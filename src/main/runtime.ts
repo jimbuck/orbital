@@ -5,7 +5,8 @@ import { ControlChannel } from './services/control-channel'
 import { AlertManager } from './services/alerts'
 import { EnvSyncWatcher } from './services/env-sync'
 import * as repo from './db/repositories'
-import { IPC } from '@shared/types'
+import { deleteBriefing } from './services/agents/briefing'
+import { IPC, isPtyTabType } from '@shared/types'
 
 /**
  * The main-process service hub. Owns the long-lived service singletons and the
@@ -30,10 +31,22 @@ class Runtime {
     this.terminals.on('data', (e) => this.send(IPC.evtTerminalData, e))
     this.terminals.on('exit', (e) => {
       this.send(IPC.evtTerminalExit, e)
-      // A dead PTY must stop contributing a stale status to the Flight aggregate
-      // (otherwise the rail/taskbar stay stuck on needs-attention/working).
       const tab = repo.tabs.get(e.tabId)
-      if (tab && tab.type === 'terminal') {
+      if (!tab) return
+      // An agent (Claude) session that exits on its own closes its tab. Note that
+      // TerminalManager.kill() does NOT emit 'exit', so this fires only on a real
+      // process exit (e.g. `/exit` or a crash), never on flight/app teardown.
+      if (tab.type === 'agent') {
+        deleteBriefing(tab.flightId, tab.id)
+        repo.tabs.remove(tab.id)
+        repo.flights.recomputeStatus(tab.flightId)
+        this.broadcastState()
+        this.broadcastAlert()
+        return
+      }
+      // A dead terminal PTY keeps its tab but must stop contributing a stale status
+      // to the Flight aggregate (else the rail/taskbar stay stuck on working/needs-you).
+      if (isPtyTabType(tab.type)) {
         repo.tabs.updateStatus(e.tabId, 'idle')
         repo.flights.recomputeStatus(tab.flightId)
         this.broadcastState()

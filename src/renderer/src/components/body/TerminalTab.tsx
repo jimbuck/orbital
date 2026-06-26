@@ -96,6 +96,20 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
       live = true
     })
 
+    // Electron exposes no Edit-menu Paste role and navigator.clipboard.readText is
+    // permission-blocked, so wire paste ourselves: Ctrl/Cmd+V and the terminal-
+    // standard Ctrl+Shift+V read the system clipboard and paste via xterm (which
+    // honors bracketed-paste mode, so multi-line pastes into TUIs stay intact).
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
+        e.preventDefault() // stop the browser's own (often no-op) paste → no double paste
+        const text = window.orbital.readClipboard()
+        if (text) term.paste(text)
+        return false // and stop xterm from also sending a literal 'v'
+      }
+      return true
+    })
+
     const inputDisposable = term.onData((data) => window.orbital.terminalInput(tab.id, data))
 
     const fitAndReport = (): void => {

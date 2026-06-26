@@ -1,5 +1,5 @@
 import { useRef, useState, type JSX } from 'react'
-import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
+import { Orbit, Terminal, Globe, FileText, Sparkles } from 'lucide-react'
 import type { Flight, Pane, LayoutNode, DropEdge, TabType } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
 import TabStrip from './TabStrip'
@@ -118,6 +118,7 @@ function computeEdge(el: HTMLElement, clientX: number, clientY: number): DropEdg
 /** The kinds of tab an empty pane can open. */
 const OPENERS: { type: TabType; label: string; Icon: typeof Terminal }[] = [
   { type: 'terminal', label: 'Terminal', Icon: Terminal },
+  { type: 'agent', label: 'Claude', Icon: Sparkles },
   { type: 'browser', label: 'Browser', Icon: Globe },
   { type: 'editor', label: 'Editor', Icon: FileText }
 ]
@@ -134,7 +135,9 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
   const [dropEdge, setDropEdge] = useState<DropEdge | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]
-  const terminals = pane.tabs.filter((t) => t.type === 'terminal')
+  // Terminal AND agent tabs are PTY-backed and share the xterm view; keep both
+  // mounted (hidden when inactive) so their PTYs survive tab switches.
+  const ptyTabs = pane.tabs.filter((t) => t.type === 'terminal' || t.type === 'agent')
 
   const onDragOver = (e: React.DragEvent): void => {
     if (!e.dataTransfer.types.includes(TAB_DND) || !bodyRef.current) return
@@ -160,8 +163,8 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-pane">
       <TabStrip pane={pane} flight={flight} />
       <div ref={bodyRef} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave} className="relative min-h-0 flex-1">
-        {/* Terminals stay mounted (hidden when inactive) so the PTY survives tab switches. */}
-        {terminals.map((t) => (
+        {/* PTY-backed tabs (terminal + agent) stay mounted so their PTY survives switches. */}
+        {ptyTabs.map((t) => (
           <div key={t.id} className={`absolute inset-0 ${activeTab && t.id === activeTab.id ? '' : 'hidden'}`}>
             <TerminalTab tab={t} />
           </div>

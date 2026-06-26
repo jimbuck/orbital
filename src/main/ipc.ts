@@ -1,12 +1,12 @@
-import { join } from 'node:path'
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
-import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import {
   IPC,
   ENV,
   controlPipePath,
   normalizeStatus,
+  isPtyTabType,
   type CreateFlightOptions,
   type RemoveFlightOptions,
   type TabType,
@@ -15,6 +15,7 @@ import {
   type SplitDirection,
   type SplitWhere,
   type TaskPatch,
+  type WorkspaceAgentPatch,
   type Flight,
   type Tab,
   type ControlRequest,
@@ -24,13 +25,12 @@ import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createWorktreeFlight, removeWorktree, slugify } from './services/worktree'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
+import { cliDir } from './services/agents/paths'
+import { getProvider } from './services/agents/provider'
+import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
+import * as claudeHooks from './services/agents/claude-hooks'
 
 /* ---- helpers ----------------------------------------------------------- */
-
-/** Directory holding the bundled `orbital` CLI + shims, prepended to PTY PATH. */
-function cliDir(): string {
-  return app.isPackaged ? join(process.resourcesPath, 'cli') : join(app.getAppPath(), 'resources', 'cli')
-}
 
 function terminalEnv(flight: Flight, tabId: string): Record<string, string> {
   const path = `${cliDir()}${PATH_DELIM}${process.env.PATH ?? ''}`
@@ -54,14 +54,69 @@ function spawnTerminal(flight: Flight, tab: Tab): void {
   })
 }
 
-/** Create a tab in a Flight (resolving the target pane) and start its PTY if a terminal. */
+/**
+ * Boot a coding agent (e.g. Claude) directly as the tab's PTY. Resolution is async
+ * (it shells out to `where`/`which`); on failure the tab shows a clear notice and
+ * flips to `error` instead of sitting as a silent dead pane.
+ */
+async function spawnAgent(flight: Flight, tab: Tab): Promise<void> {
+  const ws = repo.workspaces.get(flight.workspaceId)
+  if (!ws) return
+  const provider = getProvider(tab.config.agentProvider || ws.defaultAgentProvider)
+  try {
+    const briefingPath = writeBriefing({
+      workspace: ws,
+      flight,
+      tabId: tab.id,
+      // Read the live settings.json (the source of truth), not the cached DB mirror.
+      hooksInstalled: claudeHooks.status().installed
+    })
+    const command = await provider.resolveCommand({
+      workspace: ws,
+      flight,
+      briefingPath,
+      execPath: ws.agentExecPath
+    })
+    // The tab may have been closed during the async executable lookup; don't spawn
+    // a PTY nothing references (it could never be killed before app exit).
+    if (!repo.tabs.get(tab.id)) {
+      deleteBriefing(flight.id, tab.id)
+      return
+    }
+    runtime.terminals.spawn({
+      tabId: tab.id,
+      cwd: flight.worktreePath,
+      env: terminalEnv(flight, tab.id),
+      command
+    })
+  } catch (err) {
+    if (!repo.tabs.get(tab.id)) return // tab gone during resolution — nothing to report
+    const msg = err instanceof Error ? err.message : String(err)
+    runtime.terminals.notify(
+      tab.id,
+      `\r\n\x1b[31mOrbital could not launch ${provider.displayName}:\x1b[0m\r\n  ${msg}\r\n`
+    )
+    repo.tabs.updateStatus(tab.id, 'error')
+    repo.flights.recomputeStatus(flight.id)
+    runtime.broadcastState()
+    runtime.broadcastAlert()
+  }
+}
+
+/** Start the PTY for a freshly created PTY-backed tab (terminal or agent). */
+function startPtyTab(flight: Flight, tab: Tab): void {
+  if (tab.type === 'agent') void spawnAgent(flight, tab)
+  else if (tab.type === 'terminal') spawnTerminal(flight, tab)
+}
+
+/** Create a tab in a Flight (resolving the target pane) and start its PTY if PTY-backed. */
 function createTabInFlight(flightId: string, paneId: string | null, type: TabType, config?: TabConfig): Tab {
   const flight = repo.flights.get(flightId)
   if (!flight) throw new Error(`flight ${flightId} not found`)
   const targetPane = paneId ?? repo.panes.firstPaneId(flightId)
   if (!targetPane) throw new Error(`flight ${flightId} has no pane`)
   const tab = repo.tabs.create({ flightId, paneId: targetPane, type, config })
-  if (type === 'terminal') spawnTerminal(flight, tab)
+  startPtyTab(flight, tab)
   return tab
 }
 
@@ -78,14 +133,14 @@ function killFlightTerminals(flightId: string): void {
   if (!flight) return
   for (const pane of flight.panes) {
     for (const tab of pane.tabs) {
-      if (tab.type === 'terminal') runtime.terminals.kill(tab.id)
+      if (isPtyTabType(tab.type)) runtime.terminals.kill(tab.id)
     }
   }
 }
 
 function killPaneTerminals(paneId: string): void {
   for (const tab of repo.tabs.inPane(paneId)) {
-    if (tab.type === 'terminal') runtime.terminals.kill(tab.id)
+    if (isPtyTabType(tab.type)) runtime.terminals.kill(tab.id)
   }
 }
 
@@ -219,6 +274,9 @@ export function registerIpc(): void {
       }
     }
     killFlightTerminals(flightId)
+    for (const pane of flight.panes) {
+      for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(flightId, t.id)
+    }
     repo.flights.remove(flightId)
     broadcastAll()
   })
@@ -240,6 +298,27 @@ export function registerIpc(): void {
     return { branches, head }
   })
 
+  h(IPC.setWorkspaceAgent, (_e, workspaceId: string, patch: WorkspaceAgentPatch) => {
+    repo.workspaces.updateAgent(workspaceId, patch)
+    broadcast()
+  })
+
+  // ---- Claude status hooks (opt-in, machine-global ~/.claude/settings.json) ----
+  h(IPC.claudeHooksStatus, () => claudeHooks.status())
+  h(IPC.claudeHooksPlan, () => claudeHooks.plan())
+  h(IPC.installClaudeHooks, () => {
+    const st = claudeHooks.install()
+    repo.settings.set({ ...repo.settings.get(), claudeHooksInstalled: st.installed })
+    broadcast()
+    return st
+  })
+  h(IPC.removeClaudeHooks, () => {
+    const st = claudeHooks.remove()
+    repo.settings.set({ ...repo.settings.get(), claudeHooksInstalled: st.installed })
+    broadcast()
+    return st
+  })
+
   h(IPC.createTab, (_e, flightId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
     const tab = createTabInFlight(flightId, paneId, type, config)
     broadcast()
@@ -249,7 +328,8 @@ export function registerIpc(): void {
   h(IPC.closeTab, (_e, tabId: string) => {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
-    if (tab.type === 'terminal') runtime.terminals.kill(tabId)
+    if (isPtyTabType(tab.type)) runtime.terminals.kill(tabId)
+    if (tab.type === 'agent') deleteBriefing(tab.flightId, tabId)
     repo.tabs.remove(tabId)
     // Closing the last tab leaves the (now empty) pane in place — it shows the
     // "Open a terminal" prompt. Panes only collapse when a tab is dragged out.
@@ -322,7 +402,21 @@ export function registerIpc(): void {
   })
 
   // ---- terminals ----
-  ipcMain.on(IPC.terminalInput, (_e, tabId: string, data: string) => runtime.terminals.write(tabId, data))
+  ipcMain.on(IPC.terminalInput, (_e, tabId: string, data: string) => {
+    runtime.terminals.write(tabId, data)
+    // If the human types into an agent flagged needs-attention (answering a
+    // permission prompt, or starting the next instruction), they've responded — so
+    // it is no longer blocked on a human. Flip to working immediately rather than
+    // waiting for the next Claude hook (a long approved tool emits none until it
+    // finishes). Uses INPUT only — never scrapes terminal output (req 7).
+    const tab = repo.tabs.get(tabId)
+    if (tab && tab.type === 'agent' && tab.status === 'needs_attention') {
+      repo.tabs.updateStatus(tabId, 'working')
+      repo.flights.recomputeStatus(tab.flightId)
+      runtime.broadcastState()
+      runtime.broadcastAlert()
+    }
+  })
   ipcMain.on(IPC.terminalResize, (_e, tabId: string, cols: number, rows: number) =>
     runtime.terminals.resize(tabId, cols, rows)
   )
@@ -411,6 +505,35 @@ export function registerIpc(): void {
 
 /* ---- CLI control channel dispatcher ------------------------------------ */
 
+/**
+ * Map a Claude Code hook event (+ its stdin payload) to a terminal status, or
+ * null to ignore. This is the single source of the event→status policy — the
+ * global settings.json just lists which events to forward.
+ */
+function hookEventToStatus(event: string, payload: Record<string, unknown>): TerminalStatus | null {
+  switch (event) {
+    case 'Notification': {
+      // The load-bearing signal: Claude is blocked waiting on a human.
+      const kind = String(payload.notification_type ?? '')
+      return kind === 'permission_prompt' || kind === 'idle_prompt' ? 'needs_attention' : null
+    }
+    case 'UserPromptSubmit':
+    case 'PreToolUse':
+    case 'PostToolUse':
+      return 'working'
+    case 'Stop':
+      return 'idle'
+    case 'StopFailure':
+      return 'error'
+    case 'SessionStart':
+      return 'idle'
+    case 'SessionEnd':
+      return 'done'
+    default:
+      return null
+  }
+}
+
 export async function handleControl(req: ControlRequest): Promise<ControlResponse> {
   try {
     switch (req.cmd) {
@@ -452,14 +575,37 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
       case 'tab-new': {
         if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
         const type = String(req.args.type ?? 'terminal') as TabType
-        if (!['terminal', 'browser', 'editor'].includes(type)) {
+        if (!['terminal', 'browser', 'editor', 'agent'].includes(type)) {
           return { ok: false, error: `unknown tab type '${type}'` }
         }
         const arg = req.args.arg ? String(req.args.arg) : undefined
-        const config: TabConfig = type === 'browser' ? { url: arg } : type === 'editor' ? { filePath: arg } : {}
+        const config: TabConfig =
+          type === 'browser'
+            ? { url: arg }
+            : type === 'editor'
+              ? { filePath: arg }
+              : type === 'agent'
+                ? { agentProvider: arg }
+                : {}
         const tab = createTabInFlight(req.flightId, null, type, config)
         runtime.broadcastState()
         return { ok: true, data: { id: tab.id, type: tab.type } }
+      }
+      case 'hook': {
+        // Invoked by Claude Code hooks via `orbital hook <event>`. The CLI only
+        // reaches here for Orbital-spawned sessions (it guards on ORBITAL_FLIGHT_ID).
+        if (!req.terminalId) return { ok: true }
+        const tab = repo.tabs.get(req.terminalId)
+        if (!tab) return { ok: true }
+        const event = String(req.args.event ?? '')
+        const payload = (req.args.payload ?? {}) as Record<string, unknown>
+        const status = hookEventToStatus(event, payload)
+        if (!status) return { ok: true }
+        repo.tabs.updateStatus(req.terminalId, status)
+        repo.flights.recomputeStatus(tab.flightId)
+        runtime.broadcastState()
+        runtime.broadcastAlert()
+        return { ok: true, data: { status } }
       }
       case 'task-add': {
         if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
@@ -494,22 +640,31 @@ export function resumeWorkspaces(): void {
  * so respawn a clean PTY for every terminal tab and reset its status to idle.
  */
 export function resumeTerminals(): void {
+  const keepBriefings = new Set<string>()
   for (const flight of repo.flights.list()) {
+    // Track every current agent tab so the prune below only drops orphans.
+    for (const pane of flight.panes) {
+      for (const tab of pane.tabs) {
+        if (tab.type === 'agent') keepBriefings.add(briefingKey(flight.id, tab.id))
+      }
+    }
     // A worktree may have been removed externally while the app was closed;
     // node-pty throws synchronously on a missing cwd, so skip such Flights.
     if (!existsSync(flight.worktreePath)) continue
     for (const pane of flight.panes) {
       for (const tab of pane.tabs) {
-        if (tab.type === 'terminal') {
-          repo.tabs.updateStatus(tab.id, 'idle')
-          try {
-            spawnTerminal(flight, tab)
-          } catch (err) {
-            console.error(`failed to respawn terminal ${tab.id}:`, err)
-          }
+        if (!isPtyTabType(tab.type)) continue
+        repo.tabs.updateStatus(tab.id, 'idle')
+        try {
+          // spawnAgent owns its own error handling; spawnTerminal can throw synchronously.
+          startPtyTab(flight, tab)
+        } catch (err) {
+          console.error(`failed to respawn ${tab.type} ${tab.id}:`, err)
         }
       }
     }
     repo.flights.recomputeStatus(flight.id)
   }
+  // Drop briefing files left behind by tabs/flights removed while the app was closed.
+  pruneBriefings(keepBriefings)
 }

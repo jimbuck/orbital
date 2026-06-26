@@ -1,10 +1,11 @@
 import type { JSX } from 'react'
 import { Settings } from 'lucide-react'
+import { isPtyTabType } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 /**
- * Rail footer: a live count of open terminal tabs across every Flight, plus a
- * shortcut into Settings.
+ * Rail footer: a live count of open PTY-backed tabs (terminals + agents) across
+ * every Flight, plus a shortcut into Settings.
  */
 export default function RailFooter(): JSX.Element {
   const flights = useStore((s) => s.flights)
@@ -13,7 +14,7 @@ export default function RailFooter(): JSX.Element {
   const terminalCount = flights.reduce(
     (total, flight) =>
       total +
-      flight.panes.reduce((sum, pane) => sum + pane.tabs.filter((tab) => tab.type === 'terminal').length, 0),
+      flight.panes.reduce((sum, pane) => sum + pane.tabs.filter((tab) => isPtyTabType(tab.type)).length, 0),
     0
   )
 

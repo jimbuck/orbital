@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, FolderGit2 } from 'lucide-react'
 import { useStore, activeWorkspace, tasksForWorkspace } from '@renderer/store'
 import type { Workspace, Task, BranchInfo } from '@shared/types'
@@ -61,7 +62,10 @@ export default function NewFlight(): React.JSX.Element {
   const fallback = useStore(activeWorkspace)
   const workspace = data?.workspace ?? fallback
 
-  const allTasks = useStore((s) => (workspace ? tasksForWorkspace(s, workspace.id) : []))
+  // Subscribe via useShallow: tasksForWorkspace() builds a fresh array each call,
+  // and a selector that returns a new reference every render makes zustand v5's
+  // useSyncExternalStore loop forever ("Maximum update depth exceeded").
+  const allTasks = useStore(useShallow((s) => (workspace ? tasksForWorkspace(s, workspace.id) : [])))
   const prefill = data?.task
   // Only tasks without a Flight can be linked — plus the prefill task itself.
   const linkable = useMemo(

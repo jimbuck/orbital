@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, clipboard, type IpcRendererEvent } from 'electron'
 import {
   IPC,
   type OrbitalApi,
@@ -17,6 +17,9 @@ import {
   type CreateFlightOptions,
   type RemoveFlightOptions,
   type TaskPatch,
+  type WorkspaceAgentPatch,
+  type ClaudeHooksStatus,
+  type ClaudeHooksPlan,
   type GitStatus,
   type BranchInfo,
   type FileDiff,
@@ -55,6 +58,12 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.renameFlight, flightId, name) as Promise<void>,
   listBranches: (workspaceId: string) =>
     ipcRenderer.invoke(IPC.listBranches, workspaceId) as Promise<BranchInfo>,
+  setWorkspaceAgent: (workspaceId: string, patch: WorkspaceAgentPatch) =>
+    ipcRenderer.invoke(IPC.setWorkspaceAgent, workspaceId, patch) as Promise<void>,
+  claudeHooksStatus: () => ipcRenderer.invoke(IPC.claudeHooksStatus) as Promise<ClaudeHooksStatus>,
+  claudeHooksPlan: () => ipcRenderer.invoke(IPC.claudeHooksPlan) as Promise<ClaudeHooksPlan>,
+  installClaudeHooks: () => ipcRenderer.invoke(IPC.installClaudeHooks) as Promise<ClaudeHooksStatus>,
+  removeClaudeHooks: () => ipcRenderer.invoke(IPC.removeClaudeHooks) as Promise<ClaudeHooksStatus>,
   createTab: (flightId: string, paneId: string | null, type: TabType, config?: TabConfig) =>
     ipcRenderer.invoke(IPC.createTab, flightId, paneId, type, config) as Promise<Tab>,
   closeTab: (tabId: string) => ipcRenderer.invoke(IPC.closeTab, tabId) as Promise<void>,
@@ -78,6 +87,7 @@ const api: OrbitalApi = {
   terminalResize: (tabId: string, cols: number, rows: number) =>
     ipcRenderer.send(IPC.terminalResize, tabId, cols, rows),
   terminalBuffer: (tabId: string) => ipcRenderer.invoke(IPC.terminalBuffer, tabId) as Promise<TerminalBuffer>,
+  readClipboard: () => clipboard.readText(),
 
   // git
   gitStatus: (flightId: string) => ipcRenderer.invoke(IPC.gitStatus, flightId) as Promise<GitStatus>,

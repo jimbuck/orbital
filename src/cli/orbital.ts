@@ -28,7 +28,7 @@ Usage:
   orbital status <idle|working|needs-attention|error|done>
   orbital flights
   orbital flight new [--worktree <branch>] [name]
-  orbital tab new <terminal|browser|editor> [arg]
+  orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>]
   orbital help
 
@@ -106,7 +106,7 @@ function request(cmd: ControlCommand, args: Record<string, unknown>): ControlReq
   }
 }
 
-const TAB_TYPES = ['terminal', 'browser', 'editor'] as const
+const TAB_TYPES = ['terminal', 'browser', 'editor', 'agent'] as const
 
 /** Turn argv into a ControlRequest, or terminate the process on a usage error. */
 function buildRequest(argv: string[]): ControlRequest {
@@ -298,6 +298,70 @@ function handleResponse(req: ControlRequest, lineText: string): void {
   process.exit(0)
 }
 
+/* ------------------------------------------------------------------ hook --- */
+
+/**
+ * `orbital hook <event>` — invoked by Claude Code hooks from ~/.claude/settings.json.
+ *
+ * The guard lives HERE (not in the settings JSON): if ORBITAL_FLIGHT_ID is absent
+ * the session is not an Orbital one, so we exit 0 immediately and Claude is wholly
+ * unaffected. Otherwise we read the event JSON from stdin and fire it at the cockpit
+ * as a best-effort, never printing anything and ALWAYS exiting 0 so Claude is never
+ * blocked or shown a hook error.
+ */
+function runHook(args: string[]): void {
+  if (!process.env[ENV.flightId]) process.exit(0)
+  const event = args.find((a) => !a.startsWith('--')) ?? ''
+
+  let input = ''
+  let done = false
+  const finish = (): void => {
+    if (done) return
+    done = true
+    deliverHook(event, input)
+  }
+
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', (chunk) => (input += chunk))
+  process.stdin.on('end', finish)
+  process.stdin.on('error', finish)
+  // stdin may not be piped in every Claude build; cap the wait so we never hang.
+  setTimeout(finish, 400)
+}
+
+/** Send the hook event over the control pipe, then exit 0 regardless of outcome. */
+function deliverHook(event: string, input: string): void {
+  let payload: Record<string, unknown> = {}
+  try {
+    payload = input.trim() ? (JSON.parse(input) as Record<string, unknown>) : {}
+  } catch {
+    payload = {}
+  }
+
+  const req = request('hook', { event, payload })
+  const pipePath = process.env[ENV.socket] || controlPipePath()
+  const bail = setTimeout(() => process.exit(0), 1200)
+  const socket = connect(pipePath)
+  socket.on('connect', () => {
+    socket.write(JSON.stringify(req) + '\n', () => socket.end())
+  })
+  socket.on('close', () => {
+    clearTimeout(bail)
+    process.exit(0)
+  })
+  socket.on('error', () => {
+    clearTimeout(bail)
+    process.exit(0)
+  })
+}
+
 /* ----------------------------------------------------------------- main ---- */
 
-send(buildRequest(process.argv.slice(2)))
+const argv = process.argv.slice(2)
+if (argv[0] === 'hook') {
+  // Hooks are observational only and must never disturb Claude — handled apart
+  // from the normal request/response path (no stdout, always exit 0).
+  runHook(argv.slice(1))
+} else {
+  send(buildRequest(argv))
+}

@@ -20,8 +20,16 @@ export type TaskStatus = 'todo' | 'in_progress' | 'ready_for_review' | 'done'
 /** A Flight is bound to either the repo's root checkout or a git worktree. */
 export type FlightKind = 'root' | 'worktree'
 
-/** The three kinds of tab a Flight pane can host (PRD §6). */
-export type TabType = 'terminal' | 'browser' | 'editor'
+/**
+ * The kinds of tab a Flight pane can host (PRD §6). `agent` is a PTY-backed tab
+ * (like `terminal`) that boots straight into a coding agent — see TabConfig.agentProvider.
+ */
+export type TabType = 'terminal' | 'browser' | 'editor' | 'agent'
+
+/** Tab types that are backed by a live PTY and carry a TerminalStatus. */
+export function isPtyTabType(type: TabType): boolean {
+  return type === 'terminal' || type === 'agent'
+}
 
 /** Direction a split tiles its two children: row = side-by-side, column = stacked. */
 export type SplitDirection = 'row' | 'column'
@@ -81,8 +89,15 @@ export interface Workspace {
   repoPath: string
   /** User-editable wildcard list for env-file sync (PRD §5). */
   envSyncPatterns: string[]
+  /** Provider an `agent` tab launches by default in this workspace (default 'claude'). */
+  defaultAgentProvider: string
+  /** Optional explicit path to the agent executable, overriding PATH lookup. */
+  agentExecPath?: string
   addedAt: number
 }
+
+/** Identity + default provider for the agent-tab UI. Claude only for now. */
+export const DEFAULT_AGENT_PROVIDER = 'claude'
 
 export interface TabConfig {
   /** terminal: working directory the PTY was spawned in. */
@@ -91,6 +106,8 @@ export interface TabConfig {
   url?: string
   /** editor: path (relative to flight working dir) of the open file. */
   filePath?: string
+  /** agent: which provider this tab launches (e.g. 'claude'); defaults to the workspace's. */
+  agentProvider?: string
   /** display title override. */
   title?: string
 }
@@ -100,7 +117,7 @@ export interface Tab {
   flightId: string
   paneId: string
   type: TabType
-  /** Terminals carry a status; browser/editor tabs are null. */
+  /** Terminal and agent tabs carry a status; browser/editor tabs are null. */
   status: TerminalStatus | null
   position: number
   config: TabConfig
@@ -150,6 +167,8 @@ export interface Settings {
     sound: boolean
     taskbarBadge: boolean
   }
+  /** Whether Orbital's Claude status hooks are installed in ~/.claude/settings.json. */
+  claudeHooksInstalled: boolean
 }
 
 /** Full application state pushed to / pulled by the renderer. */
@@ -253,6 +272,26 @@ export interface TaskPatch {
   workspaceId?: string
 }
 
+/** Per-workspace agent settings update. */
+export interface WorkspaceAgentPatch {
+  defaultAgentProvider?: string
+  agentExecPath?: string
+}
+
+/** State of Orbital's opt-in Claude status hooks. */
+export interface ClaudeHooksStatus {
+  installed: boolean
+  /** Absolute path of the settings.json the hooks live in. */
+  settingsPath: string
+}
+
+/** Preview of exactly what Orbital will merge into settings.json, for confirmation. */
+export interface ClaudeHooksPlan {
+  settingsPath: string
+  /** Pretty-printed JSON of just Orbital's hook additions. */
+  json: string
+}
+
 /* ============================================================================
  * Events pushed from main -> renderer
  * ========================================================================== */
@@ -303,6 +342,11 @@ export const IPC = {
   removeFlight: 'orbital:removeFlight',
   renameFlight: 'orbital:renameFlight',
   listBranches: 'orbital:listBranches',
+  setWorkspaceAgent: 'orbital:setWorkspaceAgent',
+  claudeHooksStatus: 'orbital:claudeHooksStatus',
+  claudeHooksPlan: 'orbital:claudeHooksPlan',
+  installClaudeHooks: 'orbital:installClaudeHooks',
+  removeClaudeHooks: 'orbital:removeClaudeHooks',
   createTab: 'orbital:createTab',
   closeTab: 'orbital:closeTab',
   setActiveTab: 'orbital:setActiveTab',
@@ -368,6 +412,16 @@ export interface OrbitalApi {
   renameFlight(flightId: string, name: string): Promise<void>
   /** Branches of a workspace's repo + what HEAD points at (for the New Flight base-ref picker). */
   listBranches(workspaceId: string): Promise<BranchInfo>
+  /** Update a workspace's default agent provider / explicit executable path. */
+  setWorkspaceAgent(workspaceId: string, patch: WorkspaceAgentPatch): Promise<void>
+  /** Whether Orbital's Claude status hooks are installed, and where. */
+  claudeHooksStatus(): Promise<ClaudeHooksStatus>
+  /** The exact JSON Orbital would merge into settings.json (for the confirm dialog). */
+  claudeHooksPlan(): Promise<ClaudeHooksPlan>
+  /** Merge Orbital's hook entries into ~/.claude/settings.json (idempotent). */
+  installClaudeHooks(): Promise<ClaudeHooksStatus>
+  /** Strip only Orbital's hook entries from ~/.claude/settings.json. */
+  removeClaudeHooks(): Promise<ClaudeHooksStatus>
   createTab(flightId: string, paneId: string | null, type: TabType, config?: TabConfig): Promise<Tab>
   closeTab(tabId: string): Promise<void>
   setActiveTab(paneId: string, tabId: string): Promise<void>
@@ -387,6 +441,8 @@ export interface OrbitalApi {
   terminalResize(tabId: string, cols: number, rows: number): void
   /** Current scrollback buffer + sequence cut-point, for replay when a tab remounts. */
   terminalBuffer(tabId: string): Promise<TerminalBuffer>
+  /** Read the system clipboard (Electron clipboard module) — used for terminal paste. */
+  readClipboard(): string
 
   // git
   gitStatus(flightId: string): Promise<GitStatus>
@@ -440,6 +496,7 @@ export type ControlCommand =
   | 'flight-new'
   | 'tab-new'
   | 'task-add'
+  | 'hook'
 
 export interface ControlRequest {
   cmd: ControlCommand

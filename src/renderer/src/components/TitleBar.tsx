@@ -77,7 +77,7 @@ export default function TitleBar(): JSX.Element {
     'flex h-[34px] w-[46px] items-center justify-center text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60'
 
   return (
-    <header className="drag-region relative flex h-[34px] flex-none items-center justify-between border-b border-line bg-bar pl-[14px]">
+    <header className="drag-region relative flex h-[34px] flex-none items-center justify-between bg-bar pl-[14px]">
       {/* Left: brand + app menu bar. bg-bar so the centered breadcrumb is occluded
           here rather than visually colliding at narrow widths. */}
       <div className="no-drag z-50 flex items-center gap-2.5 bg-bar">
@@ -175,6 +175,12 @@ export default function TitleBar(): JSX.Element {
 
       {/* Click-away backdrop while a menu is open. */}
       {openMenu && <div className="no-drag fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
+
+      {/* Bottom hairline drawn ABOVE the left/right clusters. Those clusters carry an
+          opaque bg-bar (to occlude the centered breadcrumb), and CSS paints borders
+          before child content — so a plain border-b on the header gets covered under
+          the menu items and window controls. An overlay above them keeps it continuous. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[60] h-px bg-line" />
     </header>
   )
 }

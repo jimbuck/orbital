@@ -6,6 +6,10 @@ import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from '.
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
+// Must match `appId` in electron-builder.yml so notifications, taskbar pinning
+// and jump-list identity line up between the dev run and the installed app.
+const APP_ID = 'dev.jimbuck.orbital'
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1320,
@@ -16,6 +20,10 @@ function createWindow(): BrowserWindow {
     frame: false,
     backgroundColor: '#0a0d12',
     title: 'Orbital',
+    // In dev the host process is electron.exe, so without an explicit icon the
+    // taskbar/Alt-Tab show the generic Electron logo. Point at the source icon
+    // (build/ isn't shipped, but a packaged build embeds it in the exe instead).
+    icon: app.isPackaged ? undefined : join(app.getAppPath(), 'build', 'icon.ico'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -30,6 +38,23 @@ function createWindow(): BrowserWindow {
 
   // Push the initial state once the renderer is live.
   win.webContents.on('did-finish-load', () => runtime.broadcastState())
+
+  // Ctrl+Shift+R reloads the window. Handled in the main process (not a renderer
+  // keydown listener) so it still fires when the renderer itself is wedged —
+  // which is exactly when a reload is most useful.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (
+      input.type === 'keyDown' &&
+      input.control &&
+      input.shift &&
+      !input.alt &&
+      !input.meta &&
+      input.code === 'KeyR'
+    ) {
+      event.preventDefault()
+      win.webContents.reloadIgnoringCache()
+    }
+  })
 
   // Dev diagnostics: surface renderer console + load/crash failures in the terminal.
   if (RENDERER_URL) {
@@ -69,6 +94,9 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
+    // Register Orbital's identity with Windows so the shell attributes the taskbar
+    // group, pinning and notifications to "Orbital" rather than to "Electron".
+    app.setAppUserModelId(APP_ID)
     getDb()
     runtime.init()
     registerIpc()

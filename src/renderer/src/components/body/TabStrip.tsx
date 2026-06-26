@@ -3,6 +3,7 @@ import {
   Terminal,
   Globe,
   FileText,
+  Sparkles,
   Plus,
   X,
   SplitSquareHorizontal,
@@ -20,8 +21,17 @@ function TypeIcon({ type, className }: { type: TabType; className?: string }): J
   const props = { size: 14, strokeWidth: 1.5, className }
   if (type === 'browser') return <Globe {...props} />
   if (type === 'editor') return <FileText {...props} />
+  if (type === 'agent') return <Sparkles {...props} />
   return <Terminal {...props} />
 }
+
+/** Tab types offered in the add-tab popover, with their picker labels. */
+const ADD_OPTIONS: { type: TabType; label: string }[] = [
+  { type: 'terminal', label: 'Terminal' },
+  { type: 'agent', label: 'Claude' },
+  { type: 'browser', label: 'Browser' },
+  { type: 'editor', label: 'Editor' }
+]
 
 /** Display title: explicit override, else something derived from the config. */
 function tabTitle(tab: Tab): string {
@@ -39,6 +49,7 @@ function tabTitle(tab: Tab): string {
       return u
     }
   }
+  if (tab.type === 'agent') return 'Claude'
   return 'terminal'
 }
 
@@ -73,11 +84,12 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
     <div
       onDragOver={onStripDragOver}
       onDrop={onStripDrop}
-      className="flex h-9 flex-none items-stretch gap-0.5 border-b border-line bg-bar px-1.5"
+      className="flex h-9 flex-none items-stretch gap-0.5 border-b border-line bg-bar px-1.5 pt-0.5"
     >
       {pane.tabs.map((tab) => {
         const isActive = tab.id === pane.activeTabId
-        const showDot = tab.type === 'terminal' && !!tab.status && tab.status !== 'idle'
+        const showDot =
+          (tab.type === 'terminal' || tab.type === 'agent') && !!tab.status && tab.status !== 'idle'
         const chipClass = isActive
           ? '-mb-px rounded-t-btn border border-line-2 border-b-pane bg-pane text-text'
           : 'text-text-3 hover:text-text'
@@ -91,6 +103,17 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
             onDragStart={(e) => {
               e.dataTransfer.setData(TAB_DND, tab.id)
               e.dataTransfer.effectAllowed = 'move'
+              // The native drag image snapshots the chip's border box, so a tab that's
+              // only rounded on top (active) or unstyled (inactive) drags as a hard-
+              // cornered rectangle. Snapshot a fully-rounded clone for a clean ghost.
+              const node = e.currentTarget
+              const r = node.getBoundingClientRect()
+              const ghost = node.cloneNode(true) as HTMLElement
+              ghost.style.cssText = `position:fixed;top:-1000px;left:-1000px;margin:0;width:${r.width}px;height:${r.height}px;border-radius:var(--radius-btn);border:1px solid var(--color-line-2);background:var(--color-pane);pointer-events:none`
+              document.body.appendChild(ghost)
+              e.dataTransfer.setDragImage(ghost, e.nativeEvent.offsetX, e.nativeEvent.offsetY)
+              // The browser snapshots synchronously; drop the clone on the next tick.
+              setTimeout(() => ghost.remove(), 0)
             }}
             title="Drag to move to another pane"
             onClick={() => window.orbital.setActiveTab(pane.id, tab.id)}
@@ -144,15 +167,15 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
               role="menu"
               className="absolute left-0 top-8 z-[41] w-40 rounded-card border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
             >
-              {(['terminal', 'browser', 'editor'] as TabType[]).map((type) => (
+              {ADD_OPTIONS.map(({ type, label }) => (
                 <button
                   key={type}
                   role="menuitem"
                   onClick={() => addTab(type)}
-                  className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium capitalize text-text-2 hover:bg-hover ${FOCUS}`}
+                  className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium text-text-2 hover:bg-hover ${FOCUS}`}
                 >
                   <TypeIcon type={type} className="text-muted" />
-                  {type}
+                  {label}
                 </button>
               ))}
             </div>

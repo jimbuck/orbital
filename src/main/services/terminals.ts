@@ -17,14 +17,16 @@ export interface SpawnOptions {
   tabId: string
   cwd: string
   shell?: string
+  /** Explicit executable + argv to run instead of an interactive shell (agent tabs). */
+  command?: { file: string; args: string[] }
   env: Record<string, string>
   cols?: number
   rows?: number
 }
 
-/** Internal per-tab record: the live PTY plus its scrollback buffer. */
+/** Internal per-tab record: the live PTY (null for a static notice) plus its scrollback. */
 interface TerminalEntry {
-  proc: pty.IPty
+  proc: pty.IPty | null
   buf: string
   /** Cumulative bytes ever emitted (monotonic; survives ring trimming). */
   total: number
@@ -47,11 +49,14 @@ export class TerminalManager extends EventEmitter {
       this.kill(opts.tabId)
     }
 
-    const shell =
+    // An agent tab supplies an explicit command; a plain terminal runs a shell.
+    const file =
+      opts.command?.file ||
       opts.shell ||
       (process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || 'bash')
+    const args = opts.command?.args ?? []
 
-    const proc = pty.spawn(shell, [], {
+    const proc = pty.spawn(file, args, {
       name: 'xterm-color',
       cols: opts.cols || 80,
       rows: opts.rows || 24,
@@ -84,15 +89,27 @@ export class TerminalManager extends EventEmitter {
     })
   }
 
-  /** Forward keystrokes / input to the terminal, if it exists. */
-  write(tabId: string, data: string): void {
-    this.terminals.get(tabId)?.proc.write(data)
+  /**
+   * Show a static one-shot notice in a tab that has no live process (e.g. an agent
+   * whose executable could not be resolved), so the tab explains itself instead of
+   * sitting blank. Replaces any existing PTY/notice under the id.
+   */
+  notify(tabId: string, message: string): void {
+    if (this.terminals.has(tabId)) this.kill(tabId)
+    const entry: TerminalEntry = { proc: null, buf: message, total: message.length }
+    this.terminals.set(tabId, entry)
+    this.emit('data', { tabId, data: message, seq: entry.total })
   }
 
-  /** Resize the terminal's PTY, if it exists. */
+  /** Forward keystrokes / input to the terminal, if it has a live PTY. */
+  write(tabId: string, data: string): void {
+    this.terminals.get(tabId)?.proc?.write(data)
+  }
+
+  /** Resize the terminal's PTY, if it has one. */
   resize(tabId: string, cols: number, rows: number): void {
     const entry = this.terminals.get(tabId)
-    if (!entry) return
+    if (!entry || !entry.proc) return
     entry.proc.resize(cols, rows)
   }
 
@@ -112,7 +129,7 @@ export class TerminalManager extends EventEmitter {
     const entry = this.terminals.get(tabId)
     if (!entry) return
     this.terminals.delete(tabId)
-    entry.proc.kill()
+    entry.proc?.kill()
   }
 
   /** Kill every managed terminal (e.g. on app shutdown). */

@@ -28,11 +28,13 @@ export function closeDb(): void {
 function migrate(d: Database.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS workspaces (
-      id                TEXT PRIMARY KEY,
-      name              TEXT NOT NULL,
-      repo_path         TEXT NOT NULL UNIQUE,
-      env_sync_patterns TEXT NOT NULL DEFAULT '[]',
-      added_at          INTEGER NOT NULL
+      id                     TEXT PRIMARY KEY,
+      name                   TEXT NOT NULL,
+      repo_path              TEXT NOT NULL UNIQUE,
+      env_sync_patterns      TEXT NOT NULL DEFAULT '[]',
+      default_agent_provider TEXT NOT NULL DEFAULT 'claude',
+      agent_exec_path        TEXT NOT NULL DEFAULT '',
+      added_at               INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS flights (
@@ -91,6 +93,8 @@ function migrate(d: Database.Database): void {
 
   // Migrations for databases created before a column existed.
   addColumnIfMissing(d, 'flights', 'layout', "TEXT NOT NULL DEFAULT ''")
+  addColumnIfMissing(d, 'workspaces', 'default_agent_provider', "TEXT NOT NULL DEFAULT 'claude'")
+  addColumnIfMissing(d, 'workspaces', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
 }
 
 function addColumnIfMissing(d: Database.Database, table: string, column: string, def: string): void {

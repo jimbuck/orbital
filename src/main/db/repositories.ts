@@ -14,7 +14,8 @@ import {
   type TerminalStatus,
   type TaskStatus,
   type LayoutNode,
-  type TaskPatch
+  type TaskPatch,
+  isPtyTabType
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
 
@@ -23,7 +24,8 @@ const now = (): number => Date.now()
 
 const DEFAULT_SETTINGS: Settings = {
   defaultShell: '',
-  alerts: { indicator: true, sound: true, taskbarBadge: true }
+  alerts: { indicator: true, sound: true, taskbarBadge: true },
+  claudeHooksInstalled: false
 }
 
 /* ---- row -> entity mappers --------------------------------------------- */
@@ -34,6 +36,8 @@ function mapWorkspace(r: any): Workspace {
     name: r.name,
     repoPath: r.repo_path,
     envSyncPatterns: JSON.parse(r.env_sync_patterns || '[]'),
+    defaultAgentProvider: r.default_agent_provider || 'claude',
+    agentExecPath: r.agent_exec_path || undefined,
     addedAt: r.added_at
   }
 }
@@ -93,6 +97,13 @@ export const workspaces = {
   },
   updateEnvPatterns(wid: string, patterns: string[]): void {
     getDb().prepare('UPDATE workspaces SET env_sync_patterns = ? WHERE id = ?').run(JSON.stringify(patterns), wid)
+  },
+  updateAgent(wid: string, patch: { defaultAgentProvider?: string; agentExecPath?: string }): void {
+    const cur = workspaces.get(wid)
+    if (!cur) return
+    getDb()
+      .prepare('UPDATE workspaces SET default_agent_provider = ?, agent_exec_path = ? WHERE id = ?')
+      .run(patch.defaultAgentProvider ?? cur.defaultAgentProvider, patch.agentExecPath ?? cur.agentExecPath ?? '', wid)
   }
 }
 
@@ -185,7 +196,7 @@ export const flights = {
   /** Recompute and persist the aggregate status from a Flight's terminal tabs. */
   recomputeStatus(fid: string): TerminalStatus {
     const statuses = getDb()
-      .prepare("SELECT status FROM tabs WHERE flight_id = ? AND type = 'terminal' AND status IS NOT NULL")
+      .prepare("SELECT status FROM tabs WHERE flight_id = ? AND type IN ('terminal', 'agent') AND status IS NOT NULL")
       .all(fid)
       .map((r: any) => r.status as TerminalStatus)
     // import-free aggregate to avoid a cycle: mirror STATUS_PRECEDENCE.
@@ -236,7 +247,7 @@ export const tabs = {
     const pos =
       (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?').get(input.paneId) as any)
         .m + 1
-    const status = input.type === 'terminal' ? (input.status ?? 'idle') : null
+    const status = isPtyTabType(input.type) ? (input.status ?? 'idle') : null
     getDb()
       .prepare(
         'INSERT INTO tabs (id, flight_id, pane_id, type, status, position, active, config) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
@@ -266,9 +277,9 @@ export const tabs = {
     getDb().prepare('UPDATE tabs SET pane_id = ?, position = ? WHERE id = ?').run(targetPaneId, pos, tid)
     tabs.setActive(targetPaneId, tid)
   },
-  /** Terminal tabs across all flights — used to clean up PTYs on shutdown. */
+  /** PTY-backed tabs (terminal + agent) across all flights — used to clean up PTYs. */
   allTerminals(): Tab[] {
-    return getDb().prepare("SELECT * FROM tabs WHERE type = 'terminal'").all().map(mapTab)
+    return getDb().prepare("SELECT * FROM tabs WHERE type IN ('terminal', 'agent')").all().map(mapTab)
   },
   inPane(paneId: string): Tab[] {
     return getDb().prepare('SELECT * FROM tabs WHERE pane_id = ? ORDER BY position').all(paneId).map(mapTab)
