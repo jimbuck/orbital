@@ -1,21 +1,23 @@
-import { useState } from 'react'
-import { Orbit, Plus } from 'lucide-react'
-import type { Flight, Pane } from '@shared/types'
+import { useRef, useState, type JSX } from 'react'
+import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
+import type { Flight, Pane, LayoutNode, DropEdge, TabType } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
 import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
 import EditorTab from './EditorTab'
 import BrowserTab from './BrowserTab'
 
+/** Custom drag MIME carrying a tab id, so only Orbital tab-drags trigger drop zones. */
+export const TAB_DND = 'application/x-orbital-tab'
+
 /**
- * The tiled pane area — the main body of the cockpit. Lays out the active
- * Flight's panes with flex in the Flight's split direction, each pane carrying a
- * TabStrip on top of the active tab's body. Terminal tabs stay mounted (hidden)
- * when inactive so their PTY/xterm survive tab switches.
+ * The tiled pane area — the main body of the cockpit. Renders the active
+ * Flight's binary layout tree: split nodes become resizable flex containers,
+ * pane leaves render a TabStrip over the active tab. Tabs can be dragged between
+ * panes; dropping near an edge splits the target toward that edge.
  */
 export default function PaneGroup(): JSX.Element {
   const flight = useStore(activeFlight)
-  const [focusedPaneId, setFocusedPaneId] = useState<string | null>(null)
 
   if (!flight) {
     return (
@@ -26,61 +28,145 @@ export default function PaneGroup(): JSX.Element {
     )
   }
 
-  const dir = flight.splitDirection === 'row' ? 'flex-row' : 'flex-col'
-  // The focused pane gets the accent inset ring; fall back to the first pane.
-  const activePaneId = flight.panes.some((p) => p.id === focusedPaneId)
-    ? focusedPaneId
-    : (flight.panes[0]?.id ?? null)
-
   return (
-    <div className={`flex min-h-0 min-w-0 flex-1 gap-px bg-line ${dir}`}>
-      {flight.panes.map((pane) => (
-        <PaneView
-          key={pane.id}
-          pane={pane}
-          flight={flight}
-          active={pane.id === activePaneId}
-          onFocus={() => setFocusedPaneId(pane.id)}
-        />
-      ))}
+    <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
+      {flight.layout ? (
+        <LayoutView node={flight.layout} flight={flight} />
+      ) : (
+        // Defensive fallback if the layout tree is momentarily absent.
+        flight.panes.map((p) => <PaneView key={p.id} pane={p} flight={flight} />)
+      )}
     </div>
   )
 }
 
-function PaneView({
-  pane,
-  flight,
-  active,
-  onFocus
+function LayoutView({ node, flight }: { node: LayoutNode; flight: Flight }): JSX.Element | null {
+  if (!node) return null
+  if (node.type === 'pane') {
+    const pane = flight.panes.find((p) => p.id === node.paneId)
+    return pane ? <PaneView pane={pane} flight={flight} /> : null
+  }
+  return <SplitView node={node} flight={flight} />
+}
+
+function SplitView({
+  node,
+  flight
 }: {
-  pane: Pane
+  node: Extract<LayoutNode, { type: 'split' }>
   flight: Flight
-  active: boolean
-  onFocus: () => void
 }): JSX.Element {
-  const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]
-  const terminals = pane.tabs.filter((t) => t.type === 'terminal')
-  const ring = active ? 'shadow-[inset_0_0_0_1px_rgba(79,140,255,0.20)]' : ''
+  const ref = useRef<HTMLDivElement>(null)
+  const [dragRatio, setDragRatio] = useState<number | null>(null)
+  const isRow = node.dir === 'row'
+  const ratio = dragRatio ?? node.ratio
+
+  const startResize = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const el = ref.current
+    if (!el) return
+    const fracAt = (clientX: number, clientY: number): number => {
+      const rect = el.getBoundingClientRect()
+      const r = isRow ? (clientX - rect.left) / rect.width : (clientY - rect.top) / rect.height
+      return Math.min(0.9, Math.max(0.1, r))
+    }
+    const move = (ev: MouseEvent): void => setDragRatio(fracAt(ev.clientX, ev.clientY))
+    const up = (ev: MouseEvent): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      const final = fracAt(ev.clientX, ev.clientY)
+      setDragRatio(null)
+      void window.orbital.setSplitRatio(flight.id, node.id, final)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
 
   return (
-    <div
-      onMouseDownCapture={onFocus}
-      style={{ flexGrow: pane.flex, flexBasis: 0 }}
-      className={`flex min-h-0 min-w-0 flex-col bg-pane ${ring}`}
-    >
+    <div ref={ref} className={`flex min-h-0 min-w-0 flex-1 ${isRow ? 'flex-row' : 'flex-col'}`}>
+      <div className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: ratio, flexBasis: 0 }}>
+        <LayoutView node={node.a} flight={flight} />
+      </div>
+      <div
+        onMouseDown={startResize}
+        role="separator"
+        aria-orientation={isRow ? 'vertical' : 'horizontal'}
+        className={`group relative z-10 flex-none bg-line transition-colors hover:bg-accent/50 ${
+          isRow ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize'
+        } ${dragRatio !== null ? 'bg-accent/60' : ''}`}
+      />
+      <div className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: 1 - ratio, flexBasis: 0 }}>
+        <LayoutView node={node.b} flight={flight} />
+      </div>
+    </div>
+  )
+}
+
+function computeEdge(el: HTMLElement, clientX: number, clientY: number): DropEdge {
+  const rect = el.getBoundingClientRect()
+  const fx = (clientX - rect.left) / rect.width
+  const fy = (clientY - rect.top) / rect.height
+  const d = { left: fx, right: 1 - fx, top: fy, bottom: 1 - fy }
+  const min = Math.min(d.left, d.right, d.top, d.bottom)
+  if (min >= 0.25) return 'center'
+  if (min === d.left) return 'left'
+  if (min === d.right) return 'right'
+  if (min === d.top) return 'top'
+  return 'bottom'
+}
+
+/** The kinds of tab an empty pane can open. */
+const OPENERS: { type: TabType; label: string; Icon: typeof Terminal }[] = [
+  { type: 'terminal', label: 'Terminal', Icon: Terminal },
+  { type: 'browser', label: 'Browser', Icon: Globe },
+  { type: 'editor', label: 'Editor', Icon: FileText }
+]
+
+const OVERLAY_POS: Record<DropEdge, string> = {
+  center: 'inset-0',
+  left: 'inset-y-0 left-0 w-1/2',
+  right: 'inset-y-0 right-0 w-1/2',
+  top: 'inset-x-0 top-0 h-1/2',
+  bottom: 'inset-x-0 bottom-0 h-1/2'
+}
+
+function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element {
+  const [dropEdge, setDropEdge] = useState<DropEdge | null>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]
+  const terminals = pane.tabs.filter((t) => t.type === 'terminal')
+
+  const onDragOver = (e: React.DragEvent): void => {
+    if (!e.dataTransfer.types.includes(TAB_DND) || !bodyRef.current) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropEdge(computeEdge(bodyRef.current, e.clientX, e.clientY))
+  }
+  const onDrop = (e: React.DragEvent): void => {
+    if (!e.dataTransfer.types.includes(TAB_DND) || !bodyRef.current) return
+    e.preventDefault()
+    const tabId = e.dataTransfer.getData(TAB_DND)
+    const edge = computeEdge(bodyRef.current, e.clientX, e.clientY)
+    setDropEdge(null)
+    if (!tabId) return
+    if (edge === 'center') void window.orbital.moveTab(tabId, pane.id)
+    else void window.orbital.moveTabToEdge(tabId, pane.id, edge)
+  }
+  const onDragLeave = (e: React.DragEvent): void => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropEdge(null)
+  }
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-pane">
       <TabStrip pane={pane} flight={flight} />
-      <div className="relative min-h-0 flex-1">
-        {/* Terminals are always mounted; inactive ones are hidden to keep the PTY alive. */}
+      <div ref={bodyRef} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave} className="relative min-h-0 flex-1">
+        {/* Terminals stay mounted (hidden when inactive) so the PTY survives tab switches. */}
         {terminals.map((t) => (
-          <div
-            key={t.id}
-            className={`absolute inset-0 ${activeTab && t.id === activeTab.id ? '' : 'hidden'}`}
-          >
+          <div key={t.id} className={`absolute inset-0 ${activeTab && t.id === activeTab.id ? '' : 'hidden'}`}>
             <TerminalTab tab={t} />
           </div>
         ))}
 
-        {/* Non-terminal tabs are only rendered while active. */}
         {activeTab && activeTab.type === 'editor' && (
           <div className="absolute inset-0">
             <EditorTab tab={activeTab} />
@@ -93,14 +179,26 @@ function PaneView({
         )}
 
         {pane.tabs.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <button
-              onClick={() => window.orbital.createTab(flight.id, pane.id, 'terminal')}
-              className="flex items-center gap-2 rounded-btn border border-line-2 bg-hover px-4 py-2.5 text-sm font-medium text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60"
-            >
-              <Plus size={15} strokeWidth={1.5} />
-              Open a terminal
-            </button>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3.5">
+            <span className="text-xs text-faint">Open a tab in this pane</span>
+            <div className="flex items-center gap-2">
+              {OPENERS.map(({ type, label, Icon }) => (
+                <button
+                  key={type}
+                  onClick={() => window.orbital.createTab(flight.id, pane.id, type)}
+                  className="flex w-[84px] flex-col items-center gap-2 rounded-btn border border-line-2 bg-hover px-3 py-3.5 text-text-2 outline-none transition-colors hover:border-line-strong hover:bg-panel-2 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60"
+                >
+                  <Icon size={18} strokeWidth={1.5} />
+                  <span className="text-[11px] font-medium">{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {dropEdge && (
+          <div className="pointer-events-none absolute inset-0 z-20">
+            <div className={`absolute ${OVERLAY_POS[dropEdge]} rounded-sm border border-accent/60 bg-accent/15`} />
           </div>
         )}
       </div>

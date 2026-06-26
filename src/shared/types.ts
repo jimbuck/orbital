@@ -23,8 +23,23 @@ export type FlightKind = 'root' | 'worktree'
 /** The three kinds of tab a Flight pane can host (PRD §6). */
 export type TabType = 'terminal' | 'browser' | 'editor'
 
-/** Direction a Flight's panes are tiled in. */
+/** Direction a split tiles its two children: row = side-by-side, column = stacked. */
 export type SplitDirection = 'row' | 'column'
+
+/** Which side of a new split the freshly created pane goes on. */
+export type SplitWhere = 'before' | 'after'
+
+/** Where on a pane a dragged tab is dropped (an edge splits, center moves). */
+export type DropEdge = 'left' | 'right' | 'top' | 'bottom' | 'center'
+
+/**
+ * A Flight's pane layout: a binary tree. Leaves reference a pane (which owns the
+ * tabs); split nodes tile their two children in `dir`, with `ratio` (0.1–0.9)
+ * the fraction given to child `a`.
+ */
+export type LayoutNode =
+  | { type: 'pane'; paneId: string }
+  | { type: 'split'; id: string; dir: SplitDirection; ratio: number; a: LayoutNode; b: LayoutNode }
 
 /**
  * Flight aggregate precedence (PRD §5): the Flight surfaces its most
@@ -94,9 +109,6 @@ export interface Tab {
 export interface Pane {
   id: string
   flightId: string
-  position: number
-  /** Flex-grow weight within the Flight's split. */
-  flex: number
   activeTabId: string | null
   tabs: Tab[]
 }
@@ -113,7 +125,8 @@ export interface Flight {
   status: TerminalStatus
   /** Originating task, if started from one (PRD §8). */
   taskId: string | null
-  splitDirection: SplitDirection
+  /** Binary split-tree describing how `panes` are tiled in the Flight body. */
+  layout: LayoutNode
   createdAt: number
   panes: Pane[]
 }
@@ -295,7 +308,9 @@ export const IPC = {
   setActiveTab: 'orbital:setActiveTab',
   moveTab: 'orbital:moveTab',
   splitPane: 'orbital:splitPane',
-  setPaneFlex: 'orbital:setPaneFlex',
+  closePane: 'orbital:closePane',
+  moveTabToEdge: 'orbital:moveTabToEdge',
+  setSplitRatio: 'orbital:setSplitRatio',
   setTerminalStatus: 'orbital:setTerminalStatus',
   // terminals (renderer -> main, fire-and-forget)
   terminalInput: 'orbital:terminalInput',
@@ -357,8 +372,14 @@ export interface OrbitalApi {
   closeTab(tabId: string): Promise<void>
   setActiveTab(paneId: string, tabId: string): Promise<void>
   moveTab(tabId: string, targetPaneId: string): Promise<void>
-  splitPane(flightId: string, sourcePaneId: string, direction: SplitDirection): Promise<Pane>
-  setPaneFlex(paneId: string, flex: number): Promise<void>
+  /** Split `paneId` in `dir`, putting a new empty pane on the `where` side. */
+  splitPane(flightId: string, paneId: string, dir: SplitDirection, where: SplitWhere): Promise<Pane>
+  /** Close a pane (and its tabs); the layout collapses to its sibling. */
+  closePane(flightId: string, paneId: string): Promise<void>
+  /** Split a target pane toward an edge and move the dragged tab into the new pane. */
+  moveTabToEdge(tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom'): Promise<void>
+  /** Resize a split node (fraction for child a, clamped 0.1–0.9). */
+  setSplitRatio(flightId: string, splitId: string, ratio: number): Promise<void>
   setTerminalStatus(tabId: string, status: TerminalStatus): Promise<void>
 
   // terminals

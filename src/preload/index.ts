@@ -13,6 +13,7 @@ import {
   type TabConfig,
   type TerminalStatus,
   type SplitDirection,
+  type SplitWhere,
   type CreateFlightOptions,
   type RemoveFlightOptions,
   type TaskPatch,
@@ -61,10 +62,14 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.setActiveTab, paneId, tabId) as Promise<void>,
   moveTab: (tabId: string, targetPaneId: string) =>
     ipcRenderer.invoke(IPC.moveTab, tabId, targetPaneId) as Promise<void>,
-  splitPane: (flightId: string, sourcePaneId: string, direction: SplitDirection) =>
-    ipcRenderer.invoke(IPC.splitPane, flightId, sourcePaneId, direction) as Promise<Pane>,
-  setPaneFlex: (paneId: string, flex: number) =>
-    ipcRenderer.invoke(IPC.setPaneFlex, paneId, flex) as Promise<void>,
+  splitPane: (flightId: string, paneId: string, dir: SplitDirection, where: SplitWhere) =>
+    ipcRenderer.invoke(IPC.splitPane, flightId, paneId, dir, where) as Promise<Pane>,
+  closePane: (flightId: string, paneId: string) =>
+    ipcRenderer.invoke(IPC.closePane, flightId, paneId) as Promise<void>,
+  moveTabToEdge: (tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom') =>
+    ipcRenderer.invoke(IPC.moveTabToEdge, tabId, targetPaneId, edge) as Promise<void>,
+  setSplitRatio: (flightId: string, splitId: string, ratio: number) =>
+    ipcRenderer.invoke(IPC.setSplitRatio, flightId, splitId, ratio) as Promise<void>,
   setTerminalStatus: (tabId: string, status: TerminalStatus) =>
     ipcRenderer.invoke(IPC.setTerminalStatus, tabId, status) as Promise<void>,
 

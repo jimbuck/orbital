@@ -45,6 +45,7 @@ function migrate(d: Database.Database): void {
       status          TEXT NOT NULL DEFAULT 'idle',
       task_id         TEXT,
       split_direction TEXT NOT NULL DEFAULT 'row',
+      layout          TEXT NOT NULL DEFAULT '',
       created_at      INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_flights_workspace ON flights(workspace_id);
@@ -87,4 +88,14 @@ function migrate(d: Database.Database): void {
       value TEXT NOT NULL
     );
   `)
+
+  // Migrations for databases created before a column existed.
+  addColumnIfMissing(d, 'flights', 'layout', "TEXT NOT NULL DEFAULT ''")
+}
+
+function addColumnIfMissing(d: Database.Database, table: string, column: string, def: string): void {
+  const cols = (d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((r) => r.name)
+  if (!cols.includes(column)) {
+    d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${def}`)
+  }
 }

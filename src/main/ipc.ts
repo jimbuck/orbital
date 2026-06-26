@@ -13,6 +13,7 @@ import {
   type TabConfig,
   type TerminalStatus,
   type SplitDirection,
+  type SplitWhere,
   type TaskPatch,
   type Flight,
   type Tab,
@@ -22,6 +23,7 @@ import {
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createWorktreeFlight, removeWorktree, slugify } from './services/worktree'
+import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -79,6 +81,23 @@ function killFlightTerminals(flightId: string): void {
       if (tab.type === 'terminal') runtime.terminals.kill(tab.id)
     }
   }
+}
+
+function killPaneTerminals(paneId: string): void {
+  for (const tab of repo.tabs.inPane(paneId)) {
+    if (tab.type === 'terminal') runtime.terminals.kill(tab.id)
+  }
+}
+
+/** Drop an empty pane, collapsing the layout to its sibling — never the Flight's last pane. */
+function collapseIfEmpty(flightId: string, paneId: string): void {
+  const flight = repo.flights.get(flightId)
+  if (!flight || flight.panes.length <= 1) return
+  const pane = flight.panes.find((p) => p.id === paneId)
+  if (!pane || pane.tabs.length > 0) return
+  const next = removePane(flight.layout, paneId)
+  if (next) repo.flights.setLayout(flightId, next)
+  repo.panes.remove(paneId)
 }
 
 /** Register a workspace: create its root Flight and start its watchers. */
@@ -232,6 +251,8 @@ export function registerIpc(): void {
     if (!tab) return
     if (tab.type === 'terminal') runtime.terminals.kill(tabId)
     repo.tabs.remove(tabId)
+    // Closing the last tab leaves the (now empty) pane in place — it shows the
+    // "Open a terminal" prompt. Panes only collapse when a tab is dragged out.
     repo.flights.recomputeStatus(tab.flightId)
     broadcastAll()
   })
@@ -242,19 +263,53 @@ export function registerIpc(): void {
   })
 
   h(IPC.moveTab, (_e, tabId: string, targetPaneId: string) => {
+    const tab = repo.tabs.get(tabId)
+    if (!tab || tab.paneId === targetPaneId) return
+    const source = tab.paneId
     repo.tabs.move(tabId, targetPaneId)
+    collapseIfEmpty(tab.flightId, source)
     broadcast()
   })
 
-  h(IPC.splitPane, (_e, flightId: string, _sourcePaneId: string, direction: SplitDirection) => {
-    repo.flights.updateSplitDirection(flightId, direction)
+  h(IPC.splitPane, (_e, flightId: string, paneId: string, dir: SplitDirection, where: SplitWhere) => {
+    const flight = repo.flights.get(flightId)
+    if (!flight) throw new Error(`flight ${flightId} not found`)
     const pane = repo.panes.create(flightId)
+    repo.flights.setLayout(flightId, splitAt(flight.layout, paneId, dir, where, pane.id))
     broadcast()
     return pane
   })
 
-  h(IPC.setPaneFlex, (_e, paneId: string, flex: number) => {
-    repo.panes.updateFlex(paneId, flex)
+  h(IPC.closePane, (_e, flightId: string, paneId: string) => {
+    const flight = repo.flights.get(flightId)
+    if (!flight) return
+    if (flight.panes.length <= 1) throw new Error('cannot close the last pane')
+    killPaneTerminals(paneId)
+    const next = removePane(flight.layout, paneId)
+    if (next) repo.flights.setLayout(flightId, next)
+    repo.panes.remove(paneId) // cascades the pane's tabs
+    repo.flights.recomputeStatus(flightId)
+    broadcastAll()
+  })
+
+  h(IPC.moveTabToEdge, (_e, tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom') => {
+    const tab = repo.tabs.get(tabId)
+    if (!tab) return
+    const flight = repo.flights.get(tab.flightId)
+    if (!flight) return
+    const source = tab.paneId
+    const { dir, where } = edgeToSplit(edge)
+    const pane = repo.panes.create(flight.id)
+    repo.flights.setLayout(flight.id, splitAt(flight.layout, targetPaneId, dir, where, pane.id))
+    repo.tabs.move(tabId, pane.id)
+    collapseIfEmpty(flight.id, source)
+    broadcast()
+  })
+
+  h(IPC.setSplitRatio, (_e, flightId: string, splitId: string, ratio: number) => {
+    const flight = repo.flights.get(flightId)
+    if (!flight) return
+    repo.flights.setLayout(flightId, setRatio(flight.layout, splitId, ratio))
     broadcast()
   })
 

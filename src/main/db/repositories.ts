@@ -13,9 +13,10 @@ import {
   type TabConfig,
   type TerminalStatus,
   type TaskStatus,
-  type SplitDirection,
+  type LayoutNode,
   type TaskPatch
 } from '@shared/types'
+import { leaf, defaultLayout, layoutCovers } from '../services/layout'
 
 export const id = (): string => randomUUID()
 const now = (): number => Date.now()
@@ -108,8 +109,6 @@ function hydrateFlight(r: any): Flight {
     return {
       id: p.id,
       flightId: p.flight_id,
-      position: p.position,
-      flex: p.flex,
       activeTabId: activeRow?.id ?? tabs[0]?.id ?? null,
       tabs
     }
@@ -123,10 +122,24 @@ function hydrateFlight(r: any): Flight {
     branch: r.branch,
     status: r.status as TerminalStatus,
     taskId: r.task_id ?? null,
-    splitDirection: r.split_direction as SplitDirection,
+    layout: resolveLayout(r.id, r.layout, panes.map((p) => p.id)),
     createdAt: r.created_at,
     panes
   }
+}
+
+/** Parse a Flight's stored layout, rebuilding (and persisting) it if it no longer matches its panes. */
+function resolveLayout(flightId: string, raw: string, paneIdList: string[]): LayoutNode {
+  let parsed: LayoutNode | null = null
+  try {
+    parsed = raw ? (JSON.parse(raw) as LayoutNode) : null
+  } catch {
+    parsed = null
+  }
+  if (layoutCovers(parsed, paneIdList)) return parsed as LayoutNode
+  const rebuilt = defaultLayout(paneIdList)
+  getDb().prepare('UPDATE flights SET layout = ? WHERE id = ?').run(JSON.stringify(rebuilt), flightId)
+  return rebuilt
 }
 
 export const flights = {
@@ -152,8 +165,9 @@ export const flights = {
          VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
       )
       .run(fid, input.workspaceId, input.kind, input.name, input.worktreePath, input.branch, input.taskId ?? null, now())
-    // Every Flight starts with one empty pane to host its first tab.
-    panes.create(fid)
+    // Every Flight starts with one empty pane (a single-leaf layout) for its first tab.
+    const pane = panes.create(fid)
+    flights.setLayout(fid, leaf(pane.id))
     return flights.get(fid)!
   },
   remove(fid: string): void {
@@ -165,8 +179,8 @@ export const flights = {
   updateStatus(fid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE flights SET status = ? WHERE id = ?').run(status, fid)
   },
-  updateSplitDirection(fid: string, dir: SplitDirection): void {
-    getDb().prepare('UPDATE flights SET split_direction = ? WHERE id = ?').run(dir, fid)
+  setLayout(fid: string, layout: LayoutNode): void {
+    getDb().prepare('UPDATE flights SET layout = ? WHERE id = ?').run(JSON.stringify(layout), fid)
   },
   /** Recompute and persist the aggregate status from a Flight's terminal tabs. */
   recomputeStatus(fid: string): TerminalStatus {
@@ -186,19 +200,16 @@ export const flights = {
 }
 
 export const panes = {
-  create(flightId: string, flex = 1): Pane {
+  create(flightId: string): Pane {
     const pid = id()
     const pos =
       (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM panes WHERE flight_id = ?').get(flightId) as any)
         .m + 1
-    getDb().prepare('INSERT INTO panes (id, flight_id, position, flex) VALUES (?, ?, ?, ?)').run(pid, flightId, pos, flex)
-    return { id: pid, flightId, position: pos, flex, activeTabId: null, tabs: [] }
+    getDb().prepare('INSERT INTO panes (id, flight_id, position, flex) VALUES (?, ?, ?, 1)').run(pid, flightId, pos)
+    return { id: pid, flightId, activeTabId: null, tabs: [] }
   },
   remove(pid: string): void {
     getDb().prepare('DELETE FROM panes WHERE id = ?').run(pid)
-  },
-  updateFlex(pid: string, flex: number): void {
-    getDb().prepare('UPDATE panes SET flex = ? WHERE id = ?').run(flex, pid)
   },
   count(flightId: string): number {
     return (getDb().prepare('SELECT COUNT(*) AS c FROM panes WHERE flight_id = ?').get(flightId) as any).c
