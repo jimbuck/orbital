@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  :root {
+    --bg:#0a0d12; --rail:#0c1017; --bar:#0b0f16; --panel:#11151d; --panel-2:#141925; --elev:#161b24; --pane:#0d1118;
+    --text:#e6ebf2; --text-2:#cfd6e2; --text-3:#aab2c0; --muted:#8b95a6; --dim:#7d8696; --faint:#5b6473;
+    --border:rgba(255,255,255,0.06); --border-2:rgba(255,255,255,0.08); --soft:rgba(255,255,255,0.05); --strong:rgba(255,255,255,0.12);
+    --hover:rgba(255,255,255,0.04); --fill-2:rgba(255,255,255,0.03);
+    --accent:#4f8cff; --blue-text:#9cc0ff; --amber:#e8b54a; --amber-text:#e8c98a; --green:#3ddc97; --green-text:#6fe6b3; --red:#ff6b6b; --red-text:#ff9a9a;
+    --diff-add:#9fe9c6; --diff-del:#ffb0b0; --diff-hunk:#7d9cff;
+  }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,135,150,0.32); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  @keyframes pulseDot { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.55); opacity: 0.45; } }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  @keyframes blink { 0%,48% { opacity: 1; } 49%,100% { opacity: 0; } }
+</style>
+</helmet>
+<div style="min-height:100vh; width:100%; background:var(--bg); color:var(--text); font-family:'Hanken Grotesk',system-ui,sans-serif; font-size:14px; -webkit-font-smoothing:antialiased; padding:0 28px 120px;">
+  <div style="max-width:940px; margin:0 auto;">
+
+    <!-- ============ HERO ============ -->
+    <div style="padding:84px 0 30px; border-bottom:1px solid var(--soft);">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:26px;">
+        <div style="width:22px; height:22px; flex:none; position:relative;">
+          <div style="position:absolute; inset:0; border:1.4px solid var(--accent); border-radius:50%; opacity:0.55;"></div>
+          <div style="position:absolute; left:50%; top:50%; width:7px; height:7px; margin:-3.5px 0 0 -3.5px; background:var(--accent); border-radius:50%; box-shadow:0 0 9px var(--accent);"></div>
+        </div>
+        <span style="font-size:15px; font-weight:700; letter-spacing:0.3px;">Orbital</span>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--faint); border:1px solid var(--border-2); border-radius:5px; padding:2px 7px;">design system v1.1</span>
+      </div>
+      <h1 style="font-size:46px; line-height:1.04; font-weight:700; letter-spacing:-0.8px; margin:0 0 18px; text-wrap:balance;">Tailwind Design Guide</h1>
+      <p style="font-size:16px; line-height:1.6; color:var(--text-3); max-width:660px; margin:0; text-wrap:pretty;">Everything needed to rebuild the Orbital cockpit in Tailwind CSS — design tokens mapped to a <span style="font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--blue-text);">@theme</span> block, component class recipes, the UX patterns Tailwind lets you simplify, and the branding rules that keep it feeling like Orbital.</p>
+      <div style="display:flex; flex-wrap:wrap; gap:9px; margin-top:24px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--text-3); background:var(--panel); border:1px solid var(--border-2); border-radius:7px; padding:6px 11px;">Tailwind v4</span>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--text-3); background:var(--panel); border:1px solid var(--border-2); border-radius:7px; padding:6px 11px;">Hanken Grotesk</span>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--text-3); background:var(--panel); border:1px solid var(--border-2); border-radius:7px; padding:6px 11px;">JetBrains Mono</span>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--text-3); background:var(--panel); border:1px solid var(--border-2); border-radius:7px; padding:6px 11px;">Dark-first</span>
+      </div>
+    </div>
+
+    <!-- ============ 01 COLOR ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">01</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">Color</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 26px; max-width:640px;">Orbital is a near-black workspace. Surfaces are layered greys with a cool blue cast; lines are white at low alpha so they sit on any surface. Hue is reserved — the four status colors are the only saturated elements on screen.</p>
+
+    <div style="font-size:11px; letter-spacing:0.8px; text-transform:uppercase; color:var(--faint); font-weight:700; margin:0 0 13px;">Surfaces</div>
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:11px; margin-bottom:34px;">
+      <sc-for list="{{ surfaces }}" as="c" hint-placeholder-count="7">
+        <div style="display:flex; align-items:center; gap:13px; padding:12px; background:var(--panel); border:1px solid var(--border-2); border-radius:11px;">
+          <span style="width:46px; height:46px; flex:none; border-radius:9px; border:1px solid var(--strong); background:{{ c.hex }};"></span>
+          <div style="min-width:0; flex:1;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--blue-text); font-weight:600;">{{ c.tw }}</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--faint); text-transform:uppercase;">{{ c.hex }}</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-3); margin-top:3px;">{{ c.use }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:11px; letter-spacing:0.8px; text-transform:uppercase; color:var(--faint); font-weight:700; margin:0 0 13px;">Text</div>
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:11px; margin-bottom:34px;">
+      <sc-for list="{{ texts }}" as="c" hint-placeholder-count="6">
+        <div style="display:flex; align-items:center; gap:13px; padding:12px 13px; background:var(--panel); border:1px solid var(--border-2); border-radius:11px;">
+          <span style="font-size:23px; font-weight:700; flex:none; width:30px; text-align:center; color:{{ c.hex }};">Ag</span>
+          <div style="min-width:0; flex:1;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--blue-text); font-weight:600;">{{ c.tw }}</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--faint); text-transform:uppercase;">{{ c.hex }}</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-3); margin-top:3px;">{{ c.use }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:11px; letter-spacing:0.8px; text-transform:uppercase; color:var(--faint); font-weight:700; margin:0 0 13px;">Accent &amp; status</div>
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:11px; margin-bottom:18px;">
+      <sc-for list="{{ accents }}" as="c" hint-placeholder-count="4">
+        <div style="display:flex; align-items:center; gap:13px; padding:12px; background:var(--panel); border:1px solid var(--border-2); border-radius:11px;">
+          <span style="width:46px; height:46px; flex:none; border-radius:9px; background:{{ c.hex }}; box-shadow:0 0 18px {{ c.glow }};"></span>
+          <div style="min-width:0; flex:1;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--text); font-weight:600;">{{ c.tw }}</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--faint); text-transform:uppercase;">{{ c.hex }}</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-3); margin-top:3px;">{{ c.use }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    <p style="font-size:13px; line-height:1.55; color:var(--dim); margin:0 0 20px; max-width:640px;">Each status also has a lighter text tint for labels on dark fills: <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">blue</span> <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--amber-text);">amber-2</span> <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--green-text);">green-2</span> <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--red-text);">red-2</span>. Diff views add <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--diff-add);">diff-add</span> / <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--diff-del);">diff-del</span> / <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--diff-hunk);">diff-hunk</span>.</p>
+
+    <div style="font-size:11px; letter-spacing:0.8px; text-transform:uppercase; color:var(--faint); font-weight:700; margin:0 0 13px;">Lines &amp; fills <span style="text-transform:none; letter-spacing:0; color:var(--dim); font-weight:500;">— white at low alpha, so they read on any surface</span></div>
+    <div style="background:var(--panel); border:1px solid var(--border-2); border-radius:12px; overflow:hidden; margin-bottom:8px;">
+      <sc-for list="{{ lines }}" as="l" hint-placeholder-count="6">
+        <div style="display:flex; align-items:center; gap:14px; padding:11px 15px; border-top:1px solid var(--soft);">
+          <span style="width:54px; height:26px; flex:none; border-radius:7px; background:{{ l.fill }}; border:{{ l.borderShow }};"></span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text); font-weight:600; width:130px; flex:none;">{{ l.tw }}</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--faint); flex:1; min-width:0;">{{ l.value }}</span>
+          <span style="font-size:12px; color:var(--text-3); width:180px; flex:none; text-align:right;">{{ l.use }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ============ 02 TYPE ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">02</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">Typography</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 26px; max-width:640px;">Two families, one rule: <strong style="color:var(--text-2); font-weight:600;">Hanken Grotesk</strong> for everything human, <strong style="color:var(--text-2); font-weight:600;">JetBrains Mono</strong> for anything the machine owns — file paths, branch names, counts, diffs, terminal output, code.</p>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:11px; margin-bottom:24px;">
+      <div style="padding:20px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--blue-text); margin-bottom:14px;">font-sans · Hanken Grotesk</div>
+        <div style="font-size:34px; font-weight:700; letter-spacing:-0.5px; line-height:1.1;">Get work done from orbit</div>
+        <div style="font-size:13px; color:var(--dim); margin-top:12px; font-family:'JetBrains Mono',monospace;">400 · 500 · 600 · 700</div>
+      </div>
+      <div style="padding:20px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--blue-text); margin-bottom:14px;">font-mono · JetBrains Mono</div>
+        <div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:500; line-height:1.3; color:var(--text-2);">feat/env-sync ↑3<br>~/code/orbital</div>
+        <div style="font-size:13px; color:var(--dim); margin-top:12px; font-family:'JetBrains Mono',monospace;">400 · 500 · 600</div>
+      </div>
+    </div>
+
+    <div style="background:var(--panel); border:1px solid var(--border-2); border-radius:12px; overflow:hidden;">
+      <div style="display:flex; padding:9px 16px; border-bottom:1px solid var(--soft); font-size:10.5px; letter-spacing:0.5px; text-transform:uppercase; color:var(--faint); font-weight:700;">
+        <span style="width:78px; flex:none;">Size</span><span style="width:150px; flex:none;">Tailwind</span><span style="flex:1;">Role</span>
+      </div>
+      <sc-for list="{{ typeScale }}" as="t" hint-placeholder-count="6">
+        <div style="display:flex; align-items:center; padding:11px 16px; border-top:1px solid var(--soft);">
+          <span style="width:78px; flex:none; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-2);">{{ t.px }}</span>
+          <span style="width:150px; flex:none; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--blue-text);">{{ t.tw }}</span>
+          <span style="flex:1; font-size:13px; color:var(--text-3);">{{ t.use }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ============ 03 RADIUS / ELEVATION ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">03</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">Radius, spacing &amp; elevation</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 26px; max-width:640px;">Radius scales with the element's size — chips are tight, modals are soft. Spacing is a plain 1px–based rhythm; lean on Tailwind's default 4px scale and the arbitrary values below where the design is denser than the scale.</p>
+    <div style="display:flex; gap:11px; flex-wrap:wrap; margin-bottom:24px;">
+      <sc-for list="{{ radii }}" as="r" hint-placeholder-count="5">
+        <div style="flex:1; min-width:150px; padding:16px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+          <div style="height:46px; background:var(--panel-2); border:1px solid var(--strong); border-radius:{{ r.px }};"></div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text); margin-top:12px;">{{ r.tw }}</div>
+          <div style="font-size:12px; color:var(--text-3); margin-top:3px;">{{ r.use }}</div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:11px;">
+      <div style="padding:18px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+        <div style="font-size:11px; letter-spacing:0.6px; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px;">Elevation</div>
+        <div style="font-size:13px; color:var(--text-3); line-height:1.7;">Flat surfaces only — depth comes from <em style="color:var(--text-2); font-style:normal;">layering greys</em>, not big shadows. The one real shadow is the modal: <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--blue-text);">shadow-[0_24px_70px_rgba(0,0,0,.6)]</span>. Glow dots use <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--blue-text);">shadow-[0_0_8px_…]</span> in the status hue.</div>
+      </div>
+      <div style="padding:18px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+        <div style="font-size:11px; letter-spacing:0.6px; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px;">Density</div>
+        <div style="font-size:13px; color:var(--text-3); line-height:1.7;">This is a desktop IDE — tighter than web defaults. Card padding <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--blue-text);">p-3</span>, list rows <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--blue-text);">px-2.5 py-2</span>, icon buttons <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--blue-text);">h-7 w-7</span>. Minimum interactive target ≈ 28px.</div>
+      </div>
+    </div>
+
+    <!-- ============ 04 TAILWIND SETUP ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">04</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">Tailwind setup</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 22px; max-width:640px;">Drop this into your main CSS. It registers every token as a Tailwind utility namespace — <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--blue-text);">bg-panel</span>, <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--blue-text);">text-muted</span>, <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--blue-text);">border-line-strong</span>, <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--blue-text);">rounded-card</span>, <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--blue-text);">animate-pulse-dot</span>.</p>
+
+    <div style="background:#070a0e; border:1px solid var(--border-2); border-radius:12px; overflow:hidden; margin-bottom:14px;">
+      <div style="display:flex; align-items:center; gap:8px; padding:10px 15px; border-bottom:1px solid var(--soft); background:var(--bar);">
+        <span style="width:8px; height:8px; border-radius:50%; background:var(--accent);"></span>
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--text-3);">app.css</span>
+      </div>
+      <pre style="margin:0; padding:18px 18px 20px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.65; color:var(--text-2);"><span style="color:var(--faint);">/* Tailwind v4 — single CSS entrypoint */</span>
+<span style="color:var(--diff-hunk);">@import</span> <span style="color:var(--green-text);">"tailwindcss"</span>;
+
+<span style="color:var(--diff-hunk);">@theme</span> {
+  <span style="color:var(--faint);">/* surfaces */</span>
+  --color-bg:        #0a0d12;
+  --color-rail:      #0c1017;
+  --color-bar:       #0b0f16;
+  --color-pane:      #0d1118;
+  --color-panel:     #11151d;
+  --color-panel-2:   #141925;
+  --color-elev:      #161b24;
+
+  <span style="color:var(--faint);">/* text */</span>
+  --color-text:      #e6ebf2;
+  --color-text-2:    #cfd6e2;
+  --color-text-3:    #aab2c0;
+  --color-muted:     #8b95a6;
+  --color-dim:       #7d8696;
+  --color-faint:     #5b6473;
+
+  <span style="color:var(--faint);">/* lines &amp; fills (white @ low alpha) */</span>
+  --color-line:        rgb(255 255 255 / 0.06);
+  --color-line-2:      rgb(255 255 255 / 0.08);
+  --color-soft:        rgb(255 255 255 / 0.05);
+  --color-line-strong: rgb(255 255 255 / 0.12);
+  --color-hover:       rgb(255 255 255 / 0.04);
+
+  <span style="color:var(--faint);">/* accent &amp; status */</span>
+  --color-accent:    #4f8cff;   --color-blue:    #9cc0ff;
+  --color-amber:     #e8b54a;   --color-amber-2: #e8c98a;
+  --color-green:     #3ddc97;   --color-green-2: #6fe6b3;
+  --color-red:       #ff6b6b;   --color-red-2:   #ff9a9a;
+
+  <span style="color:var(--faint);">/* diff */</span>
+  --color-diff-add:  #9fe9c6;
+  --color-diff-del:  #ffb0b0;
+  --color-diff-hunk: #7d9cff;
+
+  <span style="color:var(--faint);">/* type */</span>
+  --font-sans: "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  <span style="color:var(--faint);">/* radius */</span>
+  --radius-chip:  5px;
+  --radius-btn:   8px;
+  --radius-card:  10px;
+  --radius-col:   12px;
+  --radius-modal: 14px;
+
+  <span style="color:var(--faint);">/* motion */</span>
+  --animate-pulse-dot: pulseDot 1.6s ease-in-out infinite;
+  --animate-blink:     blink 1.1s step-end infinite;
+}
+
+<span style="color:var(--diff-hunk);">@keyframes</span> pulseDot {
+  0%,100% { transform: scale(1);    opacity: 1;   }
+  50%     { transform: scale(1.55); opacity: .45; }
+}
+<span style="color:var(--diff-hunk);">@keyframes</span> blink { 0%,48% { opacity: 1 } 49%,100% { opacity: 0 } }
+
+<span style="color:var(--diff-hunk);">@layer</span> base {
+  body { <span style="color:var(--text-3);">@apply</span> bg-bg text-text font-sans antialiased; }
+}</pre>
+    </div>
+    <p style="font-size:13px; line-height:1.6; color:var(--dim); margin:0; max-width:660px;">On Tailwind v3, move the same values into <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">theme.extend.colors / fontFamily / borderRadius / keyframes / animation</span> in <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">tailwind.config.js</span> — the class names come out identical. Spinners can drop the keyframe entirely and use the built-in <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">animate-spin</span>.</p>
+
+    <!-- ============ 05 COMPONENT RECIPES ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">05</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">Component recipes</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 26px; max-width:640px;">Live render on the left, the exact Tailwind class string on the right. These are the load-bearing patterns from the cockpit.</p>
+
+    <!-- Status chips -->
+    <div style="margin-bottom:14px; background:var(--panel); border:1px solid var(--border-2); border-radius:13px; overflow:hidden;">
+      <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft);"><span style="font-size:13.5px; font-weight:700;">Status chip</span><span style="font-size:12px; color:var(--dim); margin-left:9px;">— the status vocabulary, one hue each</span></div>
+      <div style="display:flex; gap:20px; padding:18px 16px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; flex:none;">
+          <span style="display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:5px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--muted); background:var(--fill-2);">Todo</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:5px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--blue-text); background:rgba(79,140,255,0.14);">In progress</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:5px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--amber-text); background:rgba(232,181,74,0.14);">Review</span>
+          <span style="display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:5px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px; color:var(--green-text); background:rgba(61,220,151,0.13);">Done</span>
+        </div>
+        <pre style="margin:0; flex:1; min-width:280px; padding:13px 15px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11.5px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--faint);">// base</span>
+inline-flex items-center gap-1 rounded-chip
+px-2 py-0.5 text-[9.5px] font-bold uppercase
+tracking-wide
+
+<span style="color:var(--faint);">// in-progress (blue)</span>
+text-blue bg-accent/15
+<span style="color:var(--faint);">// review</span>  text-amber-2 bg-amber/15
+<span style="color:var(--faint);">// done</span>    text-green-2 bg-green/15
+<span style="color:var(--faint);">// todo</span>    text-muted   bg-white/[.03]</pre>
+      </div>
+    </div>
+
+    <!-- Task card -->
+    <div style="margin-bottom:14px; background:var(--panel); border:1px solid var(--border-2); border-radius:13px; overflow:hidden;">
+      <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft);"><span style="font-size:13.5px; font-weight:700;">Task card</span><span style="font-size:12px; color:var(--dim); margin-left:9px;">— raised on the dark column, brightens on hover</span></div>
+      <div style="display:flex; gap:20px; padding:18px 16px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="flex:none; width:228px; padding:11px 12px; border-radius:10px; background:var(--panel-2); border:1px solid var(--border-2);">
+          <div style="font-size:12.5px; font-weight:600; color:var(--text); line-height:1.35;">Decide env-sync conflict rule</div>
+          <div style="display:inline-flex; align-items:center; gap:6px; margin-top:8px; font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--blue-text);"><span style="width:6px; height:6px; border-radius:50%; background:var(--accent);"></span>Flight env-sync ▸</div>
+        </div>
+        <pre style="margin:0; flex:1; min-width:280px; padding:13px 15px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11.5px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--faint);">// card</span>
+rounded-card bg-panel-2 border border-line-2
+p-3 cursor-pointer transition-colors
+hover:border-line-strong
+
+<span style="color:var(--faint);">// title</span>      text-[12.5px] font-semibold
+             text-text leading-snug text-pretty
+<span style="color:var(--faint);">// flight ref</span> mt-2 inline-flex items-center gap-1.5
+             font-mono text-[10px] text-blue</pre>
+      </div>
+    </div>
+
+    <!-- Swim-lane board -->
+    <div style="margin-bottom:14px; background:var(--panel); border:1px solid var(--border-2); border-radius:13px; overflow:hidden;">
+      <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft);"><span style="font-size:13.5px; font-weight:700;">Swim-lane board</span><span style="font-size:12px; color:var(--dim); margin-left:9px;">— dark status columns, workspaces split by a dashed lane line</span></div>
+      <div style="padding:18px 16px;">
+        <div style="display:flex; gap:9px; margin-bottom:14px;">
+          <div style="width:78px; flex:none;"></div>
+          <div style="flex:1; padding:7px 10px; background:var(--bg); border:1px solid var(--border); border-bottom:none; border-radius:10px 10px 0 0; font-size:9.5px; letter-spacing:0.4px; text-transform:uppercase; color:var(--blue-text); font-weight:700;">In progress</div>
+          <div style="flex:1; padding:7px 10px; background:var(--bg); border:1px solid var(--border); border-bottom:none; border-radius:10px 10px 0 0; font-size:9.5px; letter-spacing:0.4px; text-transform:uppercase; color:var(--amber-text); font-weight:700;">Review</div>
+        </div>
+        <div style="display:flex; gap:9px; min-height:74px;">
+          <div style="width:78px; flex:none; display:flex; align-items:center; gap:7px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--accent);"></span><span style="font-size:11.5px; font-weight:700; color:var(--text-2);">orbital</span></div>
+          <div style="flex:1; padding:9px; background:var(--bg); border-left:1px solid var(--border); border-right:1px solid var(--border);"><div style="padding:8px 9px; border-radius:8px; background:var(--panel-2); border:1px solid var(--border-2); font-size:11px; color:var(--text);">Env-sync watcher</div></div>
+          <div style="flex:1; padding:9px; background:var(--bg); border-left:1px solid var(--border); border-right:1px solid var(--border);"></div>
+        </div>
+        <div style="display:flex; gap:9px; min-height:74px; border-top:1px dashed var(--strong);">
+          <div style="width:78px; flex:none; display:flex; align-items:center; gap:7px; padding-top:11px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--amber);"></span><span style="font-size:11.5px; font-weight:700; color:var(--text-2);">ledger-api</span></div>
+          <div style="flex:1; padding:9px; background:var(--bg); border-left:1px solid var(--border); border-right:1px solid var(--border); border-radius:0 0 0 12px;"><div style="padding:8px 9px; border-radius:8px; background:var(--panel-2); border:1px solid var(--border-2); font-size:11px; color:var(--text);">Idempotency keys</div></div>
+          <div style="flex:1; padding:9px; background:var(--bg); border-left:1px solid var(--border); border-right:1px solid var(--border); border-radius:0 0 12px 0;"></div>
+        </div>
+        <pre style="margin:16px 0 0; padding:13px 15px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11.5px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--faint);">// status column header</span>   bg-bg border border-line border-b-0 rounded-t-col
+<span style="color:var(--faint);">// lane row</span>               flex gap-3 items-stretch min-h-[200px] <span style="color:var(--green-text);">border-t border-dashed border-line-strong</span>
+<span style="color:var(--faint);">// cell (one per status)</span>  flex-1 flex flex-col gap-2 p-3 bg-bg border-x border-line
+<span style="color:var(--faint);">// last lane cells</span>        rounded-b-col   <span style="color:var(--faint);">// first lane: border-t-transparent</span></pre>
+      </div>
+    </div>
+
+    <!-- Hover-reveal -->
+    <div style="margin-bottom:14px; background:var(--panel); border:1px solid rgba(79,140,255,0.3); border-radius:13px; overflow:hidden;">
+      <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft); display:flex; align-items:center; gap:9px;"><span style="font-size:13.5px; font-weight:700;">Hover-to-reveal add</span><span style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; color:var(--green-text); background:rgba(61,220,151,0.13); padding:2px 7px; border-radius:5px;">Tailwind win</span></div>
+      <div style="padding:18px 16px;">
+        <p style="font-size:13px; line-height:1.6; color:var(--text-3); margin:0 0 14px; max-width:600px;">In the prototype this needed JS hover state tracked per cell. With Tailwind it's a <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">group</span> on the cell and one variant on the button — no state at all.</p>
+        <pre style="margin:0; padding:13px 15px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11.5px; line-height:1.7; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--diff-del);">- // before: useState(hoverCell), onMouseEnter/Leave, opacity prop per cell</span>
+
+<span style="color:var(--faint);">&lt;div class=</span><span style="color:var(--green-text);">"… <span style="color:var(--diff-add);">group</span>"</span><span style="color:var(--faint);">&gt;</span>            <span style="color:var(--faint);">// the column cell</span>
+  <span style="color:var(--faint);">&lt;button class=</span><span style="color:var(--green-text);">"<span style="color:var(--diff-add);">opacity-0 group-hover:opacity-50 hover:opacity-100</span>
+                 transition-opacity rounded-btn border border-dashed
+                 border-line-2 text-faint hover:text-text-3 hover:bg-hover"</span><span style="color:var(--faint);">&gt;</span>
+    ＋
+  <span style="color:var(--faint);">&lt;/button&gt;</span>
+<span style="color:var(--faint);">&lt;/div&gt;</span></pre>
+      </div>
+    </div>
+
+    <!-- Buttons + modal -->
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+      <div style="background:var(--panel); border:1px solid var(--border-2); border-radius:13px; overflow:hidden;">
+        <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft);"><span style="font-size:13.5px; font-weight:700;">Buttons</span></div>
+        <div style="padding:18px 16px;">
+          <div style="display:flex; gap:9px; margin-bottom:15px;">
+            <button style="border:none; cursor:pointer; padding:9px 16px; border-radius:8px; font-family:inherit; font-size:12.5px; font-weight:700; background:var(--accent); color:#06122e;">Commit</button>
+            <button style="border:1px solid var(--border-2); cursor:pointer; padding:9px 16px; border-radius:8px; font-family:inherit; font-size:12.5px; font-weight:600; background:var(--hover); color:var(--text-2);">Push ↑3</button>
+          </div>
+          <pre style="margin:0; padding:12px 14px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--faint);">// primary</span>
+rounded-btn bg-accent px-4 py-2
+text-[12.5px] font-bold text-[#06122e]
+hover:bg-[#6a9dff]
+
+<span style="color:var(--faint);">// secondary</span>
+rounded-btn bg-hover border border-line-2
+text-text-2 hover:bg-panel-2</pre>
+        </div>
+      </div>
+      <div style="background:var(--panel); border:1px solid var(--border-2); border-radius:13px; overflow:hidden;">
+        <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft);"><span style="font-size:13.5px; font-weight:700;">Modal &amp; overlay</span></div>
+        <div style="padding:18px 16px;">
+          <div style="position:relative; height:74px; border-radius:9px; background:rgba(5,7,11,0.7); border:1px solid var(--soft); display:flex; align-items:center; justify-content:center; margin-bottom:15px;">
+            <div style="width:74%; height:46px; background:var(--panel); border:1px solid var(--strong); border-radius:11px; box-shadow:0 14px 36px rgba(0,0,0,0.55);"></div>
+          </div>
+          <pre style="margin:0; padding:12px 14px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--faint);">// overlay</span>
+fixed inset-0 z-50 grid place-items-center
+bg-[#05070b]/70 p-8
+
+<span style="color:var(--faint);">// panel</span>
+bg-panel border border-line-strong
+rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status dots -->
+    <div style="background:var(--panel); border:1px solid var(--border-2); border-radius:13px; overflow:hidden;">
+      <div style="padding:13px 16px 12px; border-bottom:1px solid var(--soft);"><span style="font-size:13.5px; font-weight:700;">Flight status dots</span><span style="font-size:12px; color:var(--dim); margin-left:9px;">— a glanceable legend for the whole app</span></div>
+      <div style="display:flex; gap:24px; padding:18px 16px; flex-wrap:wrap; align-items:flex-start;">
+        <div style="display:flex; flex-direction:column; gap:13px; flex:none;">
+          <div style="display:flex; align-items:center; gap:10px;"><span style="position:relative; width:8px; height:8px;"><span style="position:absolute; inset:0; border-radius:50%; background:var(--amber); animation:pulseDot 1.6s ease-in-out infinite;"></span></span><span style="font-size:12.5px; color:var(--text-2);">Needs you — <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--amber-text);">animate-pulse-dot</span></span></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:11px; height:11px; border-radius:50%; border:1.6px solid var(--accent); border-top-color:transparent; animation:spin 0.9s linear infinite;"></span><span style="font-size:12.5px; color:var(--text-2);">Working — <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--blue-text);">animate-spin</span></span></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 7px rgba(255,107,107,0.5);"></span><span style="font-size:12.5px; color:var(--text-2);">Error — <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--red-text);">bg-red shadow-glow</span></span></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:9px; height:9px; border-radius:50%; border:1.6px solid var(--green);"></span><span style="font-size:12.5px; color:var(--text-2);">Done — <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--green-text);">ring, hollow</span></span></div>
+          <div style="display:flex; align-items:center; gap:10px;"><span style="width:7px; height:7px; border-radius:50%; background:var(--dim);"></span><span style="font-size:12.5px; color:var(--text-2);">Idle / root — <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--dim);">bg-dim</span></span></div>
+        </div>
+        <pre style="margin:0; flex:1; min-width:260px; padding:13px 15px; background:#070a0e; border:1px solid var(--border-2); border-radius:9px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;"><span style="color:var(--faint);">// needs-you</span>
+size-2 rounded-full bg-amber animate-pulse-dot
+<span style="color:var(--faint);">// working spinner</span>
+size-[11px] rounded-full border-[1.6px]
+border-accent border-t-transparent animate-spin
+<span style="color:var(--faint);">// error glow</span>
+size-2 rounded-full bg-red
+shadow-[0_0_7px_rgba(255,107,107,.5)]</pre>
+      </div>
+    </div>
+
+    <!-- ============ 06 UX PATTERNS ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">06</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">UX patterns Tailwind simplifies</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 24px; max-width:640px;">Several behaviors we hand-rolled with state or manual CSS collapse into utility classes. Reach for these before writing JS.</p>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:11px;">
+      <sc-for list="{{ patterns }}" as="p" hint-placeholder-count="6">
+        <div style="padding:16px 17px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+          <div style="font-size:13.5px; font-weight:700; color:var(--text); margin-bottom:6px;">{{ p.title }}</div>
+          <div style="font-size:12.5px; line-height:1.55; color:var(--text-3); margin-bottom:10px;">{{ p.body }}</div>
+          <code style="display:block; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--blue-text); background:var(--bg); border:1px solid var(--border-2); border-radius:7px; padding:8px 10px; white-space:pre-wrap; word-break:break-word;">{{ p.code }}</code>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ============ 07 BRANDING & VOICE ============ -->
+    <div style="display:flex; align-items:baseline; gap:14px; padding:64px 0 8px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:var(--accent); font-weight:600;">07</span>
+      <h2 style="font-size:25px; font-weight:700; letter-spacing:-0.3px; margin:0;">Branding &amp; voice</h2>
+    </div>
+    <p style="font-size:14.5px; line-height:1.6; color:var(--text-3); margin:0 0 24px; max-width:640px;">Orbital's identity is its vocabulary and restraint. Keep the lexicon consistent and the chrome quiet.</p>
+
+    <div style="font-size:11px; letter-spacing:0.8px; text-transform:uppercase; color:var(--faint); font-weight:700; margin:0 0 13px;">Lexicon</div>
+    <div style="background:var(--panel); border:1px solid var(--border-2); border-radius:12px; overflow:hidden; margin-bottom:26px;">
+      <sc-for list="{{ lexicon }}" as="x" hint-placeholder-count="5">
+        <div style="display:flex; gap:16px; padding:13px 16px; border-top:1px solid var(--soft);">
+          <span style="width:130px; flex:none; font-weight:700; font-size:13px; color:var(--text);">{{ x.term }}</span>
+          <span style="flex:1; font-size:13px; line-height:1.5; color:var(--text-3);">{{ x.def }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:11px; margin-bottom:11px;">
+      <div style="padding:18px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+        <div style="font-size:11px; letter-spacing:0.6px; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px;">Voice</div>
+        <ul style="margin:0; padding-left:18px; font-size:13px; line-height:1.75; color:var(--text-3);">
+          <li>Terse and technical. Labels are 1–3 words.</li>
+          <li>Repo, branch, file and path names stay <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">lowercase</span> in mono.</li>
+          <li>Status speaks plainly: <em style="font-style:normal; color:var(--amber-text);">needs you</em>, <em style="font-style:normal; color:var(--text-2);">working</em>, <em style="font-style:normal; color:var(--green-text);">done</em>.</li>
+          <li>No exclamation, no marketing tone inside the app.</li>
+        </ul>
+      </div>
+      <div style="padding:18px; background:var(--panel); border:1px solid var(--border-2); border-radius:12px;">
+        <div style="font-size:11px; letter-spacing:0.6px; text-transform:uppercase; color:var(--faint); font-weight:700; margin-bottom:12px;">Iconography</div>
+        <ul style="margin:0; padding-left:18px; font-size:13px; line-height:1.75; color:var(--text-3);">
+          <li>Use a single line-icon set (Lucide) at <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">14–16px</span>, <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">1.5px</span> stroke.</li>
+          <li>No emoji in product UI. Swap the placeholder glyphs (🌐, ▸) for real icons.</li>
+          <li>Status is carried by the colored <em style="font-style:normal; color:var(--text-2);">dot</em>, not an icon.</li>
+          <li>Color never decorates — a hue on screen always means a status.</li>
+        </ul>
+      </div>
+    </div>
+    <div style="padding:16px 18px; background:rgba(79,140,255,0.06); border:1px solid rgba(79,140,255,0.2); border-radius:12px;">
+      <div style="font-size:13px; line-height:1.6; color:var(--text-3);"><span style="color:var(--blue-text); font-weight:700;">Accessibility floor.</span> Body text stays at <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">text-3</span> or lighter on <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">panel</span> surfaces (≥ 4.5:1). Every interactive element gets <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--blue-text);">focus-visible:ring-2 ring-accent/60 outline-none</span>. Don't rely on dot color alone — pair it with the text label, as the cockpit does.</div>
+    </div>
+
+    <div style="margin-top:60px; padding-top:24px; border-top:1px solid var(--soft); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--faint);">orbital ▸ design system ▸ tailwind</span>
+      <span style="font-size:12px; color:var(--dim);">Tokens pulled 1:1 from Orbital v1.1 (Cockpit).</span>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      surfaces: [
+        { tw: 'bg',      hex: '#0a0d12', use: 'App background' },
+        { tw: 'rail',    hex: '#0c1017', use: 'Side rails' },
+        { tw: 'bar',     hex: '#0b0f16', use: 'Title & tab bars' },
+        { tw: 'pane',    hex: '#0d1118', use: 'Terminal / editor panes' },
+        { tw: 'panel',   hex: '#11151d', use: 'Cards & modals' },
+        { tw: 'panel-2', hex: '#141925', use: 'Raised cards, inputs' },
+        { tw: 'elev',    hex: '#161b24', use: 'Popovers & menus' },
+      ],
+      texts: [
+        { tw: 'text',    hex: '#e6ebf2', use: 'Primary' },
+        { tw: 'text-2',  hex: '#cfd6e2', use: 'Secondary' },
+        { tw: 'text-3',  hex: '#aab2c0', use: 'Tertiary / body' },
+        { tw: 'muted',   hex: '#8b95a6', use: 'Muted labels' },
+        { tw: 'dim',     hex: '#7d8696', use: 'Metadata' },
+        { tw: 'faint',   hex: '#5b6473', use: 'Faint / placeholder' },
+      ],
+      accents: [
+        { tw: 'accent', hex: '#4f8cff', glow: 'rgba(79,140,255,0.55)',  use: 'Primary action · In progress' },
+        { tw: 'amber',  hex: '#e8b54a', glow: 'rgba(232,181,74,0.5)',   use: 'Review · Needs attention' },
+        { tw: 'green',  hex: '#3ddc97', glow: 'rgba(61,220,151,0.5)',   use: 'Done · Success · Online' },
+        { tw: 'red',    hex: '#ff6b6b', glow: 'rgba(255,107,107,0.5)',  use: 'Error · Destructive' },
+      ],
+      lines: [
+        { tw: 'border-line',        value: 'white / 0.06', use: 'Default hairline',  fill: 'rgba(255,255,255,0.06)', borderShow: '1px solid var(--strong)' },
+        { tw: 'border-line-2',      value: 'white / 0.08', use: 'Card & input edges', fill: 'rgba(255,255,255,0.08)', borderShow: '1px solid var(--strong)' },
+        { tw: 'border-soft',        value: 'white / 0.05', use: 'Section dividers',  fill: 'rgba(255,255,255,0.05)', borderShow: '1px solid var(--strong)' },
+        { tw: 'border-line-strong', value: 'white / 0.12', use: 'Hover, dashed lanes', fill: 'rgba(255,255,255,0.12)', borderShow: '1px solid var(--strong)' },
+        { tw: 'bg-hover',           value: 'white / 0.04', use: 'Row / button hover', fill: 'rgba(255,255,255,0.04)', borderShow: '1px solid var(--soft)' },
+        { tw: 'bg-white/[.03]',     value: 'white / 0.03', use: 'Faint fills (todo chip)', fill: 'rgba(255,255,255,0.03)', borderShow: '1px solid var(--soft)' },
+      ],
+      typeScale: [
+        { px: '9.5–11', tw: 'text-[10px]',  use: 'Uppercase micro-labels, mono counts' },
+        { px: '11.5',   tw: 'text-[11.5px]', use: 'Mono paths, secondary card meta' },
+        { px: '12.5',   tw: 'text-[12.5px]', use: 'Card titles, body in panels' },
+        { px: '13–14',  tw: 'text-sm',      use: 'Default UI text, list titles' },
+        { px: '15',     tw: 'text-[15px]',  use: 'Modal & section titles' },
+        { px: '25–46',  tw: 'text-2xl+',    use: 'Document / marketing headings' },
+      ],
+      radii: [
+        { tw: 'rounded-chip · 5px',  px: '5px',  use: 'Status chips' },
+        { tw: 'rounded-btn · 8px',   px: '8px',  use: 'Buttons, inputs' },
+        { tw: 'rounded-card · 10px', px: '10px', use: 'Task cards' },
+        { tw: 'rounded-col · 12px',  px: '12px', use: 'Columns, troughs' },
+        { tw: 'rounded-modal · 14px', px: '14px', use: 'Modals' },
+      ],
+      patterns: [
+        { title: 'Hover-reveal', body: 'Show a control only when its container is hovered — no state.', code: 'group  +  group-hover:opacity-100' },
+        { title: 'Spinners', body: 'The working indicator needs no custom keyframe.', code: 'animate-spin border-t-transparent' },
+        { title: 'Truncation', body: 'Long branch & path names clip cleanly to one line.', code: 'truncate  (or line-clamp-2)' },
+        { title: 'Dividers', body: 'Lists separate themselves without per-row borders.', code: 'divide-y divide-soft' },
+        { title: 'Sticky headers', body: 'Column headers pin while the lane scrolls.', code: 'sticky top-0 z-10 bg-bg' },
+        { title: 'Status color maps', body: 'Drive chip color from a data attribute instead of branching JSX.', code: 'data-[status=review]:text-amber-2' },
+      ],
+      lexicon: [
+        { term: 'Workspace', def: 'A local git repository opened in Orbital. Shown in the left rail with its path and flight count.' },
+        { term: 'Flight', def: 'A git worktree plus its agent / terminal session. The core unit of work — created, monitored, and landed.' },
+        { term: 'Root flight', def: 'The main checkout of a workspace (branch main), tagged "root".' },
+        { term: 'Needs you', def: 'A flight whose agent is blocked awaiting human input — the only status that raises a global alert.' },
+        { term: 'In flight', def: 'Active terminals across all flights, summarized in the rail footer ("5 terminals in flight").' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

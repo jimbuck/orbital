@@ -1,0 +1,106 @@
+import { join } from 'node:path'
+import { app, BrowserWindow, Menu } from 'electron'
+import { getDb, closeDb } from './db/database'
+import { runtime } from './runtime'
+import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from './ipc'
+
+const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
+
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 1320,
+    height: 860,
+    minWidth: 940,
+    minHeight: 600,
+    show: false,
+    frame: false,
+    backgroundColor: '#0a0d12',
+    title: 'Orbital',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webviewTag: true,
+      spellcheck: false
+    }
+  })
+
+  win.once('ready-to-show', () => win.show())
+
+  // Push the initial state once the renderer is live.
+  win.webContents.on('did-finish-load', () => runtime.broadcastState())
+
+  // Dev diagnostics: surface renderer console + load/crash failures in the terminal.
+  if (RENDERER_URL) {
+    win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+      const tag = level >= 3 ? 'error' : level === 2 ? 'warn' : 'log'
+      console.log(`[renderer:${tag}] ${message}${line ? ` (${sourceId}:${line})` : ''}`)
+    })
+    win.webContents.on('did-fail-load', (_e, code, desc, url) =>
+      console.error(`[renderer] did-fail-load ${code} ${desc} ${url}`)
+    )
+    win.webContents.on('render-process-gone', (_e, details) =>
+      console.error('[renderer] render-process-gone', details.reason)
+    )
+  }
+
+  if (RENDERER_URL) {
+    win.loadURL(RENDERER_URL)
+  } else {
+    win.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+
+  return win
+}
+
+// A single instance keeps one owner of the control-channel pipe.
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = runtime.window
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  })
+
+  app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null)
+    getDb()
+    runtime.init()
+    registerIpc()
+
+    const win = createWindow()
+    runtime.setWindow(win)
+    win.on('closed', () => runtime.setWindow(null))
+
+    resumeWorkspaces()
+    // Start the CLI control channel BEFORE respawning terminals so a single bad
+    // worktree can never prevent the orbital-CLI pipe from coming up.
+    await runtime.control.start(handleControl).catch((err) => {
+      console.error('control channel failed to start:', err)
+    })
+    resumeTerminals()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        const w = createWindow()
+        runtime.setWindow(w)
+        w.on('closed', () => runtime.setWindow(null))
+      }
+    })
+  }).catch((err) => console.error('startup failed:', err))
+
+  // Quitting the app stops the agents (PTYs); minimizing does not (PRD §5, §12).
+  app.on('window-all-closed', () => {
+    app.quit()
+  })
+
+  app.on('before-quit', () => {
+    runtime.shutdown()
+    closeDb()
+  })
+}

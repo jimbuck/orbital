@@ -1,0 +1,23 @@
+appId: dev.jimbuck.orbital
+productName: Orbital
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources/cli
+    to: cli
+    filter: ['**/*']
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+  - '**/node_modules/better-sqlite3/**'
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

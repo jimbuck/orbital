@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+.vite/
+resources/cli/orbital.js
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.tsbuildinfo
+
+# Env files (synced into worktrees from the root checkout; never committed)
+.env
+.env.*
+
+# Local data (Orbital SQLite store is written to app userData, not the repo)
+*.local
