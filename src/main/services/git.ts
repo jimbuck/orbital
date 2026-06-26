@@ -136,6 +136,18 @@ async function branchExists(repoPath: string, branch: string): Promise<boolean> 
   return r.code === 0
 }
 
+/** Local branch names, most-recently-committed first. */
+async function listBranches(repoPath: string): Promise<string[]> {
+  const r = await capture(repoPath, [
+    'for-each-ref',
+    '--format=%(refname:short)',
+    '--sort=-committerdate',
+    'refs/heads'
+  ])
+  if (r.code !== 0) return []
+  return toLines(r.stdout).filter(Boolean)
+}
+
 async function status(repoPath: string): Promise<GitStatus> {
   // `-c core.quotePath=false` keeps non-ASCII/special filenames literal (not C-quoted),
   // so the paths we hand back can be staged/diffed/opened verbatim.
@@ -477,6 +489,7 @@ export const git = {
   currentBranch,
   defaultBranch,
   branchExists,
+  listBranches,
   status,
   stage,
   unstage,

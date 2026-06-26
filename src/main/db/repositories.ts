@@ -159,6 +159,9 @@ export const flights = {
   remove(fid: string): void {
     getDb().prepare('DELETE FROM flights WHERE id = ?').run(fid)
   },
+  rename(fid: string, name: string): void {
+    getDb().prepare('UPDATE flights SET name = ? WHERE id = ?').run(name, fid)
+  },
   updateStatus(fid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE flights SET status = ? WHERE id = ?').run(status, fid)
   },
@@ -287,8 +290,15 @@ export const tasks = {
     const cur = tasks.get(tid)
     if (!cur) throw new Error(`task ${tid} not found`)
     getDb()
-      .prepare('UPDATE tasks SET title = ?, description = ?, status = ?, updated_at = ? WHERE id = ?')
-      .run(patch.title ?? cur.title, patch.description ?? cur.description, patch.status ?? cur.status, now(), tid)
+      .prepare('UPDATE tasks SET title = ?, description = ?, status = ?, workspace_id = ?, updated_at = ? WHERE id = ?')
+      .run(
+        patch.title ?? cur.title,
+        patch.description ?? cur.description,
+        patch.status ?? cur.status,
+        patch.workspaceId ?? cur.workspaceId,
+        now(),
+        tid
+      )
     return tasks.get(tid)!
   },
   setFlight(tid: string, flightId: string | null): void {

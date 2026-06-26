@@ -1,30 +1,140 @@
-import type { JSX } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 import { Minus, Square, X, ChevronRight } from 'lucide-react'
 import { useStore, activeWorkspace, activeFlight } from '@renderer/store'
 
+interface MenuItem {
+  label: string
+  onClick?: () => void
+  disabled?: boolean
+  sep?: boolean
+}
+interface Menu {
+  id: string
+  label: string
+  items: MenuItem[]
+}
+
 /**
- * Native (frameless) window titlebar. The whole bar is a drag region; the
- * breadcrumb on the left orients the user, while the alert banner + window
- * controls on the right opt out of dragging via `no-drag`.
+ * Native (frameless) window titlebar: the Orbital brand + an app menu bar
+ * (File / View / Help) on the left, the workspace ▸ flight breadcrumb centered,
+ * and the needs-attention banner + window controls on the right. The bar itself
+ * is the drag region; interactive clusters opt out with `no-drag`.
  */
 export default function TitleBar(): JSX.Element {
   const wsName = useStore((s) => activeWorkspace(s)?.name ?? 'orbital')
   const flightName = useStore((s) => activeFlight(s)?.name)
   const alertCount = useStore((s) => s.alertCount)
+  const openModal = useStore((s) => s.openModal)
+  const workspace = useStore(activeWorkspace)
+
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
+
+  // Escape closes an open menu (WAI-ARIA menu-button pattern).
+  useEffect(() => {
+    if (!openMenu) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpenMenu(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openMenu])
+
+  const menus: Menu[] = [
+    {
+      id: 'file',
+      label: 'File',
+      items: [
+        { label: 'Add Workspace…', onClick: () => openModal('addWorkspace') },
+        { label: 'New Flight…', onClick: () => openModal('newFlight', { workspace }), disabled: !workspace },
+        { label: 'Settings…', onClick: () => openModal('settings') },
+        { sep: true, label: '' },
+        { label: 'Quit', onClick: () => window.orbital.windowClose() }
+      ]
+    },
+    {
+      id: 'view',
+      label: 'View',
+      items: [
+        { label: 'All Tasks…', onClick: () => openModal('board') },
+        { label: 'Reload', onClick: () => window.location.reload() },
+        { label: 'Toggle Developer Tools', onClick: () => window.orbital.toggleDevTools() }
+      ]
+    },
+    {
+      id: 'help',
+      label: 'Help',
+      items: [{ label: 'About Orbital', onClick: () => openModal('about') }]
+    }
+  ]
+
+  const choose = (item: MenuItem): void => {
+    if (item.disabled) return
+    setOpenMenu(null)
+    item.onClick?.()
+  }
+
+  const ctrl =
+    'flex h-[34px] w-[46px] items-center justify-center text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60'
 
   return (
-    <header className="drag-region flex h-[34px] flex-none items-center justify-between border-b border-line bg-bar pl-[14px]">
-      {/* Brand + breadcrumb */}
-      <div className="flex min-w-0 items-center gap-[10px]">
-        {/* Orbit logo mark: a faint accent ring with a glowing core. */}
+    <header className="drag-region relative flex h-[34px] flex-none items-center justify-between border-b border-line bg-bar pl-[14px]">
+      {/* Left: brand + app menu bar. bg-bar so the centered breadcrumb is occluded
+          here rather than visually colliding at narrow widths. */}
+      <div className="no-drag z-50 flex items-center gap-2.5 bg-bar">
         <div className="relative size-[15px] flex-none">
           <div className="absolute inset-0 rounded-full border-[1.2px] border-accent/55" />
           <div className="absolute left-1/2 top-1/2 -ml-[2.5px] -mt-[2.5px] size-[5px] rounded-full bg-accent shadow-[0_0_7px_rgba(79,140,255,0.9)]" />
         </div>
         <span className="text-[12px] font-semibold tracking-[0.2px]">Orbital</span>
-        <span className="text-[11px] text-faint">—</span>
+
+        <nav className="flex items-center">
+          {menus.map((m) => (
+            <div key={m.id} className="relative">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={openMenu === m.id}
+                onClick={() => setOpenMenu((o) => (o === m.id ? null : m.id))}
+                onMouseEnter={() => setOpenMenu((o) => (o ? m.id : o))}
+                className={`flex h-[34px] items-center px-2.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                  openMenu === m.id ? 'bg-hover text-text' : 'text-text-3 hover:text-text'
+                }`}
+              >
+                {m.label}
+              </button>
+
+              {openMenu === m.id && (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-[34px] z-50 min-w-[210px] rounded-b-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+                >
+                  {m.items.map((it, i) =>
+                    it.sep ? (
+                      <div key={i} className="my-1 h-px bg-soft" />
+                    ) : (
+                      <button
+                        key={i}
+                        type="button"
+                        role="menuitem"
+                        disabled={it.disabled}
+                        onClick={() => choose(it)}
+                        className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[12px] font-medium text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent"
+                      >
+                        {it.label}
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </nav>
+      </div>
+
+      {/* Center: workspace ▸ flight breadcrumb (non-interactive, so dragging still works) */}
+      <div className="pointer-events-none absolute left-1/2 top-0 flex h-full max-w-[40%] -translate-x-1/2 items-center">
         <span className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-dim">
-          <span>{wsName}</span>
+          <span className="truncate">{wsName}</span>
           {flightName && (
             <>
               <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />
@@ -34,8 +144,9 @@ export default function TitleBar(): JSX.Element {
         </span>
       </div>
 
-      {/* Alert banner + window controls */}
-      <div className="no-drag flex items-center gap-1">
+      {/* Right: needs-attention banner + window controls. bg-bar occludes the
+          centered breadcrumb; clicking here also dismisses any open menu. */}
+      <div className="no-drag z-50 flex items-center gap-1 bg-bar" onClick={() => setOpenMenu(null)}>
         {alertCount > 0 && (
           <div className="mr-2 flex items-center gap-[7px] rounded-[7px] border border-amber/25 bg-amber/12 py-[3px] pl-2 pr-[9px]">
             <span className="relative size-[7px] flex-none">
@@ -46,20 +157,10 @@ export default function TitleBar(): JSX.Element {
             </span>
           </div>
         )}
-        <button
-          type="button"
-          aria-label="Minimize"
-          onClick={() => window.orbital.windowMinimize()}
-          className="flex h-[34px] w-[46px] items-center justify-center text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60"
-        >
+        <button type="button" aria-label="Minimize" onClick={() => window.orbital.windowMinimize()} className={ctrl}>
           <Minus size={16} strokeWidth={1.5} />
         </button>
-        <button
-          type="button"
-          aria-label="Maximize"
-          onClick={() => window.orbital.windowMaximize()}
-          className="flex h-[34px] w-[46px] items-center justify-center text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60"
-        >
+        <button type="button" aria-label="Maximize" onClick={() => window.orbital.windowMaximize()} className={ctrl}>
           <Square size={13} strokeWidth={1.5} />
         </button>
         <button
@@ -71,6 +172,9 @@ export default function TitleBar(): JSX.Element {
           <X size={15} strokeWidth={1.5} />
         </button>
       </div>
+
+      {/* Click-away backdrop while a menu is open. */}
+      {openMenu && <div className="no-drag fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
     </header>
   )
 }

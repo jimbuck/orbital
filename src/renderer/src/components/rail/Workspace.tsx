@@ -77,7 +77,7 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
           ))}
           <button
             type="button"
-            onClick={() => store.openModal('newFlight', workspace)}
+            onClick={() => store.openModal('newFlight', { workspace })}
             className="mt-px flex items-center gap-[7px] rounded px-[9px] py-[6px] text-left text-[11.5px] text-faint outline-none hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <Plus size={13} strokeWidth={1.5} className="flex-none" />

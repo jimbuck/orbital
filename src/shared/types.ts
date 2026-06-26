@@ -176,6 +176,13 @@ export interface GitStatus {
   unstaged: GitFileStatus[]
 }
 
+/** Branch list for a workspace plus the branch HEAD currently points at. */
+export interface BranchInfo {
+  branches: string[]
+  /** What "HEAD" resolves to right now (the checked-out branch). */
+  head: string
+}
+
 export type DiffLineType = 'add' | 'del' | 'context' | 'hunk' | 'meta'
 
 export interface DiffLine {
@@ -229,6 +236,8 @@ export interface TaskPatch {
   title?: string
   description?: string
   status?: TaskStatus
+  /** Reassign the task to another workspace (e.g. dragged across board swim-lanes). */
+  workspaceId?: string
 }
 
 /* ============================================================================
@@ -279,6 +288,8 @@ export const IPC = {
   // flights / panes / tabs
   createFlight: 'orbital:createFlight',
   removeFlight: 'orbital:removeFlight',
+  renameFlight: 'orbital:renameFlight',
+  listBranches: 'orbital:listBranches',
   createTab: 'orbital:createTab',
   closeTab: 'orbital:closeTab',
   setActiveTab: 'orbital:setActiveTab',
@@ -313,6 +324,7 @@ export const IPC = {
   windowMinimize: 'orbital:windowMinimize',
   windowMaximize: 'orbital:windowMaximize',
   windowClose: 'orbital:windowClose',
+  toggleDevTools: 'orbital:toggleDevTools',
   // events (main -> renderer)
   evtStateChanged: 'orbital:evt:stateChanged',
   evtTerminalData: 'orbital:evt:terminalData',
@@ -338,6 +350,9 @@ export interface OrbitalApi {
   // flights / panes / tabs
   createFlight(workspaceId: string, opts: CreateFlightOptions): Promise<Flight>
   removeFlight(flightId: string, opts: RemoveFlightOptions): Promise<void>
+  renameFlight(flightId: string, name: string): Promise<void>
+  /** Branches of a workspace's repo + what HEAD points at (for the New Flight base-ref picker). */
+  listBranches(workspaceId: string): Promise<BranchInfo>
   createTab(flightId: string, paneId: string | null, type: TabType, config?: TabConfig): Promise<Tab>
   closeTab(tabId: string): Promise<void>
   setActiveTab(paneId: string, tabId: string): Promise<void>
@@ -376,6 +391,7 @@ export interface OrbitalApi {
   windowMinimize(): void
   windowMaximize(): void
   windowClose(): void
+  toggleDevTools(): void
 
   // events — each returns an unsubscribe function
   onStateChanged(cb: (state: AppState) => void): () => void

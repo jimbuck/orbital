@@ -10,6 +10,7 @@ import {
   taskStatusLabel
 } from '@renderer/lib/status'
 import type { Task, TaskStatus } from '@shared/types'
+import EditableTaskTitle from './EditableTaskTitle'
 
 /** Segmented-toggle pill class for the List / Board switch. */
 function segClass(active: boolean): string {
@@ -60,9 +61,10 @@ export default function TaskTracker(): JSX.Element {
     await window.orbital.updateTask(taskId, { status })
   }
 
-  const startFlight = async (taskId: string): Promise<void> => {
-    const flight = await window.orbital.startFlightFromTask(taskId)
-    setActiveFlight(flight.id)
+  // Open the New Flight modal prefilled with (and pre-linked to) this task,
+  // letting the user pick a base ref before the worktree is created.
+  const startFlight = (task: Task): void => {
+    openModal('newFlight', { workspace, task })
   }
 
   /** Inline mono link to a task's bound Flight. */
@@ -142,13 +144,14 @@ export default function TaskTracker(): JSX.Element {
                 className="relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
               >
                 <div className="flex items-start justify-between gap-[9px]">
-                  <span
-                    className={`text-[12.5px] font-semibold leading-snug text-pretty ${
-                      done ? 'text-faint line-through' : 'text-text'
-                    }`}
-                  >
-                    {task.title}
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <EditableTaskTitle
+                      task={task}
+                      className={`block text-[12.5px] font-semibold leading-snug text-pretty ${
+                        done ? 'text-faint line-through' : 'text-text'
+                      }`}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => setMenuTaskId((id) => (id === task.id ? null : task.id))}
@@ -166,15 +169,17 @@ export default function TaskTracker(): JSX.Element {
                 {flightLink(task, false)}
 
                 {!task.flightId && (
-                  <button
-                    type="button"
-                    onClick={() => void startFlight(task.id)}
-                    title="Start a Flight from this task"
-                    aria-label="Start a Flight from this task"
-                    className="inline-flex items-center justify-center flex-none mt-[9px] size-[22px] rounded-full bg-accent text-[#06122e] hover:brightness-110 transition outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                  >
-                    <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
-                  </button>
+                  <div className="mt-[9px] flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => startFlight(task)}
+                      title="Start a Flight from this task"
+                      aria-label="Start a Flight from this task"
+                      className="inline-flex size-[22px] flex-none items-center justify-center rounded-full bg-accent text-[#06122e] outline-none transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent/60"
+                    >
+                      <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
+                    </button>
+                  </div>
                 )}
 
                 {menuTaskId === task.id && (
@@ -236,20 +241,19 @@ export default function TaskTracker(): JSX.Element {
                       key={task.id}
                       className="p-[10px] rounded-[9px] bg-panel border border-line-2 hover:border-line-strong transition-colors"
                     >
-                      <div
-                        className={`text-[12px] font-semibold leading-snug text-pretty ${
+                      <EditableTaskTitle
+                        task={task}
+                        className={`block text-[12px] font-semibold leading-snug text-pretty ${
                           done ? 'text-faint line-through' : 'text-text'
                         }`}
-                      >
-                        {task.title}
-                      </div>
+                      />
 
                       {flightLink(task, true)}
 
                       {status === 'todo' && !task.flightId && (
                         <button
                           type="button"
-                          onClick={() => void startFlight(task.id)}
+                          onClick={() => startFlight(task)}
                           title="Start a Flight from this task"
                           className="flex items-center gap-1.5 mt-2 w-fit pl-[5px] pr-[7px] py-1 rounded-md bg-accent/[0.08] border border-accent/20 text-blue text-[10px] font-semibold hover:bg-accent/[0.16] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
                         >

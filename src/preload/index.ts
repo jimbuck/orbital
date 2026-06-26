@@ -17,6 +17,7 @@ import {
   type RemoveFlightOptions,
   type TaskPatch,
   type GitStatus,
+  type BranchInfo,
   type FileDiff,
   type FileNode,
   type TerminalDataEvent,
@@ -49,6 +50,10 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.createFlight, workspaceId, opts) as Promise<Flight>,
   removeFlight: (flightId: string, opts: RemoveFlightOptions) =>
     ipcRenderer.invoke(IPC.removeFlight, flightId, opts) as Promise<void>,
+  renameFlight: (flightId: string, name: string) =>
+    ipcRenderer.invoke(IPC.renameFlight, flightId, name) as Promise<void>,
+  listBranches: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC.listBranches, workspaceId) as Promise<BranchInfo>,
   createTab: (flightId: string, paneId: string | null, type: TabType, config?: TabConfig) =>
     ipcRenderer.invoke(IPC.createTab, flightId, paneId, type, config) as Promise<Tab>,
   closeTab: (tabId: string) => ipcRenderer.invoke(IPC.closeTab, tabId) as Promise<void>,
@@ -101,6 +106,7 @@ const api: OrbitalApi = {
   windowMinimize: () => ipcRenderer.send(IPC.windowMinimize),
   windowMaximize: () => ipcRenderer.send(IPC.windowMaximize),
   windowClose: () => ipcRenderer.send(IPC.windowClose),
+  toggleDevTools: () => ipcRenderer.send(IPC.toggleDevTools),
 
   // events
   onStateChanged: (cb: (state: AppState) => void) => on<AppState>(IPC.evtStateChanged, cb),

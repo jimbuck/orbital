@@ -170,7 +170,7 @@ export default function GitPanel(): JSX.Element {
         </button>
         <button
           type="button"
-          onClick={() => openModal('newFlight', workspace)}
+          onClick={() => openModal('newFlight', { workspace })}
           className={`flex-1 py-[7px] inline-flex items-center justify-center gap-1 ${SECONDARY}`}
         >
           <Plus size={13} strokeWidth={1.5} />

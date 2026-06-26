@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import {
@@ -8,10 +8,12 @@ import {
   taskColumnDot,
   taskColumnHeadClass
 } from '@renderer/lib/status'
-import type { Task } from '@shared/types'
+import type { Task, TaskStatus, TaskPatch } from '@shared/types'
+import EditableTaskTitle from '../panel/EditableTaskTitle'
 import Settings from './Settings'
 import AddWorkspace from './AddWorkspace'
 import NewFlight from './NewFlight'
+import About from './About'
 
 /* ============================================================================
  * Shared modal primitives
@@ -97,11 +99,21 @@ export function ModalShell({ title, subtitle, width, onClose, footer, children }
  * Full-board modal ("All tasks") — tasks for the active workspace, by status.
  * ========================================================================== */
 
-function BoardTaskCard({ task }: { task: Task }): React.JSX.Element {
+function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void }): React.JSX.Element {
   return (
-    <div className="rounded-card bg-bg border border-line p-3">
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', task.id)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
+      onDragEnd={() => onDragEnd?.()}
+      className="cursor-grab rounded-card border border-line bg-bg p-3 active:cursor-grabbing"
+    >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[12.5px] font-semibold text-text-2">{task.title}</span>
+        <div className="min-w-0 flex-1">
+          <EditableTaskTitle task={task} className="block text-[12.5px] font-semibold text-text-2" />
+        </div>
         <span className={`flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${taskChipClass(task.status)}`}>
           {taskStatusLabel(task.status)}
         </span>
@@ -115,6 +127,17 @@ function FullBoard(): React.JSX.Element {
   const workspaces = useStore((s) => s.workspaces)
   const tasks = useStore((s) => s.tasks)
   const closeModal = useStore((s) => s.closeModal)
+  const [hoverCell, setHoverCell] = useState<string | null>(null)
+
+  // Dropping a card on a cell sets its status (column) and workspace (lane).
+  const dropTask = (taskId: string, workspaceId: string, status: TaskStatus): void => {
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return
+    const patch: TaskPatch = {}
+    if (task.status !== status) patch.status = status
+    if (task.workspaceId !== workspaceId) patch.workspaceId = workspaceId
+    if (Object.keys(patch).length) void window.orbital.updateTask(taskId, patch)
+  }
 
   return (
     <div
@@ -145,8 +168,9 @@ function FullBoard(): React.JSX.Element {
           <div className="text-[12px] text-faint">No workspaces yet.</div>
         ) : (
           <div className="min-w-[820px]">
-            {/* Status column headers, offset by the workspace-label gutter. */}
-            <div className="sticky top-0 z-10 mb-0 flex gap-2 bg-panel pb-2">
+            {/* Status column headers, offset by the workspace-label gutter.
+                No bottom padding so the header sits flush on the first lane. */}
+            <div className="sticky top-0 z-10 flex gap-2 bg-panel">
               <div className="w-[150px] flex-none" />
               {TASK_STATUSES.map((status) => {
                 const dot = taskColumnDot(status)
@@ -180,13 +204,28 @@ function FullBoard(): React.JSX.Element {
                 </div>
                 {TASK_STATUSES.map((status) => {
                   const cell = tasks.filter((t) => t.workspaceId === ws.id && t.status === status)
+                  const cellKey = `${ws.id}:${status}`
+                  const isHover = hoverCell === cellKey
                   return (
                     <div
                       key={status}
-                      className="flex min-h-[88px] flex-1 flex-col gap-2 border-x border-line bg-bg p-2"
+                      onDragOver={(e) => {
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (!isHover) setHoverCell(cellKey)
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        const id = e.dataTransfer.getData('text/plain')
+                        if (id) dropTask(id, ws.id, status)
+                        setHoverCell(null)
+                      }}
+                      className={`flex min-h-[88px] flex-1 flex-col gap-2 border-x p-2 transition-colors ${
+                        isHover ? 'border-accent/40 bg-accent/[0.06]' : 'border-line bg-bg'
+                      }`}
                     >
                       {cell.map((task) => (
-                        <BoardTaskCard key={task.id} task={task} />
+                        <BoardTaskCard key={task.id} task={task} onDragEnd={() => setHoverCell(null)} />
                       ))}
                     </div>
                   )
@@ -230,6 +269,7 @@ export default function ModalRoot(): React.JSX.Element | null {
       {modal === 'addWorkspace' && <AddWorkspace />}
       {modal === 'newFlight' && <NewFlight />}
       {modal === 'board' && <FullBoard />}
+      {modal === 'about' && <About />}
     </div>
   )
 }

@@ -176,6 +176,9 @@ export function registerIpc(): void {
       baseRef: opts.baseRef,
       taskId: opts.taskId
     })
+    // Link the originating task to this Flight (so it shows the Flight ref and
+    // drops out of the "unlinked tasks" picker).
+    if (opts.taskId) repo.tasks.setFlight(opts.taskId, flight.id)
     runtime.ensureEnvWatcher(workspaceId)
     openInitialTerminal(flight)
     broadcastAll()
@@ -199,6 +202,23 @@ export function registerIpc(): void {
     killFlightTerminals(flightId)
     repo.flights.remove(flightId)
     broadcastAll()
+  })
+
+  h(IPC.renameFlight, (_e, flightId: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    repo.flights.rename(flightId, trimmed)
+    broadcast()
+  })
+
+  h(IPC.listBranches, async (_e, workspaceId: string) => {
+    const ws = repo.workspaces.get(workspaceId)
+    if (!ws) return { branches: [], head: 'HEAD' }
+    const [branches, head] = await Promise.all([
+      git.listBranches(ws.repoPath).catch(() => [] as string[]),
+      git.currentBranch(ws.repoPath).catch(() => 'main')
+    ])
+    return { branches, head }
   })
 
   h(IPC.createTab, (_e, flightId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
@@ -331,6 +351,7 @@ export function registerIpc(): void {
     else w.maximize()
   })
   ipcMain.on(IPC.windowClose, () => runtime.window?.close())
+  ipcMain.on(IPC.toggleDevTools, () => runtime.window?.webContents.toggleDevTools())
 }
 
 /* ---- CLI control channel dispatcher ------------------------------------ */
