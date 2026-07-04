@@ -94,8 +94,15 @@ const api: OrbitalApi = {
   gitStage: (flightId: string, path: string) => ipcRenderer.invoke(IPC.gitStage, flightId, path) as Promise<void>,
   gitUnstage: (flightId: string, path: string) =>
     ipcRenderer.invoke(IPC.gitUnstage, flightId, path) as Promise<void>,
-  gitCommit: (flightId: string, message: string) =>
-    ipcRenderer.invoke(IPC.gitCommit, flightId, message) as Promise<void>,
+  gitStageAll: (flightId: string) => ipcRenderer.invoke(IPC.gitStageAll, flightId) as Promise<void>,
+  gitUnstageAll: (flightId: string) => ipcRenderer.invoke(IPC.gitUnstageAll, flightId) as Promise<void>,
+  gitDiscard: (flightId: string, path: string) =>
+    ipcRenderer.invoke(IPC.gitDiscard, flightId, path) as Promise<void>,
+  gitDiscardAll: (flightId: string) => ipcRenderer.invoke(IPC.gitDiscardAll, flightId) as Promise<void>,
+  gitCommit: (flightId: string, message: string, amend?: boolean) =>
+    ipcRenderer.invoke(IPC.gitCommit, flightId, message, amend) as Promise<void>,
+  gitLastCommitMessage: (flightId: string) =>
+    ipcRenderer.invoke(IPC.gitLastCommitMessage, flightId) as Promise<string>,
   gitPush: (flightId: string) => ipcRenderer.invoke(IPC.gitPush, flightId) as Promise<void>,
   gitPull: (flightId: string) => ipcRenderer.invoke(IPC.gitPull, flightId) as Promise<void>,
   gitFetch: (flightId: string) => ipcRenderer.invoke(IPC.gitFetch, flightId) as Promise<void>,

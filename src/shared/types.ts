@@ -106,6 +106,8 @@ export interface TabConfig {
   url?: string
   /** editor: path (relative to flight working dir) of the open file. */
   filePath?: string
+  /** editor: open `filePath` as a diff of its staged (index) version, not the worktree. */
+  diffStaged?: boolean
   /** agent: which provider this tab launches (e.g. 'claude'); defaults to the workspace's. */
   agentProvider?: string
   /** display title override. */
@@ -364,7 +366,12 @@ export const IPC = {
   gitStatus: 'orbital:gitStatus',
   gitStage: 'orbital:gitStage',
   gitUnstage: 'orbital:gitUnstage',
+  gitStageAll: 'orbital:gitStageAll',
+  gitUnstageAll: 'orbital:gitUnstageAll',
+  gitDiscard: 'orbital:gitDiscard',
+  gitDiscardAll: 'orbital:gitDiscardAll',
   gitCommit: 'orbital:gitCommit',
+  gitLastCommitMessage: 'orbital:gitLastCommitMessage',
   gitPush: 'orbital:gitPush',
   gitPull: 'orbital:gitPull',
   gitFetch: 'orbital:gitFetch',
@@ -448,7 +455,15 @@ export interface OrbitalApi {
   gitStatus(flightId: string): Promise<GitStatus>
   gitStage(flightId: string, path: string): Promise<void>
   gitUnstage(flightId: string, path: string): Promise<void>
-  gitCommit(flightId: string, message: string): Promise<void>
+  gitStageAll(flightId: string): Promise<void>
+  gitUnstageAll(flightId: string): Promise<void>
+  /** Revert a file's unstaged changes (tracked: restore from index; untracked: delete). */
+  gitDiscard(flightId: string, path: string): Promise<void>
+  /** Revert ALL unstaged changes and delete untracked files; staged changes survive. */
+  gitDiscardAll(flightId: string): Promise<void>
+  gitCommit(flightId: string, message: string, amend?: boolean): Promise<void>
+  /** HEAD's full commit message ('' on an empty repo) — for the amend prefill. */
+  gitLastCommitMessage(flightId: string): Promise<string>
   gitPush(flightId: string): Promise<void>
   gitPull(flightId: string): Promise<void>
   gitFetch(flightId: string): Promise<void>

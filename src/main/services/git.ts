@@ -232,8 +232,40 @@ async function stageAll(repoPath: string): Promise<void> {
   await run(repoPath, ['add', '-A'])
 }
 
-async function commit(repoPath: string, message: string): Promise<void> {
-  await run(repoPath, ['commit', '-m', message])
+async function unstageAll(repoPath: string): Promise<void> {
+  await run(repoPath, ['reset', '-q', 'HEAD', '--'])
+}
+
+/**
+ * Throw away a file's working-tree changes: tracked files are restored from the
+ * index (any staged version survives), untracked files are deleted outright.
+ */
+async function discard(repoPath: string, path: string): Promise<void> {
+  const tracked = await capture(repoPath, ['ls-files', '--error-unmatch', '--', path])
+  if (tracked.code === 0) {
+    await run(repoPath, ['restore', '--worktree', '--', path])
+  } else {
+    await run(repoPath, ['clean', '-fd', '--', path])
+  }
+}
+
+/** Discard ALL unstaged changes and delete untracked files; staged changes survive. */
+async function discardAll(repoPath: string): Promise<void> {
+  // `restore` errors when nothing is tracked yet (fresh repo); still clean untracked.
+  await capture(repoPath, ['restore', '--worktree', '--', '.'])
+  await run(repoPath, ['clean', '-fd'])
+}
+
+async function commit(repoPath: string, message: string, amend?: boolean): Promise<void> {
+  const args = ['commit', '-m', message]
+  if (amend) args.push('--amend')
+  await run(repoPath, args)
+}
+
+/** Full message of the HEAD commit ('' on an empty repo) — prefills the amend box. */
+async function lastCommitMessage(repoPath: string): Promise<string> {
+  const r = await capture(repoPath, ['log', '-1', '--pretty=%B'])
+  return r.code === 0 ? r.stdout.trim() : ''
 }
 
 async function push(repoPath: string): Promise<void> {
@@ -494,7 +526,11 @@ export const git = {
   stage,
   unstage,
   stageAll,
+  unstageAll,
+  discard,
+  discardAll,
   commit,
+  lastCommitMessage,
   push,
   pull,
   fetch,

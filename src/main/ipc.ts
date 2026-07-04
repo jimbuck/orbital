@@ -437,10 +437,27 @@ export function registerIpc(): void {
     await git.unstage(flightRepoPath(flightId), path)
     broadcast()
   })
-  h(IPC.gitCommit, async (_e, flightId: string, message: string) => {
-    await git.commit(flightRepoPath(flightId), message)
+  h(IPC.gitStageAll, async (_e, flightId: string) => {
+    await git.stageAll(flightRepoPath(flightId))
     broadcast()
   })
+  h(IPC.gitUnstageAll, async (_e, flightId: string) => {
+    await git.unstageAll(flightRepoPath(flightId))
+    broadcast()
+  })
+  h(IPC.gitDiscard, async (_e, flightId: string, path: string) => {
+    await git.discard(flightRepoPath(flightId), path)
+    broadcast()
+  })
+  h(IPC.gitDiscardAll, async (_e, flightId: string) => {
+    await git.discardAll(flightRepoPath(flightId))
+    broadcast()
+  })
+  h(IPC.gitCommit, async (_e, flightId: string, message: string, amend?: boolean) => {
+    await git.commit(flightRepoPath(flightId), message, amend)
+    broadcast()
+  })
+  h(IPC.gitLastCommitMessage, (_e, flightId: string) => git.lastCommitMessage(flightRepoPath(flightId)))
   h(IPC.gitPush, (_e, flightId: string) => git.push(flightRepoPath(flightId)))
   h(IPC.gitPull, async (_e, flightId: string) => {
     await git.pull(flightRepoPath(flightId))

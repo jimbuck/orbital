@@ -72,7 +72,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   }, [flightId])
 
   const openFile = useCallback(
-    async (node: FileNode): Promise<void> => {
+    async (node: FileNode, staged = false): Promise<void> => {
       if (!flightId) return
       const id = ++reqRef.current
       setSelected({ path: node.path, gitState: node.gitState })
@@ -81,8 +81,8 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
       setContent(null)
       setLoading(true)
       try {
-        if (node.gitState) {
-          const d = await window.orbital.gitDiff(flightId, node.path, false)
+        if (node.gitState || staged) {
+          const d = await window.orbital.gitDiff(flightId, node.path, staged)
           if (reqRef.current === id) setDiff(d)
         } else {
           const c = await window.orbital.readFile(flightId, node.path)
@@ -104,8 +104,11 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
     const fp = tab.config.filePath
     if (!fp || autoOpenedRef.current || tree.length === 0) return
     autoOpenedRef.current = true
-    void openFile(findNode(tree, fp) ?? { name: fp.split('/').pop() || fp, path: fp, type: 'file' })
-  }, [tab.config.filePath, tree, openFile])
+    void openFile(
+      findNode(tree, fp) ?? { name: fp.split('/').pop() || fp, path: fp, type: 'file' },
+      !!tab.config.diffStaged
+    )
+  }, [tab.config.filePath, tab.config.diffStaged, tree, openFile])
 
   const save = async (): Promise<void> => {
     if (!flightId || !selected) return
