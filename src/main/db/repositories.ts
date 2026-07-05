@@ -15,6 +15,7 @@ import {
   type TaskStatus,
   type LayoutNode,
   type TaskPatch,
+  aggregateStatus,
   isPtyTabType
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
@@ -111,19 +112,18 @@ export const workspaces = {
  * Flights, panes, tabs
  * ========================================================================== */
 
-function hydrateFlight(r: any): Flight {
-  const paneRows = getDb().prepare('SELECT * FROM panes WHERE flight_id = ? ORDER BY position').all(r.id)
-  const panes: Pane[] = paneRows.map((p: any) => {
-    const tabRows = getDb().prepare('SELECT * FROM tabs WHERE pane_id = ? ORDER BY position').all(p.id)
-    const tabs = tabRows.map(mapTab)
-    const activeRow = tabRows.find((t: any) => t.active === 1) as any
-    return {
-      id: p.id,
-      flightId: p.flight_id,
-      activeTabId: activeRow?.id ?? tabs[0]?.id ?? null,
-      tabs
-    }
-  })
+function buildPane(p: any, tabRows: any[]): Pane {
+  const tabs = tabRows.map(mapTab)
+  const activeRow = tabRows.find((t: any) => t.active === 1) as any
+  return {
+    id: p.id,
+    flightId: p.flight_id,
+    activeTabId: activeRow?.id ?? tabs[0]?.id ?? null,
+    tabs
+  }
+}
+
+function buildFlight(r: any, panes: Pane[]): Flight {
   return {
     id: r.id,
     workspaceId: r.workspace_id,
@@ -133,14 +133,27 @@ function hydrateFlight(r: any): Flight {
     branch: r.branch,
     status: r.status as TerminalStatus,
     taskId: r.task_id ?? null,
-    layout: resolveLayout(r.id, r.layout, panes.map((p) => p.id)),
+    layout: resolveLayout(r.layout, panes.map((p) => p.id)),
     createdAt: r.created_at,
     panes
   }
 }
 
-/** Parse a Flight's stored layout, rebuilding (and persisting) it if it no longer matches its panes. */
-function resolveLayout(flightId: string, raw: string, paneIdList: string[]): LayoutNode {
+function hydrateFlight(r: any): Flight {
+  const db = getDb()
+  const panes = db
+    .prepare('SELECT * FROM panes WHERE flight_id = ? ORDER BY position')
+    .all(r.id)
+    .map((p: any) => buildPane(p, db.prepare('SELECT * FROM tabs WHERE pane_id = ? ORDER BY position').all(p.id)))
+  return buildFlight(r, panes)
+}
+
+/**
+ * Parse a Flight's stored layout, rebuilding it if it no longer covers its panes.
+ * The rebuild is deterministic and NOT persisted here — hydration is a read path;
+ * the next layout mutation (split/close/ratio) persists whatever it operates on.
+ */
+function resolveLayout(raw: string, paneIdList: string[]): LayoutNode {
   let parsed: LayoutNode | null = null
   try {
     parsed = raw ? (JSON.parse(raw) as LayoutNode) : null
@@ -148,14 +161,36 @@ function resolveLayout(flightId: string, raw: string, paneIdList: string[]): Lay
     parsed = null
   }
   if (layoutCovers(parsed, paneIdList)) return parsed as LayoutNode
-  const rebuilt = defaultLayout(paneIdList)
-  getDb().prepare('UPDATE flights SET layout = ? WHERE id = ?').run(JSON.stringify(rebuilt), flightId)
-  return rebuilt
+  return defaultLayout(paneIdList)
 }
 
 export const flights = {
+  /** Hydrate all flights with two batched queries (not one per flight/pane). */
   list(): Flight[] {
-    return getDb().prepare('SELECT * FROM flights ORDER BY created_at').all().map(hydrateFlight)
+    const db = getDb()
+    const rows = db.prepare('SELECT * FROM flights ORDER BY created_at').all() as any[]
+    if (rows.length === 0) return []
+
+    const tabsByPane = new Map<string, any[]>()
+    for (const t of db.prepare('SELECT * FROM tabs ORDER BY position').all() as any[]) {
+      const list = tabsByPane.get(t.pane_id)
+      if (list) list.push(t)
+      else tabsByPane.set(t.pane_id, [t])
+    }
+
+    const panesByFlight = new Map<string, Pane[]>()
+    for (const p of db.prepare('SELECT * FROM panes ORDER BY position').all() as any[]) {
+      const pane = buildPane(p, tabsByPane.get(p.id) ?? [])
+      const list = panesByFlight.get(p.flight_id)
+      if (list) list.push(pane)
+      else panesByFlight.set(p.flight_id, [pane])
+    }
+
+    return rows.map((r) => buildFlight(r, panesByFlight.get(r.id) ?? []))
+  },
+  /** Lightweight id+status projection for alert badging — skips pane/tab hydration. */
+  listStatuses(): Pick<Flight, 'id' | 'status'>[] {
+    return getDb().prepare('SELECT id, status FROM flights').all() as Pick<Flight, 'id' | 'status'>[]
   },
   get(fid: string): Flight | undefined {
     const r = getDb().prepare('SELECT * FROM flights WHERE id = ?').get(fid)
@@ -199,12 +234,7 @@ export const flights = {
       .prepare("SELECT status FROM tabs WHERE flight_id = ? AND type IN ('terminal', 'agent') AND status IS NOT NULL")
       .all(fid)
       .map((r: any) => r.status as TerminalStatus)
-    // import-free aggregate to avoid a cycle: mirror STATUS_PRECEDENCE.
-    const order: TerminalStatus[] = ['needs_attention', 'error', 'working', 'idle', 'done']
-    let agg: TerminalStatus = 'idle'
-    if (statuses.length > 0) {
-      agg = order.find((s) => statuses.includes(s)) ?? 'idle'
-    }
+    const agg = aggregateStatus(statuses)
     flights.updateStatus(fid, agg)
     return agg
   }
@@ -221,9 +251,6 @@ export const panes = {
   },
   remove(pid: string): void {
     getDb().prepare('DELETE FROM panes WHERE id = ?').run(pid)
-  },
-  count(flightId: string): number {
-    return (getDb().prepare('SELECT COUNT(*) AS c FROM panes WHERE flight_id = ?').get(flightId) as any).c
   },
   firstPaneId(flightId: string): string | undefined {
     const r = getDb().prepare('SELECT id FROM panes WHERE flight_id = ? ORDER BY position LIMIT 1').get(flightId) as any
@@ -267,19 +294,12 @@ export const tabs = {
   updateStatus(tid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE tabs SET status = ? WHERE id = ?').run(status, tid)
   },
-  updateConfig(tid: string, config: TabConfig): void {
-    getDb().prepare('UPDATE tabs SET config = ? WHERE id = ?').run(JSON.stringify(config), tid)
-  },
   move(tid: string, targetPaneId: string): void {
     const pos =
       (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?').get(targetPaneId) as any)
         .m + 1
     getDb().prepare('UPDATE tabs SET pane_id = ?, position = ? WHERE id = ?').run(targetPaneId, pos, tid)
     tabs.setActive(targetPaneId, tid)
-  },
-  /** PTY-backed tabs (terminal + agent) across all flights — used to clean up PTYs. */
-  allTerminals(): Tab[] {
-    return getDb().prepare("SELECT * FROM tabs WHERE type IN ('terminal', 'agent')").all().map(mapTab)
   },
   inPane(paneId: string): Tab[] {
     return getDb().prepare('SELECT * FROM tabs WHERE pane_id = ? ORDER BY position').all(paneId).map(mapTab)

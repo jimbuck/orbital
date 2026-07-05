@@ -1,9 +1,37 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '@renderer/store'
 import { ModalShell, ghostBtn } from './ModalRoot'
+import type { UpdateStatus } from '@shared/types'
+
+/** Human line for the updater's current state, shown under the version. */
+function updateLine(s: UpdateStatus): string {
+  switch (s.phase) {
+    case 'disabled':
+      return 'Auto-update is off in dev builds.'
+    case 'checking':
+      return 'Checking for updates…'
+    case 'downloading':
+      return `Downloading v${s.version ?? '?'}… ${s.percent ?? 0}%`
+    case 'ready':
+      return `v${s.version ?? '?'} downloaded — restart to apply.`
+    case 'uptodate':
+      return 'You are on the latest version.'
+    case 'error':
+      return `Update check failed: ${s.error ?? 'unknown error'}`
+    default:
+      return 'Updates are checked automatically.'
+  }
+}
 
 /** A small "About Orbital" surface reached from Help ▸ About. */
 export default function About(): React.JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
+  const updateStatus = useStore((s) => s.updateStatus)
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    void window.orbital.getVersion().then(setVersion)
+  }, [])
 
   return (
     <ModalShell
@@ -11,9 +39,25 @@ export default function About(): React.JSX.Element {
       width={460}
       onClose={closeModal}
       footer={
-        <button type="button" className={ghostBtn} onClick={closeModal}>
-          Close
-        </button>
+        <>
+          {updateStatus.phase === 'ready' ? (
+            <button type="button" className={ghostBtn} onClick={() => window.orbital.installUpdate()}>
+              Restart to update
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`${ghostBtn} disabled:cursor-not-allowed disabled:opacity-50`}
+              disabled={updateStatus.phase === 'checking' || updateStatus.phase === 'downloading'}
+              onClick={() => void window.orbital.checkForUpdates()}
+            >
+              Check for Updates
+            </button>
+          )}
+          <button type="button" className={ghostBtn} onClick={closeModal}>
+            Close
+          </button>
+        </>
       }
     >
       <div className="flex items-center gap-3">
@@ -24,9 +68,13 @@ export default function About(): React.JSX.Element {
         </div>
         <div>
           <div className="text-[16px] font-bold tracking-[0.2px]">Orbital</div>
-          <div className="font-mono text-[11px] text-dim">v1.1.0 · get work done from orbit</div>
+          <div className="font-mono text-[11px] text-dim">
+            {version ? `v${version}` : '…'} · get work done from orbit
+          </div>
         </div>
       </div>
+
+      <p className="mt-2 text-[11.5px] text-text-3">{updateLine(updateStatus)}</p>
 
       <p className="mt-4 text-[12.5px] leading-relaxed text-text-3">
         A native cockpit for running many interactive coding-agent sessions side by side — each in its own git

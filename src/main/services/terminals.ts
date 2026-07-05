@@ -119,11 +119,6 @@ export class TerminalManager extends EventEmitter {
     return entry ? { data: entry.buf, seq: entry.total } : { data: '', seq: 0 }
   }
 
-  /** Whether a live terminal exists for `tabId`. */
-  has(tabId: string): boolean {
-    return this.terminals.has(tabId)
-  }
-
   /** Kill and drop the terminal for `tabId`, if it exists. */
   kill(tabId: string): void {
     const entry = this.terminals.get(tabId)

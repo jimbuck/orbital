@@ -1,7 +1,8 @@
 import type { JSX, KeyboardEvent } from 'react'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Workspace as WorkspaceModel } from '@shared/types'
-import { useStore, flightsForWorkspace } from '@renderer/store'
+import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import FlightRow from './FlightRow'
 
@@ -10,14 +11,16 @@ import FlightRow from './FlightRow'
  * workspace; the chevron independently expands/collapses its Flight list.
  */
 export default function Workspace({ workspace }: { workspace: WorkspaceModel }): JSX.Element {
-  const store = useStore()
-  const flights = flightsForWorkspace(store, workspace.id)
+  const flights = useStore(useShallow((s) => s.flights.filter((f) => f.workspaceId === workspace.id)))
+  const expanded = useStore((s) => !!s.expanded[workspace.id])
+  const isActive = useStore((s) => s.activeWorkspaceId === workspace.id)
+  const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
+  const toggleExpanded = useStore((s) => s.toggleExpanded)
+  const openModal = useStore((s) => s.openModal)
   const status = aggregateStatus(flights.map((f) => f.status))
-  const expanded = !!store.expanded[workspace.id]
-  const isActive = store.activeWorkspaceId === workspace.id
   const needsAttention = flights.filter((f) => f.status === 'needs_attention').length
 
-  const activate = (): void => store.setActiveWorkspace(workspace.id)
+  const activate = (): void => setActiveWorkspace(workspace.id)
   const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
@@ -41,7 +44,7 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
           aria-label={expanded ? 'Collapse workspace' : 'Expand workspace'}
           onClick={(e) => {
             e.stopPropagation()
-            store.toggleExpanded(workspace.id)
+            toggleExpanded(workspace.id)
           }}
           className="flex flex-none items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >
@@ -77,7 +80,7 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
           ))}
           <button
             type="button"
-            onClick={() => store.openModal('newFlight', { workspace })}
+            onClick={() => openModal('newFlight', { workspace })}
             className="mt-px flex items-center gap-[7px] rounded px-[9px] py-[6px] text-left text-[11.5px] text-faint outline-none hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <Plus size={13} strokeWidth={1.5} className="flex-none" />

@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react'
-import { Minus, Square, X, ChevronRight } from 'lucide-react'
+import { Minus, Square, X, ChevronRight, RefreshCw } from 'lucide-react'
 import { useStore, activeWorkspace, activeFlight } from '@renderer/store'
 
 interface MenuItem {
@@ -24,6 +24,7 @@ export default function TitleBar(): JSX.Element {
   const wsName = useStore((s) => activeWorkspace(s)?.name ?? 'orbital')
   const flightName = useStore((s) => activeFlight(s)?.name)
   const alertCount = useStore((s) => s.alertCount)
+  const updateStatus = useStore((s) => s.updateStatus)
   const openModal = useStore((s) => s.openModal)
   const workspace = useStore(activeWorkspace)
 
@@ -63,7 +64,17 @@ export default function TitleBar(): JSX.Element {
     {
       id: 'help',
       label: 'Help',
-      items: [{ label: 'About Orbital', onClick: () => openModal('about') }]
+      items: [
+        {
+          label: 'Check for Updates…',
+          onClick: () => {
+            void window.orbital.checkForUpdates()
+            openModal('about')
+          }
+        },
+        { sep: true, label: '' },
+        { label: 'About Orbital', onClick: () => openModal('about') }
+      ]
     }
   ]
 
@@ -147,6 +158,17 @@ export default function TitleBar(): JSX.Element {
       {/* Right: needs-attention banner + window controls. bg-bar occludes the
           centered breadcrumb; clicking here also dismisses any open menu. */}
       <div className="no-drag z-50 flex items-center gap-1 bg-bar" onClick={() => setOpenMenu(null)}>
+        {updateStatus.phase === 'ready' && (
+          <button
+            type="button"
+            title={`Orbital ${updateStatus.version} has been downloaded — restart to apply it`}
+            onClick={() => window.orbital.installUpdate()}
+            className="mr-2 flex items-center gap-[7px] rounded-[7px] border border-accent/30 bg-accent/12 py-[3px] pl-2 pr-[9px] outline-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-accent/60"
+          >
+            <RefreshCw size={11} strokeWidth={2} className="flex-none text-accent" />
+            <span className="whitespace-nowrap text-[11px] font-semibold text-accent">Restart to update</span>
+          </button>
+        )}
         {alertCount > 0 && (
           <div className="mr-2 flex items-center gap-[7px] rounded-[7px] border border-amber/25 bg-amber/12 py-[3px] pl-2 pr-[9px]">
             <span className="relative size-[7px] flex-none">

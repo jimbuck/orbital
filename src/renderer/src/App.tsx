@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useStore } from './store'
 import TitleBar from './components/TitleBar'
 import Rail from './components/rail/Rail'
@@ -31,13 +31,12 @@ function playChime(): void {
 export default function App(): React.JSX.Element {
   const init = useStore((s) => s.init)
   const ready = useStore((s) => s.ready)
-  const settingsRef = useRef(useStore.getState().settings)
-  settingsRef.current = useStore((s) => s.settings)
 
   useEffect(() => {
     void init()
     const off = window.orbital.onAlert((evt) => {
-      if (evt.rising && settingsRef.current?.alerts.sound) playChime()
+      // Read settings at chime time — no store subscription needed just for this.
+      if (evt.rising && useStore.getState().settings?.alerts.sound) playChime()
     })
     return off
   }, [init])

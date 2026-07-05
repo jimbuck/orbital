@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, Menu } from 'electron'
 import { getDb, closeDb } from './db/database'
 import { runtime } from './runtime'
+import { updater } from './services/updater'
 import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -70,11 +71,9 @@ function createWindow(): BrowserWindow {
     )
   }
 
-  if (RENDERER_URL) {
-    win.loadURL(RENDERER_URL)
-  } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  const load = RENDERER_URL ? win.loadURL(RENDERER_URL) : win.loadFile(join(__dirname, '../renderer/index.html'))
+  // Otherwise a failed initial load in a packaged build is a silent blank window.
+  load.catch((err) => console.error('[main] window load failed:', err))
 
   return win
 }
@@ -113,6 +112,9 @@ if (!gotLock) {
     })
     resumeTerminals()
 
+    // Background update check against GitHub releases (no-op in dev).
+    updater.init((channel, payload) => runtime.send(channel, payload))
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         const w = createWindow()
@@ -128,6 +130,7 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    updater.stop()
     runtime.shutdown()
     closeDb()
   })

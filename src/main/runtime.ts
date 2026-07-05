@@ -14,6 +14,8 @@ import { IPC, isPtyTabType } from '@shared/types'
  * this module never touches Electron until `init()` is called.
  */
 class Runtime {
+  private static readonly COALESCE_MS = 50
+
   window: BrowserWindow | null = null
   readonly terminals = new TerminalManager()
   readonly gitWatcher = new GitWatcher()
@@ -21,6 +23,8 @@ class Runtime {
   alerts!: AlertManager
   /** One env-sync watcher per workspace, watching its root checkout. */
   readonly envWatchers = new Map<string, EnvSyncWatcher>()
+  private readonly pendingBroadcasts = new Map<string, NodeJS.Timeout>()
+  private readonly lastBroadcastAt = new Map<string, number>()
 
   init(): void {
     this.alerts = new AlertManager(
@@ -68,16 +72,38 @@ class Runtime {
     }
   }
 
-  /** Push the full hydrated app state to the renderer. */
+  /** Push the full hydrated app state to the renderer (coalesced). */
   broadcastState(): void {
-    this.send(IPC.evtStateChanged, repo.getAppState())
+    this.coalesce('state', () => this.send(IPC.evtStateChanged, repo.getAppState()))
   }
 
-  /** Recompute needs-attention, update the taskbar badge, notify the renderer. */
+  /** Recompute needs-attention, update the taskbar badge, notify the renderer (coalesced). */
   broadcastAlert(): void {
     if (!this.alerts) return
-    const evt = this.alerts.update(repo.flights.list())
-    this.send(IPC.evtAlert, evt)
+    this.coalesce('alert', () => this.send(IPC.evtAlert, this.alerts.update(repo.flights.listStatuses())))
+  }
+
+  /**
+   * Leading+trailing throttle. An isolated broadcast fires immediately so UI
+   * actions stay snappy; bursts (Claude hooks fire per tool call, each of which
+   * would re-hydrate and push the full app state) collapse into one trailing push.
+   */
+  private coalesce(key: 'state' | 'alert', fire: () => void): void {
+    if (this.pendingBroadcasts.has(key)) return
+    const elapsed = Date.now() - (this.lastBroadcastAt.get(key) ?? 0)
+    if (elapsed >= Runtime.COALESCE_MS) {
+      this.lastBroadcastAt.set(key, Date.now())
+      fire()
+      return
+    }
+    this.pendingBroadcasts.set(
+      key,
+      setTimeout(() => {
+        this.pendingBroadcasts.delete(key)
+        this.lastBroadcastAt.set(key, Date.now())
+        fire()
+      }, Runtime.COALESCE_MS - elapsed)
+    )
   }
 
   /** Ensure an env-sync watcher exists & is running for a workspace. */
@@ -107,6 +133,8 @@ class Runtime {
   }
 
   shutdown(): void {
+    for (const t of this.pendingBroadcasts.values()) clearTimeout(t)
+    this.pendingBroadcasts.clear()
     this.terminals.killAll()
     this.gitWatcher.stop()
     this.control.stop()

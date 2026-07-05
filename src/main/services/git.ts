@@ -10,8 +10,9 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { EventEmitter } from 'node:events'
+import { readFileSync, statSync } from 'node:fs'
 import { readFile as fsReadFile, writeFile as fsWriteFile, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import chokidar from 'chokidar'
 import type { FSWatcher } from 'chokidar'
 import type {
@@ -111,26 +112,6 @@ async function currentBranch(repoPath: string): Promise<string> {
   return out.trim()
 }
 
-async function defaultBranch(repoPath: string): Promise<string> {
-  // Preferred: whatever origin/HEAD points at (e.g. "origin/main").
-  const symbolic = await capture(repoPath, [
-    'symbolic-ref',
-    '--short',
-    'refs/remotes/origin/HEAD'
-  ])
-  if (symbolic.code === 0) {
-    const ref = symbolic.stdout.trim()
-    const slash = ref.indexOf('/')
-    return slash === -1 ? ref : ref.slice(slash + 1)
-  }
-  // Fallbacks: a conventional local branch, then the current branch.
-  for (const candidate of ['main', 'master']) {
-    const r = await capture(repoPath, ['rev-parse', '--verify', '--quiet', candidate])
-    if (r.code === 0) return candidate
-  }
-  return currentBranch(repoPath)
-}
-
 async function branchExists(repoPath: string, branch: string): Promise<boolean> {
   const r = await capture(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])
   return r.code === 0
@@ -148,7 +129,22 @@ async function listBranches(repoPath: string): Promise<string[]> {
   return toLines(r.stdout).filter(Boolean)
 }
 
-async function status(repoPath: string): Promise<GitStatus> {
+/**
+ * Concurrent `status` calls for the same checkout share one spawn: the git panel
+ * and the file tree both refresh on the same state broadcast, and porcelain
+ * status is the most expensive frequent git invocation.
+ */
+const statusInFlight = new Map<string, Promise<GitStatus>>()
+
+function status(repoPath: string): Promise<GitStatus> {
+  const pending = statusInFlight.get(repoPath)
+  if (pending) return pending
+  const p = statusUncached(repoPath).finally(() => statusInFlight.delete(repoPath))
+  statusInFlight.set(repoPath, p)
+  return p
+}
+
+async function statusUncached(repoPath: string): Promise<GitStatus> {
   // `-c core.quotePath=false` keeps non-ASCII/special filenames literal (not C-quoted),
   // so the paths we hand back can be staged/diffed/opened verbatim.
   const out = await run(repoPath, ['-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch'])
@@ -485,41 +481,9 @@ async function worktreeRemove(
   await run(repoPath, args)
 }
 
-async function worktreeList(repoPath: string): Promise<{ path: string; branch: string }[]> {
-  const out = await run(repoPath, ['worktree', 'list', '--porcelain'])
-  const result: { path: string; branch: string }[] = []
-  let current: { path?: string; branch?: string } = {}
-
-  const flush = (): void => {
-    if (current.path) result.push({ path: current.path, branch: current.branch ?? '' })
-    current = {}
-  }
-
-  for (const line of toLines(out)) {
-    if (line === '') {
-      flush()
-      continue
-    }
-    if (line.startsWith('worktree ')) {
-      current.path = line.slice('worktree '.length)
-    } else if (line.startsWith('branch ')) {
-      const ref = line.slice('branch '.length)
-      current.branch = ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref
-    } else if (line === 'detached') {
-      current.branch = '(detached)'
-    } else if (line === 'bare') {
-      current.branch = '(bare)'
-    }
-  }
-  flush()
-
-  return result
-}
-
 export const git = {
   isRepo,
   currentBranch,
-  defaultBranch,
   branchExists,
   listBranches,
   status,
@@ -539,8 +503,7 @@ export const git = {
   readFile,
   writeFile,
   worktreeAdd,
-  worktreeRemove,
-  worktreeList
+  worktreeRemove
 }
 
 /* ----------------------------------------------------------------------------
@@ -553,8 +516,27 @@ const DEBOUNCE_MS = 150
 const WORKTREE_DEPTH = 2
 
 /**
- * Watches one or more repositories and emits `('change', repoPath)` (debounced)
- * whenever `.git/HEAD`, `.git/index`, or the shallow working tree change.
+ * Resolve a checkout's real git dir: `.git` is a directory at a repo root, but a
+ * pointer file (`gitdir: <path>`) inside a linked worktree — whose HEAD/index
+ * live under the main repo's `.git/worktrees/<name>/`.
+ */
+function resolveGitDir(repoPath: string): string {
+  const dotGit = join(repoPath, '.git')
+  try {
+    if (statSync(dotGit).isFile()) {
+      const m = readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+)$/m)
+      if (m) return resolve(repoPath, m[1].trim())
+    }
+  } catch {
+    // missing .git — fall through and watch the conventional path anyway.
+  }
+  return dotGit
+}
+
+/**
+ * Watches one or more checkouts (repo roots and linked worktrees) and emits
+ * `('change', repoPath)` (debounced) whenever the checkout's git HEAD/index or
+ * shallow working tree change.
  */
 export class GitWatcher extends EventEmitter {
   private readonly watchers = new Map<string, FSWatcher>()
@@ -563,7 +545,7 @@ export class GitWatcher extends EventEmitter {
   watch(repoPath: string): void {
     if (this.watchers.has(repoPath)) return
 
-    const gitDir = join(repoPath, '.git').replace(/\\/g, '/')
+    const gitDir = resolveGitDir(repoPath).replace(/\\/g, '/')
     const headPath = `${gitDir}/HEAD`
     const indexPath = `${gitDir}/index`
 

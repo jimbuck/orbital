@@ -18,6 +18,12 @@ win:
   target:
     - nsis
   artifactName: ${productName}-${version}-setup.${ext}
+# Where electron-updater looks for new versions (baked into resources/app-update.yml
+# at package time). Assets are uploaded to the GitHub release by CI (.github/workflows).
+publish:
+  provider: github
+  owner: jimbuck
+  repo: orbital
 nsis:
   oneClick: false
   perMachine: false

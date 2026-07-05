@@ -96,9 +96,6 @@ export interface Workspace {
   addedAt: number
 }
 
-/** Identity + default provider for the agent-tab UI. Claude only for now. */
-export const DEFAULT_AGENT_PROVIDER = 'claude'
-
 export interface TabConfig {
   /** terminal: working directory the PTY was spawned in. */
   cwd?: string
@@ -327,13 +324,38 @@ export interface AlertEvent {
 }
 
 /* ============================================================================
+ * Auto-update (electron-updater over GitHub releases)
+ * ========================================================================== */
+
+/**
+ * Where the updater currently is. `disabled` = unpackaged dev build (there is
+ * nothing to update against); `ready` = downloaded, restart installs it.
+ */
+export type UpdatePhase =
+  | 'idle'
+  | 'disabled'
+  | 'checking'
+  | 'downloading'
+  | 'ready'
+  | 'uptodate'
+  | 'error'
+
+export interface UpdateStatus {
+  phase: UpdatePhase
+  /** Version of the update being downloaded / ready to install. */
+  version?: string
+  /** Download progress 0–100 while `downloading`. */
+  percent?: number
+  error?: string
+}
+
+/* ============================================================================
  * IPC channels (renderer <-> main)
  * ========================================================================== */
 
 export const IPC = {
   // state
   getState: 'orbital:getState',
-  getSettings: 'orbital:getSettings',
   setSettings: 'orbital:setSettings',
   // workspaces
   addWorkspace: 'orbital:addWorkspace',
@@ -357,7 +379,6 @@ export const IPC = {
   closePane: 'orbital:closePane',
   moveTabToEdge: 'orbital:moveTabToEdge',
   setSplitRatio: 'orbital:setSplitRatio',
-  setTerminalStatus: 'orbital:setTerminalStatus',
   // terminals (renderer -> main, fire-and-forget)
   terminalInput: 'orbital:terminalInput',
   terminalResize: 'orbital:terminalResize',
@@ -383,7 +404,6 @@ export const IPC = {
   createTask: 'orbital:createTask',
   updateTask: 'orbital:updateTask',
   deleteTask: 'orbital:deleteTask',
-  startFlightFromTask: 'orbital:startFlightFromTask',
   // browser
   openExternal: 'orbital:openExternal',
   // window
@@ -391,11 +411,17 @@ export const IPC = {
   windowMaximize: 'orbital:windowMaximize',
   windowClose: 'orbital:windowClose',
   toggleDevTools: 'orbital:toggleDevTools',
+  // updates
+  getVersion: 'orbital:getVersion',
+  updateStatus: 'orbital:updateStatus',
+  updateCheck: 'orbital:updateCheck',
+  updateInstall: 'orbital:updateInstall',
   // events (main -> renderer)
   evtStateChanged: 'orbital:evt:stateChanged',
   evtTerminalData: 'orbital:evt:terminalData',
   evtTerminalExit: 'orbital:evt:terminalExit',
-  evtAlert: 'orbital:evt:alert'
+  evtAlert: 'orbital:evt:alert',
+  evtUpdate: 'orbital:evt:update'
 } as const
 
 /* ============================================================================
@@ -405,7 +431,6 @@ export const IPC = {
 export interface OrbitalApi {
   // state
   getState(): Promise<AppState>
-  getSettings(): Promise<Settings>
   setSettings(settings: Settings): Promise<Settings>
 
   // workspaces
@@ -441,7 +466,6 @@ export interface OrbitalApi {
   moveTabToEdge(tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom'): Promise<void>
   /** Resize a split node (fraction for child a, clamped 0.1–0.9). */
   setSplitRatio(flightId: string, splitId: string, ratio: number): Promise<void>
-  setTerminalStatus(tabId: string, status: TerminalStatus): Promise<void>
 
   // terminals
   terminalInput(tabId: string, data: string): void
@@ -476,7 +500,6 @@ export interface OrbitalApi {
   createTask(workspaceId: string, title: string, description?: string): Promise<Task>
   updateTask(taskId: string, patch: TaskPatch): Promise<Task>
   deleteTask(taskId: string): Promise<void>
-  startFlightFromTask(taskId: string): Promise<Flight>
 
   // browser / window
   openExternal(url: string): Promise<void>
@@ -485,11 +508,22 @@ export interface OrbitalApi {
   windowClose(): void
   toggleDevTools(): void
 
+  // updates
+  /** The running app's version (package.json version of the packaged build). */
+  getVersion(): Promise<string>
+  /** Current updater status (seed for the store; live changes arrive via onUpdateStatus). */
+  updateStatus(): Promise<UpdateStatus>
+  /** Trigger a check now; progress/result arrive via onUpdateStatus events. */
+  checkForUpdates(): Promise<UpdateStatus>
+  /** Quit and install the downloaded update (no-op unless phase is `ready`). */
+  installUpdate(): void
+
   // events — each returns an unsubscribe function
   onStateChanged(cb: (state: AppState) => void): () => void
   onTerminalData(cb: (evt: TerminalDataEvent) => void): () => void
   onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
   onAlert(cb: (evt: AlertEvent) => void): () => void
+  onUpdateStatus(cb: (status: UpdateStatus) => void): () => void
 }
 
 /* ============================================================================

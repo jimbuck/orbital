@@ -1,6 +1,6 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
-import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
 import {
   IPC,
   ENV,
@@ -23,12 +23,13 @@ import {
 } from '@shared/types'
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
-import { createWorktreeFlight, removeWorktree, slugify } from './services/worktree'
+import { createWorktreeFlight, removeWorktree } from './services/worktree'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
 import { getProvider } from './services/agents/provider'
 import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
 import * as claudeHooks from './services/agents/claude-hooks'
+import { updater } from './services/updater'
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -191,7 +192,6 @@ export function registerIpc(): void {
 
   // ---- state / settings ----
   h(IPC.getState, () => repo.getAppState())
-  h(IPC.getSettings, () => repo.settings.get())
   h(IPC.setSettings, (_e, settings) => {
     const s = repo.settings.set(settings)
     broadcast()
@@ -224,7 +224,12 @@ export function registerIpc(): void {
     const ws = repo.workspaces.get(workspaceId)
     if (!ws) return
     for (const f of repo.flights.list()) {
-      if (f.workspaceId === workspaceId) killFlightTerminals(f.id)
+      if (f.workspaceId !== workspaceId) continue
+      killFlightTerminals(f.id)
+      if (f.kind === 'worktree') runtime.gitWatcher.unwatch(f.worktreePath)
+      for (const pane of f.panes) {
+        for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(f.id, t.id)
+      }
     }
     runtime.gitWatcher.unwatch(ws.repoPath)
     runtime.removeEnvWatcher(workspaceId)
@@ -253,6 +258,7 @@ export function registerIpc(): void {
     // Link the originating task to this Flight (so it shows the Flight ref and
     // drops out of the "unlinked tasks" picker).
     if (opts.taskId) repo.tasks.setFlight(opts.taskId, flight.id)
+    runtime.gitWatcher.watch(flight.worktreePath)
     runtime.ensureEnvWatcher(workspaceId)
     openInitialTerminal(flight)
     broadcastAll()
@@ -273,6 +279,7 @@ export function registerIpc(): void {
         runtime.envWatchers.get(ws.id)?.unregister(flight.worktreePath)
       }
     }
+    runtime.gitWatcher.unwatch(flight.worktreePath)
     killFlightTerminals(flightId)
     for (const pane of flight.panes) {
       for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(flightId, t.id)
@@ -393,14 +400,6 @@ export function registerIpc(): void {
     broadcast()
   })
 
-  h(IPC.setTerminalStatus, (_e, tabId: string, status: TerminalStatus) => {
-    const tab = repo.tabs.get(tabId)
-    if (!tab) return
-    repo.tabs.updateStatus(tabId, status)
-    repo.flights.recomputeStatus(tab.flightId)
-    broadcastAll()
-  })
-
   // ---- terminals ----
   ipcMain.on(IPC.terminalInput, (_e, tabId: string, data: string) => {
     runtime.terminals.write(tabId, data)
@@ -489,23 +488,6 @@ export function registerIpc(): void {
     repo.tasks.remove(taskId)
     broadcast()
   })
-  h(IPC.startFlightFromTask, async (_e, taskId: string) => {
-    const task = repo.tasks.get(taskId)
-    if (!task) throw new Error(`task ${taskId} not found`)
-    const ws = repo.workspaces.get(task.workspaceId)
-    if (!ws) throw new Error(`workspace ${task.workspaceId} not found`)
-    const flight = await createWorktreeFlight({
-      workspace: ws,
-      branch: slugify(task.title),
-      name: task.title,
-      taskId: task.id
-    })
-    repo.tasks.setFlight(task.id, flight.id)
-    runtime.ensureEnvWatcher(ws.id)
-    openInitialTerminal(flight)
-    broadcastAll()
-    return repo.flights.get(flight.id)!
-  })
 
   // ---- browser / window ----
   h(IPC.openExternal, (_e, url: string) => shell.openExternal(url))
@@ -518,6 +500,12 @@ export function registerIpc(): void {
   })
   ipcMain.on(IPC.windowClose, () => runtime.window?.close())
   ipcMain.on(IPC.toggleDevTools, () => runtime.window?.webContents.toggleDevTools())
+
+  // ---- updates ----
+  h(IPC.getVersion, () => app.getVersion())
+  h(IPC.updateStatus, () => updater.status())
+  h(IPC.updateCheck, () => updater.check())
+  ipcMain.on(IPC.updateInstall, () => updater.install())
 }
 
 /* ---- CLI control channel dispatcher ------------------------------------ */
@@ -584,6 +572,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           branch,
           name: req.args.name ? String(req.args.name) : undefined
         })
+        runtime.gitWatcher.watch(flight.worktreePath)
         runtime.ensureEnvWatcher(ws.id)
         openInitialTerminal(flight)
         runtime.broadcastState()
@@ -644,11 +633,14 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
   }
 }
 
-/** On startup, resume watchers for already-registered workspaces. */
+/** On startup, resume watchers for already-registered workspaces and their worktrees. */
 export function resumeWorkspaces(): void {
   for (const ws of repo.workspaces.list()) {
     runtime.gitWatcher.watch(ws.repoPath)
     runtime.ensureEnvWatcher(ws.id)
+  }
+  for (const f of repo.flights.list()) {
+    if (f.kind === 'worktree' && existsSync(f.worktreePath)) runtime.gitWatcher.watch(f.worktreePath)
   }
 }
 

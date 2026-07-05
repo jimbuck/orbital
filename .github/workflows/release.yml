@@ -1,0 +1,66 @@
+# Release pipeline (conventional commits -> GitHub release -> auto-update feed).
+#
+# 1. Every push to main runs release-please, which maintains a "release PR"
+#    that accumulates conventional commits into a version bump + CHANGELOG.
+# 2. Merging that PR makes release-please tag vX.Y.Z and publish a GitHub
+#    release with the changelog as its notes.
+# 3. That same run then builds the Windows installer and uploads
+#    Orbital-X.Y.Z-setup.exe + latest.yml (+ blockmap) to the release —
+#    exactly the assets electron-updater polls for inside the app.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-windows:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      # `--publish never`: latest.yml is still generated (the publish provider is
+      # configured in electron-builder.yml); uploading is done explicitly below so
+      # the assets land on the release release-please just published.
+      - run: npx electron-builder --publish never
+
+      - name: Upload installer to the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(
+            (Get-ChildItem dist/*-setup.exe).FullName
+            (Get-ChildItem dist/*-setup.exe.blockmap).FullName
+            (Get-Item dist/latest.yml).FullName
+          )
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" @assets --clobber

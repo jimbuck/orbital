@@ -82,16 +82,17 @@ export default function NewFlight(): React.JSX.Element {
   const [busy, setBusy] = useState(false)
 
   // Load the repo's branches + what HEAD points at for the base-ref picker.
+  const workspaceId = workspace?.id
   useEffect(() => {
-    if (!workspace) return
+    if (!workspaceId) return
     let alive = true
-    void window.orbital.listBranches(workspace.id).then((r) => {
+    void window.orbital.listBranches(workspaceId).then((r) => {
       if (alive) setInfo(r)
     })
     return () => {
       alive = false
     }
-  }, [workspace?.id])
+  }, [workspaceId])
 
   // No workspace to target — surface a clear message instead of a broken form.
   if (!workspace) {

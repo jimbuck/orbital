@@ -15,12 +15,6 @@ export function paneIds(node: LayoutNode): string[] {
   return node.type === 'pane' ? [node.paneId] : [...paneIds(node.a), ...paneIds(node.b)]
 }
 
-export function hasPane(node: LayoutNode, paneId: string): boolean {
-  return node.type === 'pane'
-    ? node.paneId === paneId
-    : hasPane(node.a, paneId) || hasPane(node.b, paneId)
-}
-
 /** Replace the leaf for `paneId` with a split of (existing, new) ordered by `where`. */
 export function splitAt(
   node: LayoutNode,

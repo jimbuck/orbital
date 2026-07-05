@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppState, Workspace, Flight, Task, Settings } from '@shared/types'
+import type { AppState, Workspace, Flight, Task, Settings, UpdateStatus } from '@shared/types'
 
 export type ModalType = 'settings' | 'addWorkspace' | 'newFlight' | 'board' | 'about' | null
 export type TaskView = 'list' | 'board'
@@ -15,6 +15,8 @@ interface UIState {
   taskView: TaskView
   /** Count of Flights currently needing attention (drives the title-bar banner). */
   alertCount: number
+  /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
+  updateStatus: UpdateStatus
 }
 
 interface Data {
@@ -27,18 +29,18 @@ interface Data {
 interface Actions {
   init: () => Promise<void>
   applyState: (s: AppState) => void
-  refresh: () => Promise<void>
   setActiveWorkspace: (id: string) => void
   setActiveFlight: (id: string) => void
   toggleExpanded: (id: string) => void
-  setExpanded: (id: string, value: boolean) => void
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
   setTaskView: (v: TaskView) => void
-  setAlertCount: (n: number) => void
 }
 
 export type Store = Data & UIState & Actions
+
+/** Guards init() against re-entry (React StrictMode double-invokes App's effect). */
+let initStarted = false
 
 export const useStore = create<Store>((set, get) => ({
   // data
@@ -56,13 +58,22 @@ export const useStore = create<Store>((set, get) => ({
   modalData: null,
   taskView: 'list',
   alertCount: 0,
+  updateStatus: { phase: 'idle' },
 
   async init() {
+    if (initStarted) return
+    initStarted = true
+    // These subscriptions intentionally live for the app's lifetime.
+    // alertCount is derived in applyState (the alert event always rides along
+    // with a state broadcast); the chime listens to onAlert in App.tsx.
+    window.orbital.onStateChanged((s) => get().applyState(s))
+    window.orbital.onUpdateStatus((status) => set({ updateStatus: status }))
     const state = await window.orbital.getState()
     get().applyState(state)
     set({ ready: true })
-    window.orbital.onStateChanged((s) => get().applyState(s))
-    window.orbital.onAlert((evt) => set({ alertCount: evt.count }))
+    // Seed with whatever the updater already knows (events fired before this
+    // renderer loaded — e.g. an update that finished downloading — are gone).
+    set({ updateStatus: await window.orbital.updateStatus() })
   },
 
   applyState(s) {
@@ -96,10 +107,6 @@ export const useStore = create<Store>((set, get) => ({
     })
   },
 
-  async refresh() {
-    get().applyState(await window.orbital.getState())
-  },
-
   setActiveWorkspace(id) {
     const wsFlights = get().flights.filter((f) => f.workspaceId === id)
     const activeFlightId = (wsFlights.find((f) => f.kind === 'root') ?? wsFlights[0])?.id ?? null
@@ -119,10 +126,6 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => ({ expanded: { ...s.expanded, [id]: !s.expanded[id] } }))
   },
 
-  setExpanded(id, value) {
-    set((s) => ({ expanded: { ...s.expanded, [id]: value } }))
-  },
-
   openModal(type, data) {
     set({ modal: type, modalData: data ?? null })
   },
@@ -133,10 +136,6 @@ export const useStore = create<Store>((set, get) => ({
 
   setTaskView(v) {
     set({ taskView: v })
-  },
-
-  setAlertCount(n) {
-    set({ alertCount: n })
   }
 }))
 
@@ -148,10 +147,6 @@ export function activeWorkspace(s: Store): Workspace | undefined {
 
 export function activeFlight(s: Store): Flight | undefined {
   return s.flights.find((f) => f.id === s.activeFlightId)
-}
-
-export function flightsForWorkspace(s: Store, workspaceId: string): Flight[] {
-  return s.flights.filter((f) => f.workspaceId === workspaceId)
 }
 
 export function tasksForWorkspace(s: Store, workspaceId: string): Task[] {

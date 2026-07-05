@@ -58,7 +58,6 @@
 
   /* motion */
   --animate-pulse-dot: pulseDot 1.6s ease-in-out infinite;
-  --animate-blink: blink 1.1s step-end infinite;
 }
 
 @keyframes pulseDot {
@@ -70,16 +69,6 @@
   50% {
     transform: scale(1.55);
     opacity: 0.45;
-  }
-}
-@keyframes blink {
-  0%,
-  48% {
-    opacity: 1;
-  }
-  49%,
-  100% {
-    opacity: 0;
   }
 }
 @keyframes overlayIn {
@@ -142,6 +131,16 @@
   .allow-select {
     user-select: text;
   }
+}
+
+/* Shiki-highlighted file view: keep the pane background and app mono type;
+   shiki inlines its own theme background on the <pre>, which we discard. */
+.shiki-view pre {
+  margin: 0;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* xterm.js surface tuning so it sits flush in a pane */

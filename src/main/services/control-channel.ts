@@ -18,6 +18,9 @@ export type ControlHandler = (req: ControlRequest) => Promise<ControlResponse>
  * answered with one {@link ControlResponse} line. Multiple requests may be
  * pipelined over a single connection, and lines may arrive split across chunks.
  */
+/** Cap on a connection's unterminated line — a sane request is a few KB. */
+const MAX_LINE_BYTES = 1024 * 1024
+
 export class ControlChannel {
   readonly pipePath: string = controlPipePath()
 
@@ -74,6 +77,12 @@ export class ControlChannel {
           buffer = buffer.slice(nl + 1)
           flush(line)
           nl = buffer.indexOf('\n')
+        }
+        // A client streaming bytes with no newline would grow the buffer without
+        // bound; answer with an error and drop the connection instead.
+        if (buffer.length > MAX_LINE_BYTES) {
+          this.send(socket, { ok: false, error: 'request line too long' })
+          socket.destroy()
         }
       })
 

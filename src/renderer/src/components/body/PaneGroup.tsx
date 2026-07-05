@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import { Orbit, Terminal, Globe, FileText, Sparkles } from 'lucide-react'
 import type { Flight, Pane, LayoutNode, DropEdge, TabType } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
@@ -61,6 +61,10 @@ function SplitView({
   const isRow = node.dir === 'row'
   const ratio = dragRatio ?? node.ratio
 
+  // Detach an in-flight drag's window listeners if the split unmounts mid-drag.
+  const dragCleanup = useRef<(() => void) | null>(null)
+  useEffect(() => () => dragCleanup.current?.(), [])
+
   const startResize = (e: React.MouseEvent): void => {
     e.preventDefault()
     const el = ref.current
@@ -71,15 +75,20 @@ function SplitView({
       return Math.min(0.9, Math.max(0.1, r))
     }
     const move = (ev: MouseEvent): void => setDragRatio(fracAt(ev.clientX, ev.clientY))
-    const up = (ev: MouseEvent): void => {
+    const stop = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
+      dragCleanup.current = null
+    }
+    const up = (ev: MouseEvent): void => {
+      stop()
       const final = fracAt(ev.clientX, ev.clientY)
       setDragRatio(null)
       void window.orbital.setSplitRatio(flight.id, node.id, final)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
+    dragCleanup.current = stop
   }
 
   return (

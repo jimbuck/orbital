@@ -24,7 +24,7 @@ export class AlertManager {
    * started needing attention (count grew), which the renderer uses to decide
    * whether to chime/re-badge rather than re-alert on every tick.
    */
-  update(flights: Flight[]): AlertEvent {
+  update(flights: Pick<Flight, 'id' | 'status'>[]): AlertEvent {
     const needing = flights.filter((f) => f.status === 'needs_attention')
     const count = needing.length
     const firstId = count > 0 ? needing[0].id : null

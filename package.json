@@ -9,6 +9,7 @@
   "private": true,
   "scripts": {
     "postinstall": "patch-package",
+    "prepare": "husky",
     "build:cli": "esbuild src/cli/orbital.ts --bundle --platform=node --target=node20 --format=cjs --outfile=resources/cli/orbital.js",
     "start": "npm run build:cli && electron-vite dev",
     "dev": "npm run build:cli && electron-vite dev",
@@ -28,10 +29,15 @@
     "@xterm/xterm": "^5.5.0",
     "better-sqlite3": "^11.3.0",
     "chokidar": "^3.6.0",
+    "electron-updater": "^6.8.9",
+    "marked": "^18.0.5",
     "node-pty": "^1.0.0",
-    "picomatch": "^4.0.2"
+    "picomatch": "^4.0.2",
+    "shiki": "^4.3.1"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.0",
+    "@commitlint/config-conventional": "^21.2.0",
     "@electron/rebuild": "^3.7.0",
     "@eslint/js": "^9.13.0",
     "@tailwindcss/vite": "^4.0.0",
@@ -47,6 +53,7 @@
     "esbuild": "^0.24.0",
     "eslint": "^9.13.0",
     "eslint-plugin-react-hooks": "^5.0.0",
+    "husky": "^9.1.7",
     "lucide-react": "^0.460.0",
     "patch-package": "^8.0.1",
     "playwright-core": "^1.61.1",

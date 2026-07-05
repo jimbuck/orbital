@@ -11,7 +11,6 @@ import {
   type Task,
   type TabType,
   type TabConfig,
-  type TerminalStatus,
   type SplitDirection,
   type SplitWhere,
   type CreateFlightOptions,
@@ -27,7 +26,8 @@ import {
   type TerminalDataEvent,
   type TerminalExitEvent,
   type TerminalBuffer,
-  type AlertEvent
+  type AlertEvent,
+  type UpdateStatus
 } from '@shared/types'
 
 /** Subscribe to a main->renderer push channel; returns an unsubscribe fn. */
@@ -40,7 +40,6 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: OrbitalApi = {
   // state
   getState: () => ipcRenderer.invoke(IPC.getState) as Promise<AppState>,
-  getSettings: () => ipcRenderer.invoke(IPC.getSettings) as Promise<Settings>,
   setSettings: (settings: Settings) => ipcRenderer.invoke(IPC.setSettings, settings) as Promise<Settings>,
 
   // workspaces
@@ -79,8 +78,6 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.moveTabToEdge, tabId, targetPaneId, edge) as Promise<void>,
   setSplitRatio: (flightId: string, splitId: string, ratio: number) =>
     ipcRenderer.invoke(IPC.setSplitRatio, flightId, splitId, ratio) as Promise<void>,
-  setTerminalStatus: (tabId: string, status: TerminalStatus) =>
-    ipcRenderer.invoke(IPC.setTerminalStatus, tabId, status) as Promise<void>,
 
   // terminals (fire-and-forget)
   terminalInput: (tabId: string, data: string) => ipcRenderer.send(IPC.terminalInput, tabId, data),
@@ -120,8 +117,6 @@ const api: OrbitalApi = {
   updateTask: (taskId: string, patch: TaskPatch) =>
     ipcRenderer.invoke(IPC.updateTask, taskId, patch) as Promise<Task>,
   deleteTask: (taskId: string) => ipcRenderer.invoke(IPC.deleteTask, taskId) as Promise<void>,
-  startFlightFromTask: (taskId: string) =>
-    ipcRenderer.invoke(IPC.startFlightFromTask, taskId) as Promise<Flight>,
 
   // browser / window
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
@@ -130,11 +125,18 @@ const api: OrbitalApi = {
   windowClose: () => ipcRenderer.send(IPC.windowClose),
   toggleDevTools: () => ipcRenderer.send(IPC.toggleDevTools),
 
+  // updates
+  getVersion: () => ipcRenderer.invoke(IPC.getVersion) as Promise<string>,
+  updateStatus: () => ipcRenderer.invoke(IPC.updateStatus) as Promise<UpdateStatus>,
+  checkForUpdates: () => ipcRenderer.invoke(IPC.updateCheck) as Promise<UpdateStatus>,
+  installUpdate: () => ipcRenderer.send(IPC.updateInstall),
+
   // events
   onStateChanged: (cb: (state: AppState) => void) => on<AppState>(IPC.evtStateChanged, cb),
   onTerminalData: (cb: (evt: TerminalDataEvent) => void) => on<TerminalDataEvent>(IPC.evtTerminalData, cb),
   onTerminalExit: (cb: (evt: TerminalExitEvent) => void) => on<TerminalExitEvent>(IPC.evtTerminalExit, cb),
-  onAlert: (cb: (evt: AlertEvent) => void) => on<AlertEvent>(IPC.evtAlert, cb)
+  onAlert: (cb: (evt: AlertEvent) => void) => on<AlertEvent>(IPC.evtAlert, cb),
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => on<UpdateStatus>(IPC.evtUpdate, cb)
 }
 
 contextBridge.exposeInMainWorld('orbital', api)
