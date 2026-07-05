@@ -1,0 +1,116 @@
+import type { JSX, ReactNode } from 'react'
+
+/**
+ * Shared right-click context-menu primitives for the rail (FlightRow, Workspace):
+ * a dismiss overlay + positioned surface, a menu row, and a destructive-action
+ * confirm block that swaps in place of the menu items.
+ */
+
+export type MenuPos = { x: number; y: number }
+
+/** Clamp a context-menu origin so the surface stays inside the window. */
+export function clampMenuPos(e: React.MouseEvent, width: number, height: number): MenuPos {
+  return { x: Math.min(e.clientX, window.innerWidth - width - 12), y: Math.min(e.clientY, window.innerHeight - height) }
+}
+
+/** Full-screen dismiss overlay + fixed, elevated menu surface. */
+export function ContextMenu({
+  pos,
+  width,
+  onClose,
+  children
+}: {
+  pos: MenuPos
+  width: number
+  onClose: () => void
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-40"
+        onClick={onClose}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onClose()
+        }}
+      />
+      <div
+        role="menu"
+        style={{ left: pos.x, top: pos.y, width }}
+        className="fixed z-50 rounded-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+      >
+        {children}
+      </div>
+    </>
+  )
+}
+
+export function MenuItem({
+  icon,
+  label,
+  hint,
+  danger,
+  onClick
+}: {
+  icon: ReactNode
+  label: string
+  hint?: string
+  danger?: boolean
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11.5px] font-semibold outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 ${
+        danger ? 'text-red-2' : 'text-text-2'
+      }`}
+    >
+      <span className={`flex-none ${danger ? 'text-red-2' : 'text-muted'}`}>{icon}</span>
+      <span className="flex-1">{label}</span>
+      {hint && <span className="text-[10px] font-normal text-faint">{hint}</span>}
+    </button>
+  )
+}
+
+/** In-menu confirm step for a destructive action: message (+ hint) and Confirm / Cancel. */
+export function MenuConfirm({
+  message,
+  hint,
+  confirmLabel,
+  danger = true,
+  onConfirm,
+  onCancel
+}: {
+  message: string
+  hint?: string
+  confirmLabel: string
+  danger?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}): JSX.Element {
+  return (
+    <div className="p-1">
+      <div className={`px-1 py-1 text-[11.5px] leading-snug ${danger ? 'text-red-2' : 'text-text-3'}`}>{message}</div>
+      {hint && <div className="px-1 pb-1 text-[11px] text-dim">{hint}</div>}
+      <div className="mt-1.5 flex gap-1.5">
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="flex-1 rounded-md bg-red/15 px-2 py-1.5 text-[11.5px] font-semibold text-red-2 outline-none hover:bg-red/25 focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          {confirmLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 rounded-md bg-hover px-2 py-1.5 text-[11.5px] font-semibold text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}

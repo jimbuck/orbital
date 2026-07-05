@@ -1,14 +1,16 @@
-import type { JSX, KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { useState, type JSX, type KeyboardEvent } from 'react'
+import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Workspace as WorkspaceModel } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import FlightRow from './FlightRow'
+import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 
 /**
  * A workspace (repo) header in the rail. Clicking the row activates the
  * workspace; the chevron independently expands/collapses its Flight list.
+ * Right-click opens a context menu to remove the workspace from Orbital.
  */
 export default function Workspace({ workspace }: { workspace: WorkspaceModel }): JSX.Element {
   const flights = useStore(useShallow((s) => s.flights.filter((f) => f.workspaceId === workspace.id)))
@@ -19,6 +21,21 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
   const openModal = useStore((s) => s.openModal)
   const status = aggregateStatus(flights.map((f) => f.status))
   const needsAttention = flights.filter((f) => f.status === 'needs_attention').length
+
+  const [menu, setMenu] = useState<MenuPos | null>(null)
+  const [confirming, setConfirming] = useState(false)
+
+  const closeMenu = (): void => {
+    setMenu(null)
+    setConfirming(false)
+  }
+
+  const openMenu = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setConfirming(false)
+    setMenu(clampMenuPos(e, 210, 130))
+  }
 
   const activate = (): void => setActiveWorkspace(workspace.id)
   const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -35,6 +52,7 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
         tabIndex={0}
         onClick={activate}
         onKeyDown={onHeaderKey}
+        onContextMenu={openMenu}
         className={`flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
           isActive ? 'bg-hover' : 'hover:bg-hover'
         }`}
@@ -87,6 +105,31 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
             <span>New Flight from worktree</span>
           </button>
         </div>
+      )}
+
+      {menu && (
+        <ContextMenu pos={menu} width={210} onClose={closeMenu}>
+          {!confirming ? (
+            <MenuItem
+              icon={<Trash2 size={13} strokeWidth={1.5} />}
+              label="Remove workspace"
+              danger
+              onClick={() => setConfirming(true)}
+            />
+          ) : (
+            <MenuConfirm
+              message={`Remove "${workspace.name}" from Orbital?`}
+              hint="The repo and its worktrees stay on disk; open terminals close."
+              confirmLabel="Remove"
+              danger={false}
+              onConfirm={() => {
+                void window.orbital.removeWorkspace(workspace.id)
+                closeMenu()
+              }}
+              onCancel={closeMenu}
+            />
+          )}
+        </ContextMenu>
       )}
     </div>
   )

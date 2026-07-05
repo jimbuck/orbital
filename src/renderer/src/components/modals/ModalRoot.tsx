@@ -10,6 +10,7 @@ import {
 } from '@renderer/lib/status'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import EditableTaskTitle from '../panel/EditableTaskTitle'
+import TaskDeleteButton from '../panel/TaskDeleteButton'
 import Settings from './Settings'
 import AddWorkspace from './AddWorkspace'
 import NewFlight from './NewFlight'
@@ -108,12 +109,13 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         e.dataTransfer.effectAllowed = 'move'
       }}
       onDragEnd={() => onDragEnd?.()}
-      className="cursor-grab rounded-card border border-line bg-bg p-3 active:cursor-grabbing"
+      className="group cursor-grab rounded-card border border-line bg-bg p-3 active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <EditableTaskTitle task={task} className="block text-[12.5px] font-semibold text-text-2" />
         </div>
+        <TaskDeleteButton taskId={task.id} />
         <span className={`flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${taskChipClass(task.status)}`}>
           {taskStatusLabel(task.status)}
         </span>

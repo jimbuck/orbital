@@ -11,6 +11,7 @@ import {
 } from '@renderer/lib/status'
 import type { Task, TaskStatus } from '@shared/types'
 import EditableTaskTitle from './EditableTaskTitle'
+import TaskDeleteButton from './TaskDeleteButton'
 
 /** Segmented-toggle pill class for the List / Board switch. */
 function segClass(active: boolean): string {
@@ -141,7 +142,7 @@ export default function TaskTracker(): JSX.Element {
             return (
               <div
                 key={task.id}
-                className="relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
+                className="group relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
               >
                 <div className="flex items-start justify-between gap-[9px]">
                   <div className="min-w-0 flex-1">
@@ -152,6 +153,7 @@ export default function TaskTracker(): JSX.Element {
                       }`}
                     />
                   </div>
+                  <TaskDeleteButton taskId={task.id} />
                   <button
                     type="button"
                     onClick={() => setMenuTaskId((id) => (id === task.id ? null : task.id))}
@@ -239,14 +241,19 @@ export default function TaskTracker(): JSX.Element {
                   return (
                     <div
                       key={task.id}
-                      className="p-[10px] rounded-[9px] bg-panel border border-line-2 hover:border-line-strong transition-colors"
+                      className="group p-[10px] rounded-[9px] bg-panel border border-line-2 hover:border-line-strong transition-colors"
                     >
-                      <EditableTaskTitle
-                        task={task}
-                        className={`block text-[12px] font-semibold leading-snug text-pretty ${
-                          done ? 'text-faint line-through' : 'text-text'
-                        }`}
-                      />
+                      <div className="flex items-start justify-between gap-1.5">
+                        <div className="min-w-0 flex-1">
+                          <EditableTaskTitle
+                            task={task}
+                            className={`block text-[12px] font-semibold leading-snug text-pretty ${
+                              done ? 'text-faint line-through' : 'text-text'
+                            }`}
+                          />
+                        </div>
+                        <TaskDeleteButton taskId={task.id} />
+                      </div>
 
                       {flightLink(task, true)}
 

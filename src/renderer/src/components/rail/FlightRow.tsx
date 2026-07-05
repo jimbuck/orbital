@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { Pencil, FolderX, Trash2 } from 'lucide-react'
 import type { Flight } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, flightStatusLabel, flightStatusTextClass } from '@renderer/lib/status'
+import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 
-type MenuPos = { x: number; y: number } | null
 type DeleteMode = 'none' | 'confirm' | 'force'
 
 /**
@@ -18,7 +18,7 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
   const isDone = flight.status === 'done'
   const isWorktree = flight.kind === 'worktree'
 
-  const [menu, setMenu] = useState<MenuPos>(null)
+  const [menu, setMenu] = useState<MenuPos | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(flight.name)
   const [del, setDel] = useState<DeleteMode>('none')
@@ -40,7 +40,7 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
     e.stopPropagation()
     setDel('none')
     setError(null)
-    setMenu({ x: Math.min(e.clientX, window.innerWidth - 212), y: Math.min(e.clientY, window.innerHeight - 170) })
+    setMenu(clampMenuPos(e, 200, 170))
   }
 
   const startRename = (): void => {
@@ -137,127 +137,55 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
       </div>
 
       {menu && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onClick={closeMenu}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              closeMenu()
-            }}
-          />
-          <div
-            role="menu"
-            style={{ left: menu.x, top: menu.y }}
-            className="fixed z-50 w-[200px] rounded-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
-          >
-            {del === 'none' && (
-              <>
-                <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
-                {isWorktree ? (
-                  <>
-                    <MenuItem
-                      icon={<FolderX size={13} strokeWidth={1.5} />}
-                      label="Close Flight"
-                      hint="keep worktree"
-                      onClick={() => void remove(false)}
-                    />
-                    <div className="my-1 h-px bg-soft" />
-                    <MenuItem
-                      icon={<Trash2 size={13} strokeWidth={1.5} />}
-                      label="Delete worktree"
-                      danger
-                      onClick={() => setDel('confirm')}
-                    />
-                  </>
-                ) : (
-                  <div className="px-2 py-1.5 text-[11px] leading-snug text-faint">
-                    The root Flight can&apos;t be removed.
-                  </div>
-                )}
-              </>
-            )}
+        <ContextMenu pos={menu} width={200} onClose={closeMenu}>
+          {del === 'none' && (
+            <>
+              <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
+              {isWorktree ? (
+                <>
+                  <MenuItem
+                    icon={<FolderX size={13} strokeWidth={1.5} />}
+                    label="Close Flight"
+                    hint="keep worktree"
+                    onClick={() => void remove(false)}
+                  />
+                  <div className="my-1 h-px bg-soft" />
+                  <MenuItem
+                    icon={<Trash2 size={13} strokeWidth={1.5} />}
+                    label="Delete worktree"
+                    danger
+                    onClick={() => setDel('confirm')}
+                  />
+                </>
+              ) : (
+                <div className="px-2 py-1.5 text-[11px] leading-snug text-faint">
+                  The root Flight can&apos;t be removed.
+                </div>
+              )}
+            </>
+          )}
 
-            {del === 'confirm' && (
-              <div className="p-1">
-                <div className="px-1 py-1 text-[11.5px] leading-snug text-text-3">
-                  Remove this Flight and delete its worktree?
-                </div>
-                <div className="mt-1.5 flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void remove(true)}
-                    className="flex-1 rounded-md bg-red/15 px-2 py-1.5 text-[11.5px] font-semibold text-red-2 outline-none hover:bg-red/25 focus-visible:ring-2 focus-visible:ring-accent/60"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closeMenu}
-                    className="flex-1 rounded-md bg-hover px-2 py-1.5 text-[11.5px] font-semibold text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
+          {del === 'confirm' && (
+            <MenuConfirm
+              message="Remove this Flight and delete its worktree?"
+              confirmLabel="Delete"
+              danger={false}
+              onConfirm={() => void remove(true)}
+              onCancel={closeMenu}
+            />
+          )}
 
-            {del === 'force' && (
-              <div className="p-1">
-                <div className="px-1 py-1 text-[11.5px] leading-snug text-red-2">
-                  {error || 'The worktree has uncommitted changes.'}
-                </div>
-                <div className="px-1 pb-1 text-[11px] text-dim">Force-removing discards them.</div>
-                <div className="mt-1.5 flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void remove(true, true)}
-                    className="flex-1 rounded-md bg-red/15 px-2 py-1.5 text-[11.5px] font-semibold text-red-2 outline-none hover:bg-red/25 focus-visible:ring-2 focus-visible:ring-accent/60"
-                  >
-                    Force remove
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closeMenu}
-                    className="flex-1 rounded-md bg-hover px-2 py-1.5 text-[11.5px] font-semibold text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+          {del === 'force' && (
+            <MenuConfirm
+              message={error || 'The worktree has uncommitted changes.'}
+              hint="Force-removing discards them."
+              confirmLabel="Force remove"
+              onConfirm={() => void remove(true, true)}
+              onCancel={closeMenu}
+            />
+          )}
+        </ContextMenu>
       )}
     </>
-  )
-}
-
-function MenuItem({
-  icon,
-  label,
-  hint,
-  danger,
-  onClick
-}: {
-  icon: ReactNode
-  label: string
-  hint?: string
-  danger?: boolean
-  onClick: () => void
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11.5px] font-semibold outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 ${
-        danger ? 'text-red-2' : 'text-text-2'
-      }`}
-    >
-      <span className={`flex-none ${danger ? 'text-red-2' : 'text-muted'}`}>{icon}</span>
-      <span className="flex-1">{label}</span>
-      {hint && <span className="text-[10px] font-normal text-faint">{hint}</span>}
-    </button>
   )
 }
