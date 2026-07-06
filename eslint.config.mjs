@@ -3,7 +3,8 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
-  { ignores: ['out', 'dist', 'node_modules', 'resources/cli/orbital.js', '**/*.js', '**/*.mjs'] },
+  // `website/` is its own package (Astro docs site) with generated types — not app code.
+  { ignores: ['out', 'dist', 'node_modules', 'website', 'resources/cli/orbital.js', '**/*.js', '**/*.mjs'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

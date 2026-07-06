@@ -1,0 +1,44 @@
+---
+title: Status & alerts
+description: How Orbital knows what every agent is doing, and how it gets your attention.
+---
+
+Every terminal and agent tab carries one of five statuses:
+
+| Status | Meaning |
+|---|---|
+| `idle` | Waiting for the next instruction |
+| `working` | Actively doing something |
+| `needs-attention` | **Blocked on a human** — the load-bearing signal |
+| `error` | Something failed |
+| `done` | The current task is complete |
+
+A Flight surfaces the most attention-worthy status among its terminals
+(`needs-attention` beats `error` beats `working` …), and a workspace surfaces
+the most attention-worthy Flight. One glance at the rail answers "who needs me?"
+
+![An agent needing attention: rail badge, title-bar banner, taskbar badge](../../../assets/screenshots/04-status-alert.png)
+
+## The three-way alert
+
+When a Flight flips to needs-attention:
+
+1. The **rail** shows an amber count badge on the workspace and a "needs you"
+   label on the Flight.
+2. The **title bar** shows an "N agents need you" banner.
+3. The **Windows taskbar** icon gets an overlay badge, and an optional **chime**
+   plays on the rising edge.
+
+Each channel can be toggled independently in Settings.
+
+## How statuses update
+
+- **Claude Code hooks (recommended).** Install once from Settings; every Claude
+  session launched inside Orbital then reports itself automatically — *working*
+  on tool use, *needs-attention* on permission/idle prompts, *idle* on stop,
+  *done* on session end. See [Running agents](/orbital/guides/running-agents/).
+- **Explicitly, from any agent or script:** `orbital status needs-attention`.
+- **Typing clears it.** When you type into an agent that is needs-attention,
+  you have by definition responded — the status flips back to *working*
+  immediately instead of waiting for the next hook event.
+- A terminal whose process exits stops contributing its stale status.

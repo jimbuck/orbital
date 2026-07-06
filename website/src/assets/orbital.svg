@@ -1,0 +1,36 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- App-tile background: subtle top-lit dark gradient. -->
+    <linearGradient id="bg" x1="128" y1="8" x2="128" y2="248" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b2433"/>
+      <stop offset="1" stop-color="#0b0e14"/>
+    </linearGradient>
+    <!-- Glowing planet core. -->
+    <radialGradient id="core" cx="0.38" cy="0.34" r="0.75">
+      <stop offset="0" stop-color="#d6e6ff"/>
+      <stop offset="0.45" stop-color="#6fa3ff"/>
+      <stop offset="1" stop-color="#2f6bff"/>
+    </radialGradient>
+    <!-- Soft blue glow for the orbit ring + satellite. -->
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Tile -->
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="53.5" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+
+  <!-- Orbit + satellite, tilted. The ring sits behind the core for depth. -->
+  <g transform="rotate(-28 128 128)" filter="url(#glow)">
+    <ellipse cx="128" cy="128" rx="96" ry="45" fill="none" stroke="#4f8cff" stroke-width="11"/>
+    <circle cx="176" cy="89" r="15" fill="#e9f1ff"/>
+  </g>
+
+  <!-- Planet core -->
+  <circle cx="128" cy="128" r="39" fill="url(#core)"/>
+</svg>

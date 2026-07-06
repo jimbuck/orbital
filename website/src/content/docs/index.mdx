@@ -1,0 +1,115 @@
+---
+title: Orbital
+description: Get work done from orbit — a native Windows cockpit for running many interactive coding agents side by side.
+template: splash
+head:
+  - tag: style
+    content: 'h1#_top{display:none} .sl-markdown-content{margin-top:0}'
+---
+
+import overview from '../../assets/screenshots/01-cockpit-overview.png'
+import statusAlert from '../../assets/screenshots/04-status-alert.png'
+
+<div class="ob-splash">
+
+<div class="ob-hero">
+  <div class="ob-stars" aria-hidden="true"></div>
+  <p class="ob-eyebrow">Mission control for coding agents</p>
+  <h1 class="ob-title">Get work done <em>from orbit.</em></h1>
+  <p class="ob-lede">
+    Orbital runs many interactive coding agents side by side — each in its own git
+    worktree with terminals, previews, and diffs — and tells you the moment one
+    needs you. Your agents, your subscriptions, zero extra tokens.
+  </p>
+  <div class="ob-actions">
+    <a class="ob-btn primary" href="/orbital/getting-started/quick-start/">Quick start →</a>
+    <a class="ob-btn ghost" href="https://github.com/jimbuck/orbital/releases/latest">Download for Windows</a>
+  </div>
+  <div class="ob-status-row" aria-hidden="true">
+    <span class="ob-chip"><i></i>idle</span>
+    <span class="ob-chip working"><i></i>working</span>
+    <span class="ob-chip attention"><i></i>needs-attention</span>
+    <span class="ob-chip error"><i></i>error</span>
+    <span class="ob-chip done"><i></i>done</span>
+  </div>
+  <div class="ob-shot-wrap">
+    <div class="ob-shot">
+      <div class="ob-shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>orbital — nebula-shop ▸ main</span></div>
+      <img src={overview.src} alt="The Orbital cockpit: workspaces and Flights in the left rail, a live terminal in the middle, git panel and task tracker on the right" />
+    </div>
+  </div>
+</div>
+
+<p class="ob-section-label">Flight systems</p>
+<h2 class="ob-section-title">Everything between "brief the agent" and "merge the branch"</h2>
+
+<section class="ob-features">
+  <article class="ob-feature" data-index="01">
+    <span class="glyph">◫</span>
+    <h3>Isolated Flights</h3>
+    <p>
+      Every stream of work gets its own git worktree, branch, terminals, and pane
+      layout — created in one click, with your <code>.env</code> files synced in
+      automatically. Agents never trample each other's changes.
+    </p>
+  </article>
+  <article class="ob-feature" data-index="02">
+    <span class="glyph">◉</span>
+    <h3>Know who needs you</h3>
+    <p>
+      Terminals report their status live. When an agent blocks on a permission
+      prompt, the rail pulses, the title bar shows a banner, the taskbar icon is
+      badged — and typing into the agent clears it instantly.
+    </p>
+  </article>
+  <article class="ob-feature" data-index="03">
+    <span class="glyph">⌥</span>
+    <h3>A cockpit, not just terminals</h3>
+    <p>
+      Split panes of terminals, in-app browser previews, and an editor with
+      syntax-highlighted diffs and image rendering — plus a full git panel to
+      review, commit, and push finished work.
+    </p>
+  </article>
+  <article class="ob-feature" data-index="04">
+    <span class="glyph">▸_</span>
+    <h3>Agents are first-class</h3>
+    <p>
+      The <code>orbital</code> CLI lets agents set status, file and progress
+      tasks on the shared board, open tabs, and register dev servers — so the
+      cockpit always reflects reality.
+    </p>
+  </article>
+</section>
+
+<p class="ob-section-label">Instrumentation</p>
+<h2 class="ob-section-title">Your agents talk back</h2>
+
+<div class="ob-terminal">
+  <div class="ob-shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>flight checkout-flow — nebula-shop</span></div>
+  <pre>{`$ orbital status working
+$ orbital server add 3000
+dev server registered: http://localhost:3000/ (1 live)
+$ orbital task add "Fix cart badge count"
+task added: Fix cart badge count
+$ orbital status needs-attention`}<span class="warn">{`
+● nebula-shop / checkout-flow needs you`}</span></pre>
+</div>
+
+<div class="ob-shot-wrap" style="margin-top:3.2rem">
+  <div class="ob-shot">
+    <div class="ob-shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>orbital — nebula-shop ▸ checkout-flow · needs attention</span></div>
+    <img src={statusAlert.src} alt="An agent needing attention: amber rail badge, title-bar banner, and live dev-server pill" />
+  </div>
+</div>
+
+<div class="ob-cta">
+  <h2>Three agents. One glance. Zero babysitting.</h2>
+  <p>Windows 10/11 · your existing agent subscriptions · MIT licensed</p>
+  <div class="ob-actions">
+    <a class="ob-btn primary" href="/orbital/getting-started/installation/">Install Orbital</a>
+    <a class="ob-btn ghost" href="/orbital/getting-started/what-is-orbital/">Read the docs</a>
+  </div>
+</div>
+
+</div>

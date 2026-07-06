@@ -1,0 +1,606 @@
+/* ============================================================================
+ * Orbital docs — "mission control at night".
+ * Dark-only, matching the app: deep navy-black surfaces, electric-blue accent,
+ * amber for attention, mono instrument readouts. Display type: Archivo.
+ * ========================================================================== */
+
+:root {
+  /* Brand tokens (mirrors the app's palette) */
+  --ob-bg: #0a0d12;
+  --ob-panel: #10141b;
+  --ob-panel-2: #151b24;
+  --ob-line: rgba(255, 255, 255, 0.08);
+  --ob-line-strong: rgba(255, 255, 255, 0.14);
+  --ob-text: #e6ebf2;
+  --ob-text-2: #cfd6e2;
+  --ob-muted: #8b95a6;
+  --ob-faint: #5b6473;
+  --ob-blue: #4f8cff;
+  --ob-blue-soft: #9cc0ff;
+  --ob-amber: #e8b54a;
+  --ob-green: #3ddc97;
+  --ob-red: #ff6b6b;
+
+  /* Starlight overrides */
+  --sl-color-accent-low: #12203c;
+  --sl-color-accent: var(--ob-blue);
+  --sl-color-accent-high: #b3ccff;
+  --sl-font: 'Hanken Grotesk Variable', system-ui, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --ob-font-display: 'Archivo Variable', 'Hanken Grotesk Variable', sans-serif;
+}
+
+:root[data-theme='dark'] {
+  --sl-color-white: var(--ob-text);
+  --sl-color-gray-1: var(--ob-text-2);
+  --sl-color-gray-2: #aeb7c6;
+  --sl-color-gray-3: var(--ob-muted);
+  --sl-color-gray-4: #3d4654;
+  --sl-color-gray-5: #232a35;
+  --sl-color-gray-6: #12161d;
+  --sl-color-black: var(--ob-bg);
+  --sl-color-bg: var(--ob-bg);
+  --sl-color-bg-nav: rgba(10, 13, 18, 0.88);
+  --sl-color-bg-sidebar: #0d1118;
+  --sl-color-hairline: var(--ob-line);
+  --sl-color-hairline-light: var(--ob-line);
+  --sl-color-hairline-shade: var(--ob-line);
+}
+
+/* ---- Global chrome -------------------------------------------------------- */
+
+header.header {
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--ob-line);
+}
+
+.site-title {
+  font-family: var(--ob-font-display);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Headings: wide industrial display face. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4,
+h1[data-page-title] {
+  font-family: var(--ob-font-display);
+  letter-spacing: -0.015em;
+}
+
+.sl-markdown-content h2 {
+  margin-top: 2.2em;
+  padding-top: 1.1em;
+  border-top: 1px solid var(--ob-line);
+}
+
+/* Sidebar: instrument-panel group labels. */
+#starlight__sidebar .top-level > li > details > summary .group-label span,
+#starlight__sidebar .top-level > li > details > summary .large {
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ob-faint);
+}
+
+#starlight__sidebar a[aria-current='page'] {
+  background: color-mix(in srgb, var(--ob-blue) 14%, transparent);
+  color: var(--ob-blue-soft);
+  border-radius: 7px;
+  font-weight: 600;
+}
+
+/* Inline code: chip treatment like the app's badges. */
+.sl-markdown-content code:not(pre code) {
+  background: color-mix(in srgb, var(--ob-blue) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ob-blue) 22%, transparent);
+  border-radius: 5px;
+  padding: 0.1em 0.35em;
+  color: var(--ob-blue-soft);
+  font-size: 0.86em;
+}
+
+/* Tables: hairline instrument readouts. */
+.sl-markdown-content table {
+  border: 1px solid var(--ob-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sl-markdown-content th {
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--ob-muted);
+  background: var(--ob-panel);
+}
+
+/* Screenshots: framed like app windows, with a soft launch-pad glow. */
+.sl-markdown-content img {
+  border: 1px solid var(--ob-line-strong);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 22px 60px rgba(0, 0, 0, 0.5),
+    0 0 90px rgba(79, 140, 255, 0.07);
+}
+
+/* ============================================================================
+ * Splash page ("ob-" namespace)
+ * ========================================================================== */
+
+:root:has(.ob-splash) {
+  --sl-content-width: 74rem;
+}
+
+/* Hide the empty content-panel padding artifacts around the splash. */
+.ob-splash {
+  position: relative;
+}
+
+/* ---- Starfield + orbit atmosphere ---------------------------------------- */
+
+.ob-hero {
+  position: relative;
+  padding: 4.5rem 0 3.5rem;
+  text-align: center;
+  isolation: isolate;
+}
+
+.ob-stars,
+.ob-stars::after {
+  position: absolute;
+  inset: -8rem -50vw 0;
+  z-index: -1;
+  content: '';
+  background-image:
+    radial-gradient(1px 1px at 12% 20%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 64%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 41% 12%, rgba(156, 192, 255, 0.8) 50%, transparent 51%),
+    radial-gradient(1px 1px at 57% 42%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 66% 74%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 78% 24%, rgba(232, 181, 74, 0.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 89% 58%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 6% 84%, rgba(156, 192, 255, 0.4) 50%, transparent 51%);
+  background-size: 640px 480px;
+  animation: ob-drift 120s linear infinite;
+}
+
+.ob-stars::after {
+  inset: 0;
+  background-size: 920px 690px;
+  opacity: 0.6;
+  animation-duration: 200s;
+  animation-direction: reverse;
+}
+
+/* Blue nebula glow behind the hero copy. */
+.ob-hero::before {
+  content: '';
+  position: absolute;
+  z-index: -2;
+  top: -6rem;
+  left: 50%;
+  width: min(72rem, 120vw);
+  height: 34rem;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(42% 60% at 50% 30%, rgba(79, 140, 255, 0.16), transparent 70%),
+    radial-gradient(30% 42% at 68% 18%, rgba(232, 181, 74, 0.05), transparent 70%);
+  pointer-events: none;
+}
+
+@keyframes ob-drift {
+  to {
+    background-position: 640px 480px;
+  }
+}
+
+/* ---- Hero copy ------------------------------------------------------------ */
+
+.ob-eyebrow {
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ob-blue);
+  margin: 0 0 1.1rem;
+  animation: ob-rise 0.6s ease-out both;
+}
+
+.ob-eyebrow::before,
+.ob-eyebrow::after {
+  content: '––';
+  color: var(--ob-faint);
+  margin: 0 0.9em;
+  letter-spacing: -0.1em;
+}
+
+.ob-title {
+  font-family: var(--ob-font-display);
+  font-size: clamp(2.6rem, 7vw, 4.6rem);
+  font-weight: 800;
+  line-height: 1.03;
+  letter-spacing: -0.03em;
+  margin: 0 auto 1.2rem;
+  max-width: 22ch;
+  color: var(--ob-text);
+  animation: ob-rise 0.6s 0.08s ease-out both;
+}
+
+.ob-title em {
+  font-style: normal;
+  color: transparent;
+  background: linear-gradient(100deg, var(--ob-blue) 10%, var(--ob-blue-soft) 55%, #6fe6b3 95%);
+  background-clip: text;
+}
+
+.ob-lede {
+  max-width: 56ch;
+  margin: 0 auto 2rem;
+  font-size: 1.1rem;
+  line-height: 1.7;
+  color: var(--ob-muted);
+  animation: ob-rise 0.6s 0.16s ease-out both;
+}
+
+.ob-actions {
+  display: flex;
+  gap: 0.9rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.6rem;
+  animation: ob-rise 0.6s 0.24s ease-out both;
+}
+
+.ob-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.72rem 1.5rem;
+  border-radius: 10px;
+  font-family: var(--ob-font-display);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.ob-btn.primary {
+  background: var(--ob-blue);
+  color: #06122e;
+  box-shadow: 0 6px 30px rgba(79, 140, 255, 0.35);
+}
+.ob-btn.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 38px rgba(79, 140, 255, 0.5);
+}
+
+.ob-btn.ghost {
+  border: 1px solid var(--ob-line-strong);
+  color: var(--ob-text-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+.ob-btn.ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Status chips: the product's core signal, as hero ornament. */
+.ob-status-row {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 3rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  animation: ob-rise 0.6s 0.32s ease-out both;
+}
+
+.ob-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--ob-line);
+  background: var(--ob-panel);
+  color: var(--ob-muted);
+}
+
+.ob-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ob-faint);
+}
+.ob-chip.working i {
+  background: var(--ob-blue);
+}
+.ob-chip.attention {
+  border-color: color-mix(in srgb, var(--ob-amber) 35%, transparent);
+  color: var(--ob-amber);
+  background: color-mix(in srgb, var(--ob-amber) 9%, transparent);
+}
+.ob-chip.attention i {
+  background: var(--ob-amber);
+  animation: ob-pulse 1.6s ease-in-out infinite;
+}
+.ob-chip.done i {
+  background: var(--ob-green);
+}
+.ob-chip.error i {
+  background: var(--ob-red);
+}
+
+@keyframes ob-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0.45;
+  }
+}
+
+/* ---- Framed screenshot with orbit ring ------------------------------------ */
+
+.ob-shot-wrap {
+  position: relative;
+  max-width: 66rem;
+  margin: 0 auto;
+  animation: ob-rise 0.7s 0.4s ease-out both;
+}
+
+/* Slow elliptical orbit line behind the window. */
+.ob-shot-wrap::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -14% -8%;
+  border: 1.5px solid rgba(79, 140, 255, 0.18);
+  border-radius: 50%;
+  transform: rotate(-14deg);
+  mask-image: linear-gradient(to bottom, black 0%, transparent 62%);
+}
+
+.ob-shot {
+  border: 1px solid var(--ob-line-strong);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--ob-panel);
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.6),
+    0 0 120px rgba(79, 140, 255, 0.1);
+}
+
+.ob-shot-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--ob-line);
+  background: #0d1118;
+  font-family: var(--sl-font-mono);
+  font-size: 0.7rem;
+  color: var(--ob-faint);
+}
+
+.ob-shot-bar i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--ob-faint);
+  opacity: 0.5;
+}
+.ob-shot-bar i:nth-child(1) {
+  background: var(--ob-red);
+  opacity: 0.7;
+}
+.ob-shot-bar i:nth-child(2) {
+  background: var(--ob-amber);
+  opacity: 0.7;
+}
+.ob-shot-bar i:nth-child(3) {
+  background: var(--ob-green);
+  opacity: 0.7;
+}
+.ob-shot-bar span {
+  margin-left: 0.5rem;
+}
+
+.ob-shot img {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ---- Sections below the hero ---------------------------------------------- */
+
+.ob-section-label {
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ob-faint);
+  text-align: center;
+  margin: 4.5rem 0 0.6rem;
+}
+
+.ob-section-title {
+  font-family: var(--ob-font-display);
+  font-size: clamp(1.6rem, 3.4vw, 2.3rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-align: center;
+  color: var(--ob-text);
+  margin: 0 0 2.4rem;
+}
+
+.ob-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  text-align: left;
+}
+
+.ob-feature {
+  position: relative;
+  padding: 1.4rem 1.4rem 1.3rem;
+  border: 1px solid var(--ob-line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--ob-panel) 0%, rgba(16, 20, 27, 0.4) 100%);
+  overflow: hidden;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.ob-feature:hover {
+  border-color: color-mix(in srgb, var(--ob-blue) 40%, transparent);
+  transform: translateY(-2px);
+}
+
+.ob-feature::before {
+  content: attr(data-index);
+  position: absolute;
+  top: 0.9rem;
+  right: 1.1rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.7rem;
+  color: var(--ob-faint);
+}
+
+.ob-feature h3 {
+  font-family: var(--ob-font-display);
+  font-size: 1.02rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  color: var(--ob-text);
+}
+
+.ob-feature p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--ob-muted);
+}
+
+.ob-feature .glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: 0.9rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ob-blue) 30%, transparent);
+  background: color-mix(in srgb, var(--ob-blue) 10%, transparent);
+  color: var(--ob-blue-soft);
+  font-size: 1rem;
+}
+
+/* Terminal snippet card */
+.ob-terminal {
+  max-width: 44rem;
+  margin: 0 auto;
+  text-align: left;
+  border: 1px solid var(--ob-line-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0d1118;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.ob-terminal .ob-shot-bar {
+  border-bottom: 1px solid var(--ob-line);
+}
+
+.ob-terminal pre {
+  margin: 0;
+  padding: 1.1rem 1.2rem 1.3rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.82rem;
+  line-height: 1.85;
+  color: var(--ob-text-2);
+  overflow-x: auto;
+}
+
+.ob-terminal .c {
+  color: var(--ob-faint);
+}
+.ob-terminal .p {
+  color: var(--ob-green);
+}
+.ob-terminal .cmd {
+  color: var(--ob-blue-soft);
+  font-weight: 700;
+}
+.ob-terminal .warn {
+  color: var(--ob-amber);
+}
+
+/* Closing CTA strip */
+.ob-cta {
+  margin: 4.5rem auto 1rem;
+  padding: 2.6rem 2rem;
+  text-align: center;
+  border: 1px solid var(--ob-line);
+  border-radius: 16px;
+  background:
+    radial-gradient(60% 120% at 50% 0%, rgba(79, 140, 255, 0.12), transparent 70%),
+    var(--ob-panel);
+}
+
+.ob-cta h2 {
+  font-family: var(--ob-font-display);
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.6rem;
+  color: var(--ob-text);
+}
+
+.ob-cta p {
+  color: var(--ob-muted);
+  margin: 0 0 1.6rem;
+}
+
+@keyframes ob-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-stars,
+  .ob-stars::after,
+  .ob-chip.attention i {
+    animation: none;
+  }
+  .ob-eyebrow,
+  .ob-title,
+  .ob-lede,
+  .ob-actions,
+  .ob-status-row,
+  .ob-shot-wrap {
+    animation-duration: 0.01s;
+    animation-delay: 0s;
+  }
+}
