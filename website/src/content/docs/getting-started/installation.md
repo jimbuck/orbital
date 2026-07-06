@@ -8,7 +8,9 @@ description: Install Orbital on Windows, or build it from source.
 - **Windows 10/11.** Orbital is currently Windows-only (ConPTY terminals, taskbar
   badges, and the installer are all Windows-native).
 - **git** on your `PATH`.
-- Your coding agent's CLI (e.g. `claude`) installed and authenticated as usual.
+- Your coding agent's CLI installed and authenticated as usual — **Claude Code**
+  is fully supported at launch (Codex support is planned), and any interactive
+  CLI runs fine in a plain Flight terminal.
 
 ## Install the app
 

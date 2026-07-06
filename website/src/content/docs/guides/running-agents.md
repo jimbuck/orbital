@@ -15,6 +15,13 @@ description: Agent tabs, per-workspace providers, briefings, and the Claude Code
 
 Per workspace you can configure which provider agent tabs launch and an explicit
 executable path (Settings), for setups where the agent isn't on `PATH`.
+**Claude Code is the fully supported harness at launch; Codex support is
+planned.**
+
+Either way, Orbital runs the *real* interactive CLI — not an API wrapper — so
+every feature of your harness works exactly as it does in a standalone
+terminal: slash commands, hooks, MCP servers, permission modes, plan mode, and
+your subscription's pricing rather than metered tokens.
 
 ## The briefing
 

@@ -27,9 +27,12 @@ Orbital's answer is a cockpit:
 
 ## What Orbital is *not*
 
-- **It does not run agents for you and never spends tokens.** Orbital spawns real
-  interactive terminals (ConPTY); your agents run exactly as if you had launched
-  them yourself, on your existing subscription.
+- **It is not a wrapper around your agent, and it never spends tokens.** Orbital
+  spawns the real interactive CLI in a real terminal (ConPTY), so you keep the
+  full feature set of your preferred harness — slash commands, hooks, MCP
+  servers, permission modes — and everything runs on your existing subscription
+  instead of metered API usage. **Claude Code is fully supported at launch;
+  Codex support is planned.**
 - **It is not a merge tool or CI system.** It orchestrates working copies and
   surfaces state; git semantics stay plain git.
 - **It never writes into your repositories.** All of Orbital's state lives in

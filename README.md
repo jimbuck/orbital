@@ -34,10 +34,13 @@ Orbital turns that mess into a mission control: park each agent in its own
 isolated **Flight**, glance at the rail to see who's `working` and who
 `needs you`, answer the blocked one, and get back to what you were doing.
 
-**Orbital never runs agents for you or spends tokens.** It spawns real
-interactive terminals (ConPTY + xterm.js), so everything runs on your existing
-subscriptions and CLIs, exactly as if you had launched them yourself. The full
-product spec lives in [`Orbital_PRD_v1.1.md`](./Orbital_PRD_v1.1.md).
+**Orbital never wraps or re-implements your agent.** It spawns the real
+interactive CLI in a real terminal (ConPTY + xterm.js), so you keep the full
+feature set of your preferred harness — slash commands, hooks, MCP servers,
+permission modes, plan mode — and everything runs on your existing
+subscription instead of metered API tokens. **Claude Code is fully supported
+at launch; Codex support is planned.** The full product spec lives in
+[`Orbital_PRD_v1.1.md`](./Orbital_PRD_v1.1.md).
 
 ![The Orbital cockpit: workspaces and Flights in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)
 
