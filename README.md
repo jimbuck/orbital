@@ -1,10 +1,31 @@
-# Orbital
+<p align="center">
+  <img src="build/icon.png" alt="Orbital" width="110">
+</p>
 
-> **Get work done from orbit.** Orbital is a native Windows cockpit for running
-> many interactive coding agents — Claude Code, Codex, or any CLI tool — side by
-> side. Every stream of work gets its own git worktree, its own terminals,
-> browser previews, and diff viewer, and a live status signal that tells you
-> exactly which agent needs you *right now*.
+<h1 align="center">Orbital</h1>
+
+<p align="center"><strong>Get work done from orbit.</strong><br>
+A native Windows cockpit for running many interactive coding agents side by side.</p>
+
+<p align="center">
+  <a href="https://jimbuck.github.io/orbital/">Website</a> ·
+  <a href="https://github.com/jimbuck/orbital/releases/latest">Download</a> ·
+  <a href="https://jimbuck.github.io/orbital/getting-started/quick-start/">Quick start</a> ·
+  <a href="https://jimbuck.github.io/orbital/reference/cli/">CLI reference</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/jimbuck/orbital/releases/latest"><img src="https://img.shields.io/github/v/release/jimbuck/orbital?color=4f8cff" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-4f8cff" alt="Windows 10/11">
+  <img src="https://img.shields.io/badge/license-MIT-3ddc97" alt="MIT license">
+</p>
+
+---
+
+Orbital runs many interactive coding agents — Claude Code, Codex, or any CLI
+tool — side by side. Every stream of work gets its own git worktree, its own
+terminals, browser previews, and diff viewer, and a live status signal that
+tells you exactly which agent needs you *right now*.
 
 Agents are fast, but they block on you: permission prompts, questions, finished
 work waiting for review. Run three of them in plain terminal windows and you're
@@ -17,6 +38,8 @@ isolated **Flight**, glance at the rail to see who's `working` and who
 interactive terminals (ConPTY + xterm.js), so everything runs on your existing
 subscriptions and CLIs, exactly as if you had launched them yourself. The full
 product spec lives in [`Orbital_PRD_v1.1.md`](./Orbital_PRD_v1.1.md).
+
+![The Orbital cockpit: workspaces and Flights in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)
 
 ## What you get
 
@@ -53,6 +76,8 @@ agent flips to needs-attention you get a **three-way alert**: the rail badge
 pulses, a title-bar banner appears, and the Windows taskbar icon gets a badge
 (plus an optional chime). Each is individually toggleable in Settings.
 
+![An agent needing attention: amber rail badge, title-bar banner, and dev-server pill](website/src/assets/screenshots/04-status-alert.png)
+
 Statuses update automatically two ways:
 
 1. **Claude Code hooks** — install them once from Settings (Orbital shows you
@@ -73,6 +98,8 @@ Statuses update automatically two ways:
 - A **full board view** across all workspaces with drag-and-drop between both
   status columns and workspace lanes.
 - Agents can file follow-up work themselves with `orbital task add`.
+
+![The all-workspaces task board with drag-and-drop swim-lanes](website/src/assets/screenshots/10-board-all.png)
 
 ### The `orbital` CLI
 Every Flight terminal has `orbital` on PATH, wired back to the app over a local
@@ -96,6 +123,8 @@ When a Flight has registered dev servers, the title bar shows a green
 "N dev servers" pill and the add-tab menu lists each one — one click opens it
 in an in-app browser tab next to your agent.
 
+![The dev-server pill and its dropdown in the title bar](website/src/assets/screenshots/05-dev-servers.png)
+
 ### Git, without leaving the cockpit
 The right panel is a full working-tree surface for the active Flight: branch +
 ahead/behind, stage/unstage individual files or everything, two-step-confirmed
@@ -104,6 +133,8 @@ push (sets upstream automatically), pull, fetch — and every changed file opens
 as a proper diff. External changes (an agent committing in a terminal, a
 checkout elsewhere) are picked up by filesystem watchers in root checkouts *and*
 worktrees, so the panel is always current.
+
+![A syntax-highlighted diff opened from the git panel](website/src/assets/screenshots/07-diff-view.png)
 
 ### Quality of life
 - Frameless, keyboard-friendly dark UI designed for long sessions.
