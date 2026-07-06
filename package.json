@@ -22,6 +22,9 @@
     "lint": "eslint .",
     "make": "npm run build && electron-builder"
   },
+  "overrides": {
+    "node-gyp": "^11.0.0"
+  },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
