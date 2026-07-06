@@ -24,6 +24,8 @@ interface Data {
   flights: Flight[]
   tasks: Task[]
   settings: Settings | null
+  /** Live dev servers per flight (from `orbital server add`). */
+  devServers: Record<string, string[]>
 }
 
 interface Actions {
@@ -48,6 +50,7 @@ export const useStore = create<Store>((set, get) => ({
   flights: [],
   tasks: [],
   settings: null,
+  devServers: {},
 
   // ui
   ready: false,
@@ -100,6 +103,7 @@ export const useStore = create<Store>((set, get) => ({
       flights: s.flights,
       tasks: s.tasks,
       settings: s.settings,
+      devServers: s.devServers,
       activeWorkspaceId,
       activeFlightId,
       expanded,

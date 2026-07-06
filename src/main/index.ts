@@ -7,6 +7,12 @@ import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from '.
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
+// Sandbox override for tests/demos: point all persistent state (DB, briefings)
+// at a different profile dir so a scripted run never touches the real one.
+if (process.env['ORBITAL_USER_DATA']) {
+  app.setPath('userData', process.env['ORBITAL_USER_DATA'])
+}
+
 // Must match `appId` in electron-builder.yml so notifications, taskbar pinning
 // and jump-list identity line up between the dev run and the installed app.
 const APP_ID = 'dev.jimbuck.orbital'

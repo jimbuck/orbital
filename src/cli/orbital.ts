@@ -30,14 +30,23 @@ Usage:
   orbital flight new [--worktree <branch>] [name]
   orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>]
+  orbital task list [--all]
+  orbital task update <id> [--status <todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>]
+  orbital task done <id>
+  orbital server add <url|port>
+  orbital server remove <url|port>
+  orbital server list
   orbital help
 
 Examples:
   orbital status needs-attention
-  orbital flights
   orbital flight new --worktree feature/login "Login flow"
   orbital tab new browser http://localhost:5173
   orbital task add "Write tests" --description "cover the parser"
+  orbital task list
+  orbital task done 4f21c
+  orbital server add 5173
+  orbital server remove 5173
 `
 
 /** Print usage to a stream and exit with the given code. */
@@ -143,13 +152,46 @@ function buildRequest(argv: string[]): ControlRequest {
     }
 
     case 'task': {
-      if (rest[0] !== 'add') usageError()
+      const sub = rest[0]
       const { positionals, flags } = parseArgs(rest.slice(1))
-      const title = positionals[0]
-      if (!title) usageError()
-      const args: Record<string, unknown> = { title }
-      if (flags.description) args.description = flags.description
-      return request('task-add', args)
+
+      if (sub === 'add') {
+        const title = positionals[0]
+        if (!title) usageError()
+        const args: Record<string, unknown> = { title }
+        if (flags.description) args.description = flags.description
+        return request('task-add', args)
+      }
+      if (sub === 'list') {
+        return request('task-list', { all: 'all' in flags })
+      }
+      if (sub === 'update') {
+        const id = positionals[0]
+        if (!id) usageError()
+        const args: Record<string, unknown> = { id }
+        if (flags.status !== undefined) args.status = flags.status
+        if (flags.title !== undefined) args.title = flags.title
+        if (flags.description !== undefined) args.description = flags.description
+        return request('task-update', args)
+      }
+      if (sub === 'done') {
+        const id = positionals[0]
+        if (!id) usageError()
+        return request('task-update', { id, status: 'done' })
+      }
+      return usageError()
+    }
+
+    case 'server': {
+      const sub = rest[0]
+      const { positionals } = parseArgs(rest.slice(1))
+      if (sub === 'add' || sub === 'remove') {
+        const url = positionals[0]
+        if (!url) usageError()
+        return request(sub === 'add' ? 'server-add' : 'server-remove', { url })
+      }
+      if (sub === 'list') return request('server-list', {})
+      return usageError()
     }
 
     case 'help':
@@ -168,41 +210,75 @@ function buildRequest(argv: string[]): ControlRequest {
 
 /* --------------------------------------------------------------- output ---- */
 
-/** Render the `flights` payload as a small fixed-width table. */
+/** Render rows as a small fixed-width table. */
+function printTable(cols: { key: string; head: string }[], rows: Record<string, string>[]): void {
+  const widths = cols.map((c) => Math.max(c.head.length, ...rows.map((r) => (r[c.key] ?? '').length)))
+  const line = (values: string[]): string =>
+    values.map((v, i) => v.padEnd(widths[i])).join('  ').replace(/\s+$/, '')
+  process.stdout.write(line(cols.map((c) => c.head)) + '\n')
+  for (const r of rows) {
+    process.stdout.write(line(cols.map((c) => r[c.key] ?? '')) + '\n')
+  }
+}
+
 function printFlights(data: unknown): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
     process.stdout.write('No flights.\n')
     return
   }
-
-  const rows = list.map((flight) => {
-    const o = (flight ?? {}) as Record<string, unknown>
-    return {
-      status: String(o.status ?? ''),
-      name: String(o.name ?? ''),
-      branch: String(o.branch ?? ''),
-      id: String(o.id ?? '')
-    }
-  })
-
-  const cols = [
-    { key: 'status', head: 'STATUS' },
-    { key: 'name', head: 'NAME' },
-    { key: 'branch', head: 'BRANCH' },
-    { key: 'id', head: 'ID' }
-  ] as const
-
-  const widths = cols.map((c) =>
-    Math.max(c.head.length, ...rows.map((r) => r[c.key].length))
+  printTable(
+    [
+      { key: 'status', head: 'STATUS' },
+      { key: 'name', head: 'NAME' },
+      { key: 'branch', head: 'BRANCH' },
+      { key: 'id', head: 'ID' }
+    ],
+    list.map((flight) => {
+      const o = (flight ?? {}) as Record<string, unknown>
+      return {
+        status: String(o.status ?? ''),
+        name: String(o.name ?? ''),
+        branch: String(o.branch ?? ''),
+        id: String(o.id ?? '')
+      }
+    })
   )
-  const line = (values: string[]): string =>
-    values.map((v, i) => v.padEnd(widths[i])).join('  ').replace(/\s+$/, '')
+}
 
-  process.stdout.write(line(cols.map((c) => c.head)) + '\n')
-  for (const r of rows) {
-    process.stdout.write(line(cols.map((c) => r[c.key])) + '\n')
+function printTasks(data: unknown): void {
+  const list = Array.isArray(data) ? data : []
+  if (list.length === 0) {
+    process.stdout.write('No open tasks. (`--all` includes done tasks.)\n')
+    return
   }
+  printTable(
+    [
+      { key: 'id', head: 'ID' },
+      { key: 'status', head: 'STATUS' },
+      { key: 'title', head: 'TITLE' },
+      { key: 'flight', head: 'FLIGHT' }
+    ],
+    list.map((task) => {
+      const o = (task ?? {}) as Record<string, unknown>
+      return {
+        // The short prefix is enough for `orbital task update/done`.
+        id: String(o.id ?? '').slice(0, 8),
+        status: String(o.status ?? ''),
+        title: String(o.title ?? ''),
+        flight: o.flightId ? 'linked' : ''
+      }
+    })
+  )
+}
+
+function printServers(data: unknown): void {
+  const list = Array.isArray(data) ? data : []
+  if (list.length === 0) {
+    process.stdout.write('No dev servers registered. (`orbital server add <url|port>`)\n')
+    return
+  }
+  for (const url of list) process.stdout.write(`${String(url)}\n`)
 }
 
 /** A one-line confirmation for the non-`flights` commands. */
@@ -220,6 +296,16 @@ function confirmation(req: ControlRequest, data: unknown): string {
       return `opened ${String(req.args.type ?? '')} tab`
     case 'task-add':
       return `task added: ${String(d.title ?? req.args.title ?? '')}`
+    case 'task-update':
+      return `task updated: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
+    case 'server-add': {
+      const n = Array.isArray(d.servers) ? d.servers.length : 0
+      return `dev server registered: ${String(d.url ?? '')} (${n} live)`
+    }
+    case 'server-remove': {
+      const n = Array.isArray(d.servers) ? d.servers.length : 0
+      return `dev server removed: ${String(d.url ?? '')} (${n} live)`
+    }
     default:
       return typeof data === 'string' ? data : 'ok'
   }
@@ -292,6 +378,10 @@ function handleResponse(req: ControlRequest, lineText: string): void {
 
   if (req.cmd === 'flights') {
     printFlights(res.data)
+  } else if (req.cmd === 'task-list') {
+    printTasks(res.data)
+  } else if (req.cmd === 'server-list') {
+    printServers(res.data)
   } else {
     process.stdout.write(confirmation(req, res.data) + '\n')
   }

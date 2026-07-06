@@ -70,6 +70,15 @@ export function aggregateStatus(statuses: TerminalStatus[]): TerminalStatus {
   return 'idle'
 }
 
+/** Map a CLI-style task-status token (`in-progress`) to the canonical enum. */
+export function normalizeTaskStatus(token: string): TaskStatus | null {
+  const v = token.trim().toLowerCase().replace(/-/g, '_')
+  if (v === 'todo' || v === 'in_progress' || v === 'ready_for_review' || v === 'done') {
+    return v
+  }
+  return null
+}
+
 /** Map a CLI-style status token (`needs-attention`) to the canonical enum. */
 export function normalizeStatus(token: string): TerminalStatus | null {
   const v = token.trim().toLowerCase().replace(/-/g, '_')
@@ -176,6 +185,11 @@ export interface AppState {
   flights: Flight[]
   tasks: Task[]
   settings: Settings
+  /**
+   * Live dev servers registered via `orbital server add`, keyed by flightId.
+   * Runtime-only state (not persisted) — servers die with their terminals.
+   */
+  devServers: Record<string, string[]>
 }
 
 /* ============================================================================
@@ -548,6 +562,11 @@ export type ControlCommand =
   | 'flight-new'
   | 'tab-new'
   | 'task-add'
+  | 'task-list'
+  | 'task-update'
+  | 'server-add'
+  | 'server-remove'
+  | 'server-list'
   | 'hook'
 
 export interface ControlRequest {

@@ -77,8 +77,11 @@ function briefingText({ workspace, flight, hooksInstalled }: BriefingInput): str
     `- Worktree: ${flight.worktreePath}`,
     `- Branch: ${flight.branch}`,
     '',
-    'The `orbital` CLI is on your PATH. Use `orbital task add "<title>"` to queue follow-up',
-    'work you notice but should not tackle right now.'
+    'The `orbital` CLI is on your PATH — use it to work with the cockpit:',
+    '- `orbital task add "<title>"` — queue follow-up work you notice but should not tackle now.',
+    '- `orbital task list` — see the workspace\'s open tasks (id, status, title).',
+    '- `orbital task update <id> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <id>` when it is finished.',
+    '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click.'
   ]
   if (!hooksInstalled) {
     lines.push(

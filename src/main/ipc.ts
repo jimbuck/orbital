@@ -6,6 +6,7 @@ import {
   ENV,
   controlPipePath,
   normalizeStatus,
+  normalizeTaskStatus,
   isPtyTabType,
   type CreateFlightOptions,
   type RemoveFlightOptions,
@@ -191,7 +192,7 @@ export function registerIpc(): void {
   }
 
   // ---- state / settings ----
-  h(IPC.getState, () => repo.getAppState())
+  h(IPC.getState, () => runtime.appState())
   h(IPC.setSettings, (_e, settings) => {
     const s = repo.settings.set(settings)
     broadcast()
@@ -226,6 +227,7 @@ export function registerIpc(): void {
     for (const f of repo.flights.list()) {
       if (f.workspaceId !== workspaceId) continue
       killFlightTerminals(f.id)
+      runtime.clearDevServers(f.id)
       if (f.kind === 'worktree') runtime.gitWatcher.unwatch(f.worktreePath)
       for (const pane of f.panes) {
         for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(f.id, t.id)
@@ -280,6 +282,7 @@ export function registerIpc(): void {
       }
     }
     runtime.gitWatcher.unwatch(flight.worktreePath)
+    runtime.clearDevServers(flightId)
     killFlightTerminals(flightId)
     for (const pane of flight.panes) {
       for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(flightId, t.id)
@@ -540,6 +543,31 @@ function hookEventToStatus(event: string, payload: Record<string, unknown>): Ter
   }
 }
 
+/**
+ * Normalize a CLI dev-server argument to a full URL: `3000` and `localhost:3000`
+ * become `http://localhost:3000/`; explicit schemes pass through.
+ */
+function normalizeServerUrl(raw: string): string | null {
+  const s = raw.trim()
+  if (!s) return null
+  const candidate = /^\d+$/.test(s) ? `http://localhost:${s}` : /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `http://${s}`
+  try {
+    return new URL(candidate).toString()
+  } catch {
+    return null
+  }
+}
+
+/** Resolve a task by full id or unique id prefix within a workspace. */
+function resolveTask(workspaceId: string, idArg: string): { task?: ReturnType<typeof repo.tasks.get>; error?: string } {
+  const candidates = repo.tasks
+    .list()
+    .filter((t) => t.workspaceId === workspaceId && (t.id === idArg || t.id.startsWith(idArg)))
+  if (candidates.length === 0) return { error: `no task matches id '${idArg}'` }
+  if (candidates.length > 1) return { error: `id '${idArg}' is ambiguous (${candidates.length} matches)` }
+  return { task: candidates[0] }
+}
+
 export async function handleControl(req: ControlRequest): Promise<ControlResponse> {
   try {
     switch (req.cmd) {
@@ -625,6 +653,52 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         })
         runtime.broadcastState()
         return { ok: true, data: { id: task.id, title: task.title } }
+      }
+      case 'task-list': {
+        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        const all = req.args.all === true || req.args.all === 'true'
+        const list = repo.tasks
+          .list()
+          .filter((t) => t.workspaceId === req.workspaceId && (all || t.status !== 'done'))
+          .map((t) => ({ id: t.id, status: t.status, title: t.title, description: t.description, flightId: t.flightId }))
+        return { ok: true, data: list }
+      }
+      case 'task-update': {
+        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        const idArg = String(req.args.id ?? '').trim()
+        if (!idArg) return { ok: false, error: 'task id required' }
+        const { task, error } = resolveTask(req.workspaceId, idArg)
+        if (!task) return { ok: false, error }
+        const patch: TaskPatch = {}
+        if (req.args.status !== undefined) {
+          const status = normalizeTaskStatus(String(req.args.status))
+          if (!status) return { ok: false, error: `unknown task status '${req.args.status}'` }
+          patch.status = status
+        }
+        if (req.args.title !== undefined) patch.title = String(req.args.title)
+        if (req.args.description !== undefined) patch.description = String(req.args.description)
+        if (Object.keys(patch).length === 0) return { ok: false, error: 'nothing to update' }
+        const updated = repo.tasks.update(task.id, patch)
+        runtime.broadcastState()
+        return { ok: true, data: { id: updated.id, status: updated.status, title: updated.title } }
+      }
+      case 'server-add': {
+        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
+        const url = normalizeServerUrl(String(req.args.url ?? ''))
+        if (!url) return { ok: false, error: `invalid server url '${req.args.url}'` }
+        const servers = runtime.addDevServer(req.flightId, url)
+        return { ok: true, data: { url, servers } }
+      }
+      case 'server-remove': {
+        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
+        const url = normalizeServerUrl(String(req.args.url ?? ''))
+        if (!url) return { ok: false, error: `invalid server url '${req.args.url}'` }
+        const servers = runtime.removeDevServer(req.flightId, url)
+        return { ok: true, data: { url, servers } }
+      }
+      case 'server-list': {
+        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
+        return { ok: true, data: runtime.devServersFor(req.flightId) }
       }
       default:
         return { ok: false, error: `unknown command '${(req as ControlRequest).cmd}'` }

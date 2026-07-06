@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from 'react'
-import { Minus, Square, X, ChevronRight, RefreshCw } from 'lucide-react'
+import { Minus, Square, X, ChevronRight, RefreshCw, Globe } from 'lucide-react'
 import { useStore, activeWorkspace, activeFlight } from '@renderer/store'
+import { serverLabel } from './body/TabStrip'
 
 interface MenuItem {
   label: string
@@ -29,6 +30,15 @@ export default function TitleBar(): JSX.Element {
   const workspace = useStore(activeWorkspace)
 
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [devMenu, setDevMenu] = useState(false)
+
+  const activeFlightId = useStore((s) => s.activeFlightId)
+  const servers = useStore((s) => (s.activeFlightId ? s.devServers[s.activeFlightId] : undefined)) ?? []
+
+  const openServer = (url: string): void => {
+    setDevMenu(false)
+    if (activeFlightId) void window.orbital.createTab(activeFlightId, null, 'browser', { url })
+  }
 
   // Escape closes an open menu (WAI-ARIA menu-button pattern).
   useEffect(() => {
@@ -158,6 +168,48 @@ export default function TitleBar(): JSX.Element {
       {/* Right: needs-attention banner + window controls. bg-bar occludes the
           centered breadcrumb; clicking here also dismisses any open menu. */}
       <div className="no-drag z-50 flex items-center gap-1 bg-bar" onClick={() => setOpenMenu(null)}>
+        {servers.length > 0 && (
+          <div className="relative mr-2">
+            <button
+              type="button"
+              title="Live dev servers in this Flight — click to open one in a browser tab"
+              aria-haspopup="menu"
+              aria-expanded={devMenu}
+              onClick={() => setDevMenu((v) => !v)}
+              className="flex items-center gap-[7px] rounded-[7px] border border-green/25 bg-green/10 py-[3px] pl-2 pr-[9px] outline-none hover:bg-green/20 focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <Globe size={11} strokeWidth={2} className="flex-none text-green-2" />
+              <span className="whitespace-nowrap text-[11px] font-semibold text-green-2">
+                {servers.length} dev server{servers.length === 1 ? '' : 's'}
+              </span>
+            </button>
+            {devMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setDevMenu(false)} />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-[30px] z-50 min-w-[190px] rounded-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+                >
+                  {servers.map((url) => (
+                    <button
+                      key={url}
+                      type="button"
+                      role="menuitem"
+                      title={url}
+                      onClick={() => openServer(url)}
+                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-mono text-[11.5px] text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60"
+                    >
+                      <span className="relative size-[7px] flex-none">
+                        <span className="absolute inset-0 rounded-full bg-green animate-pulse-dot" />
+                      </span>
+                      <span className="truncate">{serverLabel(url)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         {updateStatus.phase === 'ready' && (
           <button
             type="button"

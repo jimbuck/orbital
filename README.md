@@ -84,7 +84,17 @@ orbital flights                                            # list Flights in thi
 orbital flight new [--worktree <branch>] [name]            # spin up a new worktree Flight
 orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this Flight
 orbital task add "<title>" [--description <text>]          # capture a task
+orbital task list [--all]                                  # open tasks (id, status, title)
+orbital task update <id> --status <status>                 # progress a task (id prefix ok)
+orbital task done <id>                                     # shorthand for --status done
+orbital server add <url|port>                              # register a live dev server
+orbital server remove <url|port>                           # deregister it
+orbital server list                                        # this Flight's live servers
 ```
+
+When a Flight has registered dev servers, the title bar shows a green
+"N dev servers" pill and the add-tab menu lists each one — one click opens it
+in an in-app browser tab next to your agent.
 
 ### Git, without leaving the cockpit
 The right panel is a full working-tree surface for the active Flight: branch +

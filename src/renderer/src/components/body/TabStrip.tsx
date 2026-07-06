@@ -11,8 +11,19 @@ import {
   Columns2
 } from 'lucide-react'
 import type { Flight, Pane, Tab, TabType } from '@shared/types'
+import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import { TAB_DND } from './PaneGroup'
+
+/** Compact display label for a dev-server URL: host:port (or the URL itself). */
+export function serverLabel(url: string): string {
+  try {
+    const u = new URL(url)
+    return u.port ? `${u.hostname}:${u.port}` : u.hostname
+  } catch {
+    return url
+  }
+}
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
@@ -62,10 +73,11 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
   const [addOpen, setAddOpen] = useState(false)
   const [paneMenu, setPaneMenu] = useState(false)
   const onlyPane = flight.panes.length <= 1
+  const servers = useStore((s) => s.devServers[flight.id]) ?? []
 
-  const addTab = (type: TabType): void => {
+  const addTab = (type: TabType, url?: string): void => {
     setAddOpen(false)
-    void window.orbital.createTab(flight.id, pane.id, type)
+    void window.orbital.createTab(flight.id, pane.id, type, url ? { url } : undefined)
   }
 
   const onStripDragOver = (e: React.DragEvent): void => {
@@ -178,6 +190,30 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
                   {label}
                 </button>
               ))}
+
+              {/* Live dev servers (registered via `orbital server add`) open as browser tabs. */}
+              {servers.length > 0 && (
+                <>
+                  <div className="my-1 h-px bg-soft" />
+                  <div className="px-2.5 pb-1 pt-1.5 text-[9.5px] font-bold uppercase tracking-[0.6px] text-faint">
+                    Dev servers
+                  </div>
+                  {servers.map((url) => (
+                    <button
+                      key={url}
+                      role="menuitem"
+                      title={url}
+                      onClick={() => addTab('browser', url)}
+                      className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium text-text-2 hover:bg-hover ${FOCUS}`}
+                    >
+                      <span className="relative size-[7px] flex-none">
+                        <span className="absolute inset-0 rounded-full bg-green animate-pulse-dot" />
+                      </span>
+                      <span className="truncate font-mono">{serverLabel(url)}</span>
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           </>
         )}

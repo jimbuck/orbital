@@ -6,7 +6,7 @@ import { AlertManager } from './services/alerts'
 import { EnvSyncWatcher } from './services/env-sync'
 import * as repo from './db/repositories'
 import { deleteBriefing } from './services/agents/briefing'
-import { IPC, isPtyTabType } from '@shared/types'
+import { IPC, isPtyTabType, type AppState } from '@shared/types'
 
 /**
  * The main-process service hub. Owns the long-lived service singletons and the
@@ -23,6 +23,8 @@ class Runtime {
   alerts!: AlertManager
   /** One env-sync watcher per workspace, watching its root checkout. */
   readonly envWatchers = new Map<string, EnvSyncWatcher>()
+  /** Live dev servers per flight (from `orbital server add`) — runtime-only state. */
+  private readonly devServers = new Map<string, Set<string>>()
   private readonly pendingBroadcasts = new Map<string, NodeJS.Timeout>()
   private readonly lastBroadcastAt = new Map<string, number>()
 
@@ -72,9 +74,63 @@ class Runtime {
     }
   }
 
+  /** Persisted state plus the runtime-only dev-server registry. */
+  appState(): AppState {
+    const devServers: Record<string, string[]> = {}
+    for (const [flightId, urls] of this.devServers) {
+      if (urls.size > 0) devServers[flightId] = [...urls]
+    }
+    return { ...repo.getAppState(), devServers }
+  }
+
+  /** Register a live dev server for a flight; returns the flight's server list. */
+  addDevServer(flightId: string, url: string): string[] {
+    let set = this.devServers.get(flightId)
+    if (!set) {
+      set = new Set()
+      this.devServers.set(flightId, set)
+    }
+    set.add(url)
+    this.broadcastState()
+    return [...set]
+  }
+
+  /** Deregister a dev server (by exact URL, or by port when `url` is port-only). */
+  removeDevServer(flightId: string, url: string): string[] {
+    const set = this.devServers.get(flightId)
+    if (!set) return []
+    const port = ((): string => {
+      try {
+        return new URL(url).port
+      } catch {
+        return ''
+      }
+    })()
+    for (const existing of [...set]) {
+      let samePort = false
+      try {
+        samePort = !!port && new URL(existing).port === port
+      } catch {
+        /* unparseable existing entry — exact match only */
+      }
+      if (existing === url || samePort) set.delete(existing)
+    }
+    if (set.size === 0) this.devServers.delete(flightId)
+    this.broadcastState()
+    return [...(this.devServers.get(flightId) ?? [])]
+  }
+
+  devServersFor(flightId: string): string[] {
+    return [...(this.devServers.get(flightId) ?? [])]
+  }
+
+  clearDevServers(flightId: string): void {
+    if (this.devServers.delete(flightId)) this.broadcastState()
+  }
+
   /** Push the full hydrated app state to the renderer (coalesced). */
   broadcastState(): void {
-    this.coalesce('state', () => this.send(IPC.evtStateChanged, repo.getAppState()))
+    this.coalesce('state', () => this.send(IPC.evtStateChanged, this.appState()))
   }
 
   /** Recompute needs-attention, update the taskbar badge, notify the renderer (coalesced). */
