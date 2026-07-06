@@ -18,7 +18,7 @@ The three needs-attention channels are individually toggleable:
 |---|---|
 | In-app indicator | Rail badges + the title-bar "N agents need you" banner |
 | Sound | A quiet chime on the *rising edge* (a newly blocked agent) |
-| Taskbar badge | Amber overlay dot on the Windows taskbar icon |
+| Taskbar badge | The taskbar icon's satellite swells and glows amber |
 
 ## Env-file sync (per workspace)
 

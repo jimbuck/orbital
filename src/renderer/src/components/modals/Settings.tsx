@@ -371,7 +371,7 @@ export default function Settings(): React.JSX.Element {
         />
         <AlertRow
           title="Taskbar badge"
-          desc="Count on the Windows taskbar icon"
+          desc="The taskbar icon's satellite glows amber"
           checked={alerts.taskbarBadge}
           onChange={(v) => setAlerts((a) => ({ ...a, taskbarBadge: v }))}
         />

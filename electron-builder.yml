@@ -15,6 +15,10 @@ extraResources:
   - from: resources/cli
     to: cli
     filter: ['**/*']
+  # Window-icon variants swapped at runtime by AlertManager (satellite-as-badge).
+  - from: resources/icons
+    to: icons
+    filter: ['**/*']
 asarUnpack:
   - '**/node_modules/node-pty/**'
   - '**/node_modules/better-sqlite3/**'
