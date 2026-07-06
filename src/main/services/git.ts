@@ -440,6 +440,12 @@ async function readFile(repoPath: string, relPath: string): Promise<string> {
   return fsReadFile(join(repoPath, relPath), 'utf8')
 }
 
+/** Raw file bytes as base64 — lets the renderer display binary content (images). */
+async function readFileBase64(repoPath: string, relPath: string): Promise<string> {
+  const buf = await fsReadFile(join(repoPath, relPath))
+  return buf.toString('base64')
+}
+
 async function writeFile(repoPath: string, relPath: string, content: string): Promise<void> {
   const full = join(repoPath, relPath)
   await mkdir(dirname(full), { recursive: true })
@@ -501,6 +507,7 @@ export const git = {
   diff,
   fileTree,
   readFile,
+  readFileBase64,
   writeFile,
   worktreeAdd,
   worktreeRemove

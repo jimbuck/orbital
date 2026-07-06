@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen, FileText, Pencil, Save, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, Pencil, Save, X } from 'lucide-react'
 import { marked } from 'marked'
+import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
 
@@ -29,7 +30,7 @@ function gitBadge(state: GitFileState): { letter: string; cls: string } {
 /* ---- View modes ---------------------------------------------------------- */
 
 type ViewMode = 'file' | 'diff' | 'preview'
-type PreviewKind = 'markdown' | 'html' | null
+type PreviewKind = 'markdown' | 'html' | 'svg' | null
 
 function extOf(path: string): string {
   const name = path.split('/').pop() ?? ''
@@ -42,7 +43,26 @@ function previewKind(path: string): PreviewKind {
   const ext = extOf(path)
   if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'markdown'
   if (ext === 'html' || ext === 'htm') return 'html'
+  if (ext === 'svg') return 'svg'
   return null
+}
+
+/* ---- Images --------------------------------------------------------------- */
+
+/** Binary image formats rendered directly in File mode (SVG stays text + Preview). */
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon'
+}
+
+function imageMime(path: string): string | null {
+  return IMAGE_MIME[extOf(path)] ?? null
 }
 
 /* ---- Syntax highlighting (shiki, loaded lazily) -------------------------- */
@@ -161,10 +181,15 @@ const MD_CSS = `
  */
 function Preview({ kind, source }: { kind: Exclude<PreviewKind, null>; source: string }): JSX.Element {
   const doc = useMemo(() => {
-    if (kind === 'html') return source
+    if (kind !== 'markdown') return source
     const body = marked.parse(source, { async: false }) as string
     return `<!doctype html><meta charset="utf-8"><style>${MD_CSS}</style><body>${body}</body>`
   }, [kind, source])
+
+  // SVG renders via an <img> data URL — script-safe, like the iframe sandbox.
+  if (kind === 'svg') {
+    return <ImageView src={`data:image/svg+xml;utf8,${encodeURIComponent(source)}`} alt="SVG preview" />
+  }
 
   return (
     <iframe
@@ -173,6 +198,29 @@ function Preview({ kind, source }: { kind: Exclude<PreviewKind, null>; source: s
       srcDoc={doc}
       className={`h-full w-full border-0 ${kind === 'html' ? 'bg-white' : ''}`}
     />
+  )
+}
+
+/* ---- Image view ----------------------------------------------------------- */
+
+/** Centered image on a checkerboard (so transparency reads), with natural size. */
+function ImageView({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+
+  return (
+    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2.5 p-6">
+      <img
+        src={src}
+        alt={alt}
+        onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+        className="min-h-0 max-h-full max-w-full rounded border border-line-2 object-contain [background:repeating-conic-gradient(#1a2029_0%_25%,#10141b_0%_50%)_0_0/16px_16px]"
+      />
+      {dims && (
+        <span className="flex-none font-mono text-[10px] text-faint">
+          {dims.w} × {dims.h}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -211,6 +259,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   const [mode, setMode] = useState<ViewMode>('file')
   const [diff, setDiff] = useState<FileDiff | null>(null)
   const [content, setContent] = useState<string | null>(null)
+  const [imageData, setImageData] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -263,19 +312,23 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   const openFile = useCallback((node: FileNode, staged = false): void => {
     reqRef.current++
     setSelected({ path: node.path, gitState: node.gitState, staged })
-    setMode(staged || node.gitState ? 'diff' : 'file')
+    // Images open on the rendered image — their "diff" is just a binary notice.
+    setMode(!imageMime(node.path) && (staged || node.gitState) ? 'diff' : 'file')
     setEditing(false)
     setDiff(null)
     setContent(null)
+    setImageData(null)
     setLoading(false)
   }, [])
 
   // Fetch whatever the current mode needs and doesn't have yet.
   useEffect(() => {
     if (!flightId || !selected) return
+    const mime = imageMime(selected.path)
     const needDiff = mode === 'diff' && diff === null
-    const needContent = mode !== 'diff' && content === null
-    if (!needDiff && !needContent) return
+    const needImage = mode !== 'diff' && !!mime && imageData === null
+    const needContent = mode !== 'diff' && !mime && content === null
+    if (!needDiff && !needImage && !needContent) return
     const id = ++reqRef.current
     setLoading(true)
     void (async () => {
@@ -283,6 +336,10 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
         if (needDiff) {
           const d = await window.orbital.gitDiff(flightId, selected.path, selected.staged)
           if (reqRef.current === id) setDiff(d)
+        }
+        if (needImage) {
+          const b64 = await window.orbital.readFileBase64(flightId, selected.path)
+          if (reqRef.current === id) setImageData(`data:${mime};base64,${b64}`)
         }
         if (needContent) {
           const c = await window.orbital.readFile(flightId, selected.path)
@@ -298,7 +355,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
         if (reqRef.current === id) setLoading(false)
       }
     })()
-  }, [flightId, selected, mode, diff, content])
+  }, [flightId, selected, mode, diff, content, imageData])
 
   // When a tree refresh changes the selected file's git state, follow it: the
   // Diff toggle appears/disappears and a stale diff is refetched. The file
@@ -335,6 +392,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   }
 
   const kind = selected ? previewKind(selected.path) : null
+  const isImage = !!selected && !!imageMime(selected.path)
   const canDiff = !!selected && (!!selected.gitState || selected.staged)
   const modes: { id: ViewMode; label: string }[] = [
     { id: 'file', label: 'File' },
@@ -384,6 +442,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
                 )}
 
                 {mode === 'file' &&
+                  !isImage &&
                   content !== null &&
                   (editing ? (
                     <div className="flex items-center gap-1.5">
@@ -442,7 +501,15 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
               {loading ? (
                 <div className="px-4 py-3 font-mono text-[11px] text-faint">Loading…</div>
               ) : mode === 'diff' ? (
-                diff && <DiffView diff={diff} />
+                diff && <DiffView diff={diff} path={selected.path} />
+              ) : isImage ? (
+                imageData ? (
+                  <ImageView src={imageData} alt={selected.path} />
+                ) : (
+                  <div className="px-4 py-3 font-mono text-[11px] text-faint">
+                    Image could not be read{selected.gitState === 'deleted' ? ' (deleted)' : ''}.
+                  </div>
+                )
               ) : content === null ? (
                 <div className="px-4 py-3 font-mono text-[11px] text-faint">
                   File could not be read{selected.gitState === 'deleted' ? ' (deleted)' : ''}.
@@ -543,6 +610,8 @@ function TreeNode({
         >
           {badge.letter}
         </span>
+      ) : imageMime(node.path) || extOf(node.path) === 'svg' ? (
+        <ImageIcon size={13} strokeWidth={1.5} className="flex-none text-faint" />
       ) : (
         <FileText size={13} strokeWidth={1.5} className="flex-none text-faint" />
       )}
@@ -562,7 +631,49 @@ function stripSign(line: { type: string; text: string }): string {
   return text
 }
 
-function DiffView({ diff }: { diff: FileDiff }): JSX.Element {
+/** A shiki-themed token line: colored spans reassembled per diff line. */
+type TokenLine = { content: string; color?: string }[]
+
+/**
+ * Tokenize the diff's code lines in one shiki pass (hunk/meta lines become
+ * blank placeholders so indices stay aligned). Null while loading, for unknown
+ * grammars, and for oversized diffs — callers fall back to flat coloring.
+ */
+function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
+  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
+
+  const code = useMemo(
+    () =>
+      diff.lines
+        .map((l) => (l.type === 'add' || l.type === 'del' || l.type === 'context' ? stripSign(l) : ''))
+        .join('\n'),
+    [diff]
+  )
+
+  useEffect(() => {
+    let alive = true
+    setTokens(null)
+    const lang = langFor(path)
+    if (!lang || diff.binary || code.length > HIGHLIGHT_MAX) return
+    void import('shiki')
+      .then(({ codeToTokens }) => codeToTokens(code, { lang: lang as BundledLanguage, theme: 'github-dark-default' }))
+      .then((r) => {
+        if (alive) setTokens(r.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))))
+      })
+      .catch(() => {
+        /* unknown grammar / load failure — flat coloring stays up */
+      })
+    return () => {
+      alive = false
+    }
+  }, [code, path, diff.binary])
+
+  return tokens
+}
+
+function DiffView({ diff, path }: { diff: FileDiff; path: string }): JSX.Element {
+  const tokens = useDiffTokens(diff, path)
+
   if (diff.binary) {
     return <div className="px-4 py-3 font-mono text-[11px] text-faint">Binary file not shown</div>
   }
@@ -578,7 +689,7 @@ function DiffView({ diff }: { diff: FileDiff }): JSX.Element {
           )
         }
         const rowBg = line.type === 'add' ? 'bg-green/10' : line.type === 'del' ? 'bg-red/10' : ''
-        const textCls =
+        const signCls =
           line.type === 'add'
             ? 'text-diff-add'
             : line.type === 'del'
@@ -587,12 +698,23 @@ function DiffView({ diff }: { diff: FileDiff }): JSX.Element {
                 ? 'text-faint'
                 : 'text-text-3'
         const sign = line.type === 'add' ? '+' : line.type === 'del' ? '−' : ' '
+        const isCode = line.type === 'add' || line.type === 'del' || line.type === 'context'
+        const lineTokens = isCode && tokens ? tokens[i] : null
         return (
           <div key={i} className={`flex ${rowBg}`}>
             <span className="w-[30px] flex-none pr-1.5 text-right text-faint">{line.oldNo ?? ''}</span>
             <span className="w-[30px] flex-none pr-3 text-right text-faint">{line.newNo ?? ''}</span>
-            <span className={`whitespace-pre ${textCls}`}>
-              {sign} {stripSign(line)}
+            <span className={`whitespace-pre ${signCls}`}>
+              {sign}{' '}
+              {lineTokens && lineTokens.length > 0 ? (
+                lineTokens.map((t, j) => (
+                  <span key={j} style={t.color ? { color: t.color } : undefined}>
+                    {t.content}
+                  </span>
+                ))
+              ) : (
+                stripSign(line)
+              )}
             </span>
           </div>
         )

@@ -468,6 +468,7 @@ export function registerIpc(): void {
   )
   h(IPC.fileTree, (_e, flightId: string) => git.fileTree(flightRepoPath(flightId)))
   h(IPC.readFile, (_e, flightId: string, path: string) => git.readFile(flightRepoPath(flightId), path))
+  h(IPC.readFileBase64, (_e, flightId: string, path: string) => git.readFileBase64(flightRepoPath(flightId), path))
   h(IPC.writeFile, async (_e, flightId: string, path: string, content: string) => {
     await git.writeFile(flightRepoPath(flightId), path, content)
     broadcast()

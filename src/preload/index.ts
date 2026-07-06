@@ -108,6 +108,8 @@ const api: OrbitalApi = {
   fileTree: (flightId: string) => ipcRenderer.invoke(IPC.fileTree, flightId) as Promise<FileNode[]>,
   readFile: (flightId: string, path: string) =>
     ipcRenderer.invoke(IPC.readFile, flightId, path) as Promise<string>,
+  readFileBase64: (flightId: string, path: string) =>
+    ipcRenderer.invoke(IPC.readFileBase64, flightId, path) as Promise<string>,
   writeFile: (flightId: string, path: string, content: string) =>
     ipcRenderer.invoke(IPC.writeFile, flightId, path, content) as Promise<void>,
 

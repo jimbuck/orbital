@@ -399,6 +399,7 @@ export const IPC = {
   gitDiff: 'orbital:gitDiff',
   fileTree: 'orbital:fileTree',
   readFile: 'orbital:readFile',
+  readFileBase64: 'orbital:readFileBase64',
   writeFile: 'orbital:writeFile',
   // tasks
   createTask: 'orbital:createTask',
@@ -494,6 +495,8 @@ export interface OrbitalApi {
   gitDiff(flightId: string, path: string, staged: boolean): Promise<FileDiff>
   fileTree(flightId: string): Promise<FileNode[]>
   readFile(flightId: string, path: string): Promise<string>
+  /** Raw file bytes as base64 — for rendering binary content (images) in the editor. */
+  readFileBase64(flightId: string, path: string): Promise<string>
   writeFile(flightId: string, path: string, content: string): Promise<void>
 
   // tasks
