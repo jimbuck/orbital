@@ -17,6 +17,13 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  # `github.token` respects the repo/org "Allow GitHub Actions to create and
+  # approve pull requests" setting. Fall back to it, but prefer an explicit
+  # automation token when one is configured so release-please can still open the
+  # release PR in locked-down repos.
+  RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' && secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -29,6 +36,7 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          token: ${{ env.RELEASE_PLEASE_TOKEN }}
 
   build-windows:
     needs: release-please
@@ -56,7 +64,7 @@ jobs:
       - name: Upload installer to the GitHub release
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ env.RELEASE_PLEASE_TOKEN }}
         run: |
           $assets = @(
             (Get-ChildItem dist/*-setup.exe).FullName

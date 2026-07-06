@@ -24,6 +24,11 @@ rejects non-conforming messages locally. Hooks install automatically via the
 2. The `Release` workflow (`.github/workflows/release.yml`) runs
    **release-please**, which opens/updates a *release PR* that accumulates
    pending changes into a `package.json` bump + `CHANGELOG.md` entry.
+   - If your repo/org disables "Allow GitHub Actions to create and approve
+     pull requests", configure a `RELEASE_PLEASE_TOKEN` secret with a PAT or
+     GitHub App token that has `contents: write` and `pull-requests: write`.
+     The workflow prefers that token automatically and otherwise falls back to
+     the built-in `GITHUB_TOKEN`.
 3. Merge the release PR when you want to ship. release-please tags `vX.Y.Z`
    and publishes a GitHub release with the changelog as notes.
 4. The same workflow then builds the Windows installer on a `windows-latest`
@@ -50,4 +55,5 @@ The update feed location is the `publish` block in `electron-builder.yml`
 > **Note:** the repo is currently **private**. In-app update checks hit the
 > release assets anonymously, which GitHub only allows on public repos — so
 > auto-update will start working once the repo is made public. (CI publishing
-> works either way; the workflow uses the built-in `GITHUB_TOKEN`.)
+> works either way; the workflow uses `RELEASE_PLEASE_TOKEN` when configured,
+> otherwise the built-in `GITHUB_TOKEN`.)
