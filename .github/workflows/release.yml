@@ -1,74 +1,75 @@
-# Release pipeline (conventional commits -> GitHub release -> auto-update feed).
+# Fully automatic release on every push to main (same model as casewright):
 #
-# 1. Every push to main runs release-please, which maintains a "release PR"
-#    that accumulates conventional commits into a version bump + CHANGELOG.
-# 2. Merging that PR makes release-please tag vX.Y.Z and publish a GitHub
-#    release with the changelog as its notes.
-# 3. That same run then builds the Windows installer and uploads
-#    Orbital-X.Y.Z-setup.exe + latest.yml (+ blockmap) to the release —
-#    exactly the assets electron-updater polls for inside the app.
+#   1. semantic-release reads the Conventional Commits since the last tag and
+#      decides the next version — fix/refactor → patch, feat → minor, a `!` /
+#      BREAKING CHANGE → major. You never pick the number. It updates
+#      CHANGELOG.md + package.json/package-lock.json, commits that, and pushes
+#      the v<version> tag. (It does NOT create the GitHub Release — that happens
+#      in step 2, with the installer attached, so the auto-update feed never
+#      sees a release it can't download.)
+#
+#   2. If — and only if — a release was cut, the reusable build workflow builds
+#      the Windows installer and publishes the GitHub Release with the assets
+#      (setup.exe + blockmap + latest.yml) and the changelog notes.
+#      electron-updater inside the app polls exactly those assets.
+#
+# A push with no releasable commits (only chore/docs/style/test/ci) does
+# nothing. The release commit is pushed with GITHUB_TOKEN and carries
+# [skip ci], so it never re-triggers this workflow.
+#
+# Prerequisite: main must allow the GitHub Actions bot to push (semantic-release
+# pushes the bump commit + tag). If main becomes a protected branch, add a
+# ruleset bypass for the actions bot.
 name: Release
 
 on:
   push:
     branches: [main]
 
+# Let semantic-release push the bump commit + tag.
 permissions:
   contents: write
-  pull-requests: write
 
-env:
-  # `github.token` respects the repo/org "Allow GitHub Actions to create and
-  # approve pull requests" setting. Fall back to it, but prefer an explicit
-  # automation token when one is configured so release-please can still open the
-  # release PR in locked-down repos.
-  RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN != '' && secrets.RELEASE_PLEASE_TOKEN || github.token }}
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release-please:
+  release:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name: ${{ steps.rp.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@v5
-        id: rp
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-          token: ${{ env.RELEASE_PLEASE_TOKEN }}
-
-  build-windows:
-    needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    runs-on: windows-latest
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+      tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+      notes: ${{ steps.semantic.outputs.new_release_notes }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0 # semantic-release needs full history + tags to find the last release
 
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
 
-      - run: npm ci
-
-      - run: npm run build
-
-      # `--publish never`: latest.yml is still generated (the publish provider is
-      # configured in electron-builder.yml); uploading is done explicitly below so
-      # the assets land on the release release-please just published.
-      - run: npx electron-builder --publish never
-
-      - name: Upload installer to the GitHub release
-        shell: pwsh
+      - name: semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: |
+            @semantic-release/changelog@6
+            @semantic-release/exec@6
+            @semantic-release/git@10
         env:
-          GH_TOKEN: ${{ env.RELEASE_PLEASE_TOKEN }}
-        run: |
-          $assets = @(
-            (Get-ChildItem dist/*-setup.exe).FullName
-            (Get-ChildItem dist/*-setup.exe.blockmap).FullName
-            (Get-Item dist/latest.yml).FullName
-          )
-          gh release upload "${{ needs.release-please.outputs.tag_name }}" @assets --clobber
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build + publish the Windows release only when semantic-release cut a version.
+  build:
+    needs: release
+    if: ${{ needs.release.outputs.published == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+      ref: ${{ needs.release.outputs.tag }}
+      notes: ${{ needs.release.outputs.notes }}

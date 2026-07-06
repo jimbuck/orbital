@@ -1,59 +1,82 @@
 # Releasing Orbital
 
-Releases are fully automated from conventional commits — no manual version
-bumps, tags, or installer uploads.
+Releases are **fully automatic** and driven by
+[Conventional Commits](https://www.conventionalcommits.org) — the same model as
+casewright. You never choose a version number, push a tag, or merge a release
+PR; you write good commit messages and push to `main`.
 
-## Commit messages (conventional commits)
+## How it works
 
-Every commit on `main` must follow [Conventional Commits](https://www.conventionalcommits.org/):
+Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml):
 
+1. **[semantic-release](https://semantic-release.gitbook.io)** reads every commit
+   since the last `v*` tag and decides whether a release is due and what the
+   version is:
+
+   | Commit type                                | Bump              | `1.2.1` → |
+   | ------------------------------------------ | ----------------- | --------- |
+   | `fix:` / `perf:` / `refactor:`             | patch             | `1.2.2`   |
+   | `feat:`                                    | minor             | `1.3.0`   |
+   | `feat!:` / any `BREAKING CHANGE:`          | major             | `2.0.0`   |
+   | `chore:` `docs:` `style:` `test:` `ci:`    | none — no release | —         |
+
+   When a release is due it updates [`CHANGELOG.md`](../CHANGELOG.md) and the
+   `package.json`/`package-lock.json` versions, commits that as
+   `chore(release): vX.Y.Z [skip ci]`, and pushes the `vX.Y.Z` tag. It does
+   **not** create the GitHub Release yet.
+
+2. If a version was cut,
+   [`.github/workflows/release-desktop.yml`](../.github/workflows/release-desktop.yml)
+   builds the Windows installer and **publishes the GitHub Release with the
+   assets attached** — `Orbital-X.Y.Z-setup.exe`, its `.blockmap`, and
+   `latest.yml`.
+
+The two-step ordering is deliberate: the Release only becomes visible once the
+installer is present, so **electron-updater inside installed apps never sees a
+release it can't download**. The version flows from the tag's `package.json`
+(bumped by semantic-release before tagging), which is exactly what
+electron-builder stamps into the installer and `latest.yml`.
+
+## What you do
+
+Nothing release-specific. Write conventional commits (enforced locally by the
+husky + commitlint `commit-msg` hook, config in `commitlint.config.mjs`):
+
+```text
+feat(git): add per-file stage from the diff view
+fix(terminal): stop dropping bracketed-paste on Windows
+feat!: require git 2.40+
+
+BREAKING CHANGE: worktree pruning now uses `git worktree remove --force`.
 ```
-feat: add split-pane drag handles          -> minor bump (1.1.0 -> 1.2.0)
-fix: keep PTY alive across renderer reload -> patch bump (1.1.0 -> 1.1.1)
-feat!: rework the control-channel protocol -> major bump (1.1.0 -> 2.0.0)
-chore/docs/refactor/perf/test/ci: ...      -> no release on their own
-```
 
-A `commit-msg` hook (husky + commitlint, config in `commitlint.config.mjs`)
-rejects non-conforming messages locally. Hooks install automatically via the
-`prepare` script on `npm install`.
+Push to `main`. If anything releasable landed, a new version ships a few
+minutes later; if not, nothing happens.
 
-## Release flow
+## Manual / fallback release
 
-1. Push (or merge) conventional commits to `main`.
-2. The `Release` workflow (`.github/workflows/release.yml`) runs
-   **release-please**, which opens/updates a *release PR* that accumulates
-   pending changes into a `package.json` bump + `CHANGELOG.md` entry.
-   - If your repo/org disables "Allow GitHub Actions to create and approve
-     pull requests", configure a `RELEASE_PLEASE_TOKEN` secret with a PAT or
-     GitHub App token that has `contents: write` and `pull-requests: write`.
-     The workflow prefers that token automatically and otherwise falls back to
-     the built-in `GITHUB_TOKEN`.
-3. Merge the release PR when you want to ship. release-please tags `vX.Y.Z`
-   and publishes a GitHub release with the changelog as notes.
-4. The same workflow then builds the Windows installer on a `windows-latest`
-   runner and uploads to that release:
-   - `Orbital-X.Y.Z-setup.exe` — the NSIS installer
-   - `Orbital-X.Y.Z-setup.exe.blockmap` — enables differential downloads
-   - `latest.yml` — the update feed electron-updater polls
+To rebuild and republish a specific version by hand — e.g. the build failed
+*after* the tag was already created, so re-running won't help — run **Build
+desktop release** from the **Actions** tab and supply the version (e.g.
+`1.3.0`). It checks out that version's tag, rebuilds, and updates the existing
+Release's assets.
 
-Version state lives in `.release-please-manifest.json` (current released
-version) and `release-please-config.json` (changelog sections etc.).
+## One-time setup caveat — protected `main`
 
-## Auto-updates in the app
+semantic-release pushes the release commit and tag using the built-in
+`GITHUB_TOKEN`. If `main` ever becomes a **protected branch**, allow the GitHub
+Actions bot to bypass the rule (Settings → Rules → Rulesets → bypass list), or
+supply a PAT with push rights as the workflow's token. While `main` is
+unprotected (the default), no setup is needed.
 
-Packaged builds check GitHub releases on startup and every 4 hours
-(`src/main/services/updater.ts`), download updates in the background, and show
-a **Restart to update** pill in the title bar when one is ready. Installing is
-silent and relaunches the app; a downloaded update is also applied on normal
-quit. Help ▸ "Check for Updates…" triggers a manual check (status shows in the
-About dialog). Dev runs (`npm start`) report auto-update as disabled.
+## Notes
 
-The update feed location is the `publish` block in `electron-builder.yml`
-(baked into the build as `resources/app-update.yml`).
-
-> **Note:** the repo is currently **private**. In-app update checks hit the
-> release assets anonymously, which GitHub only allows on public repos — so
-> auto-update will start working once the repo is made public. (CI publishing
-> works either way; the workflow uses `RELEASE_PLEASE_TOKEN` when configured,
-> otherwise the built-in `GITHUB_TOKEN`.)
+- The release commit carries `[skip ci]` and is authored by `GITHUB_TOKEN`, so
+  it never re-triggers the release workflow (no loops).
+- `CHANGELOG.md` is generated — don't hand-edit it.
+- semantic-release and its plugins aren't project dependencies; the workflow
+  installs them ephemerally, keeping the lockfile lean.
+- Auto-update inside the app polls the `latest.yml` of the newest published
+  release (provider configured in
+  [`electron-builder.yml`](../electron-builder.yml)); see
+  `src/main/services/updater.ts` for the in-app side.

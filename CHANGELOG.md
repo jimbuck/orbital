@@ -1,5 +1,7 @@
 # Changelog
 
+All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
+
 ## [1.2.1](https://github.com/jimbuck/orbital/compare/v1.2.0...v1.2.1) (2026-07-06)
 
 

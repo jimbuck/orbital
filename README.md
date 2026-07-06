@@ -214,9 +214,11 @@ node-pty (ConPTY) + xterm.js (WebGL) · better-sqlite3 · chokidar · zustand ·
 ## Releases & auto-update
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
-(enforced by a commitlint hook). release-please turns them into versioned
-GitHub releases with a Windows installer, and packaged builds self-update from
-those releases in the background — see [`docs/releasing.md`](./docs/releasing.md).
+(enforced by a commitlint hook). semantic-release turns them into versioned
+GitHub releases automatically — no release PRs — publishing each release only
+after the Windows installer is built and attached, and packaged builds
+self-update from those releases in the background — see
+[`docs/releasing.md`](./docs/releasing.md).
 
 ## Layout
 
