@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/jimbuck/orbital/compare/v1.2.0...v1.2.1) (2026-07-06)
+
+
+### Bug Fixes
+
+* override node-gyp to v11 so CI can rebuild node-pty ([941b72c](https://github.com/jimbuck/orbital/commit/941b72c6a967be0f61df1755e07b09de0b7a3ae6))
+
 ## [1.2.0](https://github.com/jimbuck/orbital/compare/v1.1.0...v1.2.0) (2026-07-06)
 
 
