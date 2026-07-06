@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.2.2](https://github.com/jimbuck/orbital/compare/v1.2.1...v1.2.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* stop rebuilding node-pty at package time (hangs CI) ([7098b5b](https://github.com/jimbuck/orbital/commit/7098b5b9d8a67b349107f3f6136b8535e079bcba))
+
 ## [1.2.1](https://github.com/jimbuck/orbital/compare/v1.2.0...v1.2.1) (2026-07-06)
 
 
