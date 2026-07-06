@@ -94,7 +94,8 @@ jobs:
       # prebuilt in seconds). node-pty is deliberately NOT rebuilt: it ships NAPI
       # prebuilds that work under Electron, and its from-source build hangs on
       # hosted Windows runners (npmRebuild is off in electron-builder.yml).
-      - run: npx electron-rebuild -f -w better-sqlite3
+      # `-o/--only` (not `-w`) is what excludes every other module.
+      - run: npx electron-rebuild -f -o better-sqlite3
 
       # `--publish never`: latest.yml is still generated (the publish provider is
       # configured in electron-builder.yml); uploading happens below so the Release
