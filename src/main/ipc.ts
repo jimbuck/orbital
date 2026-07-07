@@ -181,6 +181,28 @@ async function registerWorkspace(repoPath: string): Promise<Flight | null> {
   return root
 }
 
+/* ---- status-event ordering ---------------------------------------------- */
+
+/**
+ * Fire time of the last status event applied per terminal (runtime-only state).
+ *
+ * Claude hooks are registered async, so each event arrives from its own
+ * short-lived `orbital hook` process and pipe DELIVERY order is not fire order:
+ * the PostToolUse of a turn's final tool call regularly lands after the Stop
+ * that ended the turn, wedging an idle flight on the "working" spinner. Every
+ * status-bearing request carries the moment it was fired (stamped by the CLI
+ * before its stdin wait); an event older than the last one applied is stale.
+ */
+const statusAppliedAt = new Map<string, number>()
+
+/** Record a status event's fire time; false when a later-fired event already landed. */
+function acceptStatusEvent(terminalId: string, firedAt: unknown): boolean {
+  const ts = typeof firedAt === 'number' && Number.isFinite(firedAt) ? firedAt : Date.now()
+  if (ts < (statusAppliedAt.get(terminalId) ?? 0)) return false
+  statusAppliedAt.set(terminalId, ts)
+  return true
+}
+
 /* ---- registration ------------------------------------------------------ */
 
 export function registerIpc(): void {
@@ -424,6 +446,9 @@ export function registerIpc(): void {
     // finishes). Uses INPUT only — never scrapes terminal output (req 7).
     const tab = repo.tabs.get(tabId)
     if (tab && tab.type === 'agent' && tab.status === 'needs_attention') {
+      // The human's response supersedes anything already in flight: hook events
+      // fired before this moment must not overwrite the flip below.
+      statusAppliedAt.set(tabId, Date.now())
       repo.tabs.updateStatus(tabId, 'working')
       repo.flights.recomputeStatus(tab.flightId)
       runtime.broadcastState()
@@ -596,10 +621,12 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         if (!req.terminalId) return { ok: false, error: 'no ORBITAL_TERMINAL_ID in environment' }
         const tab = repo.tabs.get(req.terminalId)
         if (!tab) return { ok: false, error: 'terminal not found' }
-        repo.tabs.updateStatus(req.terminalId, status)
-        repo.flights.recomputeStatus(tab.flightId)
-        runtime.broadcastState()
-        runtime.broadcastAlert()
+        if (acceptStatusEvent(req.terminalId, req.args.firedAt)) {
+          repo.tabs.updateStatus(req.terminalId, status)
+          repo.flights.recomputeStatus(tab.flightId)
+          runtime.broadcastState()
+          runtime.broadcastAlert()
+        }
         return { ok: true, data: { status } }
       }
       case 'flights': {
@@ -655,6 +682,8 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         const payload = (req.args.payload ?? {}) as Record<string, unknown>
         const status = hookEventToStatus(event, payload)
         if (!status) return { ok: true }
+        // Async hooks race over the pipe — drop an event a later-fired one beat here.
+        if (!acceptStatusEvent(req.terminalId, req.args.firedAt)) return { ok: true }
         repo.tabs.updateStatus(req.terminalId, status)
         repo.flights.recomputeStatus(tab.flightId)
         runtime.broadcastState()

@@ -127,8 +127,9 @@ function buildRequest(argv: string[]): ControlRequest {
     case 'status': {
       const token = rest[0]
       if (!token) usageError()
-      // The raw token is forwarded; the main process normalizes it.
-      return request('status', { status: token })
+      // The raw token is forwarded; the main process normalizes it. firedAt lets
+      // the cockpit order this against async hook events racing over the pipe.
+      return request('status', { status: token, firedAt: Date.now() })
     }
 
     case 'flights':
@@ -437,12 +438,17 @@ function runHook(args: string[]): void {
   if (!process.env[ENV.flightId]) process.exit(0)
   const event = args.find((a) => !a.startsWith('--')) ?? ''
 
+  // Stamp the fire time NOW, before the stdin wait. Hooks run async, each in its
+  // own short-lived process, so pipe DELIVERY order is not fire order — the
+  // cockpit uses this stamp to drop events that arrive after a later-fired one.
+  const firedAt = Date.now()
+
   let input = ''
   let done = false
   const finish = (): void => {
     if (done) return
     done = true
-    deliverHook(event, input)
+    deliverHook(event, input, firedAt)
   }
 
   process.stdin.setEncoding('utf8')
@@ -454,7 +460,7 @@ function runHook(args: string[]): void {
 }
 
 /** Send the hook event over the control pipe, then exit 0 regardless of outcome. */
-function deliverHook(event: string, input: string): void {
+function deliverHook(event: string, input: string, firedAt: number): void {
   let payload: Record<string, unknown> = {}
   try {
     payload = input.trim() ? (JSON.parse(input) as Record<string, unknown>) : {}
@@ -462,7 +468,7 @@ function deliverHook(event: string, input: string): void {
     payload = {}
   }
 
-  const req = request('hook', { event, payload })
+  const req = request('hook', { event, firedAt, payload })
   const pipePath = process.env[ENV.socket] || controlPipePath()
   const bail = setTimeout(() => process.exit(0), 1200)
   const socket = connect(pipePath)
