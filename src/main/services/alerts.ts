@@ -41,15 +41,15 @@ export class AlertManager {
     // Setting the icon on every update (not just on edges) keeps it self-healing:
     // a recreated window or a mid-alert settings toggle converges on next tick.
     const win = this.getWindow()
-    if (win) {
+    if (win && !win.isDestroyed()) {
       const badge = count > 0 && this.getSettings().alerts.taskbarBadge
       const icon = this.icon(badge ? 'alert' : 'normal')
       if (!icon.isEmpty()) {
         try {
           win.setIcon(icon)
         } catch {
-          // setIcon can throw if the window was destroyed mid-update; the badge
-          // is best-effort, so swallow and keep the loop alive.
+          // The window can still be destroyed between the check and the call;
+          // the badge is best-effort, so swallow and keep the loop alive.
         }
       }
     }
