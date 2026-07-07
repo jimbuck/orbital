@@ -39,7 +39,15 @@ function walkFiles(root: string, dir: string, out: string[], skip: Set<string>):
   }
 }
 
-/** Copy a single relative file from root -> worktree, creating parent dirs. */
+/**
+ * Copy a single relative file from root -> worktree, creating parent dirs.
+ *
+ * Conflict rule: the root checkout is the source of truth, so an existing
+ * worktree copy is always OVERWRITTEN (never skipped, no prompt). Synced
+ * files are gitignored — nothing committed can be lost — and mirroring the
+ * root's latest state is the whole point of the sync; skipping would leave
+ * stale secrets/config behind silently. Users edit synced files at the root.
+ */
 async function copyRel(rootPath: string, worktreePath: string, rel: string): Promise<void> {
   const src = path.join(rootPath, rel)
   const dest = path.join(worktreePath, rel)
