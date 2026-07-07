@@ -71,7 +71,7 @@ export default function Settings(): React.JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
 
   // Editable working copies seeded from the current store state.
-  const [patterns, setPatterns] = useState<string[]>(() => ws?.envSyncPatterns ?? [])
+  const [patterns, setPatterns] = useState<string[]>(() => settings?.envSyncPatterns ?? [])
   const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [adding, setAdding] = useState(false)
@@ -138,7 +138,6 @@ export default function Settings(): React.JSX.Element {
     setSaving(true)
     try {
       if (ws) {
-        await window.orbital.updateEnvPatterns(ws.id, patterns)
         await window.orbital.setWorkspaceAgent(ws.id, {
           defaultAgentProvider: agentProvider,
           agentExecPath: agentExecPath.trim()
@@ -148,7 +147,8 @@ export default function Settings(): React.JSX.Element {
       await window.orbital.setSettings({
         defaultShell,
         alerts,
-        claudeHooksInstalled: settings?.claudeHooksInstalled ?? false
+        claudeHooksInstalled: settings?.claudeHooksInstalled ?? false,
+        envSyncPatterns: patterns
       })
       closeModal()
     } finally {
@@ -177,6 +177,7 @@ export default function Settings(): React.JSX.Element {
       <div className={sectionLabel}>Environment file sync</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
         Files matching these patterns are copied from the root checkout into every worktree Flight and kept in sync.
+        Applies to all workspaces.
       </p>
       <div className="mt-3 flex flex-wrap gap-[7px]">
         {patterns.map((p) => (

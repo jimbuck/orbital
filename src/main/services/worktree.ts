@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
 import { git } from './git'
 import { syncEnvFiles } from './env-sync'
-import { flights as flightRepo } from '../db/repositories'
+import { flights as flightRepo, settings as settingsRepo } from '../db/repositories'
 import type { Workspace, Flight } from '@shared/types'
 
 /** Turn a branch/title into a filesystem- and git-safe slug. */
@@ -96,7 +96,7 @@ export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Pr
 
   // Best-effort env sync; a worktree should still come up if a file fails.
   try {
-    await syncEnvFiles(workspace.repoPath, worktreePath, workspace.envSyncPatterns)
+    await syncEnvFiles(workspace.repoPath, worktreePath, settingsRepo.get().envSyncPatterns)
   } catch {
     /* env sync is non-fatal */
   }

@@ -195,6 +195,8 @@ export function registerIpc(): void {
   h(IPC.getState, () => runtime.appState())
   h(IPC.setSettings, (_e, settings) => {
     const s = repo.settings.set(settings)
+    // Env-sync patterns are global settings — refresh every workspace's watcher.
+    for (const ws of repo.workspaces.list()) runtime.ensureEnvWatcher(ws.id)
     broadcast()
     return s
   })
@@ -243,12 +245,6 @@ export function registerIpc(): void {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.workspaces.rename(workspaceId, trimmed)
-    broadcast()
-  })
-
-  h(IPC.updateEnvPatterns, (_e, workspaceId: string, patterns: string[]) => {
-    repo.workspaces.updateEnvPatterns(workspaceId, patterns)
-    runtime.ensureEnvWatcher(workspaceId)
     broadcast()
   })
 

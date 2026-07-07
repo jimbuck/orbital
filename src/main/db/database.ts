@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import Database from 'better-sqlite3'
+import { DEFAULT_ENV_SYNC_PATTERNS } from '@shared/types'
 
 let db: Database.Database | null = null
 
@@ -97,6 +98,39 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'workspaces', 'default_agent_provider', "TEXT NOT NULL DEFAULT 'claude'")
   addColumnIfMissing(d, 'workspaces', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
+  migrateEnvPatternsToSettings(d)
+}
+
+/**
+ * One-time move of env-sync patterns from per-workspace rows to the global
+ * settings blob: when the settings JSON has no `envSyncPatterns` key yet, seed
+ * it with the union of every workspace's stored patterns plus the current
+ * defaults, so custom globs survive the switch. The legacy
+ * `workspaces.env_sync_patterns` column is left in place but no longer read.
+ */
+function migrateEnvPatternsToSettings(d: Database.Database): void {
+  const row = d.prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
+  if (!row) return // no settings row yet — the repository's defaults already include the key
+  try {
+    const parsed = JSON.parse(row.value)
+    if (parsed && typeof parsed === 'object' && !('envSyncPatterns' in parsed)) {
+      const union = new Set(DEFAULT_ENV_SYNC_PATTERNS)
+      const rows = d.prepare('SELECT env_sync_patterns FROM workspaces').all() as Array<{
+        env_sync_patterns: string
+      }>
+      for (const r of rows) {
+        try {
+          for (const p of JSON.parse(r.env_sync_patterns || '[]')) if (typeof p === 'string') union.add(p)
+        } catch {
+          // Skip unparseable per-workspace patterns.
+        }
+      }
+      parsed.envSyncPatterns = [...union]
+      d.prepare("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(parsed))
+    }
+  } catch {
+    // Unparseable settings blob — the repository layer falls back to defaults.
+  }
 }
 
 function addColumnIfMissing(d: Database.Database, table: string, column: string, def: string): void {

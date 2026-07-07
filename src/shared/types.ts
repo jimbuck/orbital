@@ -96,8 +96,6 @@ export interface Workspace {
   id: string
   name: string
   repoPath: string
-  /** User-editable wildcard list for env-file sync (PRD §5). */
-  envSyncPatterns: string[]
   /** Provider an `agent` tab launches by default in this workspace (default 'claude'). */
   defaultAgentProvider: string
   /** Optional explicit path to the agent executable, overriding PATH lookup. */
@@ -106,10 +104,11 @@ export interface Workspace {
 }
 
 /**
- * Default env-sync globs for a new workspace: env files, agent config
- * directories, and installed dependencies. Directory patterns use `/**` since
- * sync matching runs against relative file paths. `node_modules/**` is copied
- * once when a worktree is created but never live-watched (see env-sync.ts).
+ * Default env-sync globs (a global setting shared by every workspace): env
+ * files, agent config directories, and installed dependencies. Directory
+ * patterns use `/**` since sync matching runs against relative file paths.
+ * `node_modules/**` is copied once when a worktree is created but never
+ * live-watched (see env-sync.ts).
  */
 export const DEFAULT_ENV_SYNC_PATTERNS = [
   '.env',
@@ -196,6 +195,8 @@ export interface Settings {
   }
   /** Whether Orbital's Claude status hooks are installed in ~/.claude/settings.json. */
   claudeHooksInstalled: boolean
+  /** Global wildcard list for env-file sync, applied to every workspace (PRD §5). */
+  envSyncPatterns: string[]
 }
 
 /** Full application state pushed to / pulled by the renderer. */
@@ -395,7 +396,6 @@ export const IPC = {
   addWorkspace: 'orbital:addWorkspace',
   removeWorkspace: 'orbital:removeWorkspace',
   renameWorkspace: 'orbital:renameWorkspace',
-  updateEnvPatterns: 'orbital:updateEnvPatterns',
   // flights / panes / tabs
   createFlight: 'orbital:createFlight',
   removeFlight: 'orbital:removeFlight',
@@ -474,7 +474,6 @@ export interface OrbitalApi {
   addWorkspace(): Promise<Workspace | null>
   removeWorkspace(workspaceId: string): Promise<void>
   renameWorkspace(workspaceId: string, name: string): Promise<void>
-  updateEnvPatterns(workspaceId: string, patterns: string[]): Promise<void>
 
   // flights / panes / tabs
   createFlight(workspaceId: string, opts: CreateFlightOptions): Promise<Flight>

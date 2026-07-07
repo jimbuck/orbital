@@ -27,7 +27,8 @@ const now = (): number => Date.now()
 const DEFAULT_SETTINGS: Settings = {
   defaultShell: '',
   alerts: { indicator: true, sound: true, taskbarBadge: true },
-  claudeHooksInstalled: false
+  claudeHooksInstalled: false,
+  envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS
 }
 
 /* ---- row -> entity mappers --------------------------------------------- */
@@ -37,7 +38,6 @@ function mapWorkspace(r: any): Workspace {
     id: r.id,
     name: r.name,
     repoPath: r.repo_path,
-    envSyncPatterns: JSON.parse(r.env_sync_patterns || '[]'),
     defaultAgentProvider: r.default_agent_provider || 'claude',
     agentExecPath: r.agent_exec_path || undefined,
     addedAt: r.added_at
@@ -86,13 +86,11 @@ export const workspaces = {
     const r = getDb().prepare('SELECT * FROM workspaces WHERE repo_path = ?').get(repoPath)
     return r ? mapWorkspace(r) : undefined
   },
-  create(input: { name: string; repoPath: string; envSyncPatterns?: string[] }): Workspace {
+  create(input: { name: string; repoPath: string }): Workspace {
     const wid = id()
     getDb()
-      .prepare(
-        'INSERT INTO workspaces (id, name, repo_path, env_sync_patterns, added_at) VALUES (?, ?, ?, ?, ?)'
-      )
-      .run(wid, input.name, input.repoPath, JSON.stringify(input.envSyncPatterns ?? DEFAULT_ENV_SYNC_PATTERNS), now())
+      .prepare('INSERT INTO workspaces (id, name, repo_path, added_at) VALUES (?, ?, ?, ?)')
+      .run(wid, input.name, input.repoPath, now())
     return workspaces.get(wid)!
   },
   remove(wid: string): void {
@@ -100,9 +98,6 @@ export const workspaces = {
   },
   rename(wid: string, name: string): void {
     getDb().prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, wid)
-  },
-  updateEnvPatterns(wid: string, patterns: string[]): void {
-    getDb().prepare('UPDATE workspaces SET env_sync_patterns = ? WHERE id = ?').run(JSON.stringify(patterns), wid)
   },
   updateAgent(wid: string, patch: { defaultAgentProvider?: string; agentExecPath?: string }): void {
     const cur = workspaces.get(wid)

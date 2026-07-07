@@ -175,17 +175,18 @@ class Runtime {
     )
   }
 
-  /** Ensure an env-sync watcher exists & is running for a workspace. */
+  /** Ensure an env-sync watcher exists & is running for a workspace (patterns come from global settings). */
   ensureEnvWatcher(workspaceId: string): void {
     const ws = repo.workspaces.get(workspaceId)
     if (!ws) return
+    const patterns = repo.settings.get().envSyncPatterns
     let w = this.envWatchers.get(workspaceId)
     if (!w) {
-      w = new EnvSyncWatcher(ws.repoPath, ws.envSyncPatterns)
+      w = new EnvSyncWatcher(ws.repoPath, patterns)
       this.envWatchers.set(workspaceId, w)
       w.start()
     } else {
-      w.updatePatterns(ws.envSyncPatterns)
+      w.updatePatterns(patterns)
     }
     // (Re)register every worktree Flight of this workspace.
     for (const f of repo.flights.list()) {
