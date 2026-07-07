@@ -2,38 +2,21 @@ import { useState, type JSX, type KeyboardEvent } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ChevronRight, Maximize2, Play, Plus } from 'lucide-react'
 import { useStore, activeWorkspace, tasksForWorkspace } from '@renderer/store'
-import {
-  TASK_STATUSES,
-  taskChipClass,
-  taskColumnDot,
-  taskColumnHeadClass,
-  taskStatusLabel
-} from '@renderer/lib/status'
+import { taskChipClass, taskStatusLabel } from '@renderer/lib/status'
 import type { Task } from '@shared/types'
 import TaskTitleButton from './TaskTitleButton'
 import { TaskTagsDisplay } from './TaskMeta'
-import AddTaskCard from './AddTaskCard'
-
-/** Segmented-toggle pill class for the List / Board switch. */
-function segClass(active: boolean): string {
-  return (
-    'px-[9px] py-[3px] rounded-chip text-[11px] font-semibold cursor-pointer transition-colors ' +
-    'outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ' +
-    (active ? 'bg-panel-2 text-text' : 'text-faint hover:text-text-2')
-  )
-}
 
 /**
- * Task tracker for the active workspace. Captures new tasks, switches between a
- * List and a Board view, opens a task in the edit modal (via its title), and
- * bridges a task to a Flight. Task data is sourced from the store, which is kept
- * live by the `onStateChanged` subscription, so mutations need no manual reload.
+ * Task tracker for the active workspace. Captures new tasks as a list, opens a
+ * task in the edit modal (via its title), and bridges a task to a Flight; the
+ * expand button opens the full kanban board across all workspaces. Task data is
+ * sourced from the store, which is kept live by the `onStateChanged`
+ * subscription, so mutations need no manual reload.
  */
 export default function TaskTracker(): JSX.Element {
   const workspace = useStore(activeWorkspace)
   const flights = useStore((s) => s.flights)
-  const taskView = useStore((s) => s.taskView)
-  const setTaskView = useStore((s) => s.setTaskView)
   const openModal = useStore((s) => s.openModal)
   const setActiveFlight = useStore((s) => s.setActiveFlight)
   const tasks = useStore(
@@ -94,25 +77,15 @@ export default function TaskTracker(): JSX.Element {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-[7px] flex-none">
-          <div className="flex p-[2px] rounded-[7px] bg-bg border border-line-2">
-            <button type="button" onClick={() => setTaskView('list')} className={segClass(taskView === 'list')}>
-              List
-            </button>
-            <button type="button" onClick={() => setTaskView('board')} className={segClass(taskView === 'board')}>
-              Board
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => openModal('board')}
-            title="Open full board — all workspaces"
-            aria-label="Open full board"
-            className="size-6 flex-none rounded-md border border-line-2 flex items-center justify-center text-muted hover:bg-hover hover:text-text transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-          >
-            <Maximize2 size={13} strokeWidth={1.5} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => openModal('board')}
+          title="Open full board — all workspaces"
+          aria-label="Open full board"
+          className="size-6 flex-none rounded-md border border-line-2 flex items-center justify-center text-muted hover:bg-hover hover:text-text transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        >
+          <Maximize2 size={13} strokeWidth={1.5} />
+        </button>
       </div>
 
       {/* capture */}
@@ -128,115 +101,55 @@ export default function TaskTracker(): JSX.Element {
         />
       </div>
 
-      {/* LIST VIEW */}
-      {taskView === 'list' && (
-        <div className="flex flex-col gap-2">
-          {tasks.length === 0 && <div className="px-1 py-2 text-[12px] text-faint">No tasks yet.</div>}
-          {tasks.map((task) => {
-            const done = task.status === 'done'
-            return (
-              <div
-                key={task.id}
-                className="group relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
-              >
-                <div className="flex items-start justify-between gap-[9px]">
-                  <div className="min-w-0 flex-1">
-                    <TaskTitleButton
-                      task={task}
-                      className={`block text-[12.5px] font-semibold leading-snug text-pretty ${
-                        done ? 'text-faint line-through' : 'text-text'
-                      }`}
-                    />
-                  </div>
-                  <span
-                    className={`flex-none inline-flex items-center px-[7px] py-[2px] rounded-chip text-[9.5px] font-bold uppercase tracking-[0.3px] whitespace-nowrap ${taskChipClass(
-                      task.status
-                    )}`}
-                  >
-                    {taskStatusLabel(task.status)}
-                  </span>
+      {/* task list */}
+      <div className="flex flex-col gap-2">
+        {tasks.length === 0 && <div className="px-1 py-2 text-[12px] text-faint">No tasks yet.</div>}
+        {tasks.map((task) => {
+          const done = task.status === 'done'
+          return (
+            <div
+              key={task.id}
+              className="group relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
+            >
+              <div className="flex items-start justify-between gap-[9px]">
+                <div className="min-w-0 flex-1">
+                  <TaskTitleButton
+                    task={task}
+                    className={`block text-[12.5px] font-semibold leading-snug text-pretty ${
+                      done ? 'text-faint line-through' : 'text-text'
+                    }`}
+                  />
                 </div>
-
-                <TaskTagsDisplay task={task} />
-
-                {flightLink(task, false)}
-
-                {!task.flightId && (
-                  <div className="mt-[9px] flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => startFlight(task)}
-                      title="Start a Flight from this task"
-                      aria-label="Start a Flight from this task"
-                      className="inline-flex size-[22px] flex-none items-center justify-center rounded-full bg-accent text-[#06122e] outline-none transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent/60"
-                    >
-                      <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
-                    </button>
-                  </div>
-                )}
+                <span
+                  className={`flex-none inline-flex items-center px-[7px] py-[2px] rounded-chip text-[9.5px] font-bold uppercase tracking-[0.3px] whitespace-nowrap ${taskChipClass(
+                    task.status
+                  )}`}
+                >
+                  {taskStatusLabel(task.status)}
+                </span>
               </div>
-            )
-          })}
-        </div>
-      )}
 
-      {/* BOARD VIEW */}
-      {taskView === 'board' && (
-        <div className="flex gap-[9px] overflow-x-auto pb-2">
-          {TASK_STATUSES.map((status) => {
-            const colTasks = tasks.filter((t) => t.status === status)
-            const dot = taskColumnDot(status)
-            return (
-              <div key={status} className="group/col flex-none w-[158px] flex flex-col gap-[7px]">
-                <div className="flex items-center gap-[7px] px-[2px] pb-[2px]">
-                  <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
-                  <span
-                    className={`text-[10.5px] tracking-[0.4px] uppercase font-bold ${taskColumnHeadClass(status)}`}
+              <TaskTagsDisplay task={task} />
+
+              {flightLink(task, false)}
+
+              {!task.flightId && (
+                <div className="mt-[9px] flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => startFlight(task)}
+                    title="Start a Flight from this task"
+                    aria-label="Start a Flight from this task"
+                    className="inline-flex size-[22px] flex-none items-center justify-center rounded-full bg-accent text-[#06122e] outline-none transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
-                    {taskStatusLabel(status)}
-                  </span>
-                  <span className="font-mono text-[10px] text-faint">{colTasks.length}</span>
+                    <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
+                  </button>
                 </div>
-                {colTasks.map((task) => {
-                  const done = task.status === 'done'
-                  return (
-                    <div
-                      key={task.id}
-                      className="group p-[10px] rounded-[9px] bg-panel border border-line-2 hover:border-line-strong transition-colors"
-                    >
-                      <TaskTitleButton
-                        task={task}
-                        className={`block text-[12px] font-semibold leading-snug text-pretty ${
-                          done ? 'text-faint line-through' : 'text-text'
-                        }`}
-                      />
-
-                      <TaskTagsDisplay task={task} />
-
-                      {flightLink(task, true)}
-
-                      {status === 'todo' && !task.flightId && (
-                        <button
-                          type="button"
-                          onClick={() => startFlight(task)}
-                          title="Start a Flight from this task"
-                          className="flex items-center gap-1.5 mt-2 w-fit pl-[5px] pr-[7px] py-1 rounded-md bg-accent/[0.08] border border-accent/20 text-blue text-[10px] font-semibold hover:bg-accent/[0.16] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                        >
-                          <span className="inline-flex items-center justify-center flex-none size-[14px] rounded-full bg-accent text-[#06122e]">
-                            <Play size={7} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
-                          </span>
-                          Start a Flight
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-                {workspace && <AddTaskCard workspaceId={workspace.id} status={status} />}
-              </div>
-            )
-          })}
-        </div>
-      )}
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

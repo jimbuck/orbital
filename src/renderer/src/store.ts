@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { AppState, Workspace, Flight, Task, Settings, UpdateStatus } from '@shared/types'
 
 export type ModalType = 'settings' | 'addWorkspace' | 'newFlight' | 'board' | 'about' | 'editTask' | null
-export type TaskView = 'list' | 'board'
 
 interface UIState {
   ready: boolean
@@ -12,7 +11,6 @@ interface UIState {
   modal: ModalType
   /** Free-form payload for the open modal (e.g. the workspace a New Flight targets). */
   modalData: unknown
-  taskView: TaskView
   /** Count of Flights currently needing attention (drives the title-bar banner). */
   alertCount: number
   /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
@@ -36,7 +34,6 @@ interface Actions {
   toggleExpanded: (id: string) => void
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
-  setTaskView: (v: TaskView) => void
 }
 
 export type Store = Data & UIState & Actions
@@ -59,7 +56,6 @@ export const useStore = create<Store>((set, get) => ({
   expanded: {},
   modal: null,
   modalData: null,
-  taskView: 'list',
   alertCount: 0,
   updateStatus: { phase: 'idle' },
 
@@ -136,10 +132,6 @@ export const useStore = create<Store>((set, get) => ({
 
   closeModal() {
     set({ modal: null, modalData: null })
-  },
-
-  setTaskView(v) {
-    set({ taskView: v })
   }
 }))
 
