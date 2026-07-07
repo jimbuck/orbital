@@ -1,5 +1,5 @@
-import { useState, type JSX, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Workspace as WorkspaceModel } from '@shared/types'
 import { useStore } from '@renderer/store'
@@ -10,7 +10,8 @@ import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '
 /**
  * A workspace (repo) header in the rail. Clicking the row activates the
  * workspace; the chevron independently expands/collapses its Flight list.
- * Right-click opens a context menu to remove the workspace from Orbital.
+ * Right-click opens a context menu to rename the workspace inline or remove
+ * it from Orbital.
  */
 export default function Workspace({ workspace }: { workspace: WorkspaceModel }): JSX.Element {
   const flights = useStore(useShallow((s) => s.flights.filter((f) => f.workspaceId === workspace.id)))
@@ -24,6 +25,13 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(workspace.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (renaming) inputRef.current?.select()
+  }, [renaming])
 
   const closeMenu = (): void => {
     setMenu(null)
@@ -37,8 +45,29 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
     setMenu(clampMenuPos(e, 210, 130))
   }
 
+  const startRename = (): void => {
+    setDraft(workspace.name)
+    setRenaming(true)
+    closeMenu()
+  }
+  const commitRename = (): void => {
+    const name = draft.trim()
+    setRenaming(false)
+    if (name && name !== workspace.name) void window.orbital.renameWorkspace(workspace.id, name)
+  }
+  const onRenameKey = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      commitRename()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setRenaming(false)
+    }
+  }
+
   const activate = (): void => setActiveWorkspace(workspace.id)
   const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (renaming) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       activate()
@@ -50,7 +79,7 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
       <div
         role="button"
         tabIndex={0}
-        onClick={activate}
+        onClick={() => !renaming && activate()}
         onKeyDown={onHeaderKey}
         onContextMenu={openMenu}
         className={`flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
@@ -78,13 +107,25 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className={`text-[13.5px] font-bold ${isActive ? 'text-text' : 'text-text-2'}`}>
-            {workspace.name}
-          </div>
+          {renaming ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onRenameKey}
+              onBlur={commitRename}
+              onClick={(e) => e.stopPropagation()}
+              className="allow-select w-full rounded border border-accent/60 bg-bg px-1 py-0.5 text-[13.5px] font-bold text-text outline-none"
+            />
+          ) : (
+            <div className={`text-[13.5px] font-bold ${isActive ? 'text-text' : 'text-text-2'}`}>
+              {workspace.name}
+            </div>
+          )}
           <div className="mt-px truncate font-mono text-[10.5px] text-faint">{workspace.repoPath}</div>
         </div>
 
-        {needsAttention > 0 && (
+        {!renaming && needsAttention > 0 && (
           <span className="inline-flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-amber/15 px-[5px] font-mono text-[10px] font-bold text-amber-2">
             {needsAttention}
           </span>
@@ -110,12 +151,15 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
       {menu && (
         <ContextMenu pos={menu} width={210} onClose={closeMenu}>
           {!confirming ? (
-            <MenuItem
-              icon={<Trash2 size={13} strokeWidth={1.5} />}
-              label="Remove workspace"
-              danger
-              onClick={() => setConfirming(true)}
-            />
+            <>
+              <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
+              <MenuItem
+                icon={<Trash2 size={13} strokeWidth={1.5} />}
+                label="Remove workspace"
+                danger
+                onClick={() => setConfirming(true)}
+              />
+            </>
           ) : (
             <MenuConfirm
               message={`Remove "${workspace.name}" from Orbital?`}

@@ -374,6 +374,7 @@ export const IPC = {
   // workspaces
   addWorkspace: 'orbital:addWorkspace',
   removeWorkspace: 'orbital:removeWorkspace',
+  renameWorkspace: 'orbital:renameWorkspace',
   updateEnvPatterns: 'orbital:updateEnvPatterns',
   // flights / panes / tabs
   createFlight: 'orbital:createFlight',
@@ -451,6 +452,7 @@ export interface OrbitalApi {
   // workspaces
   addWorkspace(): Promise<Workspace | null>
   removeWorkspace(workspaceId: string): Promise<void>
+  renameWorkspace(workspaceId: string, name: string): Promise<void>
   updateEnvPatterns(workspaceId: string, patterns: string[]): Promise<void>
 
   // flights / panes / tabs

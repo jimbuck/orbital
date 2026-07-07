@@ -45,6 +45,8 @@ const api: OrbitalApi = {
   // workspaces
   addWorkspace: () => ipcRenderer.invoke(IPC.addWorkspace) as Promise<Workspace | null>,
   removeWorkspace: (id: string) => ipcRenderer.invoke(IPC.removeWorkspace, id) as Promise<void>,
+  renameWorkspace: (id: string, name: string) =>
+    ipcRenderer.invoke(IPC.renameWorkspace, id, name) as Promise<void>,
   updateEnvPatterns: (id: string, patterns: string[]) =>
     ipcRenderer.invoke(IPC.updateEnvPatterns, id, patterns) as Promise<void>,
 

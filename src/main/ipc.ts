@@ -239,6 +239,13 @@ export function registerIpc(): void {
     broadcastAll()
   })
 
+  h(IPC.renameWorkspace, (_e, workspaceId: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    repo.workspaces.rename(workspaceId, trimmed)
+    broadcast()
+  })
+
   h(IPC.updateEnvPatterns, (_e, workspaceId: string, patterns: string[]) => {
     repo.workspaces.updateEnvPatterns(workspaceId, patterns)
     runtime.ensureEnvWatcher(workspaceId)

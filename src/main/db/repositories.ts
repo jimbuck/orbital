@@ -96,6 +96,9 @@ export const workspaces = {
   remove(wid: string): void {
     getDb().prepare('DELETE FROM workspaces WHERE id = ?').run(wid)
   },
+  rename(wid: string, name: string): void {
+    getDb().prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, wid)
+  },
   updateEnvPatterns(wid: string, patterns: string[]): void {
     getDb().prepare('UPDATE workspaces SET env_sync_patterns = ? WHERE id = ?').run(JSON.stringify(patterns), wid)
   },
