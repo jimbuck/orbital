@@ -152,6 +152,94 @@ function CodeView({ path, source }: { path: string; source: string }): JSX.Eleme
   )
 }
 
+/**
+ * Editable source view with live syntax highlighting: a transparent-text
+ * textarea (caret + input) stacked over a shiki-rendered mirror of the draft,
+ * scroll-synced. Both layers share the exact font metrics and padding, so the
+ * glyphs line up. Falls back to a plain visible textarea when the grammar is
+ * unknown or the file is too large to highlight.
+ */
+function CodeEditor({
+  path,
+  value,
+  onChange
+}: {
+  path: string
+  value: string
+  onChange: (next: string) => void
+}): JSX.Element {
+  const [html, setHtml] = useState<string | null>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const lang = langFor(path)
+    if (!lang || value.length > HIGHLIGHT_MAX) {
+      setHtml(null)
+      return
+    }
+    let alive = true
+    // Tiny debounce so fast typing doesn't queue a highlight per keystroke.
+    const t = setTimeout(() => {
+      void import('shiki')
+        // The trailing newline keeps the mirror's height in step with the
+        // textarea when the draft ends mid-newline.
+        .then(({ codeToHtml }) => codeToHtml(value + '\n', { lang, theme: 'github-dark-default' }))
+        .then((h) => {
+          if (alive) setHtml(h)
+        })
+        .catch(() => {
+          if (alive) setHtml(null)
+        })
+    }, 30)
+    return () => {
+      alive = false
+      clearTimeout(t)
+    }
+  }, [path, value])
+
+  const syncScroll = (): void => {
+    const mirror = mirrorRef.current
+    const ta = taRef.current
+    if (!mirror || !ta) return
+    mirror.scrollTop = ta.scrollTop
+    mirror.scrollLeft = ta.scrollLeft
+  }
+
+  useEffect(syncScroll, [html])
+
+  return (
+    <div className="relative h-full w-full">
+      {html !== null && (
+        <div
+          ref={mirrorRef}
+          aria-hidden
+          className="shiki-view pointer-events-none absolute inset-0 overflow-hidden whitespace-pre px-4 py-3"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      )}
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={syncScroll}
+        onKeyDown={(e) => {
+          // Tab indents instead of moving focus; execCommand keeps native undo.
+          if (e.key === 'Tab') {
+            e.preventDefault()
+            document.execCommand('insertText', false, '  ')
+          }
+        }}
+        spellCheck={false}
+        wrap="off"
+        className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent px-4 py-3 font-mono text-[12px] leading-[1.6] ${
+          html !== null ? 'text-transparent caret-[#e6ebf2]' : 'text-text-2'
+        } ${FOCUS}`}
+      />
+    </div>
+  )
+}
+
 /* ---- Preview (markdown / html) ------------------------------------------- */
 
 /** Styles injected into the markdown preview iframe to match the app theme. */
@@ -518,12 +606,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
               ) : mode === 'preview' && kind ? (
                 <Preview kind={kind} source={content} />
               ) : editing ? (
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  spellCheck={false}
-                  className={`allow-select h-full w-full resize-none bg-pane px-4 py-3 font-mono text-[12px] leading-[1.6] text-text-2 ${FOCUS}`}
-                />
+                <CodeEditor path={selected.path} value={draft} onChange={setDraft} />
               ) : (
                 <CodeView path={selected.path} source={content} />
               )}
