@@ -9,13 +9,13 @@ import {
   taskColumnHeadClass
 } from '@renderer/lib/status'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
-import EditableTaskTitle from '../panel/EditableTaskTitle'
-import TaskDeleteButton from '../panel/TaskDeleteButton'
-import { TaskTags } from '../panel/TaskMeta'
+import TaskTitleButton from '../panel/TaskTitleButton'
+import { TaskTagsDisplay } from '../panel/TaskMeta'
 import AddTaskCard from '../panel/AddTaskCard'
 import Settings from './Settings'
 import AddWorkspace from './AddWorkspace'
 import NewFlight from './NewFlight'
+import EditTask from './EditTask'
 import About from './About'
 
 /* ============================================================================
@@ -115,15 +115,13 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <EditableTaskTitle task={task} className="block text-[12.5px] font-semibold text-text-2" />
+          <TaskTitleButton task={task} className="block text-[12.5px] font-semibold text-text-2" />
         </div>
-        <TaskDeleteButton taskId={task.id} />
         <span className={`flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${taskChipClass(task.status)}`}>
           {taskStatusLabel(task.status)}
         </span>
       </div>
-      {task.description && <p className="mt-1.5 text-[11px] leading-relaxed text-dim line-clamp-2">{task.description}</p>}
-      <TaskTags task={task} />
+      <TaskTagsDisplay task={task} />
     </div>
   )
 }
@@ -274,6 +272,7 @@ export default function ModalRoot(): React.JSX.Element | null {
       {modal === 'settings' && <Settings />}
       {modal === 'addWorkspace' && <AddWorkspace />}
       {modal === 'newFlight' && <NewFlight />}
+      {modal === 'editTask' && <EditTask />}
       {modal === 'board' && <FullBoard />}
       {modal === 'about' && <About />}
     </div>

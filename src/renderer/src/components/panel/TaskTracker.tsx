@@ -1,6 +1,6 @@
 import { useState, type JSX, type KeyboardEvent } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, ChevronDown, ChevronRight, Maximize2, Play, Plus } from 'lucide-react'
+import { ChevronRight, Maximize2, Play, Plus } from 'lucide-react'
 import { useStore, activeWorkspace, tasksForWorkspace } from '@renderer/store'
 import {
   TASK_STATUSES,
@@ -9,10 +9,9 @@ import {
   taskColumnHeadClass,
   taskStatusLabel
 } from '@renderer/lib/status'
-import type { Task, TaskStatus } from '@shared/types'
-import EditableTaskTitle from './EditableTaskTitle'
-import TaskDeleteButton from './TaskDeleteButton'
-import { EditableTaskDescription, TaskTags } from './TaskMeta'
+import type { Task } from '@shared/types'
+import TaskTitleButton from './TaskTitleButton'
+import { TaskTagsDisplay } from './TaskMeta'
 import AddTaskCard from './AddTaskCard'
 
 /** Segmented-toggle pill class for the List / Board switch. */
@@ -26,7 +25,7 @@ function segClass(active: boolean): string {
 
 /**
  * Task tracker for the active workspace. Captures new tasks, switches between a
- * List and a Board view, lets a task's status be changed from a dropdown, and
+ * List and a Board view, opens a task in the edit modal (via its title), and
  * bridges a task to a Flight. Task data is sourced from the store, which is kept
  * live by the `onStateChanged` subscription, so mutations need no manual reload.
  */
@@ -45,7 +44,6 @@ export default function TaskTracker(): JSX.Element {
   )
 
   const [draft, setDraft] = useState('')
-  const [menuTaskId, setMenuTaskId] = useState<string | null>(null)
 
   const flightName = (flightId: string | null): string | undefined =>
     flightId ? flights.find((f) => f.id === flightId)?.name : undefined
@@ -57,11 +55,6 @@ export default function TaskTracker(): JSX.Element {
     e.preventDefault()
     setDraft('')
     await window.orbital.createTask(workspace.id, title)
-  }
-
-  const setStatus = async (taskId: string, status: TaskStatus): Promise<void> => {
-    setMenuTaskId(null)
-    await window.orbital.updateTask(taskId, { status })
   }
 
   // Open the New Flight modal prefilled with (and pre-linked to) this task,
@@ -148,30 +141,23 @@ export default function TaskTracker(): JSX.Element {
               >
                 <div className="flex items-start justify-between gap-[9px]">
                   <div className="min-w-0 flex-1">
-                    <EditableTaskTitle
+                    <TaskTitleButton
                       task={task}
                       className={`block text-[12.5px] font-semibold leading-snug text-pretty ${
                         done ? 'text-faint line-through' : 'text-text'
                       }`}
                     />
                   </div>
-                  <TaskDeleteButton taskId={task.id} />
-                  <button
-                    type="button"
-                    onClick={() => setMenuTaskId((id) => (id === task.id ? null : task.id))}
-                    aria-haspopup="menu"
-                    aria-expanded={menuTaskId === task.id}
-                    className={`flex-none inline-flex items-center gap-1 px-[7px] py-[2px] rounded-chip text-[9.5px] font-bold uppercase tracking-[0.3px] whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${taskChipClass(
+                  <span
+                    className={`flex-none inline-flex items-center px-[7px] py-[2px] rounded-chip text-[9.5px] font-bold uppercase tracking-[0.3px] whitespace-nowrap ${taskChipClass(
                       task.status
                     )}`}
                   >
                     {taskStatusLabel(task.status)}
-                    <ChevronDown size={10} strokeWidth={2} className="opacity-65" />
-                  </button>
+                  </span>
                 </div>
 
-                <EditableTaskDescription task={task} />
-                <TaskTags task={task} />
+                <TaskTagsDisplay task={task} />
 
                 {flightLink(task, false)}
 
@@ -187,36 +173,6 @@ export default function TaskTracker(): JSX.Element {
                       <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
                     </button>
                   </div>
-                )}
-
-                {menuTaskId === task.id && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setMenuTaskId(null)} />
-                    <div
-                      role="menu"
-                      className="absolute top-8 right-[11px] z-50 w-[152px] p-1 rounded-[9px] bg-elev border border-line-strong shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
-                    >
-                      {TASK_STATUSES.map((s) => {
-                        const dot = taskColumnDot(s)
-                        const active = s === task.status
-                        return (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            key={s}
-                            onClick={() => void setStatus(task.id, s)}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left hover:bg-hover outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                          >
-                            <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
-                            <span className={`text-[11.5px] font-semibold ${taskColumnHeadClass(s)}`}>
-                              {taskStatusLabel(s)}
-                            </span>
-                            {active && <Check size={11} strokeWidth={2} className="ml-auto text-muted" />}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </>
                 )}
               </div>
             )
@@ -248,19 +204,14 @@ export default function TaskTracker(): JSX.Element {
                       key={task.id}
                       className="group p-[10px] rounded-[9px] bg-panel border border-line-2 hover:border-line-strong transition-colors"
                     >
-                      <div className="flex items-start justify-between gap-1.5">
-                        <div className="min-w-0 flex-1">
-                          <EditableTaskTitle
-                            task={task}
-                            className={`block text-[12px] font-semibold leading-snug text-pretty ${
-                              done ? 'text-faint line-through' : 'text-text'
-                            }`}
-                          />
-                        </div>
-                        <TaskDeleteButton taskId={task.id} />
-                      </div>
+                      <TaskTitleButton
+                        task={task}
+                        className={`block text-[12px] font-semibold leading-snug text-pretty ${
+                          done ? 'text-faint line-through' : 'text-text'
+                        }`}
+                      />
 
-                      <TaskTags task={task} />
+                      <TaskTagsDisplay task={task} />
 
                       {flightLink(task, true)}
 

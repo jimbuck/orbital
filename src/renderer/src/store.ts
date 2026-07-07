@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AppState, Workspace, Flight, Task, Settings, UpdateStatus } from '@shared/types'
 
-export type ModalType = 'settings' | 'addWorkspace' | 'newFlight' | 'board' | 'about' | null
+export type ModalType = 'settings' | 'addWorkspace' | 'newFlight' | 'board' | 'about' | 'editTask' | null
 export type TaskView = 'list' | 'board'
 
 interface UIState {
