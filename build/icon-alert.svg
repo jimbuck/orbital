@@ -1,0 +1,61 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Needs-attention variant of icon.svg: the orbiting satellite swells and
+       glows amber, acting as the taskbar notification badge (see alerts.ts).
+       Everything else must stay identical to icon.svg so the swap reads as the
+       satellite lighting up, not a different app. -->
+  <defs>
+    <!-- App-tile background: subtle top-lit dark gradient. -->
+    <linearGradient id="bg" x1="128" y1="8" x2="128" y2="248" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b2433"/>
+      <stop offset="1" stop-color="#0b0e14"/>
+    </linearGradient>
+    <!-- Glowing planet core. -->
+    <radialGradient id="core" cx="0.38" cy="0.34" r="0.75">
+      <stop offset="0" stop-color="#d6e6ff"/>
+      <stop offset="0.45" stop-color="#6fa3ff"/>
+      <stop offset="1" stop-color="#2f6bff"/>
+    </radialGradient>
+    <!-- Top-lit amber satellite (Orbital's needs-attention color). -->
+    <radialGradient id="sat" cx="0.35" cy="0.3" r="0.9">
+      <stop offset="0" stop-color="#ffe7b0"/>
+      <stop offset="0.55" stop-color="#f2c163"/>
+      <stop offset="1" stop-color="#e8b54a"/>
+    </radialGradient>
+    <!-- Soft blue glow for the orbit ring. -->
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Wider amber glow so the badge still halos at 32px taskbar size. -->
+    <filter id="glowAmber" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Tile -->
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)"/>
+  <rect x="8.5" y="8.5" width="239" height="239" rx="53.5" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+
+  <!-- Orbit ring, tilted as in icon.svg. -->
+  <g transform="rotate(-28 128 128)" filter="url(#glow)">
+    <ellipse cx="128" cy="128" rx="96" ry="45" fill="none" stroke="#4f8cff" stroke-width="11"/>
+  </g>
+
+  <!-- Planet core -->
+  <circle cx="128" cy="128" r="39" fill="url(#core)"/>
+
+  <!-- Satellite-as-badge: same orbit, nudged along the ellipse (parametric -45°
+       instead of -60°) so the enlarged disc clears the planet, swollen from
+       r=15 to r=26 and lit amber. Drawn last so the badge rides above the core;
+       the dark rim separates it from the blue ring underneath. -->
+  <g transform="rotate(-28 128 128)" filter="url(#glowAmber)">
+    <circle cx="195.9" cy="96.2" r="26" fill="url(#sat)" stroke="#0b0e14" stroke-width="5"/>
+  </g>
+</svg>

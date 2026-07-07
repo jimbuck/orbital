@@ -26,8 +26,9 @@ When a Flight flips to needs-attention:
 1. The **rail** shows an amber count badge on the workspace and a "needs you"
    label on the Flight.
 2. The **title bar** shows an "N agents need you" banner.
-3. The **Windows taskbar** icon gets an overlay badge, and an optional **chime**
-   plays on the rising edge.
+3. The **Windows taskbar** icon lights up — the orbiting satellite in the app
+   icon swells and glows amber — and an optional **chime** plays on the rising
+   edge.
 
 Each channel can be toggled independently in Settings.
 
