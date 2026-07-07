@@ -77,6 +77,14 @@ npm run dev   # electron-vite dev with renderer HMR (main/preload changes still 
 - **Single-instance lock.** If Orbital is already running, a new instance quits
   instantly. Check/kill first: `Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force`.
   Same cleanup if the driver crashes — the app child is NOT auto-killed.
+  **If the user's installed cockpit (`Orbital.exe`) is running, do NOT kill it** —
+  set `ORBITAL_USER_DATA=<fresh dir>` in the driver's environment instead: the lock
+  is keyed by userData, so a sandboxed instance runs side-by-side with its own empty
+  DB. The AddWorkspace flow needs a native folder picker, so seed the sandbox DB
+  directly (sqlite via python; schema is in `src/main/db/database.ts` — insert a
+  workspace + root flight + one pane row). Caveat: both instances bind the same
+  control-channel pipe, so `orbital` CLI calls can misroute while the sandbox runs —
+  keep runs short.
 - **`app.close()` can hang** when PTY children linger; the driver's `quit`
   races it against a 10s deadline and then hard-kills. If a run still leaves an
   `electron.exe` behind, use the Stop-Process line above.
