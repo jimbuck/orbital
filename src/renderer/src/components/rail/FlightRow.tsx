@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { Pencil, FolderX, Trash2 } from 'lucide-react'
+import { Pencil, CircleOff, FolderX, Trash2 } from 'lucide-react'
 import type { Flight } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, flightStatusLabel, flightStatusTextClass } from '@renderer/lib/status'
@@ -10,7 +10,8 @@ type DeleteMode = 'none' | 'confirm' | 'force'
 /**
  * A single Flight entry inside an expanded workspace. Click selects it; the
  * leading dot + optional "needs you" label carry its status. Right-click opens a
- * context menu (rename inline, close keeping the worktree, or delete the worktree).
+ * context menu (rename inline, force-clear a stuck status, close keeping the
+ * worktree, or delete the worktree).
  */
 export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
   const setActiveFlight = useStore((s) => s.setActiveFlight)
@@ -40,7 +41,7 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
     e.stopPropagation()
     setDel('none')
     setError(null)
-    setMenu(clampMenuPos(e, 200, 170))
+    setMenu(clampMenuPos(e, 200, 200))
   }
 
   const startRename = (): void => {
@@ -61,6 +62,12 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
       e.preventDefault()
       setRenaming(false)
     }
+  }
+
+  // Force-reset an out-of-sync status (e.g. a spinner wedged by a lost hook event).
+  const clearStatus = (): void => {
+    void window.orbital.clearFlightStatus(flight.id)
+    closeMenu()
   }
 
   const remove = async (removeWorktree: boolean, force = false): Promise<void> => {
@@ -141,6 +148,11 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
           {del === 'none' && (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
+              <MenuItem
+                icon={<CircleOff size={13} strokeWidth={1.5} />}
+                label="Clear Status"
+                onClick={clearStatus}
+              />
               {isWorktree ? (
                 <>
                   <MenuItem

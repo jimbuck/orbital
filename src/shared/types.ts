@@ -400,6 +400,7 @@ export const IPC = {
   createFlight: 'orbital:createFlight',
   removeFlight: 'orbital:removeFlight',
   renameFlight: 'orbital:renameFlight',
+  clearFlightStatus: 'orbital:clearFlightStatus',
   listBranches: 'orbital:listBranches',
   setWorkspaceAgent: 'orbital:setWorkspaceAgent',
   claudeHooksStatus: 'orbital:claudeHooksStatus',
@@ -479,6 +480,8 @@ export interface OrbitalApi {
   createFlight(workspaceId: string, opts: CreateFlightOptions): Promise<Flight>
   removeFlight(flightId: string, opts: RemoveFlightOptions): Promise<void>
   renameFlight(flightId: string, name: string): Promise<void>
+  /** Force-reset a Flight's terminals (and its aggregate) to idle when the status is out of sync. */
+  clearFlightStatus(flightId: string): Promise<void>
   /** Branches of a workspace's repo + what HEAD points at (for the New Flight base-ref picker). */
   listBranches(workspaceId: string): Promise<BranchInfo>
   /** Update a workspace's default agent provider / explicit executable path. */

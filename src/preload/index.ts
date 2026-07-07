@@ -55,6 +55,8 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.removeFlight, flightId, opts) as Promise<void>,
   renameFlight: (flightId: string, name: string) =>
     ipcRenderer.invoke(IPC.renameFlight, flightId, name) as Promise<void>,
+  clearFlightStatus: (flightId: string) =>
+    ipcRenderer.invoke(IPC.clearFlightStatus, flightId) as Promise<void>,
   listBranches: (workspaceId: string) =>
     ipcRenderer.invoke(IPC.listBranches, workspaceId) as Promise<BranchInfo>,
   setWorkspaceAgent: (workspaceId: string, patch: WorkspaceAgentPatch) =>

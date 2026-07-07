@@ -323,6 +323,22 @@ export function registerIpc(): void {
     broadcast()
   })
 
+  h(IPC.clearFlightStatus, (_e, flightId: string) => {
+    const flight = repo.flights.get(flightId)
+    if (!flight) return
+    for (const pane of flight.panes) {
+      for (const tab of pane.tabs) {
+        if (!isPtyTabType(tab.type)) continue
+        // The user's force-clear supersedes anything already in flight: hook
+        // events fired before this moment must not re-set the status below.
+        statusAppliedAt.set(tab.id, Date.now())
+        repo.tabs.updateStatus(tab.id, 'idle')
+      }
+    }
+    repo.flights.recomputeStatus(flightId)
+    broadcastAll()
+  })
+
   h(IPC.listBranches, async (_e, workspaceId: string) => {
     const ws = repo.workspaces.get(workspaceId)
     if (!ws) return { branches: [], head: 'HEAD' }
