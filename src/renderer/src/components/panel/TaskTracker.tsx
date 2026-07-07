@@ -13,6 +13,7 @@ import type { Task, TaskStatus } from '@shared/types'
 import EditableTaskTitle from './EditableTaskTitle'
 import TaskDeleteButton from './TaskDeleteButton'
 import { EditableTaskDescription, TaskTags } from './TaskMeta'
+import AddTaskCard from './AddTaskCard'
 
 /** Segmented-toggle pill class for the List / Board switch. */
 function segClass(active: boolean): string {
@@ -230,7 +231,7 @@ export default function TaskTracker(): JSX.Element {
             const colTasks = tasks.filter((t) => t.status === status)
             const dot = taskColumnDot(status)
             return (
-              <div key={status} className="flex-none w-[158px] flex flex-col gap-[7px]">
+              <div key={status} className="group/col flex-none w-[158px] flex flex-col gap-[7px]">
                 <div className="flex items-center gap-[7px] px-[2px] pb-[2px]">
                   <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
                   <span
@@ -279,6 +280,7 @@ export default function TaskTracker(): JSX.Element {
                     </div>
                   )
                 })}
+                {workspace && <AddTaskCard workspaceId={workspace.id} status={status} />}
               </div>
             )
           })}

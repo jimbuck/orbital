@@ -12,6 +12,7 @@ import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import EditableTaskTitle from '../panel/EditableTaskTitle'
 import TaskDeleteButton from '../panel/TaskDeleteButton'
 import { TaskTags } from '../panel/TaskMeta'
+import AddTaskCard from '../panel/AddTaskCard'
 import Settings from './Settings'
 import AddWorkspace from './AddWorkspace'
 import NewFlight from './NewFlight'
@@ -224,13 +225,14 @@ function FullBoard(): React.JSX.Element {
                         if (id) dropTask(id, ws.id, status)
                         setHoverCell(null)
                       }}
-                      className={`flex min-h-[88px] flex-1 flex-col gap-2 border-x p-2 transition-colors ${
+                      className={`group/col flex min-h-[88px] flex-1 flex-col gap-2 border-x p-2 transition-colors ${
                         isHover ? 'border-accent/40 bg-accent/[0.06]' : 'border-line bg-bg'
                       }`}
                     >
                       {cell.map((task) => (
                         <BoardTaskCard key={task.id} task={task} onDragEnd={() => setHoverCell(null)} />
                       ))}
+                      <AddTaskCard workspaceId={ws.id} status={status} />
                     </div>
                   )
                 })}
