@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.3.0](https://github.com/jimbuck/orbital/compare/v1.2.2...v1.3.0) (2026-07-07)
+
+
+### Features
+
+* satellite in the app icon is now the taskbar alert badge ([#4](https://github.com/jimbuck/orbital/issues/4)) ([c078411](https://github.com/jimbuck/orbital/commit/c0784118b310658cb97fd888462302ca583d52d9))
+
 ## [1.2.2](https://github.com/jimbuck/orbital/compare/v1.2.1...v1.2.2) (2026-07-06)
 
 
