@@ -122,14 +122,6 @@ function createTabInFlight(flightId: string, paneId: string | null, type: TabTyp
   return tab
 }
 
-/** Give a freshly created Flight a ready terminal in its first pane. */
-function openInitialTerminal(flight: Flight): void {
-  const paneId = repo.panes.firstPaneId(flight.id)
-  if (!paneId) return
-  const tab = repo.tabs.create({ flightId: flight.id, paneId, type: 'terminal' })
-  spawnTerminal(flight, tab)
-}
-
 function killFlightTerminals(flightId: string): void {
   const flight = repo.flights.get(flightId)
   if (!flight) return
@@ -177,7 +169,6 @@ async function registerWorkspace(repoPath: string): Promise<Flight | null> {
   })
   runtime.gitWatcher.watch(repoPath)
   runtime.ensureEnvWatcher(ws.id)
-  openInitialTerminal(root)
   return root
 }
 
@@ -287,7 +278,6 @@ export function registerIpc(): void {
     if (opts.taskId) repo.tasks.setFlight(opts.taskId, flight.id)
     runtime.gitWatcher.watch(flight.worktreePath)
     runtime.ensureEnvWatcher(workspaceId)
-    openInitialTerminal(flight)
     broadcastAll()
     return repo.flights.get(flight.id)!
   })
@@ -675,7 +665,6 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         })
         runtime.gitWatcher.watch(flight.worktreePath)
         runtime.ensureEnvWatcher(ws.id)
-        openInitialTerminal(flight)
         runtime.broadcastState()
         return { ok: true, data: { id: flight.id, name: flight.name, branch: flight.branch } }
       }
