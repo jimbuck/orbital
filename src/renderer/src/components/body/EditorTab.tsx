@@ -131,8 +131,9 @@ function CodeView({ path, source }: { path: string; source: string }): JSX.Eleme
       .then((h) => {
         if (alive) setHtml(h)
       })
-      .catch(() => {
-        /* unknown grammar / load failure — the plain fallback below stays up */
+      .catch((err) => {
+        // Unknown grammar / load failure — the plain fallback below stays up.
+        console.warn(`shiki highlight failed for ${path}:`, err)
       })
     return () => {
       alive = false
@@ -660,8 +661,9 @@ function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
       .then((r) => {
         if (alive) setTokens(r.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))))
       })
-      .catch(() => {
-        /* unknown grammar / load failure — flat coloring stays up */
+      .catch((err) => {
+        // Unknown grammar / load failure — flat coloring stays up.
+        console.warn(`shiki diff highlight failed for ${path}:`, err)
       })
     return () => {
       alive = false
