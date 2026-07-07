@@ -518,6 +518,16 @@ export function registerIpc(): void {
     broadcast()
   })
   h(IPC.gitFetch, (_e, flightId: string) => git.fetch(flightRepoPath(flightId)))
+  h(IPC.gitCheckout, async (_e, flightId: string, branch: string, create?: boolean) => {
+    const f = repo.flights.get(flightId)
+    if (!f) throw new Error(`flight ${flightId} not found`)
+    // Worktree Flights are pinned to their branch; only the root checkout may move HEAD.
+    if (f.kind !== 'root') throw new Error('branches can only be switched on the root Flight')
+    await git.checkout(f.worktreePath, branch, create)
+    // Persist the new HEAD onto the Flight so the rail/panel reflect it immediately.
+    await runtime.refreshBranch(f.worktreePath)
+    broadcast()
+  })
   h(IPC.gitDiff, (_e, flightId: string, path: string, staged: boolean) =>
     git.diff(flightRepoPath(flightId), path, staged)
   )

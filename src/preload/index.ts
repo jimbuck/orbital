@@ -107,6 +107,8 @@ const api: OrbitalApi = {
   gitPush: (flightId: string) => ipcRenderer.invoke(IPC.gitPush, flightId) as Promise<void>,
   gitPull: (flightId: string) => ipcRenderer.invoke(IPC.gitPull, flightId) as Promise<void>,
   gitFetch: (flightId: string) => ipcRenderer.invoke(IPC.gitFetch, flightId) as Promise<void>,
+  gitCheckout: (flightId: string, branch: string, create?: boolean) =>
+    ipcRenderer.invoke(IPC.gitCheckout, flightId, branch, create) as Promise<void>,
   gitDiff: (flightId: string, path: string, staged: boolean) =>
     ipcRenderer.invoke(IPC.gitDiff, flightId, path, staged) as Promise<FileDiff>,
   fileTree: (flightId: string) => ipcRenderer.invoke(IPC.fileTree, flightId) as Promise<FileNode[]>,

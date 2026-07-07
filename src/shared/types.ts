@@ -433,6 +433,7 @@ export const IPC = {
   gitPush: 'orbital:gitPush',
   gitPull: 'orbital:gitPull',
   gitFetch: 'orbital:gitFetch',
+  gitCheckout: 'orbital:gitCheckout',
   gitDiff: 'orbital:gitDiff',
   fileTree: 'orbital:fileTree',
   readFile: 'orbital:readFile',
@@ -533,6 +534,8 @@ export interface OrbitalApi {
   gitPush(flightId: string): Promise<void>
   gitPull(flightId: string): Promise<void>
   gitFetch(flightId: string): Promise<void>
+  /** Switch to `branch` (`create` forks it from HEAD first). Root Flights only. */
+  gitCheckout(flightId: string, branch: string, create?: boolean): Promise<void>
   gitDiff(flightId: string, path: string, staged: boolean): Promise<FileDiff>
   fileTree(flightId: string): Promise<FileNode[]>
   readFile(flightId: string, path: string): Promise<string>

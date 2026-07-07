@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type JSX, type ReactNode } from 'react'
-import { Check, GitBranch, Loader2, Minus, Plus, RefreshCw, Undo2, X } from 'lucide-react'
+import { Check, ChevronDown, GitBranch, Loader2, Minus, Plus, RefreshCw, Undo2, X } from 'lucide-react'
 import { useStore, activeFlight, activeWorkspace } from '@renderer/store'
+import { ContextMenu, type MenuPos } from '../rail/menu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
 
 /* Secondary button recipe (design guide: "// secondary"). */
@@ -11,11 +12,15 @@ const SECONDARY =
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
+/** Width of the branch-picker dropdown (anchored under the branch name). */
+const PICKER_WIDTH = 232
+
 /** The git operation currently in flight (one at a time), keyed for its spinner. */
 type GitOp =
   | 'pull'
   | 'fetch'
   | 'push'
+  | 'checkout'
   | 'commit'
   | 'stage'
   | 'unstage'
@@ -186,6 +191,10 @@ export default function GitPanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   /** Discard confirmation target: a file path, or '*' for discard-all. */
   const [armed, setArmed] = useState<string | null>(null)
+  /** Branch picker (root Flight only): anchor position when open, branch list, draft name. */
+  const [pickerPos, setPickerPos] = useState<MenuPos | null>(null)
+  const [branches, setBranches] = useState<string[]>([])
+  const [newBranch, setNewBranch] = useState('')
 
   const flightId = flight?.id ?? null
 
@@ -210,12 +219,13 @@ export default function GitPanel(): JSX.Element {
   // triggers a state broadcast via the main-process git watcher — re-read status.
   useEffect(() => window.orbital.onStateChanged(() => void refresh()), [refresh])
 
-  // Draft message / amend / confirmations are per-Flight state; drop them on switch.
+  // Draft message / amend / confirmations / picker are per-Flight state; drop them on switch.
   useEffect(() => {
     setMessage('')
     setAmend(false)
     setArmed(null)
     setError(null)
+    setPickerPos(null)
   }, [flightId])
 
   // An armed discard disarms itself if not confirmed promptly.
@@ -239,6 +249,8 @@ export default function GitPanel(): JSX.Element {
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
   const branch = status?.branch ?? flight.branch
+  // Only the root checkout may move HEAD — worktree Flights are pinned to their branch.
+  const isRoot = flight.kind === 'root'
 
   /** Run one git operation with busy/error bookkeeping, then re-read status. */
   const exec = async (op: GitOp, fn: () => Promise<void>): Promise<void> => {
@@ -268,6 +280,23 @@ export default function GitPanel(): JSX.Element {
       }
     }
     void window.orbital.createTab(flight.id, null, 'editor', { filePath: f.path, diffStaged: f.staged })
+  }
+
+  /** Anchor the branch picker under the branch button and (re)load the local branch list. */
+  const openPicker = (e: React.MouseEvent<HTMLButtonElement>): void => {
+    const r = e.currentTarget.getBoundingClientRect()
+    setPickerPos({ x: Math.min(r.left, window.innerWidth - PICKER_WIDTH - 12), y: r.bottom + 4 })
+    setNewBranch('')
+    if (workspace) {
+      void window.orbital.listBranches(workspace.id).then((info) => setBranches(info.branches))
+    }
+  }
+
+  /** Switch to (or create-and-switch to) a branch; failures land in the error banner. */
+  const checkoutBranch = (target: string, create: boolean): void => {
+    setPickerPos(null)
+    if (!create && target === branch) return
+    void exec('checkout', () => window.orbital.gitCheckout(flight.id, target, create))
   }
 
   const commit = (): void => {
@@ -300,12 +329,30 @@ export default function GitPanel(): JSX.Element {
       <div className="flex items-center justify-between px-[15px] pt-[13px] pb-[11px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Git</span>
-          <span className="flex items-center gap-1 font-mono text-[11px] text-accent min-w-0">
-            <GitBranch size={12} strokeWidth={1.5} className="flex-none" />
-            <span className="truncate" title={branch}>
-              {branch}
+          {isRoot ? (
+            <button
+              type="button"
+              onClick={openPicker}
+              disabled={!!busy}
+              title={`Switch branch — ${branch}`}
+              className={`flex items-center gap-1 rounded font-mono text-[11px] text-accent min-w-0 hover:text-blue disabled:cursor-not-allowed ${FOCUS}`}
+            >
+              <GitBranch size={12} strokeWidth={1.5} className="flex-none" />
+              <span className="truncate">{branch}</span>
+              {busy === 'checkout' ? (
+                <Loader2 size={11} strokeWidth={2} className="flex-none animate-spin" />
+              ) : (
+                <ChevronDown size={11} strokeWidth={1.5} className="flex-none text-faint" />
+              )}
+            </button>
+          ) : (
+            <span className="flex items-center gap-1 font-mono text-[11px] text-accent min-w-0">
+              <GitBranch size={12} strokeWidth={1.5} className="flex-none" />
+              <span className="truncate" title={branch}>
+                {branch}
+              </span>
             </span>
-          </span>
+          )}
         </div>
         <div className="flex items-center gap-2 font-mono text-[11px] flex-none">
           <span className={ahead > 0 ? 'text-green-2' : 'text-faint'} title="Commits ahead of upstream">
@@ -324,6 +371,49 @@ export default function GitPanel(): JSX.Element {
           </IconBtn>
         </div>
       </div>
+
+      {/* branch picker: local branches + create-and-switch (root Flight only) */}
+      {pickerPos && (
+        <ContextMenu pos={pickerPos} width={PICKER_WIDTH} onClose={() => setPickerPos(null)}>
+          <div className="max-h-56 overflow-y-auto">
+            {branches.length === 0 && <div className="px-2 py-1.5 text-[11px] text-faint">No local branches</div>}
+            {branches.map((b) => (
+              <button
+                key={b}
+                type="button"
+                role="menuitem"
+                onClick={() => checkoutBranch(b, false)}
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                  b === branch ? 'text-accent' : 'text-text-2'
+                }`}
+              >
+                <span className="min-w-0 flex-1 truncate">{b}</span>
+                {b === branch && <Check size={12} strokeWidth={2} className="flex-none" />}
+              </button>
+            ))}
+          </div>
+          <div className="mt-1 flex gap-1.5 border-t border-line-2 px-1 pb-1 pt-1.5">
+            <input
+              value={newBranch}
+              onChange={(e) => setNewBranch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newBranch.trim()) checkoutBranch(newBranch.trim(), true)
+              }}
+              placeholder="New branch…"
+              className={`min-w-0 flex-1 rounded-md border border-line-2 bg-bg px-2 py-1 font-mono text-[11px] text-text placeholder:text-faint ${FOCUS}`}
+            />
+            <button
+              type="button"
+              disabled={!newBranch.trim()}
+              onClick={() => checkoutBranch(newBranch.trim(), true)}
+              title="Create the branch and switch to it"
+              className={`flex-none px-2 py-1 ${SECONDARY}`}
+            >
+              Create
+            </button>
+          </div>
+        </ContextMenu>
+      )}
 
       {/* actions */}
       <div className="flex gap-[7px] px-[15px] pb-3">

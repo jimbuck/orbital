@@ -287,6 +287,12 @@ async function fetch(repoPath: string): Promise<void> {
   await run(repoPath, ['fetch'])
 }
 
+/** Switch the checkout to `branch`; `create` forks a new branch from HEAD first. */
+async function checkout(repoPath: string, branch: string, create?: boolean): Promise<void> {
+  const args = create ? ['switch', '-c', branch] : ['switch', branch]
+  await run(repoPath, args)
+}
+
 /* ----------------------------------------------------------------------------
  * Diff
  * -------------------------------------------------------------------------- */
@@ -504,6 +510,7 @@ export const git = {
   push,
   pull,
   fetch,
+  checkout,
   diff,
   fileTree,
   readFile,
