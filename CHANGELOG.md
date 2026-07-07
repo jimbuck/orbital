@@ -2,6 +2,18 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.4.0](https://github.com/jimbuck/orbital/compare/v1.3.1...v1.4.0) (2026-07-07)
+
+
+### Bug Fixes
+
+* resync flight branch names after external checkouts ([fd3e3f7](https://github.com/jimbuck/orbital/commit/fd3e3f74f4920aefa5c9d0ef34f3acf380616833))
+
+
+### Features
+
+* draggable resize for the workspace rail and right panel ([13a2d6f](https://github.com/jimbuck/orbital/commit/13a2d6fb43779cbdf96d0eafe59dd6a65e644d73))
+
 ## [1.3.1](https://github.com/jimbuck/orbital/compare/v1.3.0...v1.3.1) (2026-07-07)
 
 
