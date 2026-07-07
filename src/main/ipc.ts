@@ -289,11 +289,31 @@ export function registerIpc(): void {
     if (opts.removeWorktree) {
       const ws = repo.workspaces.get(flight.workspaceId)
       if (ws) {
-        // git refuses a dirty/unpushed worktree without --force; let that error
-        // propagate so the Flight is NOT removed and the unpushed work is not
-        // silently orphaned (PRD §5 unpushed-work guard).
-        await removeWorktree(ws.repoPath, flight.worktreePath, opts.force)
+        // Dirty guard BEFORE tearing anything down, so a refused removal leaves
+        // the Flight fully intact and its unpushed work is not silently
+        // orphaned (PRD §5 unpushed-work guard).
+        if (!opts.force && !(await git.status(flight.worktreePath)).clean) {
+          throw new Error('The worktree has uncommitted changes.')
+        }
+        // Release everything holding handles inside the worktree before git
+        // deletes it — on Windows a PTY cwd'd there (or a directory watcher)
+        // locks the folder and makes the removal fail on the first attempt.
+        runtime.gitWatcher.unwatch(flight.worktreePath)
         runtime.envWatchers.get(ws.id)?.unregister(flight.worktreePath)
+        killFlightTerminals(flightId)
+        try {
+          await removeWorktree(ws.repoPath, flight.worktreePath, opts.force)
+        } catch (err) {
+          // Removal still failed — restore the Flight to a usable state
+          // (watchers back on, fresh PTYs) before surfacing the error.
+          runtime.gitWatcher.watch(flight.worktreePath)
+          runtime.ensureEnvWatcher(ws.id)
+          for (const pane of flight.panes) {
+            for (const tab of pane.tabs) if (isPtyTabType(tab.type)) startPtyTab(flight, tab)
+          }
+          broadcastAll()
+          throw err
+        }
       }
     }
     runtime.gitWatcher.unwatch(flight.worktreePath)

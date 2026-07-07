@@ -106,5 +106,19 @@ export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Pr
 
 /** Remove the git worktree backing a Flight (guarded by the caller). */
 export async function removeWorktree(repoPath: string, worktreePath: string, force = false): Promise<void> {
-  await git.worktreeRemove(repoPath, worktreePath, force)
+  // On Windows the directory can stay locked briefly after the Flight's PTYs
+  // are killed (conpty releases the shell's cwd handle asynchronously), so a
+  // first attempt may fail with a delete/permission error. Retry with backoff.
+  const delays = [0, 250, 500, 1000]
+  let lastErr: unknown
+  for (const ms of delays) {
+    if (ms) await new Promise((r) => setTimeout(r, ms))
+    try {
+      await git.worktreeRemove(repoPath, worktreePath, force)
+      return
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  throw lastErr
 }
