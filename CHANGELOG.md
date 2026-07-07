@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.3.1](https://github.com/jimbuck/orbital/compare/v1.3.0...v1.3.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* allow WebAssembly in renderer CSP so shiki syntax highlighting works ([0c13075](https://github.com/jimbuck/orbital/commit/0c1307556fd7a6a4925f64eae684351686bb7f81))
+
 # [1.3.0](https://github.com/jimbuck/orbital/compare/v1.2.2...v1.3.0) (2026-07-07)
 
 
