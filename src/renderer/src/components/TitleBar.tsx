@@ -95,29 +95,32 @@ export default function TitleBar(): JSX.Element {
   }
 
   const ctrl =
-    'flex h-[34px] w-[46px] items-center justify-center text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60'
+    'flex h-full w-[46px] items-center justify-center text-muted outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60'
 
   return (
-    <header className="drag-region relative flex h-[34px] flex-none items-center justify-between bg-bar pl-[14px]">
+    // The border is the header's own border-b, and every child (menu buttons,
+    // window controls) is h-full — i.e. the 33px content box — so opaque child
+    // backgrounds can never paint over the hairline.
+    <header className="drag-region relative flex h-[34px] flex-none items-center justify-between border-b border-line bg-bar pl-[14px]">
       {/* Left: brand + app menu bar. bg-bar so the centered breadcrumb is occluded
           here rather than visually colliding at narrow widths. */}
-      <div className="no-drag z-50 flex items-center gap-2.5 bg-bar">
+      <div className="no-drag z-50 flex h-full items-center gap-2.5 bg-bar">
         <div className="relative size-[15px] flex-none">
           <div className="absolute inset-0 rounded-full border-[1.2px] border-accent/55" />
           <div className="absolute left-1/2 top-1/2 -ml-[2.5px] -mt-[2.5px] size-[5px] rounded-full bg-accent shadow-[0_0_7px_rgba(79,140,255,0.9)]" />
         </div>
         <span className="text-[12px] font-semibold tracking-[0.2px]">Orbital</span>
 
-        <nav className="flex items-center">
+        <nav className="flex h-full items-center">
           {menus.map((m) => (
-            <div key={m.id} className="relative">
+            <div key={m.id} className="relative h-full">
               <button
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={openMenu === m.id}
                 onClick={() => setOpenMenu((o) => (o === m.id ? null : m.id))}
                 onMouseEnter={() => setOpenMenu((o) => (o ? m.id : o))}
-                className={`flex h-[34px] items-center px-2.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                className={`flex h-full items-center px-2.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
                   openMenu === m.id ? 'bg-hover text-text' : 'text-text-3 hover:text-text'
                 }`}
               >
@@ -167,7 +170,7 @@ export default function TitleBar(): JSX.Element {
 
       {/* Right: needs-attention banner + window controls. bg-bar occludes the
           centered breadcrumb; clicking here also dismisses any open menu. */}
-      <div className="no-drag z-50 flex items-center gap-1 bg-bar" onClick={() => setOpenMenu(null)}>
+      <div className="no-drag z-50 flex h-full items-center gap-1 bg-bar" onClick={() => setOpenMenu(null)}>
         {servers.length > 0 && (
           <div className="relative mr-2">
             <button
@@ -241,7 +244,7 @@ export default function TitleBar(): JSX.Element {
           type="button"
           aria-label="Close"
           onClick={() => window.orbital.windowClose()}
-          className="flex h-[34px] w-[46px] items-center justify-center text-muted outline-none hover:bg-[#c4314b] hover:text-white focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="flex h-full w-[46px] items-center justify-center text-muted outline-none hover:bg-[#c4314b] hover:text-white focus-visible:ring-2 focus-visible:ring-accent/60"
         >
           <X size={15} strokeWidth={1.5} />
         </button>
@@ -249,12 +252,6 @@ export default function TitleBar(): JSX.Element {
 
       {/* Click-away backdrop while a menu is open. */}
       {openMenu && <div className="no-drag fixed inset-0 z-40" onClick={() => setOpenMenu(null)} />}
-
-      {/* Bottom hairline drawn ABOVE the left/right clusters. Those clusters carry an
-          opaque bg-bar (to occlude the centered breadcrumb), and CSS paints borders
-          before child content — so a plain border-b on the header gets covered under
-          the menu items and window controls. An overlay above them keeps it continuous. */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[60] h-px bg-line" />
     </header>
   )
 }
