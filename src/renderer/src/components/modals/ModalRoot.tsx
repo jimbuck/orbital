@@ -11,6 +11,7 @@ import {
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import EditableTaskTitle from '../panel/EditableTaskTitle'
 import TaskDeleteButton from '../panel/TaskDeleteButton'
+import { TaskTags } from '../panel/TaskMeta'
 import Settings from './Settings'
 import AddWorkspace from './AddWorkspace'
 import NewFlight from './NewFlight'
@@ -121,6 +122,7 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         </span>
       </div>
       {task.description && <p className="mt-1.5 text-[11px] leading-relaxed text-dim line-clamp-2">{task.description}</p>}
+      <TaskTags task={task} />
     </div>
   )
 }

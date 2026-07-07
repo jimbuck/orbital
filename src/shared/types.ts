@@ -161,6 +161,7 @@ export interface Task {
   workspaceId: string
   title: string
   description: string
+  tags: string[]
   status: TaskStatus
   /** Linked Flight once "start a Flight from this task" has been used. */
   flightId: string | null
@@ -280,6 +281,7 @@ export interface RemoveFlightOptions {
 export interface TaskPatch {
   title?: string
   description?: string
+  tags?: string[]
   status?: TaskStatus
   /** Reassign the task to another workspace (e.g. dragged across board swim-lanes). */
   workspaceId?: string
@@ -519,7 +521,7 @@ export interface OrbitalApi {
   writeFile(flightId: string, path: string, content: string): Promise<void>
 
   // tasks
-  createTask(workspaceId: string, title: string, description?: string): Promise<Task>
+  createTask(workspaceId: string, title: string, description?: string, tags?: string[]): Promise<Task>
   updateTask(taskId: string, patch: TaskPatch): Promise<Task>
   deleteTask(taskId: string): Promise<void>
 

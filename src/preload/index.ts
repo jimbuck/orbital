@@ -118,8 +118,8 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.writeFile, flightId, path, content) as Promise<void>,
 
   // tasks
-  createTask: (workspaceId: string, title: string, description?: string) =>
-    ipcRenderer.invoke(IPC.createTask, workspaceId, title, description) as Promise<Task>,
+  createTask: (workspaceId: string, title: string, description?: string, tags?: string[]) =>
+    ipcRenderer.invoke(IPC.createTask, workspaceId, title, description, tags) as Promise<Task>,
   updateTask: (taskId: string, patch: TaskPatch) =>
     ipcRenderer.invoke(IPC.updateTask, taskId, patch) as Promise<Task>,
   deleteTask: (taskId: string) => ipcRenderer.invoke(IPC.deleteTask, taskId) as Promise<void>,

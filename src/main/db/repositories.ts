@@ -61,6 +61,7 @@ function mapTask(r: any): Task {
     workspaceId: r.workspace_id,
     title: r.title,
     description: r.description ?? '',
+    tags: JSON.parse(r.tags || '[]') as string[],
     status: r.status as TaskStatus,
     flightId: r.flight_id ?? null,
     createdAt: r.created_at,
@@ -331,24 +332,27 @@ export const tasks = {
     const r = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(tid)
     return r ? mapTask(r) : undefined
   },
-  create(input: { workspaceId: string; title: string; description?: string }): Task {
+  create(input: { workspaceId: string; title: string; description?: string; tags?: string[] }): Task {
     const tid = id()
     const t = now()
     getDb()
       .prepare(
-        'INSERT INTO tasks (id, workspace_id, title, description, status, flight_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)'
+        'INSERT INTO tasks (id, workspace_id, title, description, tags, status, flight_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)'
       )
-      .run(tid, input.workspaceId, input.title, input.description ?? '', 'todo', t, t)
+      .run(tid, input.workspaceId, input.title, input.description ?? '', JSON.stringify(input.tags ?? []), 'todo', t, t)
     return tasks.get(tid)!
   },
   update(tid: string, patch: TaskPatch): Task {
     const cur = tasks.get(tid)
     if (!cur) throw new Error(`task ${tid} not found`)
     getDb()
-      .prepare('UPDATE tasks SET title = ?, description = ?, status = ?, workspace_id = ?, updated_at = ? WHERE id = ?')
+      .prepare(
+        'UPDATE tasks SET title = ?, description = ?, tags = ?, status = ?, workspace_id = ?, updated_at = ? WHERE id = ?'
+      )
       .run(
         patch.title ?? cur.title,
         patch.description ?? cur.description,
+        JSON.stringify(patch.tags ?? cur.tags),
         patch.status ?? cur.status,
         patch.workspaceId ?? cur.workspaceId,
         now(),

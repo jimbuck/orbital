@@ -493,8 +493,8 @@ export function registerIpc(): void {
   })
 
   // ---- tasks ----
-  h(IPC.createTask, (_e, workspaceId: string, title: string, description?: string) => {
-    const t = repo.tasks.create({ workspaceId, title, description })
+  h(IPC.createTask, (_e, workspaceId: string, title: string, description?: string, tags?: string[]) => {
+    const t = repo.tasks.create({ workspaceId, title, description, tags })
     broadcast()
     return t
   })
@@ -571,6 +571,14 @@ function normalizeServerUrl(raw: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Parse a comma-separated tag list ("bug, ui") into trimmed, non-empty tags. */
+function parseTagList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean)
 }
 
 /** Resolve a task by full id or unique id prefix within a workspace. */
@@ -664,7 +672,8 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         const task = repo.tasks.create({
           workspaceId: req.workspaceId,
           title,
-          description: req.args.description ? String(req.args.description) : undefined
+          description: req.args.description ? String(req.args.description) : undefined,
+          tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined
         })
         runtime.broadcastState()
         return { ok: true, data: { id: task.id, title: task.title } }
@@ -692,6 +701,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         }
         if (req.args.title !== undefined) patch.title = String(req.args.title)
         if (req.args.description !== undefined) patch.description = String(req.args.description)
+        if (req.args.tags !== undefined) patch.tags = parseTagList(String(req.args.tags))
         if (Object.keys(patch).length === 0) return { ok: false, error: 'nothing to update' }
         const updated = repo.tasks.update(task.id, patch)
         runtime.broadcastState()

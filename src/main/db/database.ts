@@ -78,6 +78,7 @@ function migrate(d: Database.Database): void {
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       title        TEXT NOT NULL,
       description  TEXT NOT NULL DEFAULT '',
+      tags         TEXT NOT NULL DEFAULT '[]',
       status       TEXT NOT NULL DEFAULT 'todo',
       flight_id    TEXT,
       created_at   INTEGER NOT NULL,
@@ -95,6 +96,7 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'flights', 'layout', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'workspaces', 'default_agent_provider', "TEXT NOT NULL DEFAULT 'claude'")
   addColumnIfMissing(d, 'workspaces', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
+  addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
 }
 
 function addColumnIfMissing(d: Database.Database, table: string, column: string, def: string): void {

@@ -12,6 +12,7 @@ import {
 import type { Task, TaskStatus } from '@shared/types'
 import EditableTaskTitle from './EditableTaskTitle'
 import TaskDeleteButton from './TaskDeleteButton'
+import { EditableTaskDescription, TaskTags } from './TaskMeta'
 
 /** Segmented-toggle pill class for the List / Board switch. */
 function segClass(active: boolean): string {
@@ -168,6 +169,9 @@ export default function TaskTracker(): JSX.Element {
                   </button>
                 </div>
 
+                <EditableTaskDescription task={task} />
+                <TaskTags task={task} />
+
                 {flightLink(task, false)}
 
                 {!task.flightId && (
@@ -254,6 +258,8 @@ export default function TaskTracker(): JSX.Element {
                         </div>
                         <TaskDeleteButton taskId={task.id} />
                       </div>
+
+                      <TaskTags task={task} />
 
                       {flightLink(task, true)}
 

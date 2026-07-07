@@ -29,9 +29,9 @@ Usage:
   orbital flights
   orbital flight new [--worktree <branch>] [name]
   orbital tab new <terminal|browser|editor|agent> [arg]
-  orbital task add "<title>" [--description <text>]
+  orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all]
-  orbital task update <id> [--status <todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>]
+  orbital task update <id> [--status <todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
   orbital task done <id>
   orbital server add <url|port>
   orbital server remove <url|port>
@@ -160,6 +160,7 @@ function buildRequest(argv: string[]): ControlRequest {
         if (!title) usageError()
         const args: Record<string, unknown> = { title }
         if (flags.description) args.description = flags.description
+        if (flags.tags) args.tags = flags.tags
         return request('task-add', args)
       }
       if (sub === 'list') {
@@ -172,6 +173,7 @@ function buildRequest(argv: string[]): ControlRequest {
         if (flags.status !== undefined) args.status = flags.status
         if (flags.title !== undefined) args.title = flags.title
         if (flags.description !== undefined) args.description = flags.description
+        if (flags.tags !== undefined) args.tags = flags.tags
         return request('task-update', args)
       }
       if (sub === 'done') {
