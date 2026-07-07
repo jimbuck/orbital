@@ -107,6 +107,13 @@
     overflow: hidden;
     user-select: none;
   }
+  /* Preflight resets buttons to cursor: default; every enabled button (and
+     summary/role=button element) should read as clickable. */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  summary {
+    cursor: pointer;
+  }
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
