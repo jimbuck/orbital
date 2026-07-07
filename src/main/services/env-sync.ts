@@ -4,19 +4,24 @@ import path from 'node:path'
 import picomatch from 'picomatch'
 import chokidar, { type FSWatcher, type WatchOptions } from 'chokidar'
 
-// Directories that must never be walked or watched. Worktrees should receive
-// gitignored env files from the root checkout, but the VCS metadata and
-// dependency trees are huge and irrelevant.
-const SKIP_DIRS = new Set(['.git', 'node_modules'])
+// `.git` is never walked or watched. `node_modules` is only walked when a
+// pattern explicitly targets it (the one-shot sync at worktree creation), and
+// is never live-watched — mirroring dependency churn would melt the watcher;
+// a package-manager install in the worktree handles later drift.
 const WATCH_IGNORED = ['**/.git/**', '**/node_modules/**']
+
+/** True when any pattern targets `node_modules`, so the walk must descend into it. */
+function targetsNodeModules(patterns: string[]): boolean {
+  return patterns.some((p) => p === 'node_modules' || p.startsWith('node_modules/'))
+}
 
 /**
  * Recursively collect every file under `dir`, returning paths relative to
- * `root` using forward slashes. Directories named `.git` / `node_modules` are
- * skipped entirely. Read failures are swallowed so a single unreadable
- * directory can't abort the whole walk.
+ * `root` using forward slashes. Directories named in `skip` are skipped
+ * entirely. Read failures are swallowed so a single unreadable directory
+ * can't abort the whole walk.
  */
-function walkFiles(root: string, dir: string, out: string[]): void {
+function walkFiles(root: string, dir: string, out: string[], skip: Set<string>): void {
   let entries: fs.Dirent[]
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -26,8 +31,8 @@ function walkFiles(root: string, dir: string, out: string[]): void {
   for (const entry of entries) {
     const abs = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(entry.name)) continue
-      walkFiles(root, abs, out)
+      if (skip.has(entry.name)) continue
+      walkFiles(root, abs, out, skip)
     } else if (entry.isFile()) {
       out.push(path.relative(root, abs).split(path.sep).join('/'))
     }
@@ -57,7 +62,8 @@ export async function syncEnvFiles(
 
   const isMatch = picomatch(patterns, { dot: true })
   const rels: string[] = []
-  walkFiles(rootPath, rootPath, rels)
+  const skip = new Set(targetsNodeModules(patterns) ? ['.git'] : ['.git', 'node_modules'])
+  walkFiles(rootPath, rootPath, rels, skip)
 
   const copied: string[] = []
   for (const rel of rels) {

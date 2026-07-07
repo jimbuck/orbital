@@ -105,6 +105,24 @@ export interface Workspace {
   addedAt: number
 }
 
+/**
+ * Default env-sync globs for a new workspace: env files, agent config
+ * directories, and installed dependencies. Directory patterns use `/**` since
+ * sync matching runs against relative file paths. `node_modules/**` is copied
+ * once when a worktree is created but never live-watched (see env-sync.ts).
+ */
+export const DEFAULT_ENV_SYNC_PATTERNS = [
+  '.env',
+  '.env.*',
+  '.claude/**',
+  '.codex/**',
+  '.cursor/**',
+  '.gemini/**',
+  '.cline/**',
+  '.roo/**',
+  'node_modules/**'
+]
+
 export interface TabConfig {
   /** terminal: working directory the PTY was spawned in. */
   cwd?: string

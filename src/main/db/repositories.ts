@@ -16,7 +16,8 @@ import {
   type LayoutNode,
   type TaskPatch,
   aggregateStatus,
-  isPtyTabType
+  isPtyTabType,
+  DEFAULT_ENV_SYNC_PATTERNS
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
 
@@ -91,7 +92,7 @@ export const workspaces = {
       .prepare(
         'INSERT INTO workspaces (id, name, repo_path, env_sync_patterns, added_at) VALUES (?, ?, ?, ?, ?)'
       )
-      .run(wid, input.name, input.repoPath, JSON.stringify(input.envSyncPatterns ?? ['.env', '.env.*']), now())
+      .run(wid, input.name, input.repoPath, JSON.stringify(input.envSyncPatterns ?? DEFAULT_ENV_SYNC_PATTERNS), now())
     return workspaces.get(wid)!
   },
   remove(wid: string): void {
