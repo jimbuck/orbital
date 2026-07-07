@@ -31,8 +31,10 @@ Usage:
   orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all]
+  orbital task show <id>
   orbital task update <id> [--status <todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
   orbital task done <id>
+  orbital task delete <id>
   orbital server add <url|port>
   orbital server remove <url|port>
   orbital server list
@@ -176,10 +178,20 @@ function buildRequest(argv: string[]): ControlRequest {
         if (flags.tags !== undefined) args.tags = flags.tags
         return request('task-update', args)
       }
+      if (sub === 'show') {
+        const id = positionals[0]
+        if (!id) usageError()
+        return request('task-show', { id })
+      }
       if (sub === 'done') {
         const id = positionals[0]
         if (!id) usageError()
         return request('task-update', { id, status: 'done' })
+      }
+      if (sub === 'delete') {
+        const id = positionals[0]
+        if (!id) usageError()
+        return request('task-delete', { id })
       }
       return usageError()
     }
@@ -259,6 +271,7 @@ function printTasks(data: unknown): void {
       { key: 'id', head: 'ID' },
       { key: 'status', head: 'STATUS' },
       { key: 'title', head: 'TITLE' },
+      { key: 'tags', head: 'TAGS' },
       { key: 'flight', head: 'FLIGHT' }
     ],
     list.map((task) => {
@@ -268,10 +281,25 @@ function printTasks(data: unknown): void {
         id: String(o.id ?? '').slice(0, 8),
         status: String(o.status ?? ''),
         title: String(o.title ?? ''),
+        tags: Array.isArray(o.tags) ? o.tags.join(',') : '',
         flight: o.flightId ? 'linked' : ''
       }
     })
   )
+}
+
+/** Full detail block for `orbital task show`. */
+function printTaskDetail(data: unknown): void {
+  const o = (data ?? {}) as Record<string, unknown>
+  const rows: [string, string][] = [
+    ['id', String(o.id ?? '')],
+    ['status', String(o.status ?? '')],
+    ['title', String(o.title ?? '')],
+    ['description', String(o.description ?? '') || '(none)'],
+    ['tags', Array.isArray(o.tags) && o.tags.length > 0 ? o.tags.join(', ') : '(none)'],
+    ['flight', o.flightId ? String(o.flightId) : '(not linked)']
+  ]
+  for (const [key, value] of rows) process.stdout.write(`${key.padEnd(12)} ${value}\n`)
 }
 
 function printServers(data: unknown): void {
@@ -300,6 +328,8 @@ function confirmation(req: ControlRequest, data: unknown): string {
       return `task added: ${String(d.title ?? req.args.title ?? '')}`
     case 'task-update':
       return `task updated: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
+    case 'task-delete':
+      return `task deleted: ${String(d.title ?? '')}`
     case 'server-add': {
       const n = Array.isArray(d.servers) ? d.servers.length : 0
       return `dev server registered: ${String(d.url ?? '')} (${n} live)`
@@ -382,6 +412,8 @@ function handleResponse(req: ControlRequest, lineText: string): void {
     printFlights(res.data)
   } else if (req.cmd === 'task-list') {
     printTasks(res.data)
+  } else if (req.cmd === 'task-show') {
+    printTaskDetail(res.data)
   } else if (req.cmd === 'server-list') {
     printServers(res.data)
   } else {

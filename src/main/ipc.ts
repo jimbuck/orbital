@@ -684,8 +684,33 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         const list = repo.tasks
           .list()
           .filter((t) => t.workspaceId === req.workspaceId && (all || t.status !== 'done'))
-          .map((t) => ({ id: t.id, status: t.status, title: t.title, description: t.description, flightId: t.flightId }))
+          .map((t) => ({
+            id: t.id,
+            status: t.status,
+            title: t.title,
+            description: t.description,
+            tags: t.tags,
+            flightId: t.flightId
+          }))
         return { ok: true, data: list }
+      }
+      case 'task-show': {
+        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        const idArg = String(req.args.id ?? '').trim()
+        if (!idArg) return { ok: false, error: 'task id required' }
+        const { task, error } = resolveTask(req.workspaceId, idArg)
+        if (!task) return { ok: false, error }
+        return {
+          ok: true,
+          data: {
+            id: task.id,
+            status: task.status,
+            title: task.title,
+            description: task.description,
+            tags: task.tags,
+            flightId: task.flightId
+          }
+        }
       }
       case 'task-update': {
         if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
@@ -706,6 +731,16 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         const updated = repo.tasks.update(task.id, patch)
         runtime.broadcastState()
         return { ok: true, data: { id: updated.id, status: updated.status, title: updated.title } }
+      }
+      case 'task-delete': {
+        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        const idArg = String(req.args.id ?? '').trim()
+        if (!idArg) return { ok: false, error: 'task id required' }
+        const { task, error } = resolveTask(req.workspaceId, idArg)
+        if (!task) return { ok: false, error }
+        repo.tasks.remove(task.id)
+        runtime.broadcastState()
+        return { ok: true, data: { id: task.id, title: task.title } }
       }
       case 'server-add': {
         if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
