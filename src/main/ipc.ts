@@ -710,13 +710,20 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
 
 /** On startup, resume watchers for already-registered workspaces and their worktrees. */
 export function resumeWorkspaces(): void {
+  const checkouts = new Set<string>()
   for (const ws of repo.workspaces.list()) {
     runtime.gitWatcher.watch(ws.repoPath)
     runtime.ensureEnvWatcher(ws.id)
+    checkouts.add(ws.repoPath)
   }
   for (const f of repo.flights.list()) {
-    if (f.kind === 'worktree' && existsSync(f.worktreePath)) runtime.gitWatcher.watch(f.worktreePath)
+    if (f.kind === 'worktree' && existsSync(f.worktreePath)) {
+      runtime.gitWatcher.watch(f.worktreePath)
+      checkouts.add(f.worktreePath)
+    }
   }
+  // Branches can move while the app is closed — resync stored names to git HEAD.
+  void Promise.all([...checkouts].map((p) => runtime.refreshBranch(p))).then(() => runtime.broadcastState())
 }
 
 /**

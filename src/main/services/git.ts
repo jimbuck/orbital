@@ -555,16 +555,21 @@ export class GitWatcher extends EventEmitter {
     const gitDir = resolveGitDir(repoPath).replace(/\\/g, '/')
     const headPath = `${gitDir}/HEAD`
     const indexPath = `${gitDir}/index`
+    // HEAD is replaced by atomic rename, which the file watch can miss (seen on
+    // Windows for `checkout -b`); the reflog is appended in place on every HEAD
+    // move, so it's the reliable checkout/commit signal.
+    const logsDir = `${gitDir}/logs`
+    const logsHeadPath = `${logsDir}/HEAD`
 
-    const watcher = chokidar.watch([headPath, indexPath, repoPath], {
+    const watcher = chokidar.watch([headPath, indexPath, logsHeadPath, repoPath], {
       ignoreInitial: true,
       depth: WORKTREE_DEPTH,
       ignored: (raw: string) => {
         const p = raw.replace(/\\/g, '/')
         if (p.includes('/node_modules/') || p.endsWith('/node_modules')) return true
-        // Inside .git: allow only HEAD and index, drop the rest.
+        // Inside .git: allow only HEAD, index and the HEAD reflog, drop the rest.
         if (p === gitDir || p.startsWith(`${gitDir}/`)) {
-          return p !== gitDir && p !== headPath && p !== indexPath
+          return p !== gitDir && p !== headPath && p !== indexPath && p !== logsDir && p !== logsHeadPath
         }
         return false
       }

@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { TerminalManager } from './services/terminals'
-import { GitWatcher } from './services/git'
+import { GitWatcher, git } from './services/git'
 import { ControlChannel } from './services/control-channel'
 import { AlertManager } from './services/alerts'
 import { EnvSyncWatcher } from './services/env-sync'
@@ -60,8 +60,10 @@ class Runtime {
       }
     })
 
-    // External git activity (commits, checkouts) -> refresh the renderer.
-    this.gitWatcher.on('change', () => this.broadcastState())
+    // External git activity (commits, checkouts) -> resync branch names, refresh the renderer.
+    this.gitWatcher.on('change', (repoPath: string) => {
+      void this.refreshBranch(repoPath).finally(() => this.broadcastState())
+    })
   }
 
   setWindow(win: BrowserWindow | null): void {
@@ -126,6 +128,17 @@ class Runtime {
 
   clearDevServers(flightId: string): void {
     if (this.devServers.delete(flightId)) this.broadcastState()
+  }
+
+  /**
+   * Re-read HEAD for a checkout and persist it onto its flights. `flights.branch`
+   * is captured at creation and otherwise never updated, so without this the rail
+   * shows a stale name after any external checkout — especially for root flights,
+   * whose checkout is the shared main repo where the user moves HEAD freely.
+   */
+  async refreshBranch(worktreePath: string): Promise<void> {
+    const branch = await git.currentBranch(worktreePath).catch(() => null)
+    if (branch) repo.flights.updateBranchByWorktree(worktreePath, branch)
   }
 
   /** Push the full hydrated app state to the renderer (coalesced). */

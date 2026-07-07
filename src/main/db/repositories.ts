@@ -225,6 +225,13 @@ export const flights = {
   updateStatus(fid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE flights SET status = ? WHERE id = ?').run(status, fid)
   },
+  /** Sync the stored branch for every flight checked out at `worktreePath`; true if anything changed. */
+  updateBranchByWorktree(worktreePath: string, branch: string): boolean {
+    const r = getDb()
+      .prepare('UPDATE flights SET branch = ? WHERE worktree_path = ? AND branch <> ?')
+      .run(branch, worktreePath, branch)
+    return r.changes > 0
+  },
   setLayout(fid: string, layout: LayoutNode): void {
     getDb().prepare('UPDATE flights SET layout = ? WHERE id = ?').run(JSON.stringify(layout), fid)
   },
