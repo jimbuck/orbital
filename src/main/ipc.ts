@@ -354,6 +354,14 @@ export function registerIpc(): void {
     broadcastAll()
   })
 
+  h(IPC.renameTab, (_e, tabId: string, title: string) => {
+    const tab = repo.tabs.get(tabId)
+    if (!tab) return
+    // An empty title clears the override; JSON.stringify drops the undefined key.
+    repo.tabs.updateConfig(tabId, { ...tab.config, title: title.trim() || undefined })
+    broadcast()
+  })
+
   h(IPC.setActiveTab, (_e, paneId: string, tabId: string) => {
     repo.tabs.setActive(paneId, tabId)
     broadcast()

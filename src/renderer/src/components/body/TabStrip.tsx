@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import {
   Terminal,
   Globe,
@@ -6,6 +6,8 @@ import {
   Sparkles,
   Plus,
   X,
+  CopyX,
+  Pencil,
   SplitSquareHorizontal,
   SplitSquareVertical,
   Columns2
@@ -13,6 +15,7 @@ import {
 import type { Flight, Pane, Tab, TabType } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
+import { ContextMenu, MenuItem, clampMenuPos, type MenuPos } from '../rail/menu'
 import { TAB_DND } from './PaneGroup'
 
 /** Compact display label for a dev-server URL: host:port (or the URL itself). */
@@ -65,19 +68,50 @@ function tabTitle(tab: Tab): string {
 }
 
 /**
- * The h-9 tab strip atop a pane: a chip per tab (draggable between panes), an
- * add-tab popover, and a pane-options menu (split across / below / close). The
- * strip is also a drop target — dropping a tab here moves it into this pane.
+ * The h-9 tab strip atop a pane: a chip per tab (draggable between panes,
+ * right-click for rename / split / close options), an add-tab popover, and a
+ * pane-options menu (split across / below / close). The strip is also a drop
+ * target — dropping a tab here moves it into this pane.
  */
 export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element {
   const [addOpen, setAddOpen] = useState(false)
   const [paneMenu, setPaneMenu] = useState(false)
+  const [tabMenu, setTabMenu] = useState<{ pos: MenuPos; tab: Tab } | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const renameRef = useRef<HTMLInputElement>(null)
   const onlyPane = flight.panes.length <= 1
   const servers = useStore((s) => s.devServers[flight.id]) ?? []
+
+  useEffect(() => {
+    if (renamingId) renameRef.current?.select()
+  }, [renamingId])
 
   const addTab = (type: TabType, url?: string): void => {
     setAddOpen(false)
     void window.orbital.createTab(flight.id, pane.id, type, url ? { url } : undefined)
+  }
+
+  const openTabMenu = (e: React.MouseEvent, tab: Tab): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setTabMenu({ pos: clampMenuPos(e, 190, 200), tab })
+  }
+
+  const startRename = (tab: Tab): void => {
+    setDraft(tabTitle(tab))
+    setRenamingId(tab.id)
+    setTabMenu(null)
+  }
+  const commitRename = (tab: Tab): void => {
+    const title = draft.trim()
+    setRenamingId(null)
+    if (title && title !== tabTitle(tab)) void window.orbital.renameTab(tab.id, title)
+  }
+
+  const closeOthers = (tab: Tab): void => {
+    setTabMenu(null)
+    for (const t of pane.tabs) if (t.id !== tab.id) void window.orbital.closeTab(t.id)
   }
 
   const onStripDragOver = (e: React.DragEvent): void => {
@@ -111,7 +145,8 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
             role="tab"
             tabIndex={0}
             aria-selected={isActive}
-            draggable
+            onContextMenu={(e) => openTabMenu(e, tab)}
+            draggable={renamingId !== tab.id}
             onDragStart={(e) => {
               e.dataTransfer.setData(TAB_DND, tab.id)
               e.dataTransfer.effectAllowed = 'move'
@@ -142,11 +177,31 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
             ) : (
               <TypeIcon type={tab.type} className="text-text-3" />
             )}
-            <span
-              className={`text-xs ${isActive ? 'font-semibold' : 'font-medium'} ${tab.type === 'editor' ? 'font-mono' : ''}`}
-            >
-              {tabTitle(tab)}
-            </span>
+            {renamingId === tab.id ? (
+              <input
+                ref={renameRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitRename(tab)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setRenamingId(null)
+                  }
+                }}
+                onBlur={() => commitRename(tab)}
+                onClick={(e) => e.stopPropagation()}
+                className="allow-select w-24 rounded border border-accent/60 bg-bg px-1 py-0.5 text-xs text-text outline-none"
+              />
+            ) : (
+              <span
+                className={`text-xs ${isActive ? 'font-semibold' : 'font-medium'} ${tab.type === 'editor' ? 'font-mono' : ''}`}
+              >
+                {tabTitle(tab)}
+              </span>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -271,6 +326,52 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
           </>
         )}
       </div>
+
+      {/* Tab context menu (right-click on a chip) */}
+      {tabMenu && (
+        <ContextMenu pos={tabMenu.pos} width={190} onClose={() => setTabMenu(null)}>
+          <MenuItem
+            icon={<Pencil size={13} strokeWidth={1.5} />}
+            label="Rename tab"
+            onClick={() => startRename(tabMenu.tab)}
+          />
+          <div className="my-1 h-px bg-soft" />
+          <MenuItem
+            icon={<SplitSquareHorizontal size={13} strokeWidth={1.5} />}
+            label="Split across"
+            onClick={() => {
+              setTabMenu(null)
+              void window.orbital.splitPane(flight.id, pane.id, 'row', 'after')
+            }}
+          />
+          <MenuItem
+            icon={<SplitSquareVertical size={13} strokeWidth={1.5} />}
+            label="Split below"
+            onClick={() => {
+              setTabMenu(null)
+              void window.orbital.splitPane(flight.id, pane.id, 'column', 'after')
+            }}
+          />
+          <div className="my-1 h-px bg-soft" />
+          <MenuItem
+            icon={<X size={13} strokeWidth={1.5} />}
+            label="Close tab"
+            danger
+            onClick={() => {
+              setTabMenu(null)
+              void window.orbital.closeTab(tabMenu.tab.id)
+            }}
+          />
+          {pane.tabs.length > 1 && (
+            <MenuItem
+              icon={<CopyX size={13} strokeWidth={1.5} />}
+              label="Close other tabs"
+              danger
+              onClick={() => closeOthers(tabMenu.tab)}
+            />
+          )}
+        </ContextMenu>
+      )}
     </div>
   )
 }

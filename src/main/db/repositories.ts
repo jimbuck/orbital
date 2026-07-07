@@ -304,6 +304,9 @@ export const tabs = {
   updateStatus(tid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE tabs SET status = ? WHERE id = ?').run(status, tid)
   },
+  updateConfig(tid: string, config: TabConfig): void {
+    getDb().prepare('UPDATE tabs SET config = ? WHERE id = ?').run(JSON.stringify(config), tid)
+  },
   move(tid: string, targetPaneId: string): void {
     const pos =
       (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?').get(targetPaneId) as any)

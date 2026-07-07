@@ -68,6 +68,8 @@ const api: OrbitalApi = {
   createTab: (flightId: string, paneId: string | null, type: TabType, config?: TabConfig) =>
     ipcRenderer.invoke(IPC.createTab, flightId, paneId, type, config) as Promise<Tab>,
   closeTab: (tabId: string) => ipcRenderer.invoke(IPC.closeTab, tabId) as Promise<void>,
+  renameTab: (tabId: string, title: string) =>
+    ipcRenderer.invoke(IPC.renameTab, tabId, title) as Promise<void>,
   setActiveTab: (paneId: string, tabId: string) =>
     ipcRenderer.invoke(IPC.setActiveTab, paneId, tabId) as Promise<void>,
   moveTab: (tabId: string, targetPaneId: string) =>
