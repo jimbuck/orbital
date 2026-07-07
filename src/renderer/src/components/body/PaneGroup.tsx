@@ -181,7 +181,9 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
 
         {activeTab && activeTab.type === 'editor' && (
           <div className="absolute inset-0">
-            <EditorTab tab={activeTab} />
+            {/* Keyed by tab id: without it React reuses the instance across editor
+                tabs, so a newly created tab kept showing the previous tab's file. */}
+            <EditorTab key={activeTab.id} tab={activeTab} />
           </div>
         )}
         {activeTab && activeTab.type === 'browser' && (
