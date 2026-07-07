@@ -2,6 +2,26 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.5.0](https://github.com/jimbuck/orbital/compare/v1.4.0...v1.5.0) (2026-07-07)
+
+
+### Bug Fixes
+
+* give all enabled buttons a pointer cursor ([483e9b4](https://github.com/jimbuck/orbital/commit/483e9b46e6e636a681f0bb7baa41fdc2c286c05a))
+* give the right-panel task list its own scroll region ([665feac](https://github.com/jimbuck/orbital/commit/665feac9ac4a76cc8d65109dd0f40666078954ea))
+* keep the titlebar bottom border continuous under menus and window controls ([4d6adf1](https://github.com/jimbuck/orbital/commit/4d6adf180545f57dd1b3de831f2451857e36a42d))
+
+
+### Features
+
+* allow workspaces to be renamed from the rail context menu ([1c388e4](https://github.com/jimbuck/orbital/commit/1c388e4a1afa61321482d662f0f098ed7d63c675))
+* **cli:** add task show and task delete, list tags in task list ([5fb25c0](https://github.com/jimbuck/orbital/commit/5fb25c072324a3424498ed35c4c463d7d1c76469))
+* default env sync covers agent config dirs and node_modules ([04b3048](https://github.com/jimbuck/orbital/commit/04b3048be92432ca3081472bf334e820b285e700))
+* expand tasks with tags plus editable descriptions in the panel ([f0b9475](https://github.com/jimbuck/orbital/commit/f0b9475ed4e76aaaa0d5028d12c81cb9568f3a5d))
+* hover-revealed Add Task placeholder in board columns ([03e9544](https://github.com/jimbuck/orbital/commit/03e95440d9ba60756fa020df912ed83095d1c36c))
+* right-click context menu on tabs (rename, split, close, close others) ([8cc5d6d](https://github.com/jimbuck/orbital/commit/8cc5d6dc85b24b7cc5fdeb258ac5243af2f4635b))
+* syntax highlighting while editing in the editor tab ([7fb960b](https://github.com/jimbuck/orbital/commit/7fb960b2ab0c9fa821ed2c7d6c00da6d00f554ba))
+
 # [1.4.0](https://github.com/jimbuck/orbital/compare/v1.3.1...v1.4.0) (2026-07-07)
 
 
