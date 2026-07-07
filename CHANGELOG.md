@@ -2,6 +2,24 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.6.0](https://github.com/jimbuck/orbital/compare/v1.5.0...v1.6.0) (2026-07-07)
+
+
+### Bug Fixes
+
+* drop stale hook status events so an idle flight can't spin forever ([f871bde](https://github.com/jimbuck/orbital/commit/f871bdeb195963e2a2d662ea11ce97d9bfb375a7))
+* key editor tabs by id so a new diff tab shows the clicked file ([80d3e77](https://github.com/jimbuck/orbital/commit/80d3e7761d66e24ba1be74f2491e31826d61075c))
+* release worktree locks before deleting a Flight ([ef1bc54](https://github.com/jimbuck/orbital/commit/ef1bc547cbd18e076b4688486dd493d9ec7e4465))
+
+
+### Features
+
+* 'Clear Status' flight menu item force-resets a stuck status ([1f67a8e](https://github.com/jimbuck/orbital/commit/1f67a8e50e81f91a173246771af1c21434f69415))
+* edit tasks in a modal, cards become display-only ([90f3c06](https://github.com/jimbuck/orbital/commit/90f3c06d9081eba70ae8d0d9535c8c5061278e94))
+* new Flights start with an empty pane instead of an auto-opened terminal ([7725f29](https://github.com/jimbuck/orbital/commit/7725f29cd56951b1df1539e96c9a86065c991ee6))
+* switch or create branches from the git panel (root flight only) ([465ed04](https://github.com/jimbuck/orbital/commit/465ed04ca777a8ad25557dae2058b46aee2f164f))
+* task panel is always a list; expand opens the kanban ([50a99db](https://github.com/jimbuck/orbital/commit/50a99dbca0cd88fdf6316bf9b076f496b89556d2))
+
 # [1.5.0](https://github.com/jimbuck/orbital/compare/v1.4.0...v1.5.0) (2026-07-07)
 
 
