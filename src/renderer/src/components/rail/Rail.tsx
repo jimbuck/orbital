@@ -1,6 +1,8 @@
 import type { JSX } from 'react'
 import { Plus } from 'lucide-react'
 import { useStore } from '@renderer/store'
+import { usePanelWidth } from '@renderer/lib/usePanelWidth'
+import PanelResizeHandle from '../PanelResizeHandle'
 import Workspace from './Workspace'
 import RailFooter from './RailFooter'
 
@@ -12,9 +14,16 @@ import RailFooter from './RailFooter'
 export default function Rail(): JSX.Element {
   const workspaces = useStore((s) => s.workspaces)
   const openModal = useStore((s) => s.openModal)
+  const { width, dragging, startResize, resetWidth } = usePanelWidth({
+    storageKey: 'orbital.railWidth',
+    defaultWidth: 266,
+    min: 200,
+    max: 440,
+    handleEdge: 'right'
+  })
 
   return (
-    <aside className="flex w-[266px] flex-none flex-col border-r border-line bg-rail">
+    <aside style={{ width }} className="relative flex flex-none flex-col border-r border-line bg-rail">
       <div className="flex items-center justify-between border-b border-soft px-[14px] pb-3 pt-[14px]">
         <div>
           <div className="text-[11px] font-bold uppercase tracking-[0.9px] text-faint">Workspaces</div>
@@ -39,6 +48,7 @@ export default function Rail(): JSX.Element {
       </div>
 
       <RailFooter />
+      <PanelResizeHandle edge="right" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
     </aside>
   )
 }
