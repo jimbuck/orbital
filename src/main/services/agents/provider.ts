@@ -36,11 +36,13 @@ export interface AgentProvider {
 
 import { claudeProvider } from './claude'
 import { codexProvider } from './codex'
+import { cursorProvider } from './cursor'
 
 /** Providers keyed by id. The single place to register a new agent. */
 export const AGENT_PROVIDERS: Record<string, AgentProvider> = {
   [claudeProvider.id]: claudeProvider,
-  [codexProvider.id]: codexProvider
+  [codexProvider.id]: codexProvider,
+  [cursorProvider.id]: cursorProvider
 }
 
 /** Resolve a provider by id, falling back to Claude (the default). */

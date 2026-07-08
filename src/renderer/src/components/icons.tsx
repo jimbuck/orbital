@@ -43,3 +43,20 @@ export function CodexIcon({ size = 16, className }: BrandIconProps): JSX.Element
     </svg>
   )
 }
+
+/** Cursor's isometric cube mark. */
+export function CursorIcon({ size = 16, className }: BrandIconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      fillRule="evenodd"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M12 1.5l9.5 5.5v10l-9.5 5.5L2.5 17V7L12 1.5zm0 2.2L4.5 8v8l7.5 4.3 7.5-4.3V8L12 3.7z" />
+    </svg>
+  )
+}

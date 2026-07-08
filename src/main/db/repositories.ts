@@ -17,7 +17,8 @@ import {
   type TaskPatch,
   aggregateStatus,
   isPtyTabType,
-  DEFAULT_ENV_SYNC_PATTERNS
+  DEFAULT_ENV_SYNC_PATTERNS,
+  SUPPORTED_AGENTS
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
 
@@ -30,7 +31,8 @@ const DEFAULT_SETTINGS: Settings = {
   claudeHooksInstalled: false,
   envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
   periodicFetch: true,
-  debugLogging: false
+  debugLogging: false,
+  enabledAgents: SUPPORTED_AGENTS.map((a) => a.id)
 }
 
 /* ---- row -> entity mappers --------------------------------------------- */

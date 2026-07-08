@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeWorkspace } from '@renderer/store'
 import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan } from '@shared/types'
+import { SUPPORTED_AGENTS } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
 
 /** Common Windows shells offered in the default-shell picker. */
@@ -76,6 +77,10 @@ export default function Settings(): React.JSX.Element {
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
+  // Global per-agent visibility. Existing installs lack the key -> default to all enabled.
+  const [enabledAgents, setEnabledAgents] = useState<string[]>(
+    () => settings?.enabledAgents ?? SUPPORTED_AGENTS.map((a) => a.id)
+  )
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -127,6 +132,21 @@ export default function Settings(): React.JSX.Element {
 
   const shellOptions = SHELL_OPTIONS.includes(defaultShell) ? SHELL_OPTIONS : [defaultShell, ...SHELL_OPTIONS]
 
+  // Flip an agent's visibility, but never allow emptying the set — there must
+  // always be at least one agent available in the new-tab menus.
+  const toggleAgent = (id: string, on: boolean): void => {
+    setEnabledAgents((cur) => {
+      if (!on && cur.length <= 1 && cur.includes(id)) return cur
+      return on ? [...new Set([...cur, id])] : cur.filter((a) => a !== id)
+    })
+  }
+
+  // The default-agent picker only offers enabled agents; if the workspace's
+  // current default was disabled, still show it so the select has a valid value.
+  const agentOptions = SUPPORTED_AGENTS.filter(
+    (a) => enabledAgents.includes(a.id) || a.id === agentProvider
+  )
+
   const removePattern = (p: string): void => setPatterns((cur) => cur.filter((x) => x !== p))
 
   const commitDraft = (): void => {
@@ -152,7 +172,8 @@ export default function Settings(): React.JSX.Element {
         claudeHooksInstalled: settings?.claudeHooksInstalled ?? false,
         envSyncPatterns: patterns,
         periodicFetch,
-        debugLogging
+        debugLogging,
+        enabledAgents
       })
       closeModal()
     } finally {
@@ -269,9 +290,20 @@ export default function Settings(): React.JSX.Element {
       {/* Agent */}
       <div className={sectionLabel}>Agent</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
-        A <span className="font-semibold text-text-2">Claude</span> tab boots this agent straight
-        into the Flight&apos;s worktree, pre-briefed with the flight&apos;s context.
+        An agent tab boots the coding CLI straight into the Flight&apos;s worktree. Hide agents you
+        don&apos;t use from the new-tab menus.
       </p>
+      <div className="mt-2">
+        {SUPPORTED_AGENTS.map((agent) => (
+          <AlertRow
+            key={agent.id}
+            title={agent.label}
+            desc={`Show ${agent.label} in the new-tab menus`}
+            checked={enabledAgents.includes(agent.id)}
+            onChange={(v) => toggleAgent(agent.id, v)}
+          />
+        ))}
+      </div>
       <div className="mt-3 flex items-center justify-between gap-4">
         <span className="text-[12.5px] text-text-2">Default agent</span>
         <div className="relative">
@@ -281,12 +313,11 @@ export default function Settings(): React.JSX.Element {
             aria-label="Default agent provider"
             className="appearance-none rounded-btn border border-line-2 bg-bg py-[7px] pl-3 pr-9 text-[12px] text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
           >
-            <option value="claude" className="bg-panel text-text-2">
-              Claude
-            </option>
-            <option value="codex" className="bg-panel text-text-2">
-              Codex
-            </option>
+            {agentOptions.map((a) => (
+              <option key={a.id} value={a.id} className="bg-panel text-text-2">
+                {a.label}
+              </option>
+            ))}
           </select>
           <ChevronDown
             size={13}

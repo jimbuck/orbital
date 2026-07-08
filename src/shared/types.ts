@@ -26,6 +26,13 @@ export type FlightKind = 'root' | 'worktree'
  */
 export type TabType = 'terminal' | 'browser' | 'editor' | 'agent'
 
+/** Agent providers Orbital can launch, in menu order. Keep in sync with AGENT_PROVIDERS (main). */
+export const SUPPORTED_AGENTS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'cursor', label: 'Cursor' }
+]
+
 /** Tab types that are backed by a live PTY and carry a TerminalStatus. */
 export function isPtyTabType(type: TabType): boolean {
   return type === 'terminal' || type === 'agent'
@@ -205,6 +212,8 @@ export interface Settings {
   periodicFetch: boolean
   /** Opt-in verbose file logging of CLI calls, UI actions, and errors, with rotation. Off by default. */
   debugLogging: boolean
+  /** Agent providers offered in the new-tab menus; hide the ones you don't use. */
+  enabledAgents: string[]
 }
 
 /** Full application state pushed to / pulled by the renderer. */

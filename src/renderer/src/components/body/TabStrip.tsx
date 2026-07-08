@@ -12,7 +12,8 @@ import {
   Columns2
 } from 'lucide-react'
 import type { Flight, Pane, Tab, TabConfig, TabType } from '@shared/types'
-import { ClaudeIcon, CodexIcon } from '../icons'
+import { SUPPORTED_AGENTS } from '@shared/types'
+import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, clampMenuPos, type MenuPos } from '../rail/menu'
@@ -43,18 +44,23 @@ function TypeIcon({
   const props = { size: 14, strokeWidth: 1.5, className }
   if (type === 'browser') return <Globe {...props} />
   if (type === 'editor') return <FileText {...props} />
-  if (type === 'agent') return provider === 'codex' ? <CodexIcon {...props} /> : <ClaudeIcon {...props} />
+  if (type === 'agent') {
+    if (provider === 'codex') return <CodexIcon {...props} />
+    if (provider === 'cursor') return <CursorIcon {...props} />
+    return <ClaudeIcon {...props} />
+  }
   return <Terminal {...props} />
 }
 
 /** Display names for agent providers. */
-const AGENT_TITLES: Record<string, string> = { claude: 'Claude', codex: 'Codex' }
+const AGENT_TITLES: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor' }
 
 /** Tab types offered in the add-tab popover, with their picker labels. */
 const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig }[] = [
   { type: 'terminal', label: 'Terminal' },
   { type: 'agent', label: 'Claude', config: { agentProvider: 'claude' } },
   { type: 'agent', label: 'Codex', config: { agentProvider: 'codex' } },
+  { type: 'agent', label: 'Cursor', config: { agentProvider: 'cursor' } },
   { type: 'browser', label: 'Browser' },
   { type: 'editor', label: 'Editor' }
 ]
@@ -99,6 +105,12 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
   const servers = useStore((s) => s.devServers[flight.id]) ?? []
   const defaultAgentProvider = useStore(
     (s) => s.workspaces.find((w) => w.id === flight.workspaceId)?.defaultAgentProvider
+  )
+  // Global per-agent visibility: hide agent tab types the user disabled in Settings.
+  // Undefined (existing installs) means all agents are enabled.
+  const enabledAgents = useStore((s) => s.settings?.enabledAgents) ?? SUPPORTED_AGENTS.map((a) => a.id)
+  const addOptions = ADD_OPTIONS.filter(
+    (o) => o.type !== 'agent' || enabledAgents.includes(o.config?.agentProvider ?? '')
   )
 
   useEffect(() => {
@@ -256,7 +268,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
               role="menu"
               className="absolute left-0 top-8 z-[41] w-40 rounded-card border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
             >
-              {ADD_OPTIONS.map(({ type, label, config }) => (
+              {addOptions.map(({ type, label, config }) => (
                 <button
                   key={label}
                   role="menuitem"

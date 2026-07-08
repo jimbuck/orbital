@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
 import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
 import type { Flight, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
-import { ClaudeIcon, CodexIcon, type BrandIconProps } from '../icons'
+import { SUPPORTED_AGENTS } from '@shared/types'
+import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
 import { useStore, activeFlight } from '@renderer/store'
 import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
@@ -130,6 +131,7 @@ const OPENERS: { type: TabType; label: string; Icon: ComponentType<BrandIconProp
   { type: 'terminal', label: 'Terminal', Icon: Terminal },
   { type: 'agent', label: 'Claude', Icon: ClaudeIcon, config: { agentProvider: 'claude' } },
   { type: 'agent', label: 'Codex', Icon: CodexIcon, config: { agentProvider: 'codex' } },
+  { type: 'agent', label: 'Cursor', Icon: CursorIcon, config: { agentProvider: 'cursor' } },
   { type: 'browser', label: 'Browser', Icon: Globe },
   { type: 'editor', label: 'Editor', Icon: FileText }
 ]
@@ -149,6 +151,12 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
   // Terminal AND agent tabs are PTY-backed and share the xterm view; keep both
   // mounted (hidden when inactive) so their PTYs survive tab switches.
   const ptyTabs = pane.tabs.filter((t) => t.type === 'terminal' || t.type === 'agent')
+  // Global per-agent visibility: hide agent openers the user disabled in Settings.
+  // Undefined (existing installs) means all agents are enabled.
+  const enabledAgents = useStore((s) => s.settings?.enabledAgents) ?? SUPPORTED_AGENTS.map((a) => a.id)
+  const openers = OPENERS.filter(
+    (o) => o.type !== 'agent' || enabledAgents.includes(o.config?.agentProvider ?? '')
+  )
 
   const onDragOver = (e: React.DragEvent): void => {
     if (!e.dataTransfer.types.includes(TAB_DND) || !bodyRef.current) return
@@ -198,7 +206,7 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3.5">
             <span className="text-xs text-faint">Open a tab in this pane</span>
             <div className="flex items-center gap-2">
-              {OPENERS.map(({ type, label, Icon, config }) => (
+              {openers.map(({ type, label, Icon, config }) => (
                 <button
                   key={label}
                   onClick={() => window.orbital.createTab(flight.id, pane.id, type, config)}
