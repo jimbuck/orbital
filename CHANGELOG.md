@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.10.0](https://github.com/jimbuck/orbital/compare/v1.9.1...v1.10.0) (2026-07-08)
+
+
+### Features
+
+* use official Claude and OpenAI brand marks for agent icons ([8951a29](https://github.com/jimbuck/orbital/commit/8951a29b6a02ec5da00c265f9aa81908c8d9f7d3))
+
 ## [1.9.1](https://github.com/jimbuck/orbital/compare/v1.9.0...v1.9.1) (2026-07-08)
 
 
