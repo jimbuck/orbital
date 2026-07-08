@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.8.2](https://github.com/jimbuck/orbital/compare/v1.8.1...v1.8.2) (2026-07-08)
+
+
+### Bug Fixes
+
+* restore Open in Explorer/Terminal actions on the workspace row menu ([482c701](https://github.com/jimbuck/orbital/commit/482c7014c04afce7eae923202c590d99cb39a83c))
+
 ## [1.8.1](https://github.com/jimbuck/orbital/compare/v1.8.0...v1.8.1) (2026-07-08)
 
 
