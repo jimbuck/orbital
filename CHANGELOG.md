@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.11.0](https://github.com/jimbuck/orbital/compare/v1.10.0...v1.11.0) (2026-07-08)
+
+
+### Features
+
+* add Draft task status ([6109788](https://github.com/jimbuck/orbital/commit/6109788f1109bd492ab2956998a39629c3bf9889))
+
 # [1.10.0](https://github.com/jimbuck/orbital/compare/v1.9.1...v1.10.0) (2026-07-08)
 
 
