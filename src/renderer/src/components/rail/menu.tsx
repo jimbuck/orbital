@@ -1,9 +1,9 @@
 import type { JSX, ReactNode } from 'react'
 
 /**
- * Shared right-click context-menu primitives for the rail (FlightRow, Workspace):
- * a dismiss overlay + positioned surface, a menu row, and a destructive-action
- * confirm block that swaps in place of the menu items.
+ * Shared right-click context-menu primitives (rail FlightRow/Workspace rows and
+ * task cards): a dismiss overlay + positioned surface, a menu row, and a
+ * destructive-action confirm block that swaps in place of the menu items.
  */
 
 export type MenuPos = { x: number; y: number }

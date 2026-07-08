@@ -123,7 +123,9 @@ export default function EditTask(): JSX.Element {
   return (
     <ModalShell
       title="Edit task"
-      width={520}
+      width={1040}
+      minHeight={760}
+      bodyClassName="flex flex-col"
       onClose={closeModal}
       footer={
         <>
@@ -155,94 +157,96 @@ export default function EditTask(): JSX.Element {
         </>
       }
     >
-      <label className={fieldLabel} htmlFor="et-title">
-        Title
-      </label>
-      <input
-        id="et-title"
-        autoFocus
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={onTitleKey}
-        aria-invalid={Boolean(error && !title.trim())}
-        className={`mt-1.5 ${inputBase}`}
-      />
-
-      <div className={`${fieldLabel} mt-4`}>Status</div>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {TASK_STATUSES.map((s) => {
-          const dot = taskColumnDot(s)
-          const active = s === status
-          return (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatus(s)}
-              className={`inline-flex items-center gap-1.5 rounded-btn border px-2.5 py-1.5 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
-                active ? 'border-accent/50 bg-accent/[0.10]' : 'border-line-2 bg-bg hover:bg-hover'
-              }`}
-            >
-              <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
-              <span className={taskColumnHeadClass(s)}>{taskStatusLabel(s)}</span>
-            </button>
-          )
-        })}
-      </div>
-
-      <label className={`${fieldLabel} mt-4 block`} htmlFor="et-desc">
-        Description <span className="font-normal text-faint">· optional</span>
-      </label>
-      <textarea
-        id="et-desc"
-        value={description}
-        rows={4}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder="Add more detail…"
-        className={`mt-1.5 resize-none leading-snug ${inputBase}`}
-      />
-
-      <div className={`${fieldLabel} mt-4`}>
-        Tags <span className="font-normal text-faint">· optional</span>
-      </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-btn border border-line-2 bg-bg px-2.5 py-2 focus-within:border-accent/40">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="group/tag inline-flex items-center gap-1 rounded-chip border border-line-2 bg-panel-2 px-2 py-0.5 text-[11px] font-semibold text-text-3"
-          >
-            {tag}
-            <button
-              type="button"
-              aria-label={`Remove tag ${tag}`}
-              onClick={() => setTags(tags.filter((t) => t !== tag))}
-              className="rounded text-faint outline-none hover:text-red-2 focus-visible:ring-2 focus-visible:ring-accent/60"
-            >
-              <X size={11} strokeWidth={2} />
-            </button>
-          </span>
-        ))}
+      <div className="flex min-h-0 flex-1 flex-col">
+        <label className={fieldLabel} htmlFor="et-title">
+          Title
+        </label>
         <input
-          value={tagDraft}
-          onChange={(e) => setTagDraft(e.target.value)}
-          onKeyDown={onTagKey}
-          onBlur={addTags}
-          placeholder={tags.length ? 'Add a tag…' : 'tag, tag'}
-          className="min-w-[90px] flex-1 bg-transparent text-[12px] text-text outline-none placeholder:text-faint"
+          id="et-title"
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={onTitleKey}
+          aria-invalid={Boolean(error && !title.trim())}
+          className={`mt-1.5 ${inputBase}`}
         />
-        {tagDraft.trim() && (
-          <button
-            type="button"
-            aria-label="Add tag"
-            onClick={addTags}
-            className="inline-flex items-center gap-0.5 rounded-chip border border-dashed border-line-2 px-1.5 py-0.5 text-[10px] font-semibold text-faint outline-none hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/60"
-          >
-            <Plus size={10} strokeWidth={2} />
-            add
-          </button>
-        )}
-      </div>
 
-      {error && <div className="mt-3 text-[11.5px] text-red-2">{error}</div>}
+        <div className={`${fieldLabel} mt-4`}>Status</div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {TASK_STATUSES.map((s) => {
+            const dot = taskColumnDot(s)
+            const active = s === status
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatus(s)}
+                className={`inline-flex items-center gap-1.5 rounded-btn border px-2.5 py-1.5 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                  active ? 'border-accent/50 bg-accent/[0.10]' : 'border-line-2 bg-bg hover:bg-hover'
+                }`}
+              >
+                <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
+                <span className={taskColumnHeadClass(s)}>{taskStatusLabel(s)}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <label className={`${fieldLabel} mt-4 block`} htmlFor="et-desc">
+          Description <span className="font-normal text-faint">· optional</span>
+        </label>
+        <textarea
+          id="et-desc"
+          value={description}
+          rows={4}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Add more detail…"
+          className={`mt-1.5 min-h-[120px] flex-1 resize-none leading-snug ${inputBase}`}
+        />
+
+        <div className={`${fieldLabel} mt-4`}>
+          Tags <span className="font-normal text-faint">· optional</span>
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-btn border border-line-2 bg-bg px-2.5 py-2 focus-within:border-accent/40">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="group/tag inline-flex items-center gap-1 rounded-chip border border-line-2 bg-panel-2 px-2 py-0.5 text-[11px] font-semibold text-text-3"
+            >
+              {tag}
+              <button
+                type="button"
+                aria-label={`Remove tag ${tag}`}
+                onClick={() => setTags(tags.filter((t) => t !== tag))}
+                className="rounded text-faint outline-none hover:text-red-2 focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                <X size={11} strokeWidth={2} />
+              </button>
+            </span>
+          ))}
+          <input
+            value={tagDraft}
+            onChange={(e) => setTagDraft(e.target.value)}
+            onKeyDown={onTagKey}
+            onBlur={addTags}
+            placeholder={tags.length ? 'Add a tag…' : 'tag, tag'}
+            className="min-w-[90px] flex-1 bg-transparent text-[12px] text-text outline-none placeholder:text-faint"
+          />
+          {tagDraft.trim() && (
+            <button
+              type="button"
+              aria-label="Add tag"
+              onClick={addTags}
+              className="inline-flex items-center gap-0.5 rounded-chip border border-dashed border-line-2 px-1.5 py-0.5 text-[10px] font-semibold text-faint outline-none hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <Plus size={10} strokeWidth={2} />
+              add
+            </button>
+          )}
+        </div>
+
+        {error && <div className="mt-3 text-[11.5px] text-red-2">{error}</div>}
+      </div>
     </ModalShell>
   )
 }

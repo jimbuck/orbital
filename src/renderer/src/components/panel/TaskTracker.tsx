@@ -6,6 +6,8 @@ import { taskChipClass, taskStatusLabel } from '@renderer/lib/status'
 import type { Task } from '@shared/types'
 import TaskTitleButton from './TaskTitleButton'
 import { TaskTagsDisplay } from './TaskMeta'
+import TaskCardContextMenu from './TaskCardContextMenu'
+import { clampMenuPos, type MenuPos } from '../rail/menu'
 
 /**
  * Task tracker for the active workspace. Captures new tasks as a list, opens a
@@ -27,6 +29,7 @@ export default function TaskTracker(): JSX.Element {
   )
 
   const [draft, setDraft] = useState('')
+  const [menu, setMenu] = useState<{ task: Task; pos: MenuPos } | null>(null)
 
   const flightName = (flightId: string | null): string | undefined =>
     flightId ? flights.find((f) => f.id === flightId)?.name : undefined
@@ -109,6 +112,10 @@ export default function TaskTracker(): JSX.Element {
           return (
             <div
               key={task.id}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setMenu({ task, pos: clampMenuPos(e, 210, 300) })
+              }}
               className="group relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
             >
               <div className="flex items-start justify-between gap-[9px]">
@@ -150,6 +157,10 @@ export default function TaskTracker(): JSX.Element {
           )
         })}
       </div>
+
+      {menu && (
+        <TaskCardContextMenu task={menu.task} pos={menu.pos} onClose={() => setMenu(null)} />
+      )}
     </div>
   )
 }

@@ -11,6 +11,8 @@ import {
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import TaskTitleButton from '../panel/TaskTitleButton'
 import { TaskTagsDisplay } from '../panel/TaskMeta'
+import TaskCardContextMenu from '../panel/TaskCardContextMenu'
+import { clampMenuPos, type MenuPos } from '../rail/menu'
 import AddTaskCard from '../panel/AddTaskCard'
 import Settings from './Settings'
 import AddWorkspace from './AddWorkspace'
@@ -59,20 +61,37 @@ interface ModalShellProps {
   subtitle?: string
   /** Panel width in px (design specs: 540 / 500). */
   width: number
+  /** Minimum panel height in px; the body fills any space beyond its content. */
+  minHeight?: number
+  /** Extra classes for the scrollable body (e.g. `flex flex-col` to let content fill a tall panel). */
+  bodyClassName?: string
   onClose: () => void
   footer?: ReactNode
   children: ReactNode
 }
 
-/** The framed dialog panel: header (title + subtitle + X), scrollable body, footer. */
-export function ModalShell({ title, subtitle, width, onClose, footer, children }: ModalShellProps): React.JSX.Element {
+/**
+ * The framed dialog panel: a flex column of header (title + subtitle + X), a
+ * scrollable body, and an optional footer. Header and footer stay pinned; only
+ * the body scrolls, so a tall panel (via `minHeight`) keeps its actions visible.
+ */
+export function ModalShell({
+  title,
+  subtitle,
+  width,
+  minHeight,
+  bodyClassName = '',
+  onClose,
+  footer,
+  children
+}: ModalShellProps): React.JSX.Element {
   return (
     <div
       onClick={stopBubble}
-      style={{ width, maxWidth: '94vw', animation: 'panelIn .16s ease-out' }}
-      className="max-h-[84vh] overflow-y-auto bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
+      style={{ width, minHeight, maxWidth: '94vw', animation: 'panelIn .16s ease-out' }}
+      className="flex max-h-[84vh] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
     >
-      <header className="flex items-center justify-between px-[18px] py-4 border-b border-soft">
+      <header className="flex flex-none items-center justify-between px-[18px] py-4 border-b border-soft">
         <div className="min-w-0">
           <div className="text-[15px] font-bold text-text">{title}</div>
           {subtitle && <div className="mt-0.5 text-[11.5px] text-dim">{subtitle}</div>}
@@ -87,10 +106,10 @@ export function ModalShell({ title, subtitle, width, onClose, footer, children }
         </button>
       </header>
 
-      <div className="p-[18px]">{children}</div>
+      <div className={`min-h-0 flex-1 overflow-y-auto p-[18px] ${bodyClassName}`}>{children}</div>
 
       {footer && (
-        <footer className="flex items-center justify-end gap-[9px] px-[18px] py-[14px] border-t border-soft">
+        <footer className="flex flex-none items-center justify-end gap-[9px] px-[18px] py-[14px] border-t border-soft">
           {footer}
         </footer>
       )}
@@ -103,6 +122,7 @@ export function ModalShell({ title, subtitle, width, onClose, footer, children }
  * ========================================================================== */
 
 function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void }): React.JSX.Element {
+  const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
   return (
     <div
       draggable
@@ -111,6 +131,10 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         e.dataTransfer.effectAllowed = 'move'
       }}
       onDragEnd={() => onDragEnd?.()}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setMenuPos(clampMenuPos(e, 210, 300))
+      }}
       className="group cursor-grab rounded-card border border-line bg-bg p-3 active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-2">
@@ -122,6 +146,7 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         </span>
       </div>
       <TaskTagsDisplay task={task} />
+      {menuPos && <TaskCardContextMenu task={task} pos={menuPos} onClose={() => setMenuPos(null)} />}
     </div>
   )
 }
