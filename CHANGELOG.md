@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.9.0](https://github.com/jimbuck/orbital/compare/v1.8.2...v1.9.0) (2026-07-08)
+
+
+### Features
+
+* task card right-click menu; enlarge the Edit Task modal ([74cecca](https://github.com/jimbuck/orbital/commit/74ceccacb09ca18da70f4337992a37173ccce400))
+
 ## [1.8.2](https://github.com/jimbuck/orbital/compare/v1.8.1...v1.8.2) (2026-07-08)
 
 
