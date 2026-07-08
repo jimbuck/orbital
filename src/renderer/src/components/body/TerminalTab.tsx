@@ -1,10 +1,45 @@
 import { useEffect, useRef } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Tab } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
+import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
+
+/** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
+const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
+  dark: {
+    background: '#0d1118',
+    foreground: '#cfd6e2',
+    cursor: '#4f8cff',
+    selectionBackground: 'rgba(79,140,255,0.3)',
+    black: '#0a0d12',
+    brightBlack: '#5b6473',
+    red: '#ff6b6b',
+    green: '#3ddc97',
+    yellow: '#e8b54a',
+    blue: '#4f8cff',
+    magenta: '#9cc0ff',
+    cyan: '#6fe6b3',
+    white: '#cfd6e2'
+  },
+  light: {
+    background: '#ffffff',
+    foreground: '#17202e',
+    cursor: '#2f6fe0',
+    selectionBackground: 'rgba(47,111,224,0.22)',
+    black: '#17202e',
+    brightBlack: '#98a2b3',
+    red: '#dc2626',
+    green: '#12915a',
+    yellow: '#b7791f',
+    blue: '#2563eb',
+    magenta: '#7c3aed',
+    cyan: '#0e7490',
+    white: '#47515f'
+  }
+}
 
 /**
  * A live terminal surface backed by xterm.js. The PTY itself lives in main —
@@ -18,6 +53,14 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
   const paneIdRef = useRef(tab.paneId)
   paneIdRef.current = tab.paneId
 
+  const theme = useResolvedTheme()
+  // The terminal is created in a mount-only effect, so read the initial palette
+  // through a ref (avoids re-running the effect — and dropping scrollback — on
+  // theme change); a separate effect below repaints an already-open terminal.
+  const themeRef = useRef(theme)
+  themeRef.current = theme
+  const termRef = useRef<Terminal | null>(null)
+
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -27,24 +70,11 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
     const term = new Terminal({
       fontFamily: 'JetBrains Mono, monospace',
       fontSize: 12,
-      theme: {
-        background: '#0d1118',
-        foreground: '#cfd6e2',
-        cursor: '#4f8cff',
-        selectionBackground: 'rgba(79,140,255,0.3)',
-        black: '#0a0d12',
-        brightBlack: '#5b6473',
-        red: '#ff6b6b',
-        green: '#3ddc97',
-        yellow: '#e8b54a',
-        blue: '#4f8cff',
-        magenta: '#9cc0ff',
-        cyan: '#6fe6b3',
-        white: '#cfd6e2'
-      },
+      theme: XTERM_THEMES[themeRef.current],
       cursorBlink: true,
       allowProposedApi: true
     })
+    termRef.current = term
 
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -150,9 +180,16 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
         // ignore — the GL context may already be gone.
       }
       term.dispose()
+      termRef.current = null
     }
     // Re-create only when the tab identity changes; paneId moves use the ref above.
   }, [tab.id])
+
+  // Repaint an already-open terminal when the theme changes — updating
+  // .options.theme keeps scrollback intact (recreating the Terminal would drop it).
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = XTERM_THEMES[theme]
+  }, [theme])
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden bg-pane" />
 }

@@ -32,7 +32,10 @@ const DEFAULT_SETTINGS: Settings = {
   envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
   periodicFetch: true,
   debugLogging: false,
-  enabledAgents: SUPPORTED_AGENTS.map((a) => a.id)
+  enabledAgents: SUPPORTED_AGENTS.map((a) => a.id),
+  // Existing installs merge over this default, so they stay dark and keep the
+  // current look; only an explicit change opts a user into light/system.
+  theme: 'dark'
 }
 
 /* ---- row -> entity mappers --------------------------------------------- */

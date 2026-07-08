@@ -62,6 +62,66 @@
   --animate-pulse-dot: pulseDot 1.6s ease-in-out infinite;
 }
 
+/* ============================================================================
+ * Light theme override.
+ * The @theme block above defines the DARK tokens as Tailwind utilities compiled
+ * to var(--color-*). Redeclaring those same custom properties under a scoped
+ * selector re-themes every utility (bg-panel, text-muted, …) with zero markup
+ * changes. App.tsx sets document.documentElement.dataset.theme = 'light'|'dark'
+ * from the resolved setting (see lib/theme.ts). The 'dark' default matches the
+ * @theme values, so no dark override block is needed.
+ * ========================================================================== */
+:root {
+  color-scheme: dark;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='light'] {
+  /* surfaces */
+  --color-bg: #f4f6fa;
+  --color-rail: #eef1f6;
+  --color-bar: #e9edf3;
+  --color-pane: #ffffff;
+  --color-panel: #ffffff;
+  --color-panel-2: #f1f4f9;
+  --color-elev: #ffffff;
+
+  /* text */
+  --color-text: #17202e;
+  --color-text-2: #2b3546;
+  --color-text-3: #47515f;
+  --color-muted: #667085;
+  --color-dim: #737d8f;
+  --color-faint: #98a2b3;
+
+  /* lines & fills (black @ low alpha) */
+  --color-line: rgb(0 0 0 / 0.08);
+  --color-line-2: rgb(0 0 0 / 0.1);
+  --color-soft: rgb(0 0 0 / 0.06);
+  --color-line-strong: rgb(0 0 0 / 0.14);
+  --color-hover: rgb(0 0 0 / 0.045);
+
+  /* accent & status (deeper, saturated so they read as text on light tints
+     AND still work as the /15 background tints used across the UI) */
+  --color-accent: #2f6fe0;
+  --color-blue: #2563eb;
+  --color-amber: #b7791f;
+  --color-amber-2: #8a5a12;
+  --color-green: #12915a;
+  --color-green-2: #0f7a4a;
+  --color-red: #dc2626;
+  --color-red-2: #b91c1c;
+  --color-purple: #7c3aed;
+  --color-purple-2: #6d28d9;
+
+  /* diff */
+  --color-diff-add: #1a7f4b;
+  --color-diff-del: #c0392b;
+  --color-diff-hunk: #3b5bdb;
+}
+
 @keyframes pulseDot {
   0%,
   100% {

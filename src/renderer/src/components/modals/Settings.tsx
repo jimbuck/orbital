@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeWorkspace } from '@renderer/store'
-import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan } from '@shared/types'
+import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan, ThemeMode } from '@shared/types'
 import { SUPPORTED_AGENTS } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
 
@@ -77,6 +77,8 @@ export default function Settings(): React.JSX.Element {
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
+  // App theme; missing on installs predating this setting -> default dark (the original look).
+  const [theme, setTheme] = useState<ThemeMode>(() => settings?.theme ?? 'dark')
   // Global per-agent visibility. Existing installs lack the key -> default to all enabled.
   const [enabledAgents, setEnabledAgents] = useState<string[]>(
     () => settings?.enabledAgents ?? SUPPORTED_AGENTS.map((a) => a.id)
@@ -173,7 +175,8 @@ export default function Settings(): React.JSX.Element {
         envSyncPatterns: patterns,
         periodicFetch,
         debugLogging,
-        enabledAgents
+        enabledAgents,
+        theme
       })
       closeModal()
     } finally {
@@ -243,6 +246,30 @@ export default function Settings(): React.JSX.Element {
             <Plus size={12} strokeWidth={1.5} /> add pattern
           </button>
         )}
+      </div>
+
+      <div className="my-[18px] h-px bg-soft" />
+
+      {/* Appearance */}
+      <div className={sectionLabel}>Appearance</div>
+      <div className="mt-2.5 flex items-center justify-between gap-4">
+        <span className="text-[12.5px] text-text-2">Theme</span>
+        {/* 3-way segmented control; theme re-applies on Save (useResolvedTheme reads the store). */}
+        <div className="flex items-center rounded-[7px] border border-line-2 bg-bg p-[2px]">
+          {(['system', 'light', 'dark'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setTheme(mode)}
+              aria-pressed={theme === mode}
+              className={`rounded-[5px] px-2.5 py-[3px] text-[11px] font-semibold capitalize ${
+                theme === mode ? 'bg-accent/15 text-blue' : 'text-muted hover:text-text-2'
+              } focus-visible:ring-2 focus-visible:ring-accent/60 outline-none`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="my-[18px] h-px bg-soft" />
@@ -369,7 +396,10 @@ export default function Settings(): React.JSX.Element {
                   <AlertTriangle size={13} strokeWidth={1.5} className="flex-none" />
                   Hooks run shell commands with your full permissions. Review before writing:
                 </div>
-                <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed text-text-3">
+                {/* Fixed dark code block: pin a light foreground (not a theme token) so
+                    the JSON stays readable in light mode too. */}
+                <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed text-[#aab2c0]">
+
                   {hookConfirm.plan.json}
                 </pre>
               </>

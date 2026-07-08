@@ -1,10 +1,24 @@
 import { useEffect } from 'react'
 import { useStore } from './store'
+import { useResolvedTheme } from './lib/theme'
 import TitleBar from './components/TitleBar'
 import Rail from './components/rail/Rail'
 import PaneGroup from './components/body/PaneGroup'
 import RightPanel from './components/panel/RightPanel'
 import ModalRoot from './components/modals/ModalRoot'
+
+/**
+ * Mirrors the resolved theme onto <html data-theme> so the light override in
+ * app.css activates. Rendered once; before settings load the resolved theme is
+ * 'dark', which matches the CSS defaults so there is no flash.
+ */
+function ThemeManager(): null {
+  const theme = useResolvedTheme()
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+  return null
+}
 
 /** Short, quiet chime when a new agent flips to needs-attention. */
 function playChime(): void {
@@ -43,6 +57,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-bg text-text">
+      <ThemeManager />
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <Rail />

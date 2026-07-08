@@ -20,6 +20,9 @@ export type TaskStatus = 'draft' | 'todo' | 'in_progress' | 'ready_for_review' |
 /** A Flight is bound to either the repo's root checkout or a git worktree. */
 export type FlightKind = 'root' | 'worktree'
 
+/** App color theme. `system` follows the OS's prefers-color-scheme; the others are explicit. */
+export type ThemeMode = 'system' | 'light' | 'dark'
+
 /**
  * The kinds of tab a Flight pane can host (PRD §6). `agent` is a PTY-backed tab
  * (like `terminal`) that boots straight into a coding agent — see TabConfig.agentProvider.
@@ -214,6 +217,8 @@ export interface Settings {
   debugLogging: boolean
   /** Agent providers offered in the new-tab menus; hide the ones you don't use. */
   enabledAgents: string[]
+  /** App color theme: 'system' follows the OS, else an explicit 'light'/'dark'. Defaults to 'dark'. */
+  theme: ThemeMode
 }
 
 /** Full application state pushed to / pulled by the renderer. */

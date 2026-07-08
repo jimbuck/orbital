@@ -4,6 +4,12 @@ import { marked } from 'marked'
 import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
+import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
+
+/** Shiki bundled theme id for each resolved app theme. */
+function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
+  return theme === 'light' ? 'github-light-default' : 'github-dark-default'
+}
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
@@ -118,6 +124,7 @@ const HIGHLIGHT_MAX = 300_000
 /** Read-only source view: shiki-highlighted when the grammar is known, plain otherwise. */
 function CodeView({ path, source }: { path: string; source: string }): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
+  const theme = useResolvedTheme()
 
   useEffect(() => {
     let alive = true
@@ -127,7 +134,7 @@ function CodeView({ path, source }: { path: string; source: string }): JSX.Eleme
     // Dynamic import so shiki (and only the needed grammar) loads on first use,
     // keeping it out of the renderer's startup bundle.
     void import('shiki')
-      .then(({ codeToHtml }) => codeToHtml(source, { lang, theme: 'github-dark-default' }))
+      .then(({ codeToHtml }) => codeToHtml(source, { lang, theme: shikiTheme(theme) }))
       .then((h) => {
         if (alive) setHtml(h)
       })
@@ -138,7 +145,8 @@ function CodeView({ path, source }: { path: string; source: string }): JSX.Eleme
     return () => {
       alive = false
     }
-  }, [path, source])
+    // theme is a dep so the view re-highlights when the app theme flips.
+  }, [path, source, theme])
 
   if (html === null) {
     return (
@@ -171,6 +179,7 @@ function CodeEditor({
   const [html, setHtml] = useState<string | null>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const theme = useResolvedTheme()
 
   useEffect(() => {
     const lang = langFor(path)
@@ -184,7 +193,7 @@ function CodeEditor({
       void import('shiki')
         // The trailing newline keeps the mirror's height in step with the
         // textarea when the draft ends mid-newline.
-        .then(({ codeToHtml }) => codeToHtml(value + '\n', { lang, theme: 'github-dark-default' }))
+        .then(({ codeToHtml }) => codeToHtml(value + '\n', { lang, theme: shikiTheme(theme) }))
         .then((h) => {
           if (alive) setHtml(h)
         })
@@ -196,7 +205,8 @@ function CodeEditor({
       alive = false
       clearTimeout(t)
     }
-  }, [path, value])
+    // theme is a dep so the mirror re-highlights when the app theme flips.
+  }, [path, value, theme])
 
   const syncScroll = (): void => {
     const mirror = mirrorRef.current
@@ -233,7 +243,9 @@ function CodeEditor({
         spellCheck={false}
         wrap="off"
         className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent px-4 py-3 font-mono text-[12px] leading-[1.6] ${
-          html !== null ? 'text-transparent caret-[#e6ebf2]' : 'text-text-2'
+          html !== null
+            ? `text-transparent ${theme === 'light' ? 'caret-[#17202e]' : 'caret-[#e6ebf2]'}`
+            : 'text-text-2'
         } ${FOCUS}`}
       />
     </div>
@@ -242,38 +254,77 @@ function CodeEditor({
 
 /* ---- Preview (markdown / html) ------------------------------------------- */
 
-/** Styles injected into the markdown preview iframe to match the app theme. */
-const MD_CSS = `
-  :root { color-scheme: dark; }
+/**
+ * Styles injected into the markdown preview iframe to match the app theme.
+ * The iframe is sandboxed (no app CSS reaches it), so the palette is inlined
+ * per resolved theme rather than pulling from the design tokens.
+ */
+function mdCss(theme: ResolvedTheme): string {
+  const c =
+    theme === 'light'
+      ? {
+          scheme: 'light',
+          text: '#2b3546',
+          heading: '#17202e',
+          line1: 'rgba(0,0,0,.12)',
+          line2: 'rgba(0,0,0,.08)',
+          link: '#2563eb',
+          codeBg: 'rgba(0,0,0,.05)',
+          preBg: '#f1f4f9',
+          preLine: 'rgba(0,0,0,.08)',
+          quote: '#667085',
+          quoteBar: 'rgba(0,0,0,.16)',
+          cellLine: 'rgba(0,0,0,.12)',
+          thBg: 'rgba(0,0,0,.04)'
+        }
+      : {
+          scheme: 'dark',
+          text: '#cfd6e2',
+          heading: '#e6ebf2',
+          line1: 'rgba(255,255,255,.09)',
+          line2: 'rgba(255,255,255,.06)',
+          link: '#4f8cff',
+          codeBg: 'rgba(255,255,255,.07)',
+          preBg: '#10141b',
+          preLine: 'rgba(255,255,255,.07)',
+          quote: '#8b95a6',
+          quoteBar: 'rgba(255,255,255,.14)',
+          cellLine: 'rgba(255,255,255,.1)',
+          thBg: 'rgba(255,255,255,.04)'
+        }
+  return `
+  :root { color-scheme: ${c.scheme}; }
   body { margin: 18px 22px; font: 13px/1.65 'Hanken Grotesk', system-ui, sans-serif;
-         color: #cfd6e2; background: transparent; }
-  h1, h2, h3, h4, h5 { color: #e6ebf2; line-height: 1.3; }
-  h1 { font-size: 1.55em; border-bottom: 1px solid rgba(255,255,255,.09); padding-bottom: .3em; }
-  h2 { font-size: 1.25em; border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: .25em; }
-  a { color: #4f8cff; }
+         color: ${c.text}; background: transparent; }
+  h1, h2, h3, h4, h5 { color: ${c.heading}; line-height: 1.3; }
+  h1 { font-size: 1.55em; border-bottom: 1px solid ${c.line1}; padding-bottom: .3em; }
+  h2 { font-size: 1.25em; border-bottom: 1px solid ${c.line2}; padding-bottom: .25em; }
+  a { color: ${c.link}; }
   code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: .9em;
-         background: rgba(255,255,255,.07); padding: .12em .35em; border-radius: 4px; }
-  pre { background: #10141b; border: 1px solid rgba(255,255,255,.07); border-radius: 8px;
+         background: ${c.codeBg}; padding: .12em .35em; border-radius: 4px; }
+  pre { background: ${c.preBg}; border: 1px solid ${c.preLine}; border-radius: 8px;
         padding: 12px 14px; overflow: auto; }
   pre code { background: transparent; padding: 0; }
-  blockquote { margin: 0; padding: 0 1em; color: #8b95a6; border-left: 3px solid rgba(255,255,255,.14); }
+  blockquote { margin: 0; padding: 0 1em; color: ${c.quote}; border-left: 3px solid ${c.quoteBar}; }
   table { border-collapse: collapse; }
-  th, td { border: 1px solid rgba(255,255,255,.1); padding: 5px 10px; }
-  th { background: rgba(255,255,255,.04); }
+  th, td { border: 1px solid ${c.cellLine}; padding: 5px 10px; }
+  th { background: ${c.thBg}; }
   img { max-width: 100%; }
-  hr { border: 0; border-top: 1px solid rgba(255,255,255,.09); }
+  hr { border: 0; border-top: 1px solid ${c.line1}; }
 `
+}
 
 /**
  * Rendered preview in a sandboxed iframe (no scripts, no app access) so
  * arbitrary repo content can never reach the window.orbital bridge.
  */
 function Preview({ kind, source }: { kind: Exclude<PreviewKind, null>; source: string }): JSX.Element {
+  const theme = useResolvedTheme()
   const doc = useMemo(() => {
     if (kind !== 'markdown') return source
     const body = marked.parse(source, { async: false }) as string
-    return `<!doctype html><meta charset="utf-8"><style>${MD_CSS}</style><body>${body}</body>`
-  }, [kind, source])
+    return `<!doctype html><meta charset="utf-8"><style>${mdCss(theme)}</style><body>${body}</body>`
+  }, [kind, source, theme])
 
   // SVG renders via an <img> data URL — script-safe, like the iframe sandbox.
   if (kind === 'svg') {
@@ -743,6 +794,7 @@ type TokenLine = { content: string; color?: string }[]
  */
 function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
   const [tokens, setTokens] = useState<TokenLine[] | null>(null)
+  const theme = useResolvedTheme()
 
   const code = useMemo(
     () =>
@@ -758,7 +810,7 @@ function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
     const lang = langFor(path)
     if (!lang || diff.binary || code.length > HIGHLIGHT_MAX) return
     void import('shiki')
-      .then(({ codeToTokens }) => codeToTokens(code, { lang: lang as BundledLanguage, theme: 'github-dark-default' }))
+      .then(({ codeToTokens }) => codeToTokens(code, { lang: lang as BundledLanguage, theme: shikiTheme(theme) }))
       .then((r) => {
         if (alive) setTokens(r.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))))
       })
@@ -769,7 +821,8 @@ function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
     return () => {
       alive = false
     }
-  }, [code, path, diff.binary])
+    // theme is a dep so diff syntax colors follow the app theme.
+  }, [code, path, diff.binary, theme])
 
   return tokens
 }
