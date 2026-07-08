@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, CircleOff, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleOff, FolderOpen, Pencil, Plus, Terminal, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Workspace as WorkspaceModel } from '@shared/types'
 import { useStore } from '@renderer/store'
@@ -12,7 +12,8 @@ import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '
  * clicking it selects the workspace's root Flight directly. Worktree Flights
  * live in the collapsible list below — the chevron only renders when there
  * are any. Right-click opens a context menu to rename the workspace inline,
- * start a new Flight, clear a stuck root status, or remove the workspace.
+ * start a new Flight, clear a stuck root status, open the repo in Explorer or
+ * an external terminal, or remove the workspace.
  */
 export default function Workspace({ workspace }: { workspace: WorkspaceModel }): JSX.Element {
   const flights = useStore(useShallow((s) => s.flights.filter((f) => f.workspaceId === workspace.id)))
@@ -198,6 +199,22 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
                   }}
                 />
               )}
+              <MenuItem
+                icon={<FolderOpen size={13} strokeWidth={1.5} />}
+                label="Open in Explorer"
+                onClick={() => {
+                  void window.orbital.openPath(workspace.repoPath)
+                  closeMenu()
+                }}
+              />
+              <MenuItem
+                icon={<Terminal size={13} strokeWidth={1.5} />}
+                label="Open in External Terminal"
+                onClick={() => {
+                  void window.orbital.openInTerminal(workspace.repoPath)
+                  closeMenu()
+                }}
+              />
               <div className="my-1 h-px bg-soft" />
               <MenuItem
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
