@@ -2,7 +2,6 @@ import fs from 'node:fs'
 import { mkdir, copyFile } from 'node:fs/promises'
 import path from 'node:path'
 import picomatch from 'picomatch'
-import chokidar, { type FSWatcher, type WatchOptions } from 'chokidar'
 
 // `.git` is never walked or watched. `node_modules` is only walked when a
 // pattern explicitly targets it (the one-shot sync at worktree creation), and
@@ -12,9 +11,12 @@ import chokidar, { type FSWatcher, type WatchOptions } from 'chokidar'
 // beside the repo (see worktree.ts), but if a workspace root happens to
 // enclose one, recursive globs like `**/.env` must never sync files out of
 // sibling worktrees.
-const WATCH_IGNORED = ['**/.git/**', '**/node_modules/**', '**/.orbital-worktrees/**']
+// The recursive fs.watch delivers every descendant path, so these are filtered
+// per-event by segment (see WATCH_IGNORED_SEGMENTS) rather than by pruning the
+// walk as the glob-based watcher once did.
+const WATCH_IGNORED_SEGMENTS = ['.git', 'node_modules', '.orbital-worktrees']
 
-/** Directory names the sync walk never descends into (see WATCH_IGNORED). */
+/** Directory names the sync walk never descends into (see WATCH_IGNORED_SEGMENTS). */
 const ALWAYS_SKIPPED_DIRS = ['.git', '.orbital-worktrees']
 
 /** True when any pattern targets `node_modules`, so the walk must descend into it. */
@@ -104,7 +106,10 @@ export class EnvSyncWatcher {
   private readonly rootPath: string
   private patterns: string[]
   private readonly worktrees = new Set<string>()
-  private watcher: FSWatcher | null = null
+  private watcher: fs.FSWatcher | null = null
+  // Coalesce rapid successive events for the same path — editors commonly
+  // write-then-rename, firing several events for one logical save.
+  private readonly pending = new Map<string, NodeJS.Timeout>()
 
   constructor(rootPath: string, patterns: string[]) {
     this.rootPath = rootPath
@@ -135,19 +140,28 @@ export class EnvSyncWatcher {
   /** Begin watching. No-op if already running or no patterns configured. */
   start(): void {
     if (this.watcher || this.patterns.length === 0) return
-    // `dot: true` is honored by chokidar's matcher but absent from its public
-    // WatchOptions type, so we assert the literal to keep strict mode happy.
-    const watcher = chokidar.watch(this.patterns, {
-      cwd: this.rootPath,
-      dot: true,
-      ignoreInitial: true,
-      ignored: WATCH_IGNORED
-    } as WatchOptions)
-    const onChange = (rel: string): void => {
-      void this.fanOut(rel)
+    const isMatch = picomatch(this.patterns, { dot: true })
+    // One native recursive handle (ReadDirectoryChangesW on Windows) instead of
+    // chokidar's per-directory glob walk, which duplicated the git watcher's
+    // full-tree scan and pegged the main process at startup. Events are matched
+    // in JS against the same picomatch used by syncEnvFiles.
+    let watcher: fs.FSWatcher
+    try {
+      watcher = fs.watch(this.rootPath, { recursive: true })
+    } catch {
+      // Never crash the main process if the watch can't be established.
+      return
     }
-    watcher.on('add', onChange)
-    watcher.on('change', onChange)
+    watcher.on('change', (_eventType, filename) => {
+      // A null filename can't be matched against patterns; the one-shot sync at
+      // worktree creation covers files missed here. 'rename' covers both create
+      // and delete — fanOut simply attempts the copy.
+      if (filename == null) return
+      const rel = filename.toString().split(path.sep).join('/')
+      if (rel.split('/').some((seg) => WATCH_IGNORED_SEGMENTS.includes(seg))) return
+      if (!isMatch(rel)) return
+      this.schedule(rel)
+    })
     watcher.on('error', () => {
       // Swallow watcher errors; never throw out of the watcher.
     })
@@ -156,17 +170,37 @@ export class EnvSyncWatcher {
 
   /** Stop watching and release the underlying FSWatcher. */
   stop(): void {
+    for (const timer of this.pending.values()) clearTimeout(timer)
+    this.pending.clear()
     if (!this.watcher) return
     const watcher = this.watcher
     this.watcher = null
-    void watcher.close().catch(() => {
+    try {
+      watcher.close()
+    } catch {
       // Ignore close failures.
-    })
+    }
+  }
+
+  /** Debounce per-path so a burst of write/rename events yields one fanOut. */
+  private schedule(rel: string): void {
+    const existing = this.pending.get(rel)
+    if (existing) clearTimeout(existing)
+    this.pending.set(
+      rel,
+      setTimeout(() => {
+        this.pending.delete(rel)
+        void this.fanOut(rel)
+      }, 100)
+    )
   }
 
   /** Copy a changed relative path into each registered worktree. */
   private async fanOut(rel: string): Promise<void> {
     const normalized = rel.split(path.sep).join('/')
+    // 'rename' fires for deletes too; skip the fanOut when the source is gone
+    // rather than doing pointless per-worktree copies that would all fail.
+    if (!fs.existsSync(path.join(this.rootPath, normalized))) return
     for (const worktree of this.worktrees) {
       try {
         await copyRel(this.rootPath, worktree, normalized)

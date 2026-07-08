@@ -10,11 +10,11 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { EventEmitter } from 'node:events'
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, statSync, watch } from 'node:fs'
+import type { FSWatcher } from 'node:fs'
 import { readFile as fsReadFile, writeFile as fsWriteFile, mkdir } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
-import chokidar from 'chokidar'
-import type { FSWatcher } from 'chokidar'
+import ignore from 'ignore'
 import type {
   GitStatus,
   GitFileStatus,
@@ -146,8 +146,17 @@ function status(repoPath: string): Promise<GitStatus> {
 
 async function statusUncached(repoPath: string): Promise<GitStatus> {
   // `-c core.quotePath=false` keeps non-ASCII/special filenames literal (not C-quoted),
-  // so the paths we hand back can be staged/diffed/opened verbatim.
-  const out = await run(repoPath, ['-c', 'core.quotePath=false', 'status', '--porcelain=v2', '--branch'])
+  // so the paths we hand back can be staged/diffed/opened verbatim. `--no-optional-locks`
+  // stops status from opportunistically rewriting `.git/index`, which the watcher watches
+  // — otherwise every refresh would feed itself another change event.
+  const out = await run(repoPath, [
+    '--no-optional-locks',
+    '-c',
+    'core.quotePath=false',
+    'status',
+    '--porcelain=v2',
+    '--branch'
+  ])
   let branch = ''
   let upstream: string | null = null
   let ahead = 0
@@ -545,55 +554,127 @@ function resolveGitDir(repoPath: string): string {
   return dotGit
 }
 
+/** Directory names whose subtrees never warrant a working-tree change event. */
+const IGNORED_SEGMENTS = ['.git', 'node_modules', '.orbital-worktrees']
+
+type Ignore = ReturnType<typeof ignore>
+
+/**
+ * Parse the checkout's root ignore sources into a matcher over repo-relative,
+ * forward-slash paths. A linked worktree has no in-tree `.git/info/exclude`
+ * (its `.git` is a pointer file), so that read simply misses; nested
+ * (non-root) `.gitignore` files are likewise not consulted (accepted limits).
+ */
+function loadIgnoreRules(repoPath: string): Ignore {
+  const ig = ignore()
+  for (const rel of ['.gitignore', '.git/info/exclude']) {
+    try {
+      ig.add(readFileSync(join(repoPath, rel), 'utf8'))
+    } catch {
+      // Absent source — nothing to exclude from it.
+    }
+  }
+  return ig
+}
+
+/** One checkout's live handles plus its (reloadable) ignore matcher. */
+interface WatchEntry {
+  readonly handles: FSWatcher[]
+  ig: Ignore
+}
+
 /**
  * Watches one or more checkouts (repo roots and linked worktrees) and emits
  * `('change', repoPath)` (debounced) whenever the checkout's git HEAD/index or
  * working tree change.
  */
 export class GitWatcher extends EventEmitter {
-  private readonly watchers = new Map<string, FSWatcher>()
+  private readonly entries = new Map<string, WatchEntry>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
 
   watch(repoPath: string): void {
-    if (this.watchers.has(repoPath)) return
+    if (this.entries.has(repoPath)) return
 
-    const gitDir = resolveGitDir(repoPath).replace(/\\/g, '/')
-    const headPath = `${gitDir}/HEAD`
-    const indexPath = `${gitDir}/index`
-    // HEAD is replaced by atomic rename, which the file watch can miss (seen on
-    // Windows for `checkout -b`); the reflog is appended in place on every HEAD
-    // move, so it's the reliable checkout/commit signal.
-    const logsDir = `${gitDir}/logs`
-    const logsHeadPath = `${logsDir}/HEAD`
+    const gitDir = resolveGitDir(repoPath)
+    const entry: WatchEntry = { handles: [], ig: loadIgnoreRules(repoPath) }
+    this.entries.set(repoPath, entry)
 
-    // The working tree is watched at full depth so files landing anywhere in
-    // the checkout (e.g. pasted via Explorer into a nested folder) fire a
-    // change — a depth cap silently dropped events below it, leaving the file
-    // tree stale. Perf is kept in check by the `ignored` rules instead.
-    const watcher = chokidar.watch([headPath, indexPath, logsHeadPath, repoPath], {
-      ignoreInitial: true,
-      ignored: (raw: string) => {
-        const p = raw.replace(/\\/g, '/')
-        if (p.includes('/node_modules/') || p.endsWith('/node_modules')) return true
-        // Inside .git: allow only HEAD, index and the HEAD reflog, drop the rest.
-        if (p === gitDir || p.startsWith(`${gitDir}/`)) {
-          return p !== gitDir && p !== headPath && p !== indexPath && p !== logsDir && p !== logsHeadPath
-        }
-        // Nested checkouts' .git dirs (mirrors env-sync's `**/.git/**` ignore).
-        if (p.includes('/.git/') || p.endsWith('/.git')) return true
-        return false
+    // Working tree: a single recursive handle (ReadDirectoryChangesW on Windows)
+    // surfaces files landing anywhere in the checkout, at any depth. Gitignored
+    // build dirs are filtered per-event rather than watched, so their churn
+    // never fires — consistent with the file tree, built from `ls-files
+    // --exclude-standard`, which never shows ignored paths either.
+    this.open(entry, repoPath, { recursive: true }, (filename) => {
+      if (filename === null) {
+        // fs.watch can omit the filename; treat as a generic change.
+        this.schedule(repoPath)
+        return
       }
+      const rel = filename.replace(/\\/g, '/')
+      if (rel.split('/').some((seg) => IGNORED_SEGMENTS.includes(seg))) return
+      // A changed root `.gitignore` re-reads the rules before it can be applied.
+      if (rel === '.gitignore') entry.ig = loadIgnoreRules(repoPath)
+      try {
+        if (entry.ig.ignores(rel)) return
+      } catch {
+        // `ignores` rejects paths it can't classify; keep the event.
+      }
+      this.schedule(repoPath)
     })
 
-    watcher.on('all', () => this.schedule(repoPath))
-    this.watchers.set(repoPath, watcher)
+    // HEAD and index live in the git dir. For a linked worktree the git dir sits
+    // OUTSIDE the checkout (under the main repo's `.git/worktrees/<name>/`), so
+    // the recursive watch above never sees it — this non-recursive handle does.
+    this.open(entry, gitDir, { recursive: false }, (filename) => {
+      if (filename === 'HEAD' || filename === 'index') this.schedule(repoPath)
+    })
+
+    // HEAD is replaced by atomic rename, which the file watch can miss (seen on
+    // Windows for `checkout -b`); the reflog is appended in place on every HEAD
+    // move, so logs/HEAD is the reliable checkout/commit signal.
+    this.open(entry, join(gitDir, 'logs'), { recursive: false }, (filename) => {
+      if (filename === 'HEAD') this.schedule(repoPath)
+    })
+  }
+
+  /** Open one fs.watch handle, guarding both setup and delivery so nothing throws out. */
+  private open(
+    entry: WatchEntry,
+    target: string,
+    opts: { recursive: boolean },
+    onName: (filename: string | null) => void
+  ): void {
+    let handle: FSWatcher
+    try {
+      handle = watch(target, opts)
+    } catch {
+      // A missing target (e.g. no logs dir yet) must not abort the other handles.
+      return
+    }
+    handle.on('change', (_event, filename) => {
+      try {
+        onName(filename == null ? null : filename.toString())
+      } catch {
+        // A malformed event must never crash the main process.
+      }
+    })
+    handle.on('error', () => {
+      // e.g. the watched root was deleted; never throw out of the watcher.
+    })
+    entry.handles.push(handle)
   }
 
   unwatch(repoPath: string): void {
-    const watcher = this.watchers.get(repoPath)
-    if (watcher) {
-      void watcher.close()
-      this.watchers.delete(repoPath)
+    const entry = this.entries.get(repoPath)
+    if (entry) {
+      for (const handle of entry.handles) {
+        try {
+          handle.close()
+        } catch {
+          // Ignore close failures.
+        }
+      }
+      this.entries.delete(repoPath)
     }
     const timer = this.timers.get(repoPath)
     if (timer) {
@@ -603,10 +684,7 @@ export class GitWatcher extends EventEmitter {
   }
 
   stop(): void {
-    for (const watcher of this.watchers.values()) void watcher.close()
-    this.watchers.clear()
-    for (const timer of this.timers.values()) clearTimeout(timer)
-    this.timers.clear()
+    for (const repoPath of [...this.entries.keys()]) this.unwatch(repoPath)
   }
 
   private schedule(repoPath: string): void {
