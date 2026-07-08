@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { git } from './git'
 import { syncEnvFiles } from './env-sync'
@@ -104,15 +105,37 @@ export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Pr
   return flight
 }
 
-/** Remove the git worktree backing a Flight (guarded by the caller). */
+/**
+ * Remove the git worktree backing a Flight. The caller has already decided the
+ * removal should proceed (the dirty guard passed, or force was given), so this
+ * tears the worktree down as reliably as it can rather than giving up on the
+ * first refusal.
+ */
 export async function removeWorktree(repoPath: string, worktreePath: string, force = false): Promise<void> {
-  // On Windows the directory can stay locked briefly after the Flight's PTYs
-  // are killed (conpty releases the shell's cwd handle asynchronously), so a
-  // first attempt may fail with a delete/permission error. Retry with backoff.
-  const delays = [0, 250, 500, 1000]
+  // Idempotent: if the directory is already gone (a prior attempt deleted it, or
+  // it was removed out-of-band) git's admin entry may still dangle — prune it and
+  // treat that as success rather than throwing on the "not a working tree" error.
+  if (!existsSync(worktreePath)) {
+    await git.worktreePrune(repoPath).catch(() => {})
+    return
+  }
+
+  // On Windows the directory can stay locked for a beat after the Flight's PTYs
+  // are killed: conpty releases the shell's cwd handle asynchronously (kill() is
+  // fire-and-forget), and a directory watcher may not have fully torn down yet.
+  // While any handle lingers `git worktree remove` fails with a delete/permission
+  // error, so retry with backoff over a few seconds to let the handles drain.
+  const delays = [0, 250, 500, 1000, 1000, 1000]
   let lastErr: unknown
   for (const ms of delays) {
     if (ms) await new Promise((r) => setTimeout(r, ms))
+    // A previous attempt may have partially deleted the tree before failing;
+    // once the directory is gone, retrying the same command just fails with a
+    // different error ("is not a working tree"), so prune and finish instead.
+    if (!existsSync(worktreePath)) {
+      await git.worktreePrune(repoPath).catch(() => {})
+      return
+    }
     try {
       await git.worktreeRemove(repoPath, worktreePath, force)
       return
@@ -120,5 +143,23 @@ export async function removeWorktree(repoPath: string, worktreePath: string, for
       lastErr = err
     }
   }
-  throw lastErr
+
+  // git never managed it. Only fall back to deleting the directory ourselves when
+  // the caller asked to force — a non-force refusal is git's unpushed-work guard
+  // (the worktree may have gone dirty after ipc.ts took its clean snapshot, e.g. a
+  // still-dying agent PTY flushed a file), and blindly fs.rm'ing would destroy that
+  // uncommitted work. Surface the git error instead so the UI can offer a force step.
+  if (!force) throw lastErr
+  // Forced: the handle is still held, or git partially deleted the tree and now
+  // refuses the leftover. Delete the directory ourselves — fs.rm's own retry loop
+  // rides out the last of the Windows lock.
+  try {
+    await rm(worktreePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  } catch (err) {
+    // Couldn't delete the folder either — surface the original git error, which
+    // is more informative than fs.rm's bare EBUSY/EPERM on the locked file.
+    throw lastErr ?? err
+  }
+  // Directory is gone; make git drop the now-dangling worktree admin entry.
+  await git.worktreePrune(repoPath).catch(() => {})
 }

@@ -502,6 +502,15 @@ async function worktreeRemove(
   await run(repoPath, args)
 }
 
+/**
+ * Drop administrative entries for worktrees whose directories no longer exist
+ * (`git worktree prune`). Run after we delete a worktree's folder ourselves so
+ * git forgets the now-dangling entry and won't reject re-using the path later.
+ */
+async function worktreePrune(repoPath: string): Promise<void> {
+  await run(repoPath, ['worktree', 'prune'])
+}
+
 export const git = {
   isRepo,
   currentBranch,
@@ -526,7 +535,8 @@ export const git = {
   readFileBase64,
   writeFile,
   worktreeAdd,
-  worktreeRemove
+  worktreeRemove,
+  worktreePrune
 }
 
 /* ----------------------------------------------------------------------------
