@@ -72,10 +72,12 @@ export function StatusDot({ status, className = '' }: { status: TerminalStatus; 
 
 /* ---- Tasks -------------------------------------------------------------- */
 
-export const TASK_STATUSES: TaskStatus[] = ['todo', 'in_progress', 'ready_for_review', 'done']
+export const TASK_STATUSES: TaskStatus[] = ['draft', 'todo', 'in_progress', 'ready_for_review', 'done']
 
 export function taskStatusLabel(s: TaskStatus): string {
   switch (s) {
+    case 'draft':
+      return 'Draft'
     case 'in_progress':
       return 'In progress'
     case 'ready_for_review':
@@ -90,6 +92,8 @@ export function taskStatusLabel(s: TaskStatus): string {
 /** Chip classes for a task status (text + background tint), per the recipe. */
 export function taskChipClass(s: TaskStatus): string {
   switch (s) {
+    case 'draft':
+      return 'text-purple bg-purple/15'
     case 'in_progress':
       return 'text-blue bg-accent/15'
     case 'ready_for_review':
@@ -104,6 +108,8 @@ export function taskChipClass(s: TaskStatus): string {
 /** Column dot styling for the board view (filled vs. hollow). */
 export function taskColumnDot(s: TaskStatus): { className: string; style: React.CSSProperties } {
   switch (s) {
+    case 'draft':
+      return { className: 'border-[1.6px] border-purple bg-transparent', style: {} }
     case 'in_progress':
       return { className: 'bg-accent', style: {} }
     case 'ready_for_review':
@@ -117,6 +123,8 @@ export function taskColumnDot(s: TaskStatus): { className: string; style: React.
 
 export function taskColumnHeadClass(s: TaskStatus): string {
   switch (s) {
+    case 'draft':
+      return 'text-purple'
     case 'in_progress':
       return 'text-blue'
     case 'ready_for_review':

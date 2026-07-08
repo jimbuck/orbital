@@ -11,7 +11,7 @@ capture speed, not ceremony.
 - Type into **Capture a task…** and press Enter.
 - Click a title to edit it inline.
 - Click the status chip to move it through
-  `todo → in progress → ready for review → done`.
+  `draft → todo → in progress → ready for review → done`.
 - Hover a card and click the trash icon to delete (with an inline confirm).
 
 ## Board views

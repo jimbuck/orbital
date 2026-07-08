@@ -15,7 +15,7 @@
 export type TerminalStatus = 'idle' | 'working' | 'needs_attention' | 'error' | 'done'
 
 /** Lightweight tracker state for a task (PRD §4, §8). Set by the user only. */
-export type TaskStatus = 'todo' | 'in_progress' | 'ready_for_review' | 'done'
+export type TaskStatus = 'draft' | 'todo' | 'in_progress' | 'ready_for_review' | 'done'
 
 /** A Flight is bound to either the repo's root checkout or a git worktree. */
 export type FlightKind = 'root' | 'worktree'
@@ -73,7 +73,7 @@ export function aggregateStatus(statuses: TerminalStatus[]): TerminalStatus {
 /** Map a CLI-style task-status token (`in-progress`) to the canonical enum. */
 export function normalizeTaskStatus(token: string): TaskStatus | null {
   const v = token.trim().toLowerCase().replace(/-/g, '_')
-  if (v === 'todo' || v === 'in_progress' || v === 'ready_for_review' || v === 'done') {
+  if (v === 'draft' || v === 'todo' || v === 'in_progress' || v === 'ready_for_review' || v === 'done') {
     return v
   }
   return null

@@ -68,7 +68,7 @@ orbital task done <id>
   ```
 
 - `task update` / `task done` accept any **unique id prefix** — `f907` works.
-- Statuses: `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or
+- Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or
   underscores both accepted).
 
 ## Dev servers

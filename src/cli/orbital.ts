@@ -32,7 +32,7 @@ Usage:
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all]
   orbital task show <id>
-  orbital task update <id> [--status <todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
+  orbital task update <id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
   orbital task done <id>
   orbital task delete <id>
   orbital server add <url|port>
