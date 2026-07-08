@@ -322,7 +322,7 @@ export const tabs = {
 
 export const tasks = {
   list(): Task[] {
-    return getDb().prepare('SELECT * FROM tasks ORDER BY created_at DESC').all().map(mapTask)
+    return getDb().prepare('SELECT * FROM tasks ORDER BY created_at, id').all().map(mapTask)
   },
   get(tid: string): Task | undefined {
     const r = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(tid)

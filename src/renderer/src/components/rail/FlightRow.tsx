@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { Pencil, CircleOff, FolderX, Trash2 } from 'lucide-react'
+import { Pencil, CircleOff, FolderOpen, Terminal, FolderX, Trash2 } from 'lucide-react'
 import type { Flight } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, flightStatusLabel, flightStatusTextClass } from '@renderer/lib/status'
@@ -145,6 +145,22 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
                 icon={<CircleOff size={13} strokeWidth={1.5} />}
                 label="Clear Status"
                 onClick={clearStatus}
+              />
+              <MenuItem
+                icon={<FolderOpen size={13} strokeWidth={1.5} />}
+                label="Open in Explorer"
+                onClick={() => {
+                  void window.orbital.openPath(flight.worktreePath)
+                  closeMenu()
+                }}
+              />
+              <MenuItem
+                icon={<Terminal size={13} strokeWidth={1.5} />}
+                label="Open in External Terminal"
+                onClick={() => {
+                  void window.orbital.openInTerminal(flight.worktreePath)
+                  closeMenu()
+                }}
               />
               <MenuItem
                 icon={<FolderX size={13} strokeWidth={1.5} />}

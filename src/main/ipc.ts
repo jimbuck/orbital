@@ -1,5 +1,6 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
 import {
   IPC,
@@ -71,6 +72,7 @@ async function spawnAgent(flight: Flight, tab: Tab): Promise<void> {
       workspace: ws,
       flight,
       tabId: tab.id,
+      providerName: provider.id === 'claude' ? 'Claude Code' : provider.displayName,
       // Read the live settings.json (the source of truth), not the cached DB mirror.
       hooksInstalled: claudeHooks.status().installed
     })
@@ -593,6 +595,28 @@ export function registerIpc(): void {
 
   // ---- browser / window ----
   h(IPC.openExternal, (_e, url: string) => shell.openExternal(url))
+  h(IPC.openPath, async (_e, p: string) => {
+    await shell.openPath(p)
+  })
+  h(IPC.openInTerminal, (_e, p: string) => {
+    if (process.platform === 'win32') {
+      // Prefer Windows Terminal; fall back to a new PowerShell window if wt is missing.
+      const wt = spawn('wt', ['-d', p], { detached: true, stdio: 'ignore' })
+      wt.on('error', () => {
+        const ps = spawn('cmd.exe', ['/c', 'start', 'powershell.exe', '-NoExit'], {
+          cwd: p,
+          detached: true,
+          stdio: 'ignore'
+        })
+        ps.unref()
+      })
+      wt.unref()
+    } else if (process.platform === 'darwin') {
+      spawn('open', ['-a', 'Terminal', p], { detached: true, stdio: 'ignore' }).unref()
+    } else {
+      spawn('x-terminal-emulator', [], { cwd: p, detached: true, stdio: 'ignore' }).unref()
+    }
+  })
   ipcMain.on(IPC.windowMinimize, () => runtime.window?.minimize())
   ipcMain.on(IPC.windowMaximize, () => {
     const w = runtime.window

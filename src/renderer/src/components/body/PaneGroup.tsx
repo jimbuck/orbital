@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type JSX } from 'react'
-import { Orbit, Terminal, Globe, FileText, Sparkles } from 'lucide-react'
-import type { Flight, Pane, LayoutNode, DropEdge, TabType } from '@shared/types'
+import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
+import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
+import type { Flight, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
+import { ClaudeIcon, CodexIcon, type BrandIconProps } from '../icons'
 import { useStore, activeFlight } from '@renderer/store'
 import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
@@ -125,9 +126,10 @@ function computeEdge(el: HTMLElement, clientX: number, clientY: number): DropEdg
 }
 
 /** The kinds of tab an empty pane can open. */
-const OPENERS: { type: TabType; label: string; Icon: typeof Terminal }[] = [
+const OPENERS: { type: TabType; label: string; Icon: ComponentType<BrandIconProps>; config?: TabConfig }[] = [
   { type: 'terminal', label: 'Terminal', Icon: Terminal },
-  { type: 'agent', label: 'Claude', Icon: Sparkles },
+  { type: 'agent', label: 'Claude', Icon: ClaudeIcon, config: { agentProvider: 'claude' } },
+  { type: 'agent', label: 'Codex', Icon: CodexIcon, config: { agentProvider: 'codex' } },
   { type: 'browser', label: 'Browser', Icon: Globe },
   { type: 'editor', label: 'Editor', Icon: FileText }
 ]
@@ -196,10 +198,10 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3.5">
             <span className="text-xs text-faint">Open a tab in this pane</span>
             <div className="flex items-center gap-2">
-              {OPENERS.map(({ type, label, Icon }) => (
+              {OPENERS.map(({ type, label, Icon, config }) => (
                 <button
-                  key={type}
-                  onClick={() => window.orbital.createTab(flight.id, pane.id, type)}
+                  key={label}
+                  onClick={() => window.orbital.createTab(flight.id, pane.id, type, config)}
                   className="flex w-[84px] flex-col items-center gap-2 rounded-btn border border-line-2 bg-hover px-3 py-3.5 text-text-2 outline-none transition-colors hover:border-line-strong hover:bg-panel-2 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   <Icon size={18} strokeWidth={1.5} />

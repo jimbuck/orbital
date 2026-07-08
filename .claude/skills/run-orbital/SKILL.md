@@ -90,7 +90,8 @@ npm run dev   # electron-vite dev with renderer HMR (main/preload changes still 
   `electron.exe` behind, use the Stop-Process line above.
 - **The app uses the real user DB** (`%APPDATA%\orbital\orbital.db`): it opens
   every registered workspace, respawns saved tabs (including `agent` tabs, which
-  boot a real idle Claude session), and git actions hit real repos. The first
+  boot a real idle agent session — Claude or Codex), and git actions hit real
+  repos. The first
   workspace ("orbital", this repo) is auto-selected at boot.
 - **Both rails are `<aside>`.** The git panel / task rail is `aside.border-l`;
   a bare `aside` selector gets the left workspace rail.

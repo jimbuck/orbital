@@ -107,12 +107,16 @@ export interface Workspace {
  * Default env-sync globs (a global setting shared by every workspace): env
  * files, agent config directories, and installed dependencies. Directory
  * patterns use `/**` since sync matching runs against relative file paths.
+ * Env-file patterns are prefixed with `**` so nested files (e.g.
+ * `apps/web/.env`) sync too; the directory patterns stay root-scoped —
+ * agent config dirs live at the repo root, and `node_modules/**` must keep
+ * its exact spelling for env-sync.ts's targetsNodeModules() check.
  * `node_modules/**` is copied once when a worktree is created but never
  * live-watched (see env-sync.ts).
  */
 export const DEFAULT_ENV_SYNC_PATTERNS = [
-  '.env',
-  '.env.*',
+  '**/.env',
+  '**/.env.*',
   '.claude/**',
   '.codex/**',
   '.cursor/**',
@@ -446,6 +450,8 @@ export const IPC = {
   deleteTask: 'orbital:deleteTask',
   // browser
   openExternal: 'orbital:openExternal',
+  openPath: 'orbital:openPath',
+  openInTerminal: 'orbital:openInTerminal',
   // window
   windowMinimize: 'orbital:windowMinimize',
   windowMaximize: 'orbital:windowMaximize',
@@ -553,6 +559,10 @@ export interface OrbitalApi {
 
   // browser / window
   openExternal(url: string): Promise<void>
+  /** Reveal a folder in the OS file manager (Explorer on Windows). */
+  openPath(path: string): Promise<void>
+  /** Open an external terminal window at a folder (Windows Terminal / PowerShell on Windows). */
+  openInTerminal(path: string): Promise<void>
   windowMinimize(): void
   windowMaximize(): void
   windowClose(): void

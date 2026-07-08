@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, Pencil, Save, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, Pencil, RefreshCw, Save, X } from 'lucide-react'
 import { marked } from 'marked'
 import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
@@ -353,6 +353,9 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const reqRef = useRef(0)
+  // Current tree refetch, exposed for the manual refresh button; the effect
+  // below keeps it bound to the live flight and its `alive` guard.
+  const refetchTreeRef = useRef<() => void>(() => {})
 
   // Load the tree, and keep it fresh: any state broadcast (git watcher, staging,
   // commits, saves) refetches it debounced, so badges track the repo live.
@@ -365,6 +368,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
         if (alive) setTree(nodes)
       })
     }
+    refetchTreeRef.current = refetch
     refetch()
     const unsub = window.orbital.onStateChanged(() => {
       window.clearTimeout(timer)
@@ -492,23 +496,37 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   return (
     <div className="flex h-full w-full bg-pane">
       {/* File tree */}
-      <div className="w-56 flex-none overflow-y-auto border-r border-line bg-rail/40 py-1.5">
-        {tree.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-faint">No files</div>
-        ) : (
-          tree.map((node) => (
-            <TreeNode
-              key={node.path}
-              node={node}
-              depth={0}
-              expanded={expanded}
-              toggle={(p) => setExpanded((e) => ({ ...e, [p]: !e[p] }))}
-              onSelect={openFile}
-              selectedPath={selected?.path ?? null}
-              changedDirs={changedDirs}
-            />
-          ))
-        )}
+      <div className="flex w-56 flex-none flex-col border-r border-line bg-rail/40 py-1.5">
+        <div className="flex flex-none items-center justify-between pb-1 pl-3 pr-2">
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.5px] text-faint">Files</span>
+          <button
+            type="button"
+            title="Refresh file tree"
+            aria-label="Refresh file tree"
+            onClick={() => refetchTreeRef.current()}
+            className={`flex-none rounded p-0.5 text-faint hover:text-text-2 ${FOCUS}`}
+          >
+            <RefreshCw size={12} strokeWidth={1.5} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {tree.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-faint">No files</div>
+          ) : (
+            tree.map((node) => (
+              <TreeNode
+                key={node.path}
+                node={node}
+                depth={0}
+                expanded={expanded}
+                toggle={(p) => setExpanded((e) => ({ ...e, [p]: !e[p] }))}
+                onSelect={openFile}
+                selectedPath={selected?.path ?? null}
+                changedDirs={changedDirs}
+              />
+            ))
+          )}
+        </div>
       </div>
 
       {/* Content */}

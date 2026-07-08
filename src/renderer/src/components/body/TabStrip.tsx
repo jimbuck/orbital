@@ -3,7 +3,6 @@ import {
   Terminal,
   Globe,
   FileText,
-  Sparkles,
   Plus,
   X,
   CopyX,
@@ -12,7 +11,8 @@ import {
   SplitSquareVertical,
   Columns2
 } from 'lucide-react'
-import type { Flight, Pane, Tab, TabType } from '@shared/types'
+import type { Flight, Pane, Tab, TabConfig, TabType } from '@shared/types'
+import { ClaudeIcon, CodexIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, clampMenuPos, type MenuPos } from '../rail/menu'
@@ -30,25 +30,37 @@ export function serverLabel(url: string): string {
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
-/** Lucide glyph for a tab type. */
-function TypeIcon({ type, className }: { type: TabType; className?: string }): JSX.Element {
+/** Glyph for a tab type (agent tabs get their provider's brand mark). */
+function TypeIcon({
+  type,
+  provider,
+  className
+}: {
+  type: TabType
+  provider?: string
+  className?: string
+}): JSX.Element {
   const props = { size: 14, strokeWidth: 1.5, className }
   if (type === 'browser') return <Globe {...props} />
   if (type === 'editor') return <FileText {...props} />
-  if (type === 'agent') return <Sparkles {...props} />
+  if (type === 'agent') return provider === 'codex' ? <CodexIcon {...props} /> : <ClaudeIcon {...props} />
   return <Terminal {...props} />
 }
 
+/** Display names for agent providers. */
+const AGENT_TITLES: Record<string, string> = { claude: 'Claude', codex: 'Codex' }
+
 /** Tab types offered in the add-tab popover, with their picker labels. */
-const ADD_OPTIONS: { type: TabType; label: string }[] = [
+const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig }[] = [
   { type: 'terminal', label: 'Terminal' },
-  { type: 'agent', label: 'Claude' },
+  { type: 'agent', label: 'Claude', config: { agentProvider: 'claude' } },
+  { type: 'agent', label: 'Codex', config: { agentProvider: 'codex' } },
   { type: 'browser', label: 'Browser' },
   { type: 'editor', label: 'Editor' }
 ]
 
 /** Display title: explicit override, else something derived from the config. */
-function tabTitle(tab: Tab): string {
+function tabTitle(tab: Tab, defaultAgentProvider?: string): string {
   if (tab.config.title) return tab.config.title
   if (tab.type === 'editor') {
     const p = tab.config.filePath
@@ -63,7 +75,10 @@ function tabTitle(tab: Tab): string {
       return u
     }
   }
-  if (tab.type === 'agent') return 'Claude'
+  if (tab.type === 'agent') {
+    const provider = tab.config.agentProvider || defaultAgentProvider || 'claude'
+    return AGENT_TITLES[provider] ?? provider
+  }
   return 'terminal'
 }
 
@@ -82,14 +97,17 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
   const renameRef = useRef<HTMLInputElement>(null)
   const onlyPane = flight.panes.length <= 1
   const servers = useStore((s) => s.devServers[flight.id]) ?? []
+  const defaultAgentProvider = useStore(
+    (s) => s.workspaces.find((w) => w.id === flight.workspaceId)?.defaultAgentProvider
+  )
 
   useEffect(() => {
     if (renamingId) renameRef.current?.select()
   }, [renamingId])
 
-  const addTab = (type: TabType, url?: string): void => {
+  const addTab = (type: TabType, config?: TabConfig): void => {
     setAddOpen(false)
-    void window.orbital.createTab(flight.id, pane.id, type, url ? { url } : undefined)
+    void window.orbital.createTab(flight.id, pane.id, type, config)
   }
 
   const openTabMenu = (e: React.MouseEvent, tab: Tab): void => {
@@ -99,14 +117,14 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
   }
 
   const startRename = (tab: Tab): void => {
-    setDraft(tabTitle(tab))
+    setDraft(tabTitle(tab, defaultAgentProvider))
     setRenamingId(tab.id)
     setTabMenu(null)
   }
   const commitRename = (tab: Tab): void => {
     const title = draft.trim()
     setRenamingId(null)
-    if (title && title !== tabTitle(tab)) void window.orbital.renameTab(tab.id, title)
+    if (title && title !== tabTitle(tab, defaultAgentProvider)) void window.orbital.renameTab(tab.id, title)
   }
 
   const closeOthers = (tab: Tab): void => {
@@ -175,7 +193,11 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
             {showDot && tab.status ? (
               <StatusDot status={tab.status} />
             ) : (
-              <TypeIcon type={tab.type} className="text-text-3" />
+              <TypeIcon
+                type={tab.type}
+                provider={tab.config.agentProvider || defaultAgentProvider}
+                className="text-text-3"
+              />
             )}
             {renamingId === tab.id ? (
               <input
@@ -199,7 +221,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
               <span
                 className={`text-xs ${isActive ? 'font-semibold' : 'font-medium'} ${tab.type === 'editor' ? 'font-mono' : ''}`}
               >
-                {tabTitle(tab)}
+                {tabTitle(tab, defaultAgentProvider)}
               </span>
             )}
             <button
@@ -234,14 +256,14 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
               role="menu"
               className="absolute left-0 top-8 z-[41] w-40 rounded-card border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
             >
-              {ADD_OPTIONS.map(({ type, label }) => (
+              {ADD_OPTIONS.map(({ type, label, config }) => (
                 <button
-                  key={type}
+                  key={label}
                   role="menuitem"
-                  onClick={() => addTab(type)}
+                  onClick={() => addTab(type, config)}
                   className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium text-text-2 hover:bg-hover ${FOCUS}`}
                 >
-                  <TypeIcon type={type} className="text-muted" />
+                  <TypeIcon type={type} provider={config?.agentProvider} className="text-muted" />
                   {label}
                 </button>
               ))}
@@ -258,7 +280,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
                       key={url}
                       role="menuitem"
                       title={url}
-                      onClick={() => addTab('browser', url)}
+                      onClick={() => addTab('browser', { url })}
                       className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium text-text-2 hover:bg-hover ${FOCUS}`}
                     >
                       <span className="relative size-[7px] flex-none">

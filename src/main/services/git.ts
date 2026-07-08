@@ -526,8 +526,6 @@ export const git = {
 
 /** Coalesce bursts of FS events into a single `change` emit. */
 const DEBOUNCE_MS = 150
-/** Shallow recursion: HEAD/index already capture staging & commit/checkout. */
-const WORKTREE_DEPTH = 2
 
 /**
  * Resolve a checkout's real git dir: `.git` is a directory at a repo root, but a
@@ -550,7 +548,7 @@ function resolveGitDir(repoPath: string): string {
 /**
  * Watches one or more checkouts (repo roots and linked worktrees) and emits
  * `('change', repoPath)` (debounced) whenever the checkout's git HEAD/index or
- * shallow working tree change.
+ * working tree change.
  */
 export class GitWatcher extends EventEmitter {
   private readonly watchers = new Map<string, FSWatcher>()
@@ -568,9 +566,12 @@ export class GitWatcher extends EventEmitter {
     const logsDir = `${gitDir}/logs`
     const logsHeadPath = `${logsDir}/HEAD`
 
+    // The working tree is watched at full depth so files landing anywhere in
+    // the checkout (e.g. pasted via Explorer into a nested folder) fire a
+    // change — a depth cap silently dropped events below it, leaving the file
+    // tree stale. Perf is kept in check by the `ignored` rules instead.
     const watcher = chokidar.watch([headPath, indexPath, logsHeadPath, repoPath], {
       ignoreInitial: true,
-      depth: WORKTREE_DEPTH,
       ignored: (raw: string) => {
         const p = raw.replace(/\\/g, '/')
         if (p.includes('/node_modules/') || p.endsWith('/node_modules')) return true
@@ -578,6 +579,8 @@ export class GitWatcher extends EventEmitter {
         if (p === gitDir || p.startsWith(`${gitDir}/`)) {
           return p !== gitDir && p !== headPath && p !== indexPath && p !== logsDir && p !== logsHeadPath
         }
+        // Nested checkouts' .git dirs (mirrors env-sync's `**/.git/**` ignore).
+        if (p.includes('/.git/') || p.endsWith('/.git')) return true
         return false
       }
     })

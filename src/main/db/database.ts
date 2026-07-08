@@ -99,6 +99,7 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'workspaces', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
   migrateEnvPatternsToSettings(d)
+  migrateEnvPatternsRecursive(d)
 }
 
 /**
@@ -128,6 +129,38 @@ function migrateEnvPatternsToSettings(d: Database.Database): void {
       parsed.envSyncPatterns = [...union]
       d.prepare("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(parsed))
     }
+  } catch {
+    // Unparseable settings blob — the repository layer falls back to defaults.
+  }
+}
+
+/**
+ * Upgrade stored env-sync patterns from the old root-only default globs to
+ * their recursive forms (prefixing `.env` and `.env.*` with a `**` glob), so
+ * users who saved settings before the defaults went recursive still pick up
+ * nested env files (the stored `envSyncPatterns` list fully shadows the
+ * defaults). Only the exact legacy default spellings are rewritten; custom
+ * globs are left untouched. Effectively one-shot: after the rewrite no legacy
+ * spellings remain, so later runs no-op.
+ */
+function migrateEnvPatternsRecursive(d: Database.Database): void {
+  const RECURSIVE = new Map([
+    ['.env', '**/.env'],
+    ['.env.*', '**/.env.*']
+  ])
+  const row = d.prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
+  if (!row) return // no settings row yet — the repository's defaults are already recursive
+  try {
+    const parsed = JSON.parse(row.value)
+    const patterns = parsed?.envSyncPatterns
+    if (!Array.isArray(patterns) || !patterns.some((p) => RECURSIVE.has(p))) return
+    const upgraded: string[] = []
+    for (const p of patterns) {
+      const next = typeof p === 'string' ? (RECURSIVE.get(p) ?? p) : p
+      if (!upgraded.includes(next)) upgraded.push(next)
+    }
+    parsed.envSyncPatterns = upgraded
+    d.prepare("UPDATE settings SET value = ? WHERE key = 'app'").run(JSON.stringify(parsed))
   } catch {
     // Unparseable settings blob — the repository layer falls back to defaults.
   }

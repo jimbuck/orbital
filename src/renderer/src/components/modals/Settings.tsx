@@ -267,6 +267,9 @@ export default function Settings(): React.JSX.Element {
             <option value="claude" className="bg-panel text-text-2">
               Claude
             </option>
+            <option value="codex" className="bg-panel text-text-2">
+              Codex
+            </option>
           </select>
           <ChevronDown
             size={13}

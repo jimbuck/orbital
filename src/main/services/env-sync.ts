@@ -8,7 +8,14 @@ import chokidar, { type FSWatcher, type WatchOptions } from 'chokidar'
 // pattern explicitly targets it (the one-shot sync at worktree creation), and
 // is never live-watched — mirroring dependency churn would melt the watcher;
 // a package-manager install in the worktree handles later drift.
-const WATCH_IGNORED = ['**/.git/**', '**/node_modules/**']
+// `.orbital-worktrees` is excluded defensively: worktrees normally live
+// beside the repo (see worktree.ts), but if a workspace root happens to
+// enclose one, recursive globs like `**/.env` must never sync files out of
+// sibling worktrees.
+const WATCH_IGNORED = ['**/.git/**', '**/node_modules/**', '**/.orbital-worktrees/**']
+
+/** Directory names the sync walk never descends into (see WATCH_IGNORED). */
+const ALWAYS_SKIPPED_DIRS = ['.git', '.orbital-worktrees']
 
 /** True when any pattern targets `node_modules`, so the walk must descend into it. */
 function targetsNodeModules(patterns: string[]): boolean {
@@ -70,7 +77,9 @@ export async function syncEnvFiles(
 
   const isMatch = picomatch(patterns, { dot: true })
   const rels: string[] = []
-  const skip = new Set(targetsNodeModules(patterns) ? ['.git'] : ['.git', 'node_modules'])
+  const skip = new Set(
+    targetsNodeModules(patterns) ? ALWAYS_SKIPPED_DIRS : [...ALWAYS_SKIPPED_DIRS, 'node_modules']
+  )
   walkFiles(rootPath, rootPath, rels, skip)
 
   const copied: string[] = []

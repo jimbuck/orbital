@@ -129,6 +129,8 @@ const api: OrbitalApi = {
 
   // browser / window
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
+  openPath: (path: string) => ipcRenderer.invoke(IPC.openPath, path) as Promise<void>,
+  openInTerminal: (path: string) => ipcRenderer.invoke(IPC.openInTerminal, path) as Promise<void>,
   windowMinimize: () => ipcRenderer.send(IPC.windowMinimize),
   windowMaximize: () => ipcRenderer.send(IPC.windowMaximize),
   windowClose: () => ipcRenderer.send(IPC.windowClose),

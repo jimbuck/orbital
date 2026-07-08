@@ -25,6 +25,8 @@ export interface BriefingInput {
   workspace: Workspace
   flight: Flight
   tabId: string
+  /** Agent name used in the opener; defaults to 'Claude Code'. */
+  providerName?: string
   /** When true, the cockpit learns status from Claude hooks, so drop the self-report block. */
   hooksInstalled: boolean
 }
@@ -65,9 +67,9 @@ export function pruneBriefings(keep: Set<string>): void {
   }
 }
 
-function briefingText({ workspace, flight, hooksInstalled }: BriefingInput): string {
+function briefingText({ workspace, flight, providerName, hooksInstalled }: BriefingInput): string {
   const lines = [
-    'You are Claude Code running inside an Orbital flight — one workspace in the Orbital',
+    `You are ${providerName ?? 'Claude Code'} running inside an Orbital flight — one workspace in the Orbital`,
     'cockpit, which runs several coding-agent sessions side by side, each in its own git',
     'worktree.',
     '',
@@ -78,10 +80,14 @@ function briefingText({ workspace, flight, hooksInstalled }: BriefingInput): str
     `- Branch: ${flight.branch}`,
     '',
     'The `orbital` CLI is on your PATH — use it to work with the cockpit:',
-    '- `orbital task add "<title>"` — queue follow-up work you notice but should not tackle now.',
-    '- `orbital task list` — see the workspace\'s open tasks (id, status, title).',
-    '- `orbital task update <id> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <id>` when it is finished.',
-    '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click.'
+    '- `orbital task add "<title>" [--description <text>] [--tags <a,b>]` — queue follow-up work you notice but should not tackle now.',
+    '- `orbital task list` — see the workspace\'s open tasks (id, status, title); `--all` includes done ones.',
+    '- `orbital task show <id>` — full detail for one task.',
+    '- `orbital task update <id> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <id>` when it is finished; `orbital task delete <id>` to drop one.',
+    '- `orbital flights` — list this workspace\'s flights.',
+    '- `orbital flight new [--worktree <branch>] [name]` — open a new flight, optionally in a fresh git worktree.',
+    '- `orbital tab new <terminal|browser|editor|agent> [arg]` — open a tab in this flight (browser arg = URL, editor arg = file path, agent arg = provider).',
+    '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click; `orbital server list` shows what is registered.'
   ]
   if (!hooksInstalled) {
     lines.push(

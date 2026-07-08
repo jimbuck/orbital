@@ -3,8 +3,8 @@
  *
  * An `agent` tab is a PTY-backed tab that boots straight into a coding agent.
  * Each provider knows how to resolve the executable + argv to spawn for a given
- * Flight. Only Claude is implemented; the registry is the extension point for
- * Codex / Gemini / etc. (add a provider + register it here — no other plumbing).
+ * Flight. Claude and Codex are implemented; the registry is the extension point
+ * for Gemini / etc. (add a provider + register it here — no other plumbing).
  */
 import type { Workspace, Flight } from '@shared/types'
 
@@ -35,10 +35,12 @@ export interface AgentProvider {
 }
 
 import { claudeProvider } from './claude'
+import { codexProvider } from './codex'
 
 /** Providers keyed by id. The single place to register a new agent. */
 export const AGENT_PROVIDERS: Record<string, AgentProvider> = {
-  [claudeProvider.id]: claudeProvider
+  [claudeProvider.id]: claudeProvider,
+  [codexProvider.id]: codexProvider
 }
 
 /** Resolve a provider by id, falling back to Claude (the default). */
