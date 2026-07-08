@@ -75,6 +75,7 @@ export default function Settings(): React.JSX.Element {
   const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
+  const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -150,7 +151,8 @@ export default function Settings(): React.JSX.Element {
         alerts,
         claudeHooksInstalled: settings?.claudeHooksInstalled ?? false,
         envSyncPatterns: patterns,
-        periodicFetch
+        periodicFetch,
+        debugLogging
       })
       closeModal()
     } finally {
@@ -370,6 +372,22 @@ export default function Settings(): React.JSX.Element {
         )}
         {hookError && <div className="mt-2.5 text-[11px] text-red-2">{hookError}</div>}
       </div>
+
+      <div className="my-[18px] h-px bg-soft" />
+
+      {/* Debug logging */}
+      <div className={sectionLabel}>Debug logging</div>
+      <div className="mt-1">
+        <AlertRow
+          title="Debug logging"
+          desc="Record CLI calls, UI actions, and errors to a rotating log file for diagnosing crashes"
+          checked={debugLogging}
+          onChange={setDebugLogging}
+        />
+      </div>
+      <button type="button" className={`${ghostBtn} mt-1.5`} onClick={() => void window.orbital.openLogFolder()}>
+        Open log folder
+      </button>
 
       <div className="my-[18px] h-px bg-soft" />
 

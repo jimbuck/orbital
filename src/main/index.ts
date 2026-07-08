@@ -1,8 +1,9 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu } from 'electron'
 import { getDb, closeDb } from './db/database'
-import { runtime } from './runtime'
+import { runtime, repo } from './runtime'
 import { updater } from './services/updater'
+import { logger } from './services/logger'
 import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -103,6 +104,24 @@ if (!gotLock) {
     // group, pinning and notifications to "Orbital" rather than to "Electron".
     app.setAppUserModelId(APP_ID)
     getDb()
+    // Bring the opt-in debug logger up first thing so it can capture the rest of
+    // startup. It writes to Electron's per-user logs dir and no-ops unless the
+    // setting is on. The crash handlers add a log breadcrumb but must NOT change
+    // the app's failure contract: they always mirror to console, and a fatal
+    // uncaughtException still terminates. (Installing an uncaughtException
+    // listener otherwise suppresses Node's default print-and-exit, silently
+    // limping on in a corrupted state — and, with logging off, with no record.)
+    logger.init(app.getPath('logs'))
+    logger.setEnabled(repo.settings.get().debugLogging)
+    process.on('uncaughtException', (err) => {
+      logger.error('uncaughtException', { message: err.message, stack: err.stack })
+      console.error(err)
+      app.exit(1)
+    })
+    process.on('unhandledRejection', (reason) => {
+      logger.error('unhandledRejection', { reason: String(reason) })
+      console.error(reason)
+    })
     runtime.init()
     registerIpc()
 

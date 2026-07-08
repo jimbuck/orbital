@@ -203,6 +203,8 @@ export interface Settings {
   envSyncPatterns: string[]
   /** Auto-run `git fetch` per workspace on an interval so ahead/behind stays current. */
   periodicFetch: boolean
+  /** Opt-in verbose file logging of CLI calls, UI actions, and errors, with rotation. Off by default. */
+  debugLogging: boolean
 }
 
 /** Full application state pushed to / pulled by the renderer. */
@@ -454,6 +456,7 @@ export const IPC = {
   openExternal: 'orbital:openExternal',
   openPath: 'orbital:openPath',
   openInTerminal: 'orbital:openInTerminal',
+  openLogFolder: 'orbital:openLogFolder',
   // window
   windowMinimize: 'orbital:windowMinimize',
   windowMaximize: 'orbital:windowMaximize',
@@ -565,6 +568,8 @@ export interface OrbitalApi {
   openPath(path: string): Promise<void>
   /** Open an external terminal window at a folder (Windows Terminal / PowerShell on Windows). */
   openInTerminal(path: string): Promise<void>
+  /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */
+  openLogFolder(): Promise<void>
   windowMinimize(): void
   windowMaximize(): void
   windowClose(): void

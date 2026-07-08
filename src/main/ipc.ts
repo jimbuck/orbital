@@ -1,7 +1,7 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, app, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import {
   IPC,
   ENV,
@@ -33,6 +33,7 @@ import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './se
 import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
 import { updater } from './services/updater'
+import { logger, summarizeArgs } from './services/logger'
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -219,7 +220,29 @@ function isHumanKeystroke(data: string): boolean {
 /* ---- registration ------------------------------------------------------ */
 
 export function registerIpc(): void {
-  const h = ipcMain.handle.bind(ipcMain)
+  // Every UI action funnels through this wrapper so the debug logger sees each
+  // invoke (channel + summarized args) and any thrown error, without touching
+  // the individual handler call sites below. It delegates to ipcMain.handle and
+  // re-throws so the renderer still sees the original rejection. Logging is a
+  // no-op unless debug logging is enabled, so this is free in the common case.
+  const h = (
+    channel: string,
+    fn: (e: IpcMainInvokeEvent, ...args: any[]) => unknown
+  ): void => {
+    ipcMain.handle(channel, async (e, ...args) => {
+      // Guard so summarizeArgs (allocates a mapped copy) never runs when logging
+      // is off — this wrapper is on every UI invoke's path.
+      if (logger.isEnabled()) logger.ui(channel, summarizeArgs(args))
+      try {
+        return await fn(e, ...args)
+      } catch (err) {
+        logger.error(`ipc ${channel} failed`, {
+          message: err instanceof Error ? err.message : String(err)
+        })
+        throw err // preserve the existing rejection surfaced to the renderer
+      }
+    })
+  }
   const broadcast = (): void => runtime.broadcastState()
   const broadcastAll = (): void => {
     runtime.broadcastState()
@@ -234,6 +257,8 @@ export function registerIpc(): void {
     for (const ws of repo.workspaces.list()) runtime.ensureEnvWatcher(ws.id)
     // Toggling periodicFetch starts/stops the background fetcher live.
     runtime.configureFetch()
+    // Toggling debug logging takes effect immediately (no restart needed).
+    logger.setEnabled(settings.debugLogging)
     broadcast()
     return s
   })
@@ -600,6 +625,10 @@ export function registerIpc(): void {
   h(IPC.openPath, async (_e, p: string) => {
     await shell.openPath(p)
   })
+  h(IPC.openLogFolder, async () => {
+    // Reveal the rotating debug-log folder in Explorer so users can grab the file.
+    await shell.openPath(logger.dir)
+  })
   h(IPC.openInTerminal, (_e, p: string) => {
     if (process.platform === 'win32') {
       // Prefer Windows Terminal; fall back to a new PowerShell window if wt is missing.
@@ -701,6 +730,9 @@ function resolveTask(workspaceId: string, idArg: string): { task?: ReturnType<ty
 }
 
 export async function handleControl(req: ControlRequest): Promise<ControlResponse> {
+  // Record every incoming CLI command up front so a crash mid-dispatch still
+  // leaves a trail of what the CLI was asking the app to do.
+  logger.cli(req.cmd, { args: req.args, flightId: req.flightId, workspaceId: req.workspaceId })
   try {
     switch (req.cmd) {
       case 'status': {
@@ -883,7 +915,9 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         return { ok: false, error: `unknown command '${(req as ControlRequest).cmd}'` }
     }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    const error = err instanceof Error ? err.message : String(err)
+    logger.error(`cli ${req.cmd} failed`, { error })
+    return { ok: false, error }
   }
 }
 
