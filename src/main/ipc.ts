@@ -195,6 +195,25 @@ function acceptStatusEvent(terminalId: string, firedAt: unknown): boolean {
   return true
 }
 
+/**
+ * Why each needs-attention tab is blocked, keyed by tab id: the Notification
+ * hook's notification_type ('permission_prompt' | 'idle_prompt'), recorded when
+ * that status lands and cleared when it resolves. Human input consults this to
+ * pick the right next status — answering a permission prompt puts Claude
+ * straight to work, while typing at an idle prompt is just composing.
+ */
+const attentionKind = new Map<string, string>()
+
+// Focus-in/out reports and mouse-tracking sequences a TUI subscribed to — sent
+// by merely clicking into or scrolling a terminal, so not a human response.
+// eslint-disable-next-line no-control-regex
+const TERMINAL_REPORTS = /\x1b\[(?:I|O|<\d+;\d+;\d+[Mm]|M[\s\S]{3})/g
+
+/** True when terminal input contains an actual keystroke/paste, not just reports. */
+function isHumanKeystroke(data: string): boolean {
+  return data.replace(TERMINAL_REPORTS, '').length > 0
+}
+
 /* ---- registration ------------------------------------------------------ */
 
 export function registerIpc(): void {
@@ -343,6 +362,7 @@ export function registerIpc(): void {
         // The user's force-clear supersedes anything already in flight: hook
         // events fired before this moment must not re-set the status below.
         statusAppliedAt.set(tab.id, Date.now())
+        attentionKind.delete(tab.id)
         repo.tabs.updateStatus(tab.id, 'idle')
       }
     }
@@ -466,17 +486,21 @@ export function registerIpc(): void {
   // ---- terminals ----
   ipcMain.on(IPC.terminalInput, (_e, tabId: string, data: string) => {
     runtime.terminals.write(tabId, data)
-    // If the human types into an agent flagged needs-attention (answering a
-    // permission prompt, or starting the next instruction), they've responded — so
-    // it is no longer blocked on a human. Flip to working immediately rather than
-    // waiting for the next Claude hook (a long approved tool emits none until it
-    // finishes). Uses INPUT only — never scrapes terminal output (req 7).
+    // If the human types into an agent flagged needs-attention, they've responded —
+    // so it is no longer blocked on a human. Where it goes depends on why it was
+    // blocked: answering a permission prompt puts Claude straight to work (and a
+    // long approved tool emits no hook until it finishes) → working; typing at an
+    // idle prompt is just composing the next instruction → idle, and the
+    // UserPromptSubmit hook flips it to working on actual submit. Uses INPUT
+    // only — never scrapes terminal output (req 7).
     const tab = repo.tabs.get(tabId)
-    if (tab && tab.type === 'agent' && tab.status === 'needs_attention') {
+    if (tab && tab.type === 'agent' && tab.status === 'needs_attention' && isHumanKeystroke(data)) {
       // The human's response supersedes anything already in flight: hook events
       // fired before this moment must not overwrite the flip below.
       statusAppliedAt.set(tabId, Date.now())
-      repo.tabs.updateStatus(tabId, 'working')
+      const next = attentionKind.get(tabId) === 'permission_prompt' ? 'working' : 'idle'
+      attentionKind.delete(tabId)
+      repo.tabs.updateStatus(tabId, next)
       repo.flights.recomputeStatus(tab.flightId)
       runtime.broadcastState()
       runtime.broadcastAlert()
@@ -660,6 +684,8 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         const tab = repo.tabs.get(req.terminalId)
         if (!tab) return { ok: false, error: 'terminal not found' }
         if (acceptStatusEvent(req.terminalId, req.args.firedAt)) {
+          // CLI-set needs-attention has no prompt kind — typing then resets to idle.
+          attentionKind.delete(req.terminalId)
           repo.tabs.updateStatus(req.terminalId, status)
           repo.flights.recomputeStatus(tab.flightId)
           runtime.broadcastState()
@@ -721,6 +747,11 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         if (!status) return { ok: true }
         // Async hooks race over the pipe — drop an event a later-fired one beat here.
         if (!acceptStatusEvent(req.terminalId, req.args.firedAt)) return { ok: true }
+        if (status === 'needs_attention') {
+          attentionKind.set(req.terminalId, String(payload.notification_type ?? ''))
+        } else {
+          attentionKind.delete(req.terminalId)
+        }
         repo.tabs.updateStatus(req.terminalId, status)
         repo.flights.recomputeStatus(tab.flightId)
         runtime.broadcastState()
