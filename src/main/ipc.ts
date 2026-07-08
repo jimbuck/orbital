@@ -232,6 +232,8 @@ export function registerIpc(): void {
     const s = repo.settings.set(settings)
     // Env-sync patterns are global settings — refresh every workspace's watcher.
     for (const ws of repo.workspaces.list()) runtime.ensureEnvWatcher(ws.id)
+    // Toggling periodicFetch starts/stops the background fetcher live.
+    runtime.configureFetch()
     broadcast()
     return s
   })

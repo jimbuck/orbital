@@ -28,7 +28,8 @@ const DEFAULT_SETTINGS: Settings = {
   defaultShell: '',
   alerts: { indicator: true, sound: true, taskbarBadge: true },
   claudeHooksInstalled: false,
-  envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS
+  envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
+  periodicFetch: true
 }
 
 /* ---- row -> entity mappers --------------------------------------------- */

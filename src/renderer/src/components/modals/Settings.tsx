@@ -74,6 +74,7 @@ export default function Settings(): React.JSX.Element {
   const [patterns, setPatterns] = useState<string[]>(() => settings?.envSyncPatterns ?? [])
   const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
+  const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -148,7 +149,8 @@ export default function Settings(): React.JSX.Element {
         defaultShell,
         alerts,
         claudeHooksInstalled: settings?.claudeHooksInstalled ?? false,
-        envSyncPatterns: patterns
+        envSyncPatterns: patterns,
+        periodicFetch
       })
       closeModal()
     } finally {
@@ -245,6 +247,19 @@ export default function Settings(): React.JSX.Element {
             className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-faint"
           />
         </div>
+      </div>
+
+      <div className="my-[18px] h-px bg-soft" />
+
+      {/* Git */}
+      <div className={sectionLabel}>Git</div>
+      <div className="mt-1">
+        <AlertRow
+          title="Periodic fetch"
+          desc="Fetch each repo in the background to keep ahead/behind current"
+          checked={periodicFetch}
+          onChange={setPeriodicFetch}
+        />
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

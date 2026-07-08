@@ -201,6 +201,8 @@ export interface Settings {
   claudeHooksInstalled: boolean
   /** Global wildcard list for env-file sync, applied to every workspace (PRD §5). */
   envSyncPatterns: string[]
+  /** Auto-run `git fetch` per workspace on an interval so ahead/behind stays current. */
+  periodicFetch: boolean
 }
 
 /** Full application state pushed to / pulled by the renderer. */

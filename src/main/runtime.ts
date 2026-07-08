@@ -15,6 +15,8 @@ import { IPC, isPtyTabType, type AppState } from '@shared/types'
  */
 class Runtime {
   private static readonly COALESCE_MS = 50
+  /** How often the background fetcher runs `git fetch` per workspace. */
+  private static readonly FETCH_INTERVAL_MS = 3 * 60_000
 
   window: BrowserWindow | null = null
   readonly terminals = new TerminalManager()
@@ -27,6 +29,10 @@ class Runtime {
   private readonly devServers = new Map<string, Set<string>>()
   private readonly pendingBroadcasts = new Map<string, NodeJS.Timeout>()
   private readonly lastBroadcastAt = new Map<string, number>()
+  /** Background `git fetch` scheduler — null when the setting is off. */
+  private fetchTimer: NodeJS.Timeout | null = null
+  /** Guards against overlapping ticks when a previous fetch run is still going. */
+  private fetching = false
 
   init(): void {
     this.alerts = new AlertManager(
@@ -64,6 +70,10 @@ class Runtime {
     this.gitWatcher.on('change', (repoPath: string) => {
       void this.refreshBranch(repoPath).finally(() => this.broadcastState())
     })
+
+    // Background `git fetch` so ahead/behind stays current without a manual Fetch.
+    // Reads workspaces live each tick, so this is safe before workspaces are resumed.
+    this.configureFetch()
   }
 
   setWindow(win: BrowserWindow | null): void {
@@ -202,9 +212,54 @@ class Runtime {
     }
   }
 
+  /**
+   * Start/stop the background `git fetch` scheduler to match the `periodicFetch`
+   * setting. Idempotent — safe to call at startup and again on every settings save.
+   * The tick reads the workspace list live, so this works even before resume.
+   */
+  configureFetch(): void {
+    const enabled = repo.settings.get().periodicFetch
+    if (enabled && !this.fetchTimer) {
+      this.fetchTimer = setInterval(() => void this.fetchAll(), Runtime.FETCH_INTERVAL_MS)
+    } else if (!enabled && this.fetchTimer) {
+      clearInterval(this.fetchTimer)
+      this.fetchTimer = null
+    }
+  }
+
+  /**
+   * One tick: `git fetch` each workspace's shared repo. Worktrees share the repo's
+   * refs, so one fetch per repoPath updates ahead/behind for all its flights. Each
+   * fetch is best-effort (an offline remote must not abort the rest), and the whole
+   * run is guarded so a slow tick never overlaps the next.
+   */
+  private async fetchAll(): Promise<void> {
+    if (this.fetching) return
+    this.fetching = true
+    try {
+      let changed = false
+      for (const ws of repo.workspaces.list()) {
+        try {
+          await git.fetch(ws.repoPath)
+          changed = true
+        } catch {
+          /* offline / no remote — skip this repo, keep fetching the others */
+        }
+      }
+      // Remote-tracking refs may have moved — nudge the renderer to re-read ahead/behind.
+      if (changed) this.broadcastState()
+    } finally {
+      this.fetching = false
+    }
+  }
+
   shutdown(): void {
     for (const t of this.pendingBroadcasts.values()) clearTimeout(t)
     this.pendingBroadcasts.clear()
+    if (this.fetchTimer) {
+      clearInterval(this.fetchTimer)
+      this.fetchTimer = null
+    }
     this.terminals.killAll()
     this.gitWatcher.stop()
     this.control.stop()
