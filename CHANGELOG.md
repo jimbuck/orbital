@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.8.1](https://github.com/jimbuck/orbital/compare/v1.8.0...v1.8.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* replace per-directory chokidar watchers with native recursive fs.watch ([3456a3e](https://github.com/jimbuck/orbital/commit/3456a3e3b29674b98ccfb60a8ca29edff46e5c6d))
+
 # [1.8.0](https://github.com/jimbuck/orbital/compare/v1.7.0...v1.8.0) (2026-07-08)
 
 
