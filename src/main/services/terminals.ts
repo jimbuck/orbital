@@ -13,6 +13,14 @@ import type { TerminalBuffer } from '@shared/types'
 /** Maximum scrollback retained per terminal, in characters. Oldest is trimmed. */
 const MAX_BUFFER = 200_000
 
+/**
+ * How long a prepared PTY waits for the renderer to report its real size before
+ * spawning at the 80×24 default anyway. The common case (a visible tab) reports
+ * within a frame or two, well under this; the fallback only elapses for a tab
+ * that is never viewed (e.g. restored into a background flight on boot).
+ */
+const DEFERRED_SPAWN_FALLBACK_MS = 1500
+
 export interface SpawnOptions {
   tabId: string
   cwd: string
@@ -41,9 +49,61 @@ interface TerminalEntry {
  */
 export class TerminalManager extends EventEmitter {
   private readonly terminals = new Map<string, TerminalEntry>()
+  /** Spawns registered via prepare() that are waiting for the renderer's first size. */
+  private readonly deferred = new Map<string, SpawnOptions>()
+  /** Fallback timers that spawn a deferred PTY at the default size if no size arrives. */
+  private readonly deferredTimers = new Map<string, NodeJS.Timeout>()
+  /** A size reported before its spawn was prepared (async agent lookup still running). */
+  private readonly firstSize = new Map<string, { cols: number; rows: number }>()
+
+  /**
+   * Register a PTY to spawn once the renderer reports the tab's real size, then
+   * spawn it at those dimensions. This keeps a child process (e.g. an agent CLI
+   * that paints a full-screen UI the instant it starts) from rendering its first
+   * frame at the 80×24 default and then reflowing when the size correction lands
+   * — the "jumbled on open" the user sees. If the size was already reported,
+   * spawns immediately; if none arrives within DEFERRED_SPAWN_FALLBACK_MS (a tab
+   * that is never viewed), spawns at the default so the PTY still starts.
+   */
+  prepare(opts: SpawnOptions): void {
+    const { tabId } = opts
+    if (this.terminals.has(tabId)) this.kill(tabId)
+    const size = this.firstSize.get(tabId)
+    if (size) {
+      this.firstSize.delete(tabId)
+      this.spawn({ ...opts, cols: size.cols, rows: size.rows })
+      return
+    }
+    this.deferred.set(tabId, opts)
+    this.deferredTimers.set(
+      tabId,
+      setTimeout(() => this.flushDeferred(tabId), DEFERRED_SPAWN_FALLBACK_MS)
+    )
+  }
+
+  /** Spawn a still-deferred PTY at the reported size, or the default if none. */
+  private flushDeferred(tabId: string, cols?: number, rows?: number): void {
+    const opts = this.deferred.get(tabId)
+    if (!opts) return
+    this.clearDeferred(tabId)
+    this.spawn({ ...opts, cols, rows })
+  }
+
+  /** Drop a pending deferred spawn and cancel its fallback timer. */
+  private clearDeferred(tabId: string): void {
+    this.deferred.delete(tabId)
+    const timer = this.deferredTimers.get(tabId)
+    if (timer) {
+      clearTimeout(timer)
+      this.deferredTimers.delete(tabId)
+    }
+  }
 
   /** Spawn a PTY for `tabId`, replacing any existing terminal under that id. */
   spawn(opts: SpawnOptions): void {
+    // Cancel any deferral for this tab; this spawn supersedes it.
+    this.clearDeferred(opts.tabId)
+    this.firstSize.delete(opts.tabId)
     // A tabId maps to at most one live PTY; replace an existing one.
     if (this.terminals.has(opts.tabId)) {
       this.kill(opts.tabId)
@@ -95,6 +155,8 @@ export class TerminalManager extends EventEmitter {
    * sitting blank. Replaces any existing PTY/notice under the id.
    */
   notify(tabId: string, message: string): void {
+    this.clearDeferred(tabId)
+    this.firstSize.delete(tabId)
     if (this.terminals.has(tabId)) this.kill(tabId)
     const entry: TerminalEntry = { proc: null, buf: message, total: message.length }
     this.terminals.set(tabId, entry)
@@ -106,11 +168,17 @@ export class TerminalManager extends EventEmitter {
     this.terminals.get(tabId)?.proc?.write(data)
   }
 
-  /** Resize the terminal's PTY, if it has one. */
+  /** Resize the terminal's PTY, or spawn a deferred one now that its size is known. */
   resize(tabId: string, cols: number, rows: number): void {
     const entry = this.terminals.get(tabId)
-    if (!entry || !entry.proc) return
-    entry.proc.resize(cols, rows)
+    if (entry?.proc) {
+      entry.proc.resize(cols, rows)
+      return
+    }
+    // No live PTY yet: this is the first size for a deferred spawn (spawn it now),
+    // or it arrived before the spawn was prepared (remember it for prepare()).
+    if (this.deferred.has(tabId)) this.flushDeferred(tabId, cols, rows)
+    else this.firstSize.set(tabId, { cols, rows })
   }
 
   /** Current scrollback + sequence cut-point for replay; empty if unknown. */
@@ -119,8 +187,10 @@ export class TerminalManager extends EventEmitter {
     return entry ? { data: entry.buf, seq: entry.total } : { data: '', seq: 0 }
   }
 
-  /** Kill and drop the terminal for `tabId`, if it exists. */
+  /** Kill and drop the terminal for `tabId`, including any pending deferred spawn. */
   kill(tabId: string): void {
+    this.clearDeferred(tabId)
+    this.firstSize.delete(tabId)
     const entry = this.terminals.get(tabId)
     if (!entry) return
     this.terminals.delete(tabId)
@@ -132,5 +202,10 @@ export class TerminalManager extends EventEmitter {
     for (const tabId of [...this.terminals.keys()]) {
       this.kill(tabId)
     }
+    // Deferred spawns have no live PTY, so they are not in `terminals` — clear them too.
+    for (const tabId of [...this.deferred.keys()]) {
+      this.clearDeferred(tabId)
+    }
+    this.firstSize.clear()
   }
 }

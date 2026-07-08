@@ -50,7 +50,7 @@ function terminalEnv(flight: Flight, tabId: string): Record<string, string> {
 
 function spawnTerminal(flight: Flight, tab: Tab): void {
   const shellPref = repo.settings.get().defaultShell || undefined
-  runtime.terminals.spawn({
+  runtime.terminals.prepare({
     tabId: tab.id,
     cwd: flight.worktreePath,
     shell: shellPref,
@@ -88,7 +88,7 @@ async function spawnAgent(flight: Flight, tab: Tab): Promise<void> {
       deleteBriefing(flight.id, tab.id)
       return
     }
-    runtime.terminals.spawn({
+    runtime.terminals.prepare({
       tabId: tab.id,
       cwd: flight.worktreePath,
       env: terminalEnv(flight, tab.id),
