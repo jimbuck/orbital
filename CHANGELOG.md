@@ -2,6 +2,19 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.7.0](https://github.com/jimbuck/orbital/compare/v1.6.0...v1.7.0) (2026-07-08)
+
+
+### Bug Fixes
+
+* typing at an idle prompt resets needs-attention to idle, not working ([7337483](https://github.com/jimbuck/orbital/commit/733748325888209f0b62dc785eb4c6321c60e78c))
+
+
+### Features
+
+* paste clipboard images into terminals as scratch-file paths ([139a180](https://github.com/jimbuck/orbital/commit/139a180f612cabda60e0658609e27c83490b2ea0))
+* workspace header row is the root Flight; chevron only with worktrees ([b103b39](https://github.com/jimbuck/orbital/commit/b103b39dd4e495fdf866c6f937c2a7c04b2727dc))
+
 # [1.6.0](https://github.com/jimbuck/orbital/compare/v1.5.0...v1.6.0) (2026-07-07)
 
 
