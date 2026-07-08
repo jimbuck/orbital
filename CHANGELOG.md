@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.8.0](https://github.com/jimbuck/orbital/compare/v1.7.0...v1.8.0) (2026-07-08)
+
+
+### Features
+
+* codex provider, FIFO tasks, flight menu actions, live file tree, recursive env sync ([3f81997](https://github.com/jimbuck/orbital/commit/3f8199735d6d167b5a09b568c3b80b944284b64e))
+
 # [1.7.0](https://github.com/jimbuck/orbital/compare/v1.6.0...v1.7.0) (2026-07-08)
 
 
