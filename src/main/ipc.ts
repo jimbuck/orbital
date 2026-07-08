@@ -1,7 +1,7 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { ipcMain, dialog, shell, app, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { ipcMain, dialog, shell, app, BrowserWindow, webContents, type IpcMainInvokeEvent } from 'electron'
 import {
   IPC,
   ENV,
@@ -622,6 +622,21 @@ export function registerIpc(): void {
 
   // ---- browser / window ----
   h(IPC.openExternal, (_e, url: string) => shell.openExternal(url))
+  // A <webview>'s popups (Ctrl/Cmd-click, target=_blank, window.open) can only be
+  // intercepted on the guest's webContents in main. Route them to a NEW internal
+  // browser tab in the same flight/pane and deny the real popup window.
+  h(IPC.registerBrowserView, (_e, webContentsId: number, flightId: string, paneId: string) => {
+    const wc = webContents.fromId(webContentsId)
+    if (!wc) return
+    wc.setWindowOpenHandler((details) => {
+      const url = details.url
+      if (/^https?:\/\//i.test(url) && repo.flights.get(flightId)) {
+        createTabInFlight(flightId, paneId, 'browser', { url })
+        runtime.broadcastState()
+      }
+      return { action: 'deny' }
+    })
+  })
   h(IPC.openPath, async (_e, p: string) => {
     await shell.openPath(p)
   })

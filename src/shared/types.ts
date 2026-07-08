@@ -468,6 +468,7 @@ export const IPC = {
   deleteTask: 'orbital:deleteTask',
   // browser
   openExternal: 'orbital:openExternal',
+  registerBrowserView: 'orbital:registerBrowserView',
   openPath: 'orbital:openPath',
   openInTerminal: 'orbital:openInTerminal',
   openLogFolder: 'orbital:openLogFolder',
@@ -578,6 +579,12 @@ export interface OrbitalApi {
 
   // browser / window
   openExternal(url: string): Promise<void>
+  /**
+   * Register a browser tab's <webview> guest so main can route its popup /
+   * new-window requests (Ctrl/Cmd-click, target=_blank, window.open) to a new
+   * internal browser tab instead of a real OS popup window.
+   */
+  registerBrowserView(webContentsId: number, flightId: string, paneId: string): Promise<void>
   /** Reveal a folder in the OS file manager (Explorer on Windows). */
   openPath(path: string): Promise<void>
   /** Open an external terminal window at a folder (Windows Terminal / PowerShell on Windows). */

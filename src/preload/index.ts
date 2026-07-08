@@ -129,6 +129,8 @@ const api: OrbitalApi = {
 
   // browser / window
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
+  registerBrowserView: (webContentsId: number, flightId: string, paneId: string) =>
+    ipcRenderer.invoke(IPC.registerBrowserView, webContentsId, flightId, paneId) as Promise<void>,
   openPath: (path: string) => ipcRenderer.invoke(IPC.openPath, path) as Promise<void>,
   openInTerminal: (path: string) => ipcRenderer.invoke(IPC.openInTerminal, path) as Promise<void>,
   openLogFolder: () => ipcRenderer.invoke(IPC.openLogFolder) as Promise<void>,

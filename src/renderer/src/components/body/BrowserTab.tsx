@@ -45,6 +45,21 @@ export default function BrowserTab({ tab }: { tab: Tab }): JSX.Element {
     // Re-bind when the webview first mounts (url goes '' -> non-empty).
   }, [url])
 
+  // Once the guest is ready, register it with main so its popups (Ctrl/Cmd-click,
+  // target=_blank, window.open) open a new internal browser tab instead of a real
+  // OS window — the window-open handler can only be attached on the guest in main.
+  useEffect(() => {
+    const wv = webviewRef.current
+    if (!wv) return
+    const onReady = (): void => {
+      void window.orbital.registerBrowserView(wv.getWebContentsId(), tab.flightId, tab.paneId)
+    }
+    wv.addEventListener('dom-ready', onReady)
+    return () => {
+      wv.removeEventListener('dom-ready', onReady)
+    }
+  }, [url, tab.flightId, tab.paneId])
+
   const navigate = (): void => {
     const next = normalizeUrl(input)
     if (!next) return
@@ -77,9 +92,14 @@ export default function BrowserTab({ tab }: { tab: Tab }): JSX.Element {
           className={`mx-1 h-6 flex-1 rounded-btn border border-line-2 bg-bg px-2.5 font-mono text-[11.5px] text-text-2 placeholder:text-faint ${FOCUS}`}
         />
         <button
-          onClick={() => url && window.orbital.openExternal(url)}
-          aria-label="Open externally"
-          title="Open externally"
+          onClick={() => {
+            // Open the live page URL, not the stale `url` state (which only tracks
+            // manual address-bar navigation, not in-page navigation).
+            const current = webviewRef.current?.getURL?.() || input || url
+            if (current) void window.orbital.openExternal(current)
+          }}
+          aria-label="Open in External Browser"
+          title="Open in External Browser"
           className={btn}
         >
           <ExternalLink size={14} strokeWidth={1.5} />

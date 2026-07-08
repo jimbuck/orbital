@@ -315,16 +315,70 @@ function mdCss(theme: ResolvedTheme): string {
 }
 
 /**
- * Rendered preview in a sandboxed iframe (no scripts, no app access) so
- * arbitrary repo content can never reach the window.orbital bridge.
+ * Rendered preview in a sandboxed iframe. Scripts stay disabled (no allow-scripts),
+ * so arbitrary repo content still can't reach the window.orbital bridge. For the
+ * markdown case we add allow-same-origin — with no scripts this is safe, and it's
+ * needed so the PARENT can read the frame's DOM to intercept anchor clicks (per
+ * the link-handling spec: plain click → internal browser tab, Ctrl/Cmd → external).
  */
-function Preview({ kind, source }: { kind: Exclude<PreviewKind, null>; source: string }): JSX.Element {
+function Preview({
+  kind,
+  source,
+  onLink
+}: {
+  kind: Exclude<PreviewKind, null>
+  source: string
+  onLink: (href: string, external: boolean) => void
+}): JSX.Element {
   const theme = useResolvedTheme()
+  const iframeRef = useRef<HTMLIFrameElement>(null)
   const doc = useMemo(() => {
     if (kind !== 'markdown') return source
     const body = marked.parse(source, { async: false }) as string
     return `<!doctype html><meta charset="utf-8"><style>${mdCss(theme)}</style><body>${body}</body>`
   }, [kind, source, theme])
+
+  // Intercept anchor clicks inside the (same-origin, script-free) markdown frame:
+  // the sandbox would otherwise navigate the tiny iframe itself. Reattach on each
+  // `load` because a srcDoc rebuild (theme/source change) replaces contentDocument.
+  useEffect(() => {
+    if (kind !== 'markdown') return
+    const iframe = iframeRef.current
+    if (!iframe) return
+
+    const onClick = (e: MouseEvent): void => {
+      const anchor = (e.target as HTMLElement)?.closest?.('a')
+      const href = anchor?.getAttribute('href')
+      if (!anchor || !href) return
+      e.preventDefault() // stop the sandboxed frame from navigating itself
+      // Pure in-page fragment (#heading) — nothing to open.
+      if (href.startsWith('#')) return
+      const resolved = anchor.href // absolute URL resolved by the browser
+      if (/^https?:\/\//i.test(resolved)) {
+        onLink(resolved, e.ctrlKey || e.metaKey)
+      } else {
+        // mailto:, tel:, etc. — hand off to the OS.
+        onLink(resolved, true)
+      }
+    }
+
+    const attach = (): void => {
+      const cdoc = iframe.contentDocument
+      if (cdoc) cdoc.addEventListener('click', onClick)
+    }
+    const detach = (): void => {
+      const cdoc = iframe.contentDocument
+      if (cdoc) cdoc.removeEventListener('click', onClick)
+    }
+
+    iframe.addEventListener('load', attach)
+    // The frame may already be loaded (effect re-run without a fresh load).
+    attach()
+    return () => {
+      iframe.removeEventListener('load', attach)
+      detach()
+    }
+  }, [kind, doc, onLink])
 
   // SVG renders via an <img> data URL — script-safe, like the iframe sandbox.
   if (kind === 'svg') {
@@ -333,8 +387,11 @@ function Preview({ kind, source }: { kind: Exclude<PreviewKind, null>; source: s
 
   return (
     <iframe
+      ref={iframeRef}
       title="preview"
-      sandbox=""
+      // allow-same-origin (no allow-scripts) lets the parent read the frame's DOM
+      // to intercept link clicks; scripts stay disabled so repo content is inert.
+      sandbox={kind === 'markdown' ? 'allow-same-origin' : ''}
       srcDoc={doc}
       className={`h-full w-full border-0 ${kind === 'html' ? 'bg-white' : ''}`}
     />
@@ -535,6 +592,16 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
     setDiff(null) // saved content invalidates any cached diff
   }
 
+  // Link clicks in the markdown preview: Ctrl/Cmd → OS external browser; a plain
+  // click → a new internal browser tab in this pane (per the link-handling spec).
+  const onPreviewLink = useCallback(
+    (href: string, external: boolean): void => {
+      if (external) void window.orbital.openExternal(href)
+      else if (flightId) void window.orbital.createTab(flightId, tab.paneId, 'browser', { url: href })
+    },
+    [flightId, tab.paneId]
+  )
+
   const kind = selected ? previewKind(selected.path) : null
   const isImage = !!selected && !!imageMime(selected.path)
   const canDiff = !!selected && (!!selected.gitState || selected.staged)
@@ -673,7 +740,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
                   File could not be read{selected.gitState === 'deleted' ? ' (deleted)' : ''}.
                 </div>
               ) : mode === 'preview' && kind ? (
-                <Preview kind={kind} source={content} />
+                <Preview kind={kind} source={content} onLink={onPreviewLink} />
               ) : editing ? (
                 <CodeEditor path={selected.path} value={draft} onChange={setDraft} />
               ) : (
