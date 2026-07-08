@@ -8,16 +8,16 @@ import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '
 type DeleteMode = 'none' | 'confirm' | 'force'
 
 /**
- * A single Flight entry inside an expanded workspace. Click selects it; the
- * leading dot + optional "needs you" label carry its status. Right-click opens a
- * context menu (rename inline, force-clear a stuck status, close keeping the
- * worktree, or delete the worktree).
+ * A single worktree Flight entry inside an expanded workspace (the root Flight
+ * is the workspace header itself). Click selects it; the leading dot + optional
+ * "needs you" label carry its status. Right-click opens a context menu (rename
+ * inline, force-clear a stuck status, close keeping the worktree, or delete the
+ * worktree).
  */
 export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
   const setActiveFlight = useStore((s) => s.setActiveFlight)
   const isActive = useStore((s) => s.activeFlightId === flight.id)
   const isDone = flight.status === 'done'
-  const isWorktree = flight.kind === 'worktree'
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [renaming, setRenaming] = useState(false)
@@ -115,19 +115,12 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
             />
           ) : (
             <>
-              <span className="flex items-center gap-[6px]">
-                <span
-                  className={`truncate text-[12.5px] ${isActive ? 'font-bold' : 'font-semibold'} ${
-                    isActive ? 'text-text' : isDone ? 'text-text-3' : 'text-text-2'
-                  }`}
-                >
-                  {flight.name}
-                </span>
-                {flight.kind === 'root' && (
-                  <span className="flex-none rounded-[4px] border border-line-2 px-1 text-[9px] leading-[13px] text-faint">
-                    root
-                  </span>
-                )}
+              <span
+                className={`block truncate text-[12.5px] ${isActive ? 'font-bold' : 'font-semibold'} ${
+                  isActive ? 'text-text' : isDone ? 'text-text-3' : 'text-text-2'
+                }`}
+              >
+                {flight.name}
               </span>
               <span className="mt-[2px] block truncate font-mono text-[10px] text-faint">{flight.branch}</span>
             </>
@@ -153,27 +146,19 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
                 label="Clear Status"
                 onClick={clearStatus}
               />
-              {isWorktree ? (
-                <>
-                  <MenuItem
-                    icon={<FolderX size={13} strokeWidth={1.5} />}
-                    label="Close Flight"
-                    hint="keep worktree"
-                    onClick={() => void remove(false)}
-                  />
-                  <div className="my-1 h-px bg-soft" />
-                  <MenuItem
-                    icon={<Trash2 size={13} strokeWidth={1.5} />}
-                    label="Delete worktree"
-                    danger
-                    onClick={() => setDel('confirm')}
-                  />
-                </>
-              ) : (
-                <div className="px-2 py-1.5 text-[11px] leading-snug text-faint">
-                  The root Flight can&apos;t be removed.
-                </div>
-              )}
+              <MenuItem
+                icon={<FolderX size={13} strokeWidth={1.5} />}
+                label="Close Flight"
+                hint="keep worktree"
+                onClick={() => void remove(false)}
+              />
+              <div className="my-1 h-px bg-soft" />
+              <MenuItem
+                icon={<Trash2 size={13} strokeWidth={1.5} />}
+                label="Delete worktree"
+                danger
+                onClick={() => setDel('confirm')}
+              />
             </>
           )}
 

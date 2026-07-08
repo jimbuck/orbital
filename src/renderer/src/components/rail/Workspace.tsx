@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleOff, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Workspace as WorkspaceModel } from '@shared/types'
 import { useStore } from '@renderer/store'
@@ -8,18 +8,23 @@ import FlightRow from './FlightRow'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 
 /**
- * A workspace (repo) header in the rail. Clicking the row activates the
- * workspace; the chevron independently expands/collapses its Flight list.
- * Right-click opens a context menu to rename the workspace inline or remove
- * it from Orbital.
+ * A workspace (repo) header in the rail. The header row IS the root Flight:
+ * clicking it selects the workspace's root Flight directly. Worktree Flights
+ * live in the collapsible list below — the chevron only renders when there
+ * are any. Right-click opens a context menu to rename the workspace inline,
+ * start a new Flight, clear a stuck root status, or remove the workspace.
  */
 export default function Workspace({ workspace }: { workspace: WorkspaceModel }): JSX.Element {
   const flights = useStore(useShallow((s) => s.flights.filter((f) => f.workspaceId === workspace.id)))
   const expanded = useStore((s) => !!s.expanded[workspace.id])
   const isActive = useStore((s) => s.activeWorkspaceId === workspace.id)
+  const activeFlightId = useStore((s) => s.activeFlightId)
   const setActiveWorkspace = useStore((s) => s.setActiveWorkspace)
   const toggleExpanded = useStore((s) => s.toggleExpanded)
   const openModal = useStore((s) => s.openModal)
+  const root = flights.find((f) => f.kind === 'root')
+  const worktrees = flights.filter((f) => f.kind !== 'root')
+  const rootActive = !!root && activeFlightId === root.id
   const status = aggregateStatus(flights.map((f) => f.status))
   const needsAttention = flights.filter((f) => f.status === 'needs_attention').length
 
@@ -42,7 +47,7 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
     e.preventDefault()
     e.stopPropagation()
     setConfirming(false)
-    setMenu(clampMenuPos(e, 210, 130))
+    setMenu(clampMenuPos(e, 210, 200))
   }
 
   const startRename = (): void => {
@@ -82,25 +87,29 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
         onClick={() => !renaming && activate()}
         onKeyDown={onHeaderKey}
         onContextMenu={openMenu}
-        className={`flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
-          isActive ? 'bg-hover' : 'hover:bg-hover'
+        className={`group flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
+          rootActive ? 'bg-panel-2' : isActive ? 'bg-hover' : 'hover:bg-hover'
         }`}
       >
-        <button
-          type="button"
-          aria-label={expanded ? 'Collapse workspace' : 'Expand workspace'}
-          onClick={(e) => {
-            e.stopPropagation()
-            toggleExpanded(workspace.id)
-          }}
-          className="flex flex-none items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-        >
-          {expanded ? (
-            <ChevronDown size={14} strokeWidth={1.5} className="text-muted" />
-          ) : (
-            <ChevronRight size={14} strokeWidth={1.5} className="text-faint" />
-          )}
-        </button>
+        {worktrees.length > 0 ? (
+          <button
+            type="button"
+            aria-label={expanded ? 'Collapse workspace' : 'Expand workspace'}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleExpanded(workspace.id)
+            }}
+            className="flex flex-none items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          >
+            {expanded ? (
+              <ChevronDown size={14} strokeWidth={1.5} className="text-muted" />
+            ) : (
+              <ChevronRight size={14} strokeWidth={1.5} className="text-faint" />
+            )}
+          </button>
+        ) : (
+          <span className="w-[14px] flex-none" />
+        )}
 
         <span className="flex w-[11px] flex-none items-center justify-center">
           <StatusDot status={status} />
@@ -122,8 +131,26 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
               {workspace.name}
             </div>
           )}
-          <div className="mt-px truncate font-mono text-[10.5px] text-faint">{workspace.repoPath}</div>
+          <div className="mt-px truncate font-mono text-[10.5px] text-faint">
+            {root ? `${root.branch} · ` : ''}
+            {workspace.repoPath}
+          </div>
         </div>
+
+        {!renaming && (
+          <button
+            type="button"
+            aria-label="New Flight from worktree"
+            title="New Flight from worktree"
+            onClick={(e) => {
+              e.stopPropagation()
+              openModal('newFlight', { workspace })
+            }}
+            className="flex size-5 flex-none items-center justify-center rounded-[6px] text-faint opacity-0 outline-none hover:bg-hover hover:text-text focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 group-hover:opacity-100"
+          >
+            <Plus size={13} strokeWidth={1.5} />
+          </button>
+        )}
 
         {!renaming && needsAttention > 0 && (
           <span className="inline-flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-amber/15 px-[5px] font-mono text-[10px] font-bold text-amber-2">
@@ -132,9 +159,9 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
         )}
       </div>
 
-      {expanded && (
+      {expanded && worktrees.length > 0 && (
         <div className="ml-3 mb-[6px] mt-[3px] flex flex-col gap-[2px] border-l border-line-2 pl-3">
-          {flights.map((flight) => (
+          {worktrees.map((flight) => (
             <FlightRow key={flight.id} flight={flight} />
           ))}
           <button
@@ -153,6 +180,25 @@ export default function Workspace({ workspace }: { workspace: WorkspaceModel }):
           {!confirming ? (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
+              <MenuItem
+                icon={<Plus size={13} strokeWidth={1.5} />}
+                label="New Flight from worktree"
+                onClick={() => {
+                  openModal('newFlight', { workspace })
+                  closeMenu()
+                }}
+              />
+              {root && (
+                <MenuItem
+                  icon={<CircleOff size={13} strokeWidth={1.5} />}
+                  label="Clear Status"
+                  onClick={() => {
+                    void window.orbital.clearFlightStatus(root.id)
+                    closeMenu()
+                  }}
+                />
+              )}
+              <div className="my-1 h-px bg-soft" />
               <MenuItem
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
                 label="Remove workspace"
