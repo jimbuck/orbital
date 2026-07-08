@@ -1,4 +1,4 @@
-import { useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
+import { useMemo, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
 import { Plus, X } from 'lucide-react'
 import { marked } from 'marked'
 import { useStore } from '@renderer/store'
@@ -25,6 +25,7 @@ function tagsChanged(a: string[], b: string[]): boolean {
 export default function EditTask(): JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
   const data = useStore((s) => s.modalData) as EditTaskData | null
+  const allTasks = useStore((s) => s.tasks)
   const task = data?.task
 
   const [title, setTitle] = useState(task?.title ?? '')
@@ -38,6 +39,32 @@ export default function EditTask(): JSX.Element {
   const [deleteArmed, setDeleteArmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Recently-used tags to suggest, so users reuse existing tags instead of
+  // retyping and creating near-duplicates. Drawn from other tasks in the same
+  // workspace, ordered by how recently a task carrying the tag was touched.
+  // Declared before the `if (!task)` early return to keep hook order stable;
+  // guarded to return [] when there's no task to edit.
+  const tagSuggestions = useMemo<string[]>(() => {
+    if (!task) return []
+    const selected = new Set(tags)
+    const draft = tagDraft.trim().toLowerCase()
+    // For each tag, remember the most recent updatedAt of a task that carries it.
+    const recency = new Map<string, number>()
+    for (const t of allTasks) {
+      if (t.workspaceId !== task.workspaceId) continue
+      for (const tag of t.tags) {
+        if (selected.has(tag)) continue
+        if (draft && !tag.toLowerCase().includes(draft)) continue
+        const prev = recency.get(tag)
+        if (prev === undefined || t.updatedAt > prev) recency.set(tag, t.updatedAt)
+      }
+    }
+    return [...recency.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([tag]) => tag)
+  }, [allTasks, tags, tagDraft, task])
 
   // The card that opened us passed a task snapshot; if it's gone, say so.
   if (!task) {
@@ -68,6 +95,14 @@ export default function EditTask(): JSX.Element {
 
   const addTags = (): void => {
     setTags(withPendingTags())
+    setTagDraft('')
+  }
+
+  // Add a clicked suggestion. Dedupe defensively (suggestions already exclude
+  // selected tags) and clear the draft, since the draft was only there to filter
+  // the suggestion list the user just picked from.
+  const addSuggestion = (tag: string): void => {
+    if (!tags.includes(tag)) setTags([...tags, tag])
     setTagDraft('')
   }
 
@@ -334,6 +369,31 @@ export default function EditTask(): JSX.Element {
             </button>
           )}
         </div>
+
+        {/* Recently-used tags from sibling tasks — click to add so users reuse
+            existing tags. Styled as add-affordances (dashed, faint, Plus icon)
+            to read distinctly from the solid selected-tag chips above. Only
+            shown when there's at least one suggestion. */}
+        {tagSuggestions.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-faint">Recent:</span>
+            {tagSuggestions.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                // Prevent the input's onBlur→addTags from committing a half-typed
+                // draft before this click registers: mousedown fires before blur,
+                // so suppressing its default keeps focus on the input.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => addSuggestion(tag)}
+                className="inline-flex items-center gap-0.5 rounded-chip border border-dashed border-line-2 px-2 py-0.5 text-[11px] font-semibold text-faint outline-none transition-colors hover:text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                <Plus size={10} strokeWidth={2} />
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && <div className="mt-3 text-[11.5px] text-red-2">{error}</div>}
       </div>
