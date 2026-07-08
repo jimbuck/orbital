@@ -1,5 +1,6 @@
-import { useState, type JSX, type KeyboardEvent } from 'react'
+import { useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
 import { Plus, X } from 'lucide-react'
+import { marked } from 'marked'
 import { useStore } from '@renderer/store'
 import { TASK_STATUSES, taskStatusLabel, taskColumnDot, taskColumnHeadClass } from '@renderer/lib/status'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
@@ -29,6 +30,9 @@ export default function EditTask(): JSX.Element {
   const [title, setTitle] = useState(task?.title ?? '')
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'todo')
   const [description, setDescription] = useState(task?.description ?? '')
+  // Description is stored as raw markdown; this toggles between the raw editor
+  // and a rendered preview so users can author markdown and see it formatted.
+  const [descMode, setDescMode] = useState<'write' | 'preview'>('write')
   const [tags, setTags] = useState<string[]>(task?.tags ?? [])
   const [tagDraft, setTagDraft] = useState('')
   const [deleteArmed, setDeleteArmed] = useState(false)
@@ -120,6 +124,17 @@ export default function EditTask(): JSX.Element {
     }
   }
 
+  // The preview is injected via dangerouslySetInnerHTML, so a raw <a> click would
+  // navigate the whole renderer SPA. Intercept anchor clicks, keep the SPA intact,
+  // and hand the URL to the OS browser instead.
+  const onPreviewClick = (e: MouseEvent<HTMLDivElement>): void => {
+    const anchor = (e.target as HTMLElement).closest('a')
+    const href = anchor?.getAttribute('href')
+    if (!href) return
+    e.preventDefault()
+    void window.orbital.openExternal(href)
+  }
+
   return (
     <ModalShell
       title="Edit task"
@@ -192,17 +207,92 @@ export default function EditTask(): JSX.Element {
           })}
         </div>
 
-        <label className={`${fieldLabel} mt-4 block`} htmlFor="et-desc">
-          Description <span className="font-normal text-faint">· optional</span>
-        </label>
-        <textarea
-          id="et-desc"
-          value={description}
-          rows={4}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Add more detail…"
-          className={`mt-1.5 min-h-[120px] flex-1 resize-none leading-snug ${inputBase}`}
-        />
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <label className={`${fieldLabel} block`} htmlFor="et-desc">
+            Description <span className="font-normal text-faint">· optional</span>{' '}
+            <span className="font-normal text-faint">· markdown</span>
+          </label>
+          {/* Write / Preview segmented toggle — mirrors the Status button styling
+              (active vs inactive) but sized down to read as small tabs. */}
+          <div className="flex gap-1">
+            {(['write', 'preview'] as const).map((mode) => {
+              const active = descMode === mode
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setDescMode(mode)}
+                  className={`rounded-btn border px-2 py-0.5 text-[11px] font-semibold capitalize outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                    active ? 'border-accent/50 bg-accent/[0.10]' : 'border-line-2 bg-bg hover:bg-hover'
+                  }`}
+                >
+                  {mode}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        {descMode === 'write' ? (
+          <textarea
+            id="et-desc"
+            value={description}
+            rows={4}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Add more detail…"
+            className={`mt-1.5 min-h-[120px] flex-1 resize-none leading-snug ${inputBase}`}
+          />
+        ) : description.trim() ? (
+          // Rendered markdown occupies the same footprint as the textarea so the
+          // modal height doesn't jump when toggling. Links are handled by
+          // onPreviewClick since the HTML is injected directly.
+          <div
+            onClick={onPreviewClick}
+            className="task-md mt-1.5 min-h-[120px] flex-1 overflow-auto rounded-btn border border-line-2 bg-bg px-3 py-2 text-[12.5px] leading-snug text-text-2"
+            dangerouslySetInnerHTML={{ __html: marked.parse(description, { async: false }) as string }}
+          />
+        ) : (
+          <div className="mt-1.5 flex min-h-[120px] flex-1 items-center justify-center rounded-btn border border-line-2 bg-bg px-3 py-2 text-[12px] text-faint">
+            Nothing to preview
+          </div>
+        )}
+        {/* Scoped styles for rendered markdown — all colors use design tokens so
+            it reads correctly in both light and dark themes. */}
+        <style>{`
+          .task-md > :first-child { margin-top: 0; }
+          .task-md > :last-child { margin-bottom: 0; }
+          .task-md h1, .task-md h2, .task-md h3, .task-md h4 {
+            font-weight: 600; color: var(--color-text); line-height: 1.25;
+            margin: 0.9em 0 0.4em;
+          }
+          .task-md h1 { font-size: 1.4em; }
+          .task-md h2 { font-size: 1.25em; }
+          .task-md h3 { font-size: 1.1em; }
+          .task-md h4 { font-size: 1em; }
+          .task-md p { margin: 0.5em 0; }
+          .task-md strong { font-weight: 600; color: var(--color-text); }
+          .task-md em { font-style: italic; }
+          .task-md a { color: var(--color-accent); text-decoration: underline; cursor: pointer; }
+          .task-md ul, .task-md ol { margin: 0.5em 0; padding-left: 1.4em; }
+          .task-md ul { list-style: disc; }
+          .task-md ol { list-style: decimal; }
+          .task-md li { margin: 0.2em 0; }
+          .task-md code {
+            font-family: var(--font-mono, ui-monospace, monospace);
+            font-size: 0.9em; background: var(--color-panel-2);
+            border: 1px solid var(--color-line-2); border-radius: 4px;
+            padding: 0.1em 0.35em;
+          }
+          .task-md pre {
+            background: var(--color-panel-2); border: 1px solid var(--color-line-2);
+            border-radius: 6px; padding: 0.6em 0.75em; margin: 0.6em 0; overflow: auto;
+          }
+          .task-md pre code { background: none; border: none; padding: 0; }
+          .task-md blockquote {
+            border-left: 3px solid var(--color-line-2); margin: 0.6em 0;
+            padding: 0.1em 0.8em; color: var(--color-text-3);
+          }
+          .task-md hr { border: none; border-top: 1px solid var(--color-line-2); margin: 0.9em 0; }
+        `}</style>
 
         <div className={`${fieldLabel} mt-4`}>
           Tags <span className="font-normal text-faint">· optional</span>
