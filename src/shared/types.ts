@@ -420,6 +420,7 @@ export const IPC = {
   terminalInput: 'orbital:terminalInput',
   terminalResize: 'orbital:terminalResize',
   terminalBuffer: 'orbital:terminalBuffer',
+  pasteClipboardImage: 'orbital:pasteClipboardImage',
   // git
   gitStatus: 'orbital:gitStatus',
   gitStage: 'orbital:gitStage',
@@ -517,6 +518,8 @@ export interface OrbitalApi {
   terminalBuffer(tabId: string): Promise<TerminalBuffer>
   /** Read the system clipboard (Electron clipboard module) — used for terminal paste. */
   readClipboard(): string
+  /** Save the clipboard image (if any) to a scratch PNG and return its absolute path — used for terminal image paste. */
+  pasteClipboardImage(): Promise<string | null>
 
   // git
   gitStatus(flightId: string): Promise<GitStatus>

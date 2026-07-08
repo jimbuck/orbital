@@ -100,11 +100,19 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
     // permission-blocked, so wire paste ourselves: Ctrl/Cmd+V and the terminal-
     // standard Ctrl+Shift+V read the system clipboard and paste via xterm (which
     // honors bracketed-paste mode, so multi-line pastes into TUIs stay intact).
+    // A text-less clipboard image (screenshot) is saved to a scratch PNG and its
+    // path pasted instead — agent CLIs like Claude Code attach pasted image paths.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
         e.preventDefault() // stop the browser's own (often no-op) paste → no double paste
         const text = window.orbital.readClipboard()
-        if (text) term.paste(text)
+        if (text) {
+          term.paste(text)
+        } else {
+          void window.orbital.pasteClipboardImage().then((path) => {
+            if (path) term.paste(path.includes(' ') ? `"${path}"` : path)
+          })
+        }
         return false // and stop xterm from also sending a literal 'v'
       }
       return true

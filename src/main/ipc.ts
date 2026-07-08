@@ -29,6 +29,7 @@ import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
 import { getProvider } from './services/agents/provider'
 import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
+import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
 import { updater } from './services/updater'
 
@@ -485,6 +486,7 @@ export function registerIpc(): void {
     runtime.terminals.resize(tabId, cols, rows)
   )
   h(IPC.terminalBuffer, (_e, tabId: string) => runtime.terminals.buffer(tabId))
+  h(IPC.pasteClipboardImage, () => savePastedImage())
 
   // ---- git ----
   const flightRepoPath = (flightId: string): string => {
@@ -878,4 +880,5 @@ export function resumeTerminals(): void {
   }
   // Drop briefing files left behind by tabs/flights removed while the app was closed.
   pruneBriefings(keepBriefings)
+  prunePastedImages()
 }
