@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.9.1](https://github.com/jimbuck/orbital/compare/v1.9.0...v1.9.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* spawn terminal PTY at the renderer-reported size to avoid jumbled agent startup ([caee2d5](https://github.com/jimbuck/orbital/commit/caee2d53e4161c887e5dde7b08dc20b565bdc9d7))
+
 # [1.9.0](https://github.com/jimbuck/orbital/compare/v1.8.2...v1.9.0) (2026-07-08)
 
 
