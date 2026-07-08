@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState, type JSX, type ReactNode } from 'react'
-import { Check, ChevronDown, GitBranch, Loader2, Minus, Plus, RefreshCw, Undo2, X } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  Loader2,
+  Minus,
+  Plus,
+  RefreshCw,
+  Undo2,
+  X
+} from 'lucide-react'
 import { useStore, activeFlight, activeWorkspace } from '@renderer/store'
 import { ContextMenu, type MenuPos } from '../rail/menu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
@@ -172,6 +183,124 @@ function GitFileRow({
 }
 
 /**
+ * A node in the changed-files tree: either a directory (has `children`) or a
+ * file leaf (has `file`). `name` is the short segment shown in the row; `path`
+ * is the full repo-relative path, used as the stable key for expand/collapse.
+ */
+type TreeNode = {
+  name: string
+  path: string
+  children?: TreeNode[]
+  file?: GitFileStatus
+}
+
+/** Directories before files, each alphabetical. */
+function sortNodes(nodes: TreeNode[]): void {
+  nodes.sort((a, b) => {
+    const aDir = a.children ? 0 : 1
+    const bDir = b.children ? 0 : 1
+    return aDir - bDir || a.name.localeCompare(b.name)
+  })
+  for (const n of nodes) if (n.children) sortNodes(n.children)
+}
+
+/**
+ * Collapse chains of single-child directories into one node ("a/b/c" shown as a
+ * single row), the way VS Code's Source Control tree does, then recurse.
+ */
+function collapseChains(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (!node.children) return node
+    let cur = node
+    while (cur.children!.length === 1 && cur.children![0].children) {
+      const only = cur.children![0]
+      cur = { name: `${cur.name}/${only.name}`, path: only.path, children: only.children }
+    }
+    cur.children = collapseChains(cur.children!)
+    return cur
+  })
+}
+
+/** Build a nested directory tree from a flat list of changed files. */
+function buildFileTree(files: GitFileStatus[]): TreeNode[] {
+  const root: TreeNode = { name: '', path: '', children: [] }
+  for (const file of files) {
+    const parts = file.path.split('/')
+    let node = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dirPath = parts.slice(0, i + 1).join('/')
+      let child = node.children!.find((c) => c.children && c.path === dirPath)
+      if (!child) {
+        child = { name: parts[i], path: dirPath, children: [] }
+        node.children!.push(child)
+      }
+      node = child
+    }
+    node.children!.push({ name: parts[parts.length - 1], path: file.path, file })
+  }
+  sortNodes(root.children!)
+  return collapseChains(root.children!)
+}
+
+/**
+ * Recursively render one tree node. File leaves defer to `renderLeaf` (the
+ * unchanged `GitFileRow`); directory rows toggle a collapsed key on click.
+ * Indentation grows with depth via left padding.
+ */
+function TreeRow({
+  node,
+  depth,
+  section,
+  collapsed,
+  onToggle,
+  renderLeaf
+}: {
+  node: TreeNode
+  depth: number
+  section: 's' | 'u'
+  collapsed: Set<string>
+  onToggle: (key: string) => void
+  renderLeaf: (file: GitFileStatus) => JSX.Element
+}): JSX.Element {
+  const indent = { paddingLeft: depth * 12 }
+
+  if (node.file) {
+    return <div style={indent}>{renderLeaf(node.file)}</div>
+  }
+
+  const key = `${section}:${node.path}`
+  const open = !collapsed.has(key)
+  const Chevron = open ? ChevronDown : ChevronRight
+  return (
+    <>
+      <div style={indent}>
+        <button
+          type="button"
+          onClick={() => onToggle(key)}
+          title={node.path}
+          className={`flex w-full items-center gap-1 rounded-md px-[7px] py-[4px] text-left hover:bg-hover ${FOCUS}`}
+        >
+          <Chevron size={13} strokeWidth={1.5} className="flex-none text-faint" />
+          <span className="min-w-0 truncate font-mono text-[11.5px] text-faint">{node.name}</span>
+        </button>
+      </div>
+      {open &&
+        node.children!.map((child) => (
+          <TreeRow
+            key={`${section}:${child.path}`}
+            node={child}
+            depth={depth + 1}
+            section={section}
+            collapsed={collapsed}
+            onToggle={onToggle}
+            renderLeaf={renderLeaf}
+          />
+        ))}
+    </>
+  )
+}
+
+/**
  * Git surface for the active Flight: branch + ahead/behind + refresh, Pull /
  * Fetch / Worktree, staged & unstaged lists with stage/unstage/discard/compare
  * per file (plus stage-all / unstage-all / discard-all), and a commit area with
@@ -191,6 +320,8 @@ export default function GitPanel(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   /** Discard confirmation target: a file path, or '*' for discard-all. */
   const [armed, setArmed] = useState<string | null>(null)
+  /** Collapsed directory nodes, keyed `s:`/`u:` + full dir path (default expanded = absent). */
+  const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
   /** Branch picker (root Flight only): anchor position when open, branch list, draft name. */
   const [pickerPos, setPickerPos] = useState<MenuPos | null>(null)
   const [branches, setBranches] = useState<string[]>([])
@@ -226,7 +357,17 @@ export default function GitPanel(): JSX.Element {
     setArmed(null)
     setError(null)
     setPickerPos(null)
+    setCollapsedDirs(new Set())
   }, [flightId])
+
+  const toggleDir = useCallback((key: string): void => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
 
   // An armed discard disarms itself if not confirmed promptly.
   useEffect(() => {
@@ -246,6 +387,8 @@ export default function GitPanel(): JSX.Element {
 
   const staged = status?.staged ?? []
   const unstaged = status?.unstaged ?? []
+  const stagedTree = buildFileTree(staged)
+  const unstagedTree = buildFileTree(unstaged)
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
   const branch = status?.branch ?? flight.branch
@@ -478,15 +621,24 @@ export default function GitPanel(): JSX.Element {
         {staged.length === 0 ? (
           <div className="px-[7px] pb-1 text-[11px] text-faint">No staged changes</div>
         ) : (
-          staged.map((f) => (
-            <GitFileRow
-              key={`s:${f.path}`}
-              file={f}
-              action="unstage"
-              armed={false}
-              disabled={!!busy}
-              onAction={() => void exec('unstage', () => window.orbital.gitUnstage(flight.id, f.path))}
-              onOpenDiff={() => openDiff(f)}
+          stagedTree.map((node) => (
+            <TreeRow
+              key={`s:${node.path}`}
+              node={node}
+              depth={0}
+              section="s"
+              collapsed={collapsedDirs}
+              onToggle={toggleDir}
+              renderLeaf={(f) => (
+                <GitFileRow
+                  file={f}
+                  action="unstage"
+                  armed={false}
+                  disabled={!!busy}
+                  onAction={() => void exec('unstage', () => window.orbital.gitUnstage(flight.id, f.path))}
+                  onOpenDiff={() => openDiff(f)}
+                />
+              )}
             />
           ))
         )}
@@ -539,18 +691,27 @@ export default function GitPanel(): JSX.Element {
         {unstaged.length === 0 ? (
           <div className="px-[7px] pb-1 text-[11px] text-faint">Working tree clean</div>
         ) : (
-          unstaged.map((f) => (
-            <GitFileRow
-              key={`u:${f.path}`}
-              file={f}
-              action="stage"
-              armed={armed === f.path}
-              disabled={!!busy}
-              onAction={() => void exec('stage', () => window.orbital.gitStage(flight.id, f.path))}
-              onOpenDiff={() => openDiff(f)}
-              onArm={() => setArmed(f.path)}
-              onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(flight.id, f.path))}
-              onDisarm={() => setArmed(null)}
+          unstagedTree.map((node) => (
+            <TreeRow
+              key={`u:${node.path}`}
+              node={node}
+              depth={0}
+              section="u"
+              collapsed={collapsedDirs}
+              onToggle={toggleDir}
+              renderLeaf={(f) => (
+                <GitFileRow
+                  file={f}
+                  action="stage"
+                  armed={armed === f.path}
+                  disabled={!!busy}
+                  onAction={() => void exec('stage', () => window.orbital.gitStage(flight.id, f.path))}
+                  onOpenDiff={() => openDiff(f)}
+                  onArm={() => setArmed(f.path)}
+                  onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(flight.id, f.path))}
+                  onDisarm={() => setArmed(null)}
+                />
+              )}
             />
           ))
         )}
