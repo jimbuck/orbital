@@ -11,6 +11,12 @@ interface UIState {
   modal: ModalType
   /** Free-form payload for the open modal (e.g. the workspace a New Flight targets). */
   modalData: unknown
+  /**
+   * Ordered stack of open modals — enables stacking (e.g. a task modal on top of
+   * the board without closing it). `modal`/`modalData` mirror the TOP entry so
+   * existing single-modal consumers keep working unchanged.
+   */
+  modalStack: { type: Exclude<ModalType, null>; data: unknown }[]
   /** Count of Flights currently needing attention (drives the title-bar banner). */
   alertCount: number
   /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
@@ -56,6 +62,7 @@ export const useStore = create<Store>((set, get) => ({
   expanded: {},
   modal: null,
   modalData: null,
+  modalStack: [],
   alertCount: 0,
   updateStatus: { phase: 'idle' },
 
@@ -127,11 +134,29 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   openModal(type, data) {
-    set({ modal: type, modalData: data ?? null })
+    // A null type means "close everything" — clear the stack and the mirrors.
+    if (type === null) {
+      set({ modalStack: [], modal: null, modalData: null })
+      return
+    }
+    // Otherwise push a new layer and mirror it as the top. Pushing is
+    // backward-compatible: with nothing open the stack holds a single entry
+    // (same as before); opening editTask/newFlight over the board yields
+    // [board, editTask] so BOTH render (see ModalRoot).
+    set((s) => {
+      const modalStack = [...s.modalStack, { type, data: data ?? null }]
+      return { modalStack, modal: type, modalData: data ?? null }
+    })
   },
 
   closeModal() {
-    set({ modal: null, modalData: null })
+    // Pop just the top layer and re-mirror the new top (revealing the board
+    // beneath a task modal). Empty stack resets the mirrors to null.
+    set((s) => {
+      const modalStack = s.modalStack.slice(0, -1)
+      const top = modalStack[modalStack.length - 1] ?? null
+      return { modalStack, modal: top ? top.type : null, modalData: top ? top.data : null }
+    })
   }
 }))
 

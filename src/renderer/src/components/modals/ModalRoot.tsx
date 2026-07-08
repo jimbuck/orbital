@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import {
   TASK_STATUSES,
@@ -123,6 +123,14 @@ export function ModalShell({
 
 function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void }): React.JSX.Element {
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
+  const openModal = useStore((s) => s.openModal)
+  // Look up the card's workspace the same way TaskCardContextMenu does, so the
+  // Create Flight flow can seed the New Flight modal with the right workspace.
+  const workspace = useStore((s) => s.workspaces.find((w) => w.id === task.workspaceId))
+  // "No linked flight" mirrors TaskCardContextMenu: a fresh todo with no Flight
+  // yet. If the task already has a matching Flight, don't offer Create Flight.
+  const hasFlight = useStore((s) => !!task.flightId && s.flights.some((f) => f.id === task.flightId))
+  const showCreateFlight = task.status === 'todo' && !hasFlight
   return (
     <div
       draggable
@@ -146,6 +154,23 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         </span>
       </div>
       <TaskTagsDisplay task={task} />
+      {showCreateFlight && (
+        // stopPropagation + a no-op mouseDown keep the click from starting a
+        // card drag. openModal now STACKS over the board (see ModalRoot), so
+        // New Flight opens on top and closing it returns here.
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            openModal('newFlight', { workspace, task })
+          }}
+          className="mt-2 inline-flex items-center gap-1 rounded-btn border border-line-2 px-2 py-1 text-[10.5px] font-semibold text-accent hover:bg-hover transition-colors no-drag"
+        >
+          <Plus size={12} strokeWidth={1.5} />
+          Create Flight
+        </button>
+      )}
       {menuPos && <TaskCardContextMenu task={task} pos={menuPos} onClose={() => setMenuPos(null)} />}
     </div>
   )
@@ -171,7 +196,7 @@ function FullBoard(): React.JSX.Element {
     <div
       onClick={stopBubble}
       style={{ animation: 'panelIn .16s ease-out' }}
-      className="flex h-[86vh] w-[1180px] max-w-[95vw] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
+      className="flex h-[86vh] w-[2360px] max-w-[95vw] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
     >
       <header className="flex flex-none items-center justify-between px-[18px] py-[15px] border-b border-soft">
         <div className="min-w-0">
@@ -273,33 +298,45 @@ function FullBoard(): React.JSX.Element {
  * ========================================================================== */
 
 export default function ModalRoot(): React.JSX.Element | null {
-  const modal = useStore((s) => s.modal)
+  const modalStack = useStore((s) => s.modalStack)
   const closeModal = useStore((s) => s.closeModal)
 
-  // Dismiss on Escape while any modal is open.
+  // Dismiss on Escape while any modal is open — closeModal() pops just the top
+  // layer, so Escape peels the stack back one at a time (task → board → gone).
   useEffect(() => {
-    if (!modal) return
+    if (modalStack.length === 0) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') closeModal()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [modal, closeModal])
+  }, [modalStack.length, closeModal])
 
-  if (!modal) return null
+  if (modalStack.length === 0) return null
 
+  // Render every stack entry as its own overlay layer, deeper layers on top.
+  // Only the TOP backdrop dismisses on click so clicking around a task modal
+  // doesn't blast through and also close the board beneath it.
   return (
-    <div
-      onClick={closeModal}
-      style={{ animation: 'overlayIn .12s ease-out' }}
-      className="fixed inset-0 z-50 grid place-items-center bg-[#05070b]/70 p-8 no-drag"
-    >
-      {modal === 'settings' && <Settings />}
-      {modal === 'addWorkspace' && <AddWorkspace />}
-      {modal === 'newFlight' && <NewFlight />}
-      {modal === 'editTask' && <EditTask />}
-      {modal === 'board' && <FullBoard />}
-      {modal === 'about' && <About />}
-    </div>
+    <>
+      {modalStack.map((entry, i) => {
+        const isTop = i === modalStack.length - 1
+        return (
+          <div
+            key={`${i}:${entry.type}`}
+            onClick={isTop ? closeModal : (e) => e.stopPropagation()}
+            style={{ animation: 'overlayIn .12s ease-out', zIndex: 50 + i * 10 }}
+            className="fixed inset-0 grid place-items-center bg-[#05070b]/70 p-8 no-drag"
+          >
+            {entry.type === 'settings' && <Settings />}
+            {entry.type === 'addWorkspace' && <AddWorkspace />}
+            {entry.type === 'newFlight' && <NewFlight />}
+            {entry.type === 'editTask' && <EditTask />}
+            {entry.type === 'board' && <FullBoard />}
+            {entry.type === 'about' && <About />}
+          </div>
+        )
+      })}
+    </>
   )
 }
