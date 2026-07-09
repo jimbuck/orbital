@@ -1,5 +1,10 @@
 appId: dev.jimbuck.orbital
 productName: Orbital
+# Windows shows the exe's FileDescription in the "not responding"/End-Task dialog
+# and Task Manager. electron-builder derives it from `description`, so override the
+# long package.json description with the bare product name for the shipped binary.
+extraMetadata:
+  description: Orbital
 # Don't let packaging rebuild native modules from source: node-pty ships NAPI
 # prebuilds (ABI-stable under Electron) and its source build hangs on CI
 # runners; better-sqlite3 (non-NAPI) is rebuilt for Electron's ABI explicitly
