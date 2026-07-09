@@ -2,6 +2,26 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.12.0](https://github.com/jimbuck/orbital/compare/v1.11.0...v1.12.0) (2026-07-09)
+
+
+### Bug Fixes
+
+* make worktree-backed flight deletion reliable on Windows ([977f9e1](https://github.com/jimbuck/orbital/commit/977f9e1d854b3daa700837d5999e26c17689ede3))
+
+
+### Features
+
+* add Cursor CLI agent + per-agent visibility toggles ([47d2eef](https://github.com/jimbuck/orbital/commit/47d2eeff4f11ab5f79203eb9a455dc8072f34958))
+* clean up the kanban board ([8418259](https://github.com/jimbuck/orbital/commit/84182596f8fc6dd61d6fda6fd83cbe38b73c932d))
+* internal/external link handling for terminal, editor, and browser ([b7682a4](https://github.com/jimbuck/orbital/commit/b7682a4fa0c9e86324cddc3a56c044e055de2f6f))
+* light/dark/system theme toggle ([5cd516f](https://github.com/jimbuck/orbital/commit/5cd516f4e674217fecb219aa3fc0cb6c3198bc62))
+* markdown editor with write/preview toggle for task descriptions ([09e6e2c](https://github.com/jimbuck/orbital/commit/09e6e2c2963c8a1f03d362c5ee4d60e8241fff6f))
+* opt-in rotating debug logging ([1edecdc](https://github.com/jimbuck/orbital/commit/1edecdc47f72fa23f8b1e54a02eb9e19e881faf1))
+* periodic background git fetch (toggleable, on by default) ([e9271b4](https://github.com/jimbuck/orbital/commit/e9271b47d97dca94d19d1a326c1282d69ffda295))
+* render git changes as a collapsible tree ([b723adf](https://github.com/jimbuck/orbital/commit/b723adf23dce73e8c93dc1bb8dff9945b2465239))
+* suggest recently-used tags when editing task tags ([32bf669](https://github.com/jimbuck/orbital/commit/32bf6698b6536fed911e5d6805bf91ddbf054fdf))
+
 # [1.11.0](https://github.com/jimbuck/orbital/compare/v1.10.0...v1.11.0) (2026-07-08)
 
 
