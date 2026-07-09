@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.12.1](https://github.com/jimbuck/orbital/compare/v1.12.0...v1.12.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* report Orbital as the Windows exe FileDescription ([0382d83](https://github.com/jimbuck/orbital/commit/0382d8358df88698936cf9689cad41189ef7ab90))
+
 # [1.12.0](https://github.com/jimbuck/orbital/compare/v1.11.0...v1.12.0) (2026-07-09)
 
 
