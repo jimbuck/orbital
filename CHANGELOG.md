@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.13.1](https://github.com/jimbuck/orbital/compare/v1.13.0...v1.13.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* show filename not full path in git changed-files tree ([4e1e5a6](https://github.com/jimbuck/orbital/commit/4e1e5a615436e30a69fa1fd27e0f33daa112b3af))
+
 # [1.13.0](https://github.com/jimbuck/orbital/compare/v1.12.1...v1.13.0) (2026-07-10)
 
 
