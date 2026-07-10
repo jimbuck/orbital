@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.13.0](https://github.com/jimbuck/orbital/compare/v1.12.1...v1.13.0) (2026-07-10)
+
+
+### Features
+
+* mouse copy/paste and a focus-aware Edit menu for terminals ([0aa91ef](https://github.com/jimbuck/orbital/commit/0aa91ef5fb250f65447ef44c07b9fef93540e9fd))
+
 ## [1.12.1](https://github.com/jimbuck/orbital/compare/v1.12.0...v1.12.1) (2026-07-09)
 
 
