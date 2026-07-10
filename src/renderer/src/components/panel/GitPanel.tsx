@@ -126,6 +126,9 @@ function GitFileRow({
   const badge = stateBadge(file.state)
   const isStage = action === 'stage'
   const untracked = file.state === 'untracked'
+  // The enclosing tree already conveys the folders, so the row shows just the
+  // filename segment; the full path stays in the tooltip. (Git paths use '/'.)
+  const name = file.path.split('/').pop() || file.path
   return (
     <div
       className={`group flex items-center gap-[9px] px-[7px] py-[5px] rounded-md ${
@@ -143,7 +146,7 @@ function GitFileRow({
         title={`Open diff — ${file.path}`}
         className={`flex-1 min-w-0 truncate rounded text-left font-mono text-[11.5px] text-text-2 hover:text-text ${FOCUS}`}
       >
-        {file.path}
+        {name}
       </button>
 
       {armed ? (
