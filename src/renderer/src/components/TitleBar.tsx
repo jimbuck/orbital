@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe } from 'lucide-react'
 import { useStore, activeWorkspace, activeFlight } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
+import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 
 interface MenuItem {
   label: string
@@ -63,6 +64,16 @@ export default function TitleBar(): JSX.Element {
       ]
     },
     {
+      id: 'edit',
+      label: 'Edit',
+      items: [
+        { label: 'Copy', onClick: editCopy },
+        { label: 'Paste', onClick: editPaste },
+        { sep: true, label: '' },
+        { label: 'Select All', onClick: editSelectAll }
+      ]
+    },
+    {
       id: 'view',
       label: 'View',
       items: [
@@ -118,6 +129,9 @@ export default function TitleBar(): JSX.Element {
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={openMenu === m.id}
+                // Don't take focus: Edit-menu copy/paste act on whatever the user
+                // was editing (a terminal or input), so focus must stay put.
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => setOpenMenu((o) => (o === m.id ? null : m.id))}
                 onMouseEnter={() => setOpenMenu((o) => (o ? m.id : o))}
                 className={`flex h-full items-center px-2.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
@@ -141,6 +155,9 @@ export default function TitleBar(): JSX.Element {
                         type="button"
                         role="menuitem"
                         disabled={it.disabled}
+                        // Preserve focus (see the menu button above) so Edit
+                        // actions target the terminal/input, not this menuitem.
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => choose(it)}
                         className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[12px] font-medium text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent"
                       >

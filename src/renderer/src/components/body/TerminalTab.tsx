@@ -6,6 +6,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import type { Tab } from '@shared/types'
 import { useStore, activeFlight } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
+import { registerTerminal } from '@renderer/lib/editActions'
 
 /** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
 const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
@@ -126,26 +127,57 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
       live = true
     })
 
+    // Copy the current selection to the system clipboard, then clear it (so the
+    // next right-click pastes rather than re-copying). Terminals are read-only
+    // output, so copy never mutates the buffer.
+    const copySelection = (): void => {
+      const sel = term.getSelection()
+      if (sel) {
+        window.orbital.writeClipboard(sel)
+        term.clearSelection()
+      }
+    }
+
     // Electron exposes no Edit-menu Paste role and navigator.clipboard.readText is
-    // permission-blocked, so wire paste ourselves: Ctrl/Cmd+V and the terminal-
-    // standard Ctrl+Shift+V read the system clipboard and paste via xterm (which
-    // honors bracketed-paste mode, so multi-line pastes into TUIs stay intact).
-    // A text-less clipboard image (screenshot) is saved to a scratch PNG and its
-    // path pasted instead — agent CLIs like Claude Code attach pasted image paths.
+    // permission-blocked, so wire paste ourselves. xterm's paste() honors
+    // bracketed-paste mode, so multi-line pastes into TUIs stay intact. A text-less
+    // clipboard image (screenshot) is saved to a scratch PNG and its path pasted
+    // instead — agent CLIs like Claude Code attach pasted image paths.
+    const pasteClipboard = (): void => {
+      const text = window.orbital.readClipboard()
+      if (text) {
+        term.paste(text)
+      } else {
+        void window.orbital.pasteClipboardImage().then((path) => {
+          if (path) term.paste(path.includes(' ') ? `"${path}"` : path)
+        })
+      }
+    }
+
+    // Keyboard paste: Ctrl/Cmd+V and the terminal-standard Ctrl+Shift+V.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
         e.preventDefault() // stop the browser's own (often no-op) paste → no double paste
-        const text = window.orbital.readClipboard()
-        if (text) {
-          term.paste(text)
-        } else {
-          void window.orbital.pasteClipboardImage().then((path) => {
-            if (path) term.paste(path.includes(' ') ? `"${path}"` : path)
-          })
-        }
+        pasteClipboard()
         return false // and stop xterm from also sending a literal 'v'
       }
       return true
+    })
+
+    // Mouse copy/paste (PuTTY model): right-click with a selection copies it,
+    // otherwise right-click pastes. Suppresses the browser's default context menu.
+    const onContextMenu = (e: MouseEvent): void => {
+      e.preventDefault()
+      if (term.hasSelection()) copySelection()
+      else pasteClipboard()
+    }
+    container.addEventListener('contextmenu', onContextMenu)
+
+    // Expose copy/paste/select-all to the Edit menu, dispatched by focus.
+    const unregisterEdit = registerTerminal(container, {
+      copy: copySelection,
+      paste: pasteClipboard,
+      selectAll: () => term.selectAll()
     })
 
     const inputDisposable = term.onData((data) => window.orbital.terminalInput(tab.id, data))
@@ -172,6 +204,8 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
       cancelAnimationFrame(raf)
       unsubscribe()
       exitUnsub()
+      container.removeEventListener('contextmenu', onContextMenu)
+      unregisterEdit()
       resizeObserver.disconnect()
       inputDisposable.dispose()
       try {

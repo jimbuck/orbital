@@ -544,6 +544,8 @@ export interface OrbitalApi {
   terminalBuffer(tabId: string): Promise<TerminalBuffer>
   /** Read the system clipboard (Electron clipboard module) — used for terminal paste. */
   readClipboard(): string
+  /** Write text to the system clipboard — used for terminal/Edit-menu copy. */
+  writeClipboard(text: string): void
   /** Save the clipboard image (if any) to a scratch PNG and return its absolute path — used for terminal image paste. */
   pasteClipboardImage(): Promise<string | null>
 
