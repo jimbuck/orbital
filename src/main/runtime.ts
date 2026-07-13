@@ -27,6 +27,8 @@ class Runtime {
   readonly envWatchers = new Map<string, EnvSyncWatcher>()
   /** Live dev servers per flight (from `orbital server add`) — runtime-only state. */
   private readonly devServers = new Map<string, Set<string>>()
+  /** Flights whose worktree is still doing background setup (node_modules copy) — runtime-only. */
+  private readonly settingUp = new Set<string>()
   private readonly pendingBroadcasts = new Map<string, NodeJS.Timeout>()
   private readonly lastBroadcastAt = new Map<string, number>()
   /** Background `git fetch` scheduler — null when the setting is off. */
@@ -86,13 +88,25 @@ class Runtime {
     }
   }
 
-  /** Persisted state plus the runtime-only dev-server registry. */
+  /** Persisted state plus the runtime-only dev-server registry and setting-up flags. */
   appState(): AppState {
     const devServers: Record<string, string[]> = {}
     for (const [flightId, urls] of this.devServers) {
       if (urls.size > 0) devServers[flightId] = [...urls]
     }
-    return { ...repo.getAppState(), devServers }
+    return { ...repo.getAppState(), devServers, settingUpFlights: [...this.settingUp] }
+  }
+
+  /** Flag a flight as setting up (background worktree prep) so the rail shows a spinner. */
+  markSettingUp(flightId: string): void {
+    if (this.settingUp.has(flightId)) return
+    this.settingUp.add(flightId)
+    this.broadcastState()
+  }
+
+  /** Clear a flight's setting-up flag once its background prep finishes. */
+  clearSettingUp(flightId: string): void {
+    if (this.settingUp.delete(flightId)) this.broadcastState()
   }
 
   /** Register a live dev server for a flight; returns the flight's server list. */

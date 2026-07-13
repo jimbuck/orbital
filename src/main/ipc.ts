@@ -26,6 +26,7 @@ import {
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createWorktreeFlight, removeWorktree } from './services/worktree'
+import { copyNodeModulesTree, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
 import { getProvider } from './services/agents/provider'
@@ -36,6 +37,20 @@ import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
 
 /* ---- helpers ----------------------------------------------------------- */
+
+/**
+ * Kick off a freshly created worktree Flight's background setup: bulk-copy
+ * node_modules off the critical path (awaiting it would block flight creation
+ * for minutes), flagging the flight as "setting up" so the rail shows a spinner
+ * until the copy finishes. No-op for root Flights or when node_modules isn't a
+ * sync target.
+ */
+function beginWorktreeSetup(flight: Flight, repoPath: string): void {
+  if (flight.kind !== 'worktree') return
+  if (!targetsNodeModules(repo.settings.get().envSyncPatterns)) return
+  runtime.markSettingUp(flight.id)
+  void copyNodeModulesTree(repoPath, flight.worktreePath).finally(() => runtime.clearSettingUp(flight.id))
+}
 
 function terminalEnv(flight: Flight, tabId: string): Record<string, string> {
   const path = `${cliDir()}${PATH_DELIM}${process.env.PATH ?? ''}`
@@ -327,6 +342,7 @@ export function registerIpc(): void {
     if (opts.taskId) repo.tasks.setFlight(opts.taskId, flight.id)
     runtime.gitWatcher.watch(flight.worktreePath)
     runtime.ensureEnvWatcher(workspaceId)
+    beginWorktreeSetup(flight, ws.repoPath)
     broadcastAll()
     return repo.flights.get(flight.id)!
   })
@@ -786,6 +802,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         })
         runtime.gitWatcher.watch(flight.worktreePath)
         runtime.ensureEnvWatcher(ws.id)
+        beginWorktreeSetup(flight, ws.repoPath)
         runtime.broadcastState()
         return { ok: true, data: { id: flight.id, name: flight.name, branch: flight.branch } }
       }

@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { mkdir, copyFile } from 'node:fs/promises'
+import { mkdir, copyFile, cp } from 'node:fs/promises'
 import path from 'node:path'
 import picomatch from 'picomatch'
 
@@ -19,8 +19,8 @@ const WATCH_IGNORED_SEGMENTS = ['.git', 'node_modules', '.orbital-worktrees']
 /** Directory names the sync walk never descends into (see WATCH_IGNORED_SEGMENTS). */
 const ALWAYS_SKIPPED_DIRS = ['.git', '.orbital-worktrees']
 
-/** True when any pattern targets `node_modules`, so the walk must descend into it. */
-function targetsNodeModules(patterns: string[]): boolean {
+/** True when any pattern targets `node_modules`, so it should be bulk-copied (see copyNodeModulesTree). */
+export function targetsNodeModules(patterns: string[]): boolean {
   return patterns.some((p) => p === 'node_modules' || p.startsWith('node_modules/'))
 }
 
@@ -79,9 +79,13 @@ export async function syncEnvFiles(
 
   const isMatch = picomatch(patterns, { dot: true })
   const rels: string[] = []
-  const skip = new Set(
-    targetsNodeModules(patterns) ? ALWAYS_SKIPPED_DIRS : [...ALWAYS_SKIPPED_DIRS, 'node_modules']
-  )
+  // node_modules is ALWAYS skipped by this file-by-file walk — it is copied in
+  // one bulk async pass by copyNodeModulesTree instead. A synchronous walk +
+  // per-file copy of node_modules (hundreds of thousands of files) would block
+  // the main process for minutes, so it must never ride on this path. A
+  // `node_modules/**` pattern therefore matches nothing here; it only signals
+  // the bulk copy (see targetsNodeModules / worktree.ts).
+  const skip = new Set([...ALWAYS_SKIPPED_DIRS, 'node_modules'])
   walkFiles(rootPath, rootPath, rels, skip)
 
   const copied: string[] = []
@@ -95,6 +99,21 @@ export async function syncEnvFiles(
     }
   }
   return copied
+}
+
+/**
+ * Bulk-copy the root checkout's `node_modules` into a fresh worktree, recursively
+ * and asynchronously. Deliberately separate from syncEnvFiles's file-by-file
+ * walk: node_modules holds hundreds of thousands of files, so a synchronous walk
+ * + per-file copy would freeze the main process for minutes. `fs.cp` yields
+ * between operations, so the caller runs this in the BACKGROUND while the Flight
+ * is already usable. No-op when the root has no node_modules.
+ */
+export async function copyNodeModulesTree(rootPath: string, worktreePath: string): Promise<void> {
+  const src = path.join(rootPath, 'node_modules')
+  if (!fs.existsSync(src)) return
+  const dest = path.join(worktreePath, 'node_modules')
+  await cp(src, dest, { recursive: true, force: true, errorOnExist: false })
 }
 
 /**

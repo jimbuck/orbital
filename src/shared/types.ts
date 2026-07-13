@@ -232,6 +232,12 @@ export interface AppState {
    * Runtime-only state (not persisted) — servers die with their terminals.
    */
   devServers: Record<string, string[]>
+  /**
+   * Flight ids whose worktree is still setting up (background node_modules copy
+   * after creation). Runtime-only; the rail shows a "setting up…" spinner while
+   * a flight is listed here.
+   */
+  settingUpFlights: string[]
 }
 
 /* ============================================================================

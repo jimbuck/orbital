@@ -17,6 +17,7 @@ type DeleteMode = 'none' | 'confirm' | 'force'
 export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
   const setActiveFlight = useStore((s) => s.setActiveFlight)
   const isActive = useStore((s) => s.activeFlightId === flight.id)
+  const settingUp = useStore((s) => s.settingUpFlights.includes(flight.id))
   const isDone = flight.status === 'done'
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
@@ -99,7 +100,11 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
         } ${isDone ? 'opacity-60' : ''}`}
       >
         <span className="flex w-[11px] flex-none items-center justify-center">
-          <StatusDot status={flight.status} />
+          {settingUp ? (
+            <span className="inline-block size-[11px] rounded-full border-[1.6px] border-accent border-t-transparent animate-spin" />
+          ) : (
+            <StatusDot status={flight.status} />
+          )}
         </span>
 
         <span className="min-w-0 flex-1">
@@ -127,12 +132,22 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
           )}
         </span>
 
-        {!renaming && flight.status === 'needs_attention' && (
+        {!renaming && settingUp ? (
           <span
-            className={`flex-none whitespace-nowrap text-[9.5px] font-bold ${flightStatusTextClass(flight.status)}`}
+            className="flex-none whitespace-nowrap text-[9.5px] font-semibold text-blue"
+            title="Copying dependencies (node_modules) into the new worktree…"
           >
-            {flightStatusLabel(flight.status)}
+            setting up…
           </span>
+        ) : (
+          !renaming &&
+          flight.status === 'needs_attention' && (
+            <span
+              className={`flex-none whitespace-nowrap text-[9.5px] font-bold ${flightStatusTextClass(flight.status)}`}
+            >
+              {flightStatusLabel(flight.status)}
+            </span>
+          )
         )}
       </div>
 

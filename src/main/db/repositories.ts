@@ -397,8 +397,8 @@ export const settings = {
  * Full hydrated state
  * ========================================================================== */
 
-/** Persisted state; the runtime layers its in-memory `devServers` on top. */
-export function getAppState(): Omit<AppState, 'devServers'> {
+/** Persisted state; the runtime layers its in-memory `devServers` / `settingUpFlights` on top. */
+export function getAppState(): Omit<AppState, 'devServers' | 'settingUpFlights'> {
   return {
     workspaces: workspaces.list(),
     flights: flights.list(),

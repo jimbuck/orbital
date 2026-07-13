@@ -30,6 +30,8 @@ interface Data {
   settings: Settings | null
   /** Live dev servers per flight (from `orbital server add`). */
   devServers: Record<string, string[]>
+  /** Flight ids whose worktree is still setting up (background node_modules copy). */
+  settingUpFlights: string[]
 }
 
 interface Actions {
@@ -54,6 +56,7 @@ export const useStore = create<Store>((set, get) => ({
   tasks: [],
   settings: null,
   devServers: {},
+  settingUpFlights: [],
 
   // ui
   ready: false,
@@ -107,6 +110,7 @@ export const useStore = create<Store>((set, get) => ({
       tasks: s.tasks,
       settings: s.settings,
       devServers: s.devServers,
+      settingUpFlights: s.settingUpFlights,
       activeWorkspaceId,
       activeFlightId,
       expanded,

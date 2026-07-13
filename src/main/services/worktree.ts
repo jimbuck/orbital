@@ -95,7 +95,11 @@ export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Pr
     taskId: input.taskId ?? null
   })
 
-  // Best-effort env sync; a worktree should still come up if a file fails.
+  // Small, fast files (env files + agent config dirs) sync BEFORE we return, so
+  // they're present the moment the Flight opens. Best-effort: a worktree should
+  // still come up if a file fails. The heavy node_modules copy is kicked off
+  // separately by the caller (in the background), so it never blocks flight
+  // creation — see ipc.ts / runtime.markSettingUp.
   try {
     await syncEnvFiles(workspace.repoPath, worktreePath, settingsRepo.get().envSyncPatterns)
   } catch {
