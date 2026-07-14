@@ -15,6 +15,7 @@ import {
   type TaskStatus,
   type LayoutNode,
   type TaskPatch,
+  type WorkspaceProjectConfig,
   aggregateStatus,
   isPtyTabType,
   DEFAULT_ENV_SYNC_PATTERNS,
@@ -112,6 +113,52 @@ export const projects = {
     getDb()
       .prepare('UPDATE projects SET default_agent_provider = ?, agent_exec_path = ? WHERE id = ?')
       .run(patch.defaultAgentProvider ?? cur.defaultAgentProvider, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
+  },
+  /**
+   * Make the `projects` table match a workspace config's project list (the YAML
+   * is the source of truth). Rows absent from the config are deleted — their
+   * worktrees, panes, tabs and tasks cascade away — and each config entry is
+   * upserted by its stable id, preserving `added_at` (hence list order) for rows
+   * that already exist. Runs in one transaction so a mid-reconcile failure can't
+   * leave the projection half-applied. Returns the ids that were deleted so the
+   * caller can release any runtime resources (watchers, terminals) for them.
+   */
+  reconcile(configProjects: WorkspaceProjectConfig[]): { removed: string[] } {
+    const db = getDb()
+    const keep = new Set(configProjects.map((p) => p.id))
+    const removed: string[] = []
+    const tx = db.transaction(() => {
+      for (const row of projects.list()) {
+        if (!keep.has(row.id)) {
+          projects.remove(row.id)
+          removed.push(row.id)
+        }
+      }
+      const upsert = db.prepare(
+        `INSERT INTO projects (id, name, repo_path, default_agent_provider, agent_exec_path, added_at)
+         VALUES (@id, @name, @repoPath, @provider, @execPath, @addedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           repo_path = excluded.repo_path,
+           default_agent_provider = excluded.default_agent_provider,
+           agent_exec_path = excluded.agent_exec_path`
+      )
+      let seq = now()
+      for (const p of configProjects) {
+        upsert.run({
+          id: p.id,
+          name: p.name,
+          repoPath: p.path,
+          provider: p.agentProvider || 'claude',
+          execPath: p.agentExecPath ?? '',
+          // New rows land after existing ones, in config order; existing rows
+          // keep their stored added_at via the ON CONFLICT branch above.
+          addedAt: seq++
+        })
+      }
+    })
+    tx()
+    return { removed }
   }
 }
 

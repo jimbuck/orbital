@@ -4,6 +4,7 @@ import { getDb, closeDb } from './db/database'
 import { runtime, repo } from './runtime'
 import { updater } from './services/updater'
 import { logger } from './services/logger'
+import { loadWorkspaceConfig, activeControlPipePath } from './services/workspace-config'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -104,6 +105,12 @@ if (!gotLock) {
     // group, pinning and notifications to "Orbital" rather than to "Electron".
     app.setAppUserModelId(APP_ID)
     getDb()
+    // A workspace is a YAML file (in this profile dir) listing the projects it
+    // contains — the source of truth for the project set. Load it (seeding from
+    // the DB on an existing install's first run), then reconcile the `projects`
+    // table to match so the rest of the app reads projects exactly as before.
+    const workspace = loadWorkspaceConfig()
+    repo.projects.reconcile(workspace.projects)
     // Bring the opt-in debug logger up first thing so it can capture the rest of
     // startup. It writes to Electron's per-user logs dir and no-ops unless the
     // setting is on. The crash handlers add a log breadcrumb but must NOT change
@@ -131,8 +138,9 @@ if (!gotLock) {
 
     resumeProjects()
     // Start the CLI control channel BEFORE respawning terminals so a single bad
-    // worktree can never prevent the orbital-CLI pipe from coming up.
-    await runtime.control.start(handleControl).catch((err) => {
+    // worktree can never prevent the orbital-CLI pipe from coming up. The pipe is
+    // scoped to this workspace so multiple instances never collide on one name.
+    await runtime.control.start(handleControl, activeControlPipePath()).catch((err) => {
       console.error('control channel failed to start:', err)
     })
     resumeTerminals()

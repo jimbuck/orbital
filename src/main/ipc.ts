@@ -5,7 +5,6 @@ import { ipcMain, dialog, shell, app, BrowserWindow, webContents, type IpcMainIn
 import {
   IPC,
   ENV,
-  controlPipePath,
   normalizeStatus,
   normalizeTaskStatus,
   isPtyTabType,
@@ -35,6 +34,7 @@ import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
 import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
+import { activeControlPipePath, syncWorkspaceFromDb } from './services/workspace-config'
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -58,7 +58,7 @@ function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> 
     [ENV.terminalId]: tabId,
     [ENV.worktreeId]: worktree.id,
     [ENV.projectId]: worktree.projectId,
-    [ENV.socket]: controlPipePath(),
+    [ENV.socket]: activeControlPipePath(),
     PATH: path,
     Path: path
   }
@@ -296,6 +296,7 @@ export function registerIpc(): void {
     }
     await registerProject(dir)
     const project = repo.projects.getByPath(dir)!
+    syncWorkspaceFromDb()
     broadcastAll()
     return project
   })
@@ -315,6 +316,7 @@ export function registerIpc(): void {
     runtime.gitWatcher.unwatch(project.repoPath)
     runtime.removeEnvWatcher(projectId)
     repo.projects.remove(projectId)
+    syncWorkspaceFromDb()
     broadcastAll()
   })
 
@@ -322,6 +324,7 @@ export function registerIpc(): void {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.projects.rename(projectId, trimmed)
+    syncWorkspaceFromDb()
     broadcast()
   })
 
@@ -427,6 +430,7 @@ export function registerIpc(): void {
 
   h(IPC.setProjectAgent, (_e, projectId: string, patch: ProjectAgentPatch) => {
     repo.projects.updateAgent(projectId, patch)
+    syncWorkspaceFromDb()
     broadcast()
   })
 

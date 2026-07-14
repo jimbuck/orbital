@@ -673,9 +673,54 @@ export interface ControlResponse {
   error?: string
 }
 
-/** Stable pipe name so the CLI can find the running app without discovery. */
-export function controlPipePath(): string {
+/**
+ * Pipe/socket path the CLI connects to. A per-workspace `key` disambiguates the
+ * name so multiple instances (one per workspace) never collide on a single pipe;
+ * the CLI receives the already-resolved path via `ORBITAL_SOCKET`, so it never
+ * needs the key itself. An absent/empty key yields the legacy global name — used
+ * for the single-workspace case and for a CLI invoked outside an Orbital
+ * terminal, which has no instance to address.
+ */
+export function controlPipePath(key?: string): string {
+  const safe = (key ?? '').replace(/[^a-z0-9]/gi, '').slice(0, 16)
+  const suffix = safe ? `-${safe}` : ''
   return process.platform === 'win32'
-    ? '\\\\.\\pipe\\orbital-control'
-    : `${process.env.TMPDIR || '/tmp'}/orbital-control.sock`
+    ? `\\\\.\\pipe\\orbital-control${suffix}`
+    : `${process.env.TMPDIR || '/tmp'}/orbital-control${suffix}.sock`
+}
+
+/* ============================================================================
+ * Workspace configuration
+ *
+ * A "workspace" is a collection of projects defined by a YAML config file. The
+ * file is the source of truth for which projects the workspace contains (and,
+ * in a later phase, for workspace-scoped settings); the SQLite `projects` table
+ * is a reconciled projection of it. Each workspace maps to its own profile
+ * directory (its own DB + control pipe), so instances run side by side.
+ * ========================================================================== */
+
+/** Bump when the on-disk config shape changes in a non-additive way. */
+export const WORKSPACE_CONFIG_VERSION = 1
+
+/** One project entry in a workspace config file. */
+export interface WorkspaceProjectConfig {
+  /** Stable id — worktree and task rows in the DB reference it. */
+  id: string
+  name: string
+  /** Absolute path to the git repo. */
+  path: string
+  /** Provider an `agent` tab launches by default (default 'claude'). */
+  agentProvider?: string
+  /** Optional explicit agent executable path, overriding PATH lookup. */
+  agentExecPath?: string
+}
+
+/** The parsed contents of a workspace's YAML config file. */
+export interface WorkspaceConfig {
+  version: number
+  /** Stable workspace id — also keys this instance's control pipe. */
+  id: string
+  /** Human-facing workspace name (shown in the picker / title bar, later). */
+  name: string
+  projects: WorkspaceProjectConfig[]
 }
