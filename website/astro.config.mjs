@@ -35,7 +35,7 @@ export default defineConfig({
         {
           label: 'Concepts',
           items: [
-            { label: 'Workspaces, Flights & tabs', slug: 'concepts/workspaces-and-flights' },
+            { label: 'Projects, Worktrees & tabs', slug: 'concepts/projects-and-worktrees' },
             { label: 'Status & alerts', slug: 'concepts/status-and-alerts' }
           ]
         },

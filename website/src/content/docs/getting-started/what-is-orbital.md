@@ -6,7 +6,7 @@ description: A native Windows cockpit for running many interactive coding agents
 Orbital is a desktop app for people who run **multiple coding agents at once** —
 Claude Code, Codex, or any CLI tool — across one or many repositories.
 
-![The Orbital cockpit: workspaces and Flights on the left, terminals in the middle, git panel and tasks on the right](../../../assets/screenshots/01-cockpit-overview.png)
+![The Orbital cockpit: projects and worktrees on the left, terminals in the middle, git panel and tasks on the right](../../../assets/screenshots/01-cockpit-overview.png)
 
 ## The problem it solves
 
@@ -18,7 +18,7 @@ permission prompt for ten minutes while another finished long ago.
 
 Orbital's answer is a cockpit:
 
-- Each stream of work runs in its own **Flight** — an isolated git worktree with
+- Each stream of work runs in its own **worktree** — an isolated git worktree with
   its own branch, terminals, browser previews, and editor.
 - Every terminal carries a live **status**. The left rail, the title bar, and the
   Windows taskbar all tell you the moment an agent needs you.
@@ -45,9 +45,9 @@ Throughout these docs we use three example projects: **nebula-shop** (a
 storefront), **comet-api** (its order service), and **stardust-blog** (a content
 site).
 
-1. Add `nebula-shop` as a workspace.
+1. Add `nebula-shop` as a project.
 2. Capture tasks as they occur to you ("Add checkout flow", "Fix cart badge count").
-3. Start a Flight from a task — branch, worktree, terminal, one click.
-4. Boot an agent in the Flight and brief it.
+3. Start a worktree from a task — branch, worktree, terminal, one click.
+4. Boot an agent in the worktree and brief it.
 5. Keep working yourself; Orbital chimes when the agent needs you.
 6. Review the diff in the git panel, commit, push, mark the task done.

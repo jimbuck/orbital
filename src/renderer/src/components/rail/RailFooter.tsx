@@ -5,16 +5,16 @@ import { useStore } from '@renderer/store'
 
 /**
  * Rail footer: a live count of open PTY-backed tabs (terminals + agents) across
- * every Flight, plus a shortcut into Settings.
+ * every Worktree, plus a shortcut into Settings.
  */
 export default function RailFooter(): JSX.Element {
-  const flights = useStore((s) => s.flights)
+  const worktrees = useStore((s) => s.worktrees)
   const openModal = useStore((s) => s.openModal)
 
-  const terminalCount = flights.reduce(
-    (total, flight) =>
+  const terminalCount = worktrees.reduce(
+    (total, worktree) =>
       total +
-      flight.panes.reduce((sum, pane) => sum + pane.tabs.filter((tab) => isPtyTabType(tab.type)).length, 0),
+      worktree.panes.reduce((sum, pane) => sum + pane.tabs.filter((tab) => isPtyTabType(tab.type)).length, 0),
     0
   )
 
@@ -23,7 +23,7 @@ export default function RailFooter(): JSX.Element {
       <div className="flex items-center gap-2">
         <span className="size-2 flex-none rounded-full bg-green shadow-[0_0_8px_rgba(61,220,151,0.55)]" />
         <span className="whitespace-nowrap text-[11.5px] text-muted">
-          {terminalCount} terminal{terminalCount === 1 ? '' : 's'} in flight
+          {terminalCount} terminal{terminalCount === 1 ? '' : 's'} in worktrees
         </span>
       </div>
       <button

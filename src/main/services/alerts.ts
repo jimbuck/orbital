@@ -1,18 +1,18 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeImage } from 'electron'
-import type { Flight, Settings, AlertEvent } from '@shared/types'
+import type { Worktree, Settings, AlertEvent } from '@shared/types'
 
 /**
  * AlertManager owns the Windows taskbar leg of the three-way needs-attention
  * alert. Sound + in-app banner are handled in the renderer.
  *
- * The badge is the app icon itself: when a Flight needs attention the window
+ * The badge is the app icon itself: when a Worktree needs attention the window
  * icon swaps to a variant where the orbiting satellite swells and glows amber
  * (resources/icons/icon-alert.png, rendered from build/icon-alert.svg by
  * scripts/render-icons.js), and swaps back once everything is quiet.
  *
- * On every state change the orchestrator calls `update(flights)`; the manager
- * computes how many Flights need attention, swaps the window icon, and returns
+ * On every state change the orchestrator calls `update(worktrees)`; the manager
+ * computes how many Worktrees need attention, swaps the window icon, and returns
  * an AlertEvent that the renderer consumes for chime/banner.
  */
 export class AlertManager {
@@ -28,12 +28,12 @@ export class AlertManager {
 
   /**
    * Recompute the needs-attention set, drive the taskbar icon, and report the
-   * transition. `rising` is true when a *new* Flight has just started needing
+   * transition. `rising` is true when a *new* Worktree has just started needing
    * attention (count grew), which the renderer uses to decide whether to
    * chime/re-badge rather than re-alert on every tick.
    */
-  update(flights: Pick<Flight, 'id' | 'status'>[]): AlertEvent {
-    const needing = flights.filter((f) => f.status === 'needs_attention')
+  update(worktrees: Pick<Worktree, 'id' | 'status'>[]): AlertEvent {
+    const needing = worktrees.filter((w) => w.status === 'needs_attention')
     const count = needing.length
     const firstId = count > 0 ? needing[0].id : null
     const rising = count > this.prev
@@ -55,7 +55,7 @@ export class AlertManager {
     }
 
     this.prev = count
-    return { count, flightId: firstId, rising }
+    return { count, worktreeId: firstId, rising }
   }
 
   private icon(kind: 'normal' | 'alert'): Electron.NativeImage {

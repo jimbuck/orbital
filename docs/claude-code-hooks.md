@@ -2,7 +2,7 @@
 
 Orbital surfaces *which agent needs you* by reading each terminal's status. An
 agent can set its own status by calling the `orbital` CLI, which is on `PATH`
-inside every Flight terminal. You can drive it by hand:
+inside every worktree terminal. You can drive it by hand:
 
 ```sh
 orbital status working           # I'm busy
@@ -54,11 +54,11 @@ commands, or you can wire them into whatever hook/event system that tool offers.
 
 ## Manual organization
 
-The same CLI lets an agent organize its own workspace:
+The same CLI lets an agent organize its own project:
 
 ```sh
-orbital flights                          # list sibling Flights (id, branch, status)
-orbital flight new --worktree feat/x     # spin up a new worktree Flight
+orbital worktrees                        # list sibling worktrees (id, branch, status)
+orbital worktree new --worktree feat/x   # spin up a new linked worktree
 orbital tab new browser http://localhost:5173   # open a preview tab
 orbital task add "Write changelog" --description "for the 1.2 release"
 ```

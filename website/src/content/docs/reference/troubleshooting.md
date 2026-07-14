@@ -9,19 +9,19 @@ The CLI couldn't reach the control pipe. Ensure the Orbital app is running, and
 that you're in a terminal Orbital spawned (the CLI reads identity from the
 `ORBITAL_*` environment variables — a terminal opened elsewhere won't have them).
 
-## Deleting a Flight says the worktree is dirty
+## Deleting a worktree says it is dirty
 
 That's the unpushed-work guard: `git worktree remove` refuses when the worktree
 has uncommitted changes (or git considers it locked). The context menu then
 offers **Force remove**, which discards those changes — commit or stash first if
 you want them.
 
-## A Flight's terminal is dead after restart
+## A worktree's terminal is dead after restart
 
 Terminals intentionally restart fresh (scrollback doesn't persist). If the
-Flight's worktree directory was deleted outside Orbital while the app was
-closed, its terminals can't respawn — remove the Flight, or recreate the
-worktree at the same path.
+worktree's directory was deleted outside Orbital while the app was
+closed, its terminals can't respawn — remove the worktree, or recreate it
+at the same path.
 
 ## Native module errors when building from source
 

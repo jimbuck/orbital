@@ -4,7 +4,7 @@ import { getDb, closeDb } from './db/database'
 import { runtime, repo } from './runtime'
 import { updater } from './services/updater'
 import { logger } from './services/logger'
-import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from './ipc'
+import { registerIpc, handleControl, resumeProjects, resumeTerminals } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
@@ -129,7 +129,7 @@ if (!gotLock) {
     runtime.setWindow(win)
     win.on('closed', () => runtime.setWindow(null))
 
-    resumeWorkspaces()
+    resumeProjects()
     // Start the CLI control channel BEFORE respawning terminals so a single bad
     // worktree can never prevent the orbital-CLI pipe from coming up.
     await runtime.control.start(handleControl).catch((err) => {
@@ -147,7 +147,9 @@ if (!gotLock) {
         w.on('closed', () => runtime.setWindow(null))
       }
     })
-  }).catch((err) => console.error('startup failed:', err))
+  }).catch((err) => {
+    console.error('startup failed:', err)
+  })
 
   // Quitting the app stops the agents (PTYs); minimizing does not (PRD §5, §12).
   app.on('window-all-closed', () => {

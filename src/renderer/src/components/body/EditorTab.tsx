@@ -3,7 +3,7 @@ import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, Pencil,
 import { marked } from 'marked'
 import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
-import { useStore, activeFlight } from '@renderer/store'
+import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 
 /** Shiki bundled theme id for each resolved app theme. */
@@ -449,7 +449,7 @@ function findNode(nodes: FileNode[], path: string): FileNode | null {
  * for markdown and HTML.
  */
 export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
-  const flightId = useStore((s) => activeFlight(s)?.id)
+  const worktreeId = useStore((s) => activeWorktree(s)?.id)
   const [tree, setTree] = useState<FileNode[]>([])
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<Selected | null>(null)
@@ -462,17 +462,17 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   const [loading, setLoading] = useState(false)
   const reqRef = useRef(0)
   // Current tree refetch, exposed for the manual refresh button; the effect
-  // below keeps it bound to the live flight and its `alive` guard.
+  // below keeps it bound to the live worktree and its `alive` guard.
   const refetchTreeRef = useRef<() => void>(() => {})
 
   // Load the tree, and keep it fresh: any state broadcast (git watcher, staging,
   // commits, saves) refetches it debounced, so badges track the repo live.
   useEffect(() => {
-    if (!flightId) return
+    if (!worktreeId) return
     let alive = true
     let timer: number | undefined
     const refetch = (): void => {
-      void window.orbital.fileTree(flightId).then((nodes) => {
+      void window.orbital.fileTree(worktreeId).then((nodes) => {
         if (alive) setTree(nodes)
       })
     }
@@ -487,7 +487,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
       unsub()
       window.clearTimeout(timer)
     }
-  }, [flightId])
+  }, [worktreeId])
 
   // Directories containing at least one changed file get a dot in the tree.
   const changedDirs = useMemo(() => {
@@ -524,7 +524,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
 
   // Fetch whatever the current mode needs and doesn't have yet.
   useEffect(() => {
-    if (!flightId || !selected) return
+    if (!worktreeId || !selected) return
     const mime = imageMime(selected.path)
     const needDiff = mode === 'diff' && diff === null
     const needImage = mode !== 'diff' && !!mime && imageData === null
@@ -535,15 +535,15 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
     void (async () => {
       try {
         if (needDiff) {
-          const d = await window.orbital.gitDiff(flightId, selected.path, selected.staged)
+          const d = await window.orbital.gitDiff(worktreeId, selected.path, selected.staged)
           if (reqRef.current === id) setDiff(d)
         }
         if (needImage) {
-          const b64 = await window.orbital.readFileBase64(flightId, selected.path)
+          const b64 = await window.orbital.readFileBase64(worktreeId, selected.path)
           if (reqRef.current === id) setImageData(`data:${mime};base64,${b64}`)
         }
         if (needContent) {
-          const c = await window.orbital.readFile(flightId, selected.path)
+          const c = await window.orbital.readFile(worktreeId, selected.path)
           if (reqRef.current === id) {
             setContent(c)
             setDraft(c)
@@ -556,7 +556,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
         if (reqRef.current === id) setLoading(false)
       }
     })()
-  }, [flightId, selected, mode, diff, content, imageData])
+  }, [worktreeId, selected, mode, diff, content, imageData])
 
   // When a tree refresh changes the selected file's git state, follow it: the
   // Diff toggle appears/disappears and a stale diff is refetched. The file
@@ -583,9 +583,9 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   }, [tab.config.filePath, tab.config.diffStaged, tree, openFile])
 
   const save = async (): Promise<void> => {
-    if (!flightId || !selected) return
-    await window.orbital.writeFile(flightId, selected.path, draft)
-    const c = await window.orbital.readFile(flightId, selected.path)
+    if (!worktreeId || !selected) return
+    await window.orbital.writeFile(worktreeId, selected.path, draft)
+    const c = await window.orbital.readFile(worktreeId, selected.path)
     setContent(c)
     setDraft(c)
     setEditing(false)
@@ -597,9 +597,9 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   const onPreviewLink = useCallback(
     (href: string, external: boolean): void => {
       if (external) void window.orbital.openExternal(href)
-      else if (flightId) void window.orbital.createTab(flightId, tab.paneId, 'browser', { url: href })
+      else if (worktreeId) void window.orbital.createTab(worktreeId, tab.paneId, 'browser', { url: href })
     },
-    [flightId, tab.paneId]
+    [worktreeId, tab.paneId]
   )
 
   const kind = selected ? previewKind(selected.path) : null

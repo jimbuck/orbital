@@ -1,7 +1,7 @@
 /**
  * Cursor CLI agent provider.
  *
- * Boots `cursor-agent` (Cursor's CLI binary) directly in the Flight's worktree.
+ * Boots `cursor-agent` (Cursor's CLI binary) directly in the Worktree's checkout.
  * The Cursor CLI has no --append-system-prompt-file equivalent, so the briefing
  * file is not passed.
  */

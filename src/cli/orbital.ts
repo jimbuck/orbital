@@ -1,9 +1,9 @@
 /**
  * Orbital — agent-facing `orbital` CLI (PRD §9).
  *
- * This binary is injected on the PATH of every Flight terminal so the coding
+ * This binary is injected on the PATH of every worktree terminal so the coding
  * agent running inside it can talk back to the cockpit: report its status, list
- * sibling Flights, spawn new Flights / tabs, and file tasks. It speaks the
+ * sibling worktrees, spawn new worktrees / tabs, and file tasks. It speaks the
  * `ControlRequest`/`ControlResponse` protocol over the local control pipe.
  *
  * It is bundled to `resources/cli/orbital.js` by esbuild, so it may use ONLY
@@ -22,12 +22,12 @@ import {
 
 /* ------------------------------------------------------------------ usage -- */
 
-const USAGE = `orbital — control the running Orbital cockpit from inside a Flight terminal.
+const USAGE = `orbital — control the running Orbital cockpit from inside a worktree terminal.
 
 Usage:
   orbital status <idle|working|needs-attention|error|done>
-  orbital flights
-  orbital flight new [--worktree <branch>] [name]
+  orbital worktrees
+  orbital worktree new [--worktree <branch>] [name]
   orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all]
@@ -42,7 +42,7 @@ Usage:
 
 Examples:
   orbital status needs-attention
-  orbital flight new --worktree feature/login "Login flow"
+  orbital worktree new --worktree feature/login "Login flow"
   orbital tab new browser http://localhost:5173
   orbital task add "Write tests" --description "cover the parser"
   orbital task list
@@ -111,8 +111,8 @@ function request(cmd: ControlCommand, args: Record<string, unknown>): ControlReq
   return {
     cmd,
     terminalId: process.env[ENV.terminalId],
-    flightId: process.env[ENV.flightId],
-    workspaceId: process.env[ENV.workspaceId],
+    worktreeId: process.env[ENV.worktreeId],
+    projectId: process.env[ENV.projectId],
     args
   }
 }
@@ -132,16 +132,20 @@ function buildRequest(argv: string[]): ControlRequest {
       return request('status', { status: token, firedAt: Date.now() })
     }
 
+    // `flights` is a hidden backward-compat alias for `worktrees`.
+    case 'worktrees':
     case 'flights':
-      return request('flights', {})
+      return request('worktrees', {})
 
+    // `flight` is a hidden backward-compat alias for `worktree`.
+    case 'worktree':
     case 'flight': {
       if (rest[0] !== 'new') usageError()
       const { positionals, flags } = parseArgs(rest.slice(1))
       const args: Record<string, unknown> = {}
       if (flags.worktree) args.worktree = flags.worktree
       if (positionals[0]) args.name = positionals[0]
-      return request('flight-new', args)
+      return request('worktree-new', args)
     }
 
     case 'tab': {
@@ -236,10 +240,10 @@ function printTable(cols: { key: string; head: string }[], rows: Record<string, 
   }
 }
 
-function printFlights(data: unknown): void {
+function printWorktrees(data: unknown): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
-    process.stdout.write('No flights.\n')
+    process.stdout.write('No worktrees.\n')
     return
   }
   printTable(
@@ -249,8 +253,8 @@ function printFlights(data: unknown): void {
       { key: 'branch', head: 'BRANCH' },
       { key: 'id', head: 'ID' }
     ],
-    list.map((flight) => {
-      const o = (flight ?? {}) as Record<string, unknown>
+    list.map((worktree) => {
+      const o = (worktree ?? {}) as Record<string, unknown>
       return {
         status: String(o.status ?? ''),
         name: String(o.name ?? ''),
@@ -273,7 +277,7 @@ function printTasks(data: unknown): void {
       { key: 'status', head: 'STATUS' },
       { key: 'title', head: 'TITLE' },
       { key: 'tags', head: 'TAGS' },
-      { key: 'flight', head: 'FLIGHT' }
+      { key: 'worktree', head: 'WORKTREE' }
     ],
     list.map((task) => {
       const o = (task ?? {}) as Record<string, unknown>
@@ -283,7 +287,7 @@ function printTasks(data: unknown): void {
         status: String(o.status ?? ''),
         title: String(o.title ?? ''),
         tags: Array.isArray(o.tags) ? o.tags.join(',') : '',
-        flight: o.flightId ? 'linked' : ''
+        worktree: o.worktreeId ? 'linked' : ''
       }
     })
   )
@@ -298,7 +302,7 @@ function printTaskDetail(data: unknown): void {
     ['title', String(o.title ?? '')],
     ['description', String(o.description ?? '') || '(none)'],
     ['tags', Array.isArray(o.tags) && o.tags.length > 0 ? o.tags.join(', ') : '(none)'],
-    ['flight', o.flightId ? String(o.flightId) : '(not linked)']
+    ['worktree', o.worktreeId ? String(o.worktreeId) : '(not linked)']
   ]
   for (const [key, value] of rows) process.stdout.write(`${key.padEnd(12)} ${value}\n`)
 }
@@ -312,16 +316,16 @@ function printServers(data: unknown): void {
   for (const url of list) process.stdout.write(`${String(url)}\n`)
 }
 
-/** A one-line confirmation for the non-`flights` commands. */
+/** A one-line confirmation for the non-`worktrees` commands. */
 function confirmation(req: ControlRequest, data: unknown): string {
   const d = (data ?? {}) as Record<string, unknown>
   switch (req.cmd) {
     case 'status':
       return `terminal status set to ${String(req.args.status ?? '')}`
-    case 'flight-new': {
+    case 'worktree-new': {
       const name = d.name ?? req.args.name
       const branch = d.branch ?? req.args.worktree
-      return `flight created${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}`
+      return `worktree created${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}`
     }
     case 'tab-new':
       return `opened ${String(req.args.type ?? '')} tab`
@@ -409,8 +413,8 @@ function handleResponse(req: ControlRequest, lineText: string): void {
     fail(res.error || 'command failed')
   }
 
-  if (req.cmd === 'flights') {
-    printFlights(res.data)
+  if (req.cmd === 'worktrees') {
+    printWorktrees(res.data)
   } else if (req.cmd === 'task-list') {
     printTasks(res.data)
   } else if (req.cmd === 'task-show') {
@@ -428,14 +432,14 @@ function handleResponse(req: ControlRequest, lineText: string): void {
 /**
  * `orbital hook <event>` — invoked by Claude Code hooks from ~/.claude/settings.json.
  *
- * The guard lives HERE (not in the settings JSON): if ORBITAL_FLIGHT_ID is absent
+ * The guard lives HERE (not in the settings JSON): if ORBITAL_WORKTREE_ID is absent
  * the session is not an Orbital one, so we exit 0 immediately and Claude is wholly
  * unaffected. Otherwise we read the event JSON from stdin and fire it at the cockpit
  * as a best-effort, never printing anything and ALWAYS exiting 0 so Claude is never
  * blocked or shown a hook error.
  */
 function runHook(args: string[]): void {
-  if (!process.env[ENV.flightId]) process.exit(0)
+  if (!process.env[ENV.worktreeId]) process.exit(0)
   const event = args.find((a) => !a.startsWith('--')) ?? ''
 
   // Stamp the fire time NOW, before the stdin wait. Hooks run async, each in its

@@ -6,7 +6,7 @@ import type { Task, TaskStatus } from '@shared/types'
 import { ContextMenu, MenuItem, MenuConfirm, type MenuPos } from '../rail/menu'
 
 /**
- * Right-click context menu for a task card: edit, bridge to a Flight, quick
+ * Right-click context menu for a task card: edit, bridge to a Worktree, quick
  * status changes, and a confirm-guarded delete. Shared by the panel tracker and
  * the full board so a card offers the same actions wherever it's shown. The
  * owning card holds the open/position state and renders this when set.
@@ -21,9 +21,9 @@ export default function TaskCardContextMenu({
   onClose: () => void
 }): JSX.Element {
   const openModal = useStore((s) => s.openModal)
-  const setActiveFlight = useStore((s) => s.setActiveFlight)
-  const workspace = useStore((s) => s.workspaces.find((w) => w.id === task.workspaceId))
-  const hasFlight = useStore((s) => !!task.flightId && s.flights.some((f) => f.id === task.flightId))
+  const setActiveWorktree = useStore((s) => s.setActiveWorktree)
+  const project = useStore((s) => s.projects.find((p) => p.id === task.projectId))
+  const hasWorktree = useStore((s) => !!task.worktreeId && s.worktrees.some((w) => w.id === task.worktreeId))
   const [confirming, setConfirming] = useState(false)
 
   const setStatus = (status: TaskStatus): void => {
@@ -43,21 +43,21 @@ export default function TaskCardContextMenu({
               onClose()
             }}
           />
-          {hasFlight ? (
+          {hasWorktree ? (
             <MenuItem
               icon={<ChevronRight size={13} strokeWidth={1.5} />}
-              label="Go to Flight"
+              label="Go to Worktree"
               onClick={() => {
-                if (task.flightId) setActiveFlight(task.flightId)
+                if (task.worktreeId) setActiveWorktree(task.worktreeId)
                 onClose()
               }}
             />
           ) : (
             <MenuItem
               icon={<Play size={13} strokeWidth={1.5} />}
-              label="Start Flight"
+              label="Start Worktree"
               onClick={() => {
-                openModal('newFlight', { workspace, task })
+                openModal('newWorktree', { project, task })
                 onClose()
               }}
             />

@@ -11,7 +11,7 @@ import {
   Undo2,
   X
 } from 'lucide-react'
-import { useStore, activeFlight, activeWorkspace } from '@renderer/store'
+import { useStore, activeWorktree, activeProject } from '@renderer/store'
 import { ContextMenu, type MenuPos } from '../rail/menu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
 
@@ -304,16 +304,16 @@ function TreeRow({
 }
 
 /**
- * Git surface for the active Flight: branch + ahead/behind + refresh, Pull /
+ * Git surface for the active Worktree: branch + ahead/behind + refresh, Pull /
  * Fetch / Worktree, staged & unstaged lists with stage/unstage/discard/compare
  * per file (plus stage-all / unstage-all / discard-all), and a commit area with
  * amend support. One operation runs at a time; failures surface in an error
- * banner instead of vanishing. Status reloads on Flight change, after every
+ * banner instead of vanishing. Status reloads on Worktree change, after every
  * mutation, and whenever main broadcasts state (the git watcher's signal).
  */
 export default function GitPanel(): JSX.Element {
-  const flight = useStore(activeFlight)
-  const workspace = useStore(activeWorkspace)
+  const worktree = useStore(activeWorktree)
+  const project = useStore(activeProject)
   const openModal = useStore((s) => s.openModal)
 
   const [status, setStatus] = useState<GitStatus | null>(null)
@@ -325,26 +325,26 @@ export default function GitPanel(): JSX.Element {
   const [armed, setArmed] = useState<string | null>(null)
   /** Collapsed directory nodes, keyed `s:`/`u:` + full dir path (default expanded = absent). */
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
-  /** Branch picker (root Flight only): anchor position when open, branch list, draft name. */
+  /** Branch picker (root Worktree only): anchor position when open, branch list, draft name. */
   const [pickerPos, setPickerPos] = useState<MenuPos | null>(null)
   const [branches, setBranches] = useState<string[]>([])
   const [newBranch, setNewBranch] = useState('')
 
-  const flightId = flight?.id ?? null
+  const worktreeId = worktree?.id ?? null
 
   const refresh = useCallback(async (): Promise<void> => {
-    if (!flightId) {
+    if (!worktreeId) {
       setStatus(null)
       return
     }
     try {
-      setStatus(await window.orbital.gitStatus(flightId))
+      setStatus(await window.orbital.gitStatus(worktreeId))
     } catch {
       setStatus(null)
     }
-  }, [flightId])
+  }, [worktreeId])
 
-  // Load on mount and whenever the active Flight changes.
+  // Load on mount and whenever the active Worktree changes.
   useEffect(() => {
     void refresh()
   }, [refresh])
@@ -353,7 +353,7 @@ export default function GitPanel(): JSX.Element {
   // triggers a state broadcast via the main-process git watcher — re-read status.
   useEffect(() => window.orbital.onStateChanged(() => void refresh()), [refresh])
 
-  // Draft message / amend / confirmations / picker are per-Flight state; drop them on switch.
+  // Draft message / amend / confirmations / picker are per-Worktree state; drop them on switch.
   useEffect(() => {
     setMessage('')
     setAmend(false)
@@ -361,7 +361,7 @@ export default function GitPanel(): JSX.Element {
     setError(null)
     setPickerPos(null)
     setCollapsedDirs(new Set())
-  }, [flightId])
+  }, [worktreeId])
 
   const toggleDir = useCallback((key: string): void => {
     setCollapsedDirs((prev) => {
@@ -379,11 +379,11 @@ export default function GitPanel(): JSX.Element {
     return () => clearTimeout(t)
   }, [armed])
 
-  if (!flight) {
+  if (!worktree) {
     return (
       <div className="border-b border-soft px-[15px] py-4">
         <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Git</span>
-        <div className="mt-2 text-[12px] text-faint">No Flight</div>
+        <div className="mt-2 text-[12px] text-faint">No Worktree</div>
       </div>
     )
   }
@@ -394,9 +394,9 @@ export default function GitPanel(): JSX.Element {
   const unstagedTree = buildFileTree(unstaged)
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
-  const branch = status?.branch ?? flight.branch
-  // Only the root checkout may move HEAD — worktree Flights are pinned to their branch.
-  const isRoot = flight.kind === 'root'
+  const branch = status?.branch ?? worktree.branch
+  // Only the root checkout may move HEAD — linked Worktrees are pinned to their branch.
+  const isRoot = worktree.kind === 'root'
 
   /** Run one git operation with busy/error bookkeeping, then re-read status. */
   const exec = async (op: GitOp, fn: () => Promise<void>): Promise<void> => {
@@ -416,7 +416,7 @@ export default function GitPanel(): JSX.Element {
 
   /** Open (or re-focus) an editor tab showing this file's staged/unstaged diff. */
   const openDiff = (f: GitFileStatus): void => {
-    for (const pane of flight.panes) {
+    for (const pane of worktree.panes) {
       const existing = pane.tabs.find(
         (t) => t.type === 'editor' && t.config.filePath === f.path && !!t.config.diffStaged === f.staged
       )
@@ -425,7 +425,7 @@ export default function GitPanel(): JSX.Element {
         return
       }
     }
-    void window.orbital.createTab(flight.id, null, 'editor', { filePath: f.path, diffStaged: f.staged })
+    void window.orbital.createTab(worktree.id, null, 'editor', { filePath: f.path, diffStaged: f.staged })
   }
 
   /** Anchor the branch picker under the branch button and (re)load the local branch list. */
@@ -433,8 +433,8 @@ export default function GitPanel(): JSX.Element {
     const r = e.currentTarget.getBoundingClientRect()
     setPickerPos({ x: Math.min(r.left, window.innerWidth - PICKER_WIDTH - 12), y: r.bottom + 4 })
     setNewBranch('')
-    if (workspace) {
-      void window.orbital.listBranches(workspace.id).then((info) => setBranches(info.branches))
+    if (project) {
+      void window.orbital.listBranches(project.id).then((info) => setBranches(info.branches))
     }
   }
 
@@ -442,14 +442,14 @@ export default function GitPanel(): JSX.Element {
   const checkoutBranch = (target: string, create: boolean): void => {
     setPickerPos(null)
     if (!create && target === branch) return
-    void exec('checkout', () => window.orbital.gitCheckout(flight.id, target, create))
+    void exec('checkout', () => window.orbital.gitCheckout(worktree.id, target, create))
   }
 
   const commit = (): void => {
     const msg = message.trim()
     if (!msg || (staged.length === 0 && !amend)) return
     void exec('commit', async () => {
-      await window.orbital.gitCommit(flight.id, msg, amend)
+      await window.orbital.gitCommit(worktree.id, msg, amend)
       setMessage('')
       setAmend(false)
     })
@@ -460,7 +460,7 @@ export default function GitPanel(): JSX.Element {
     setAmend(next)
     // Amending with an empty box almost always means "reuse the last message".
     if (next && !message.trim()) {
-      const last = await window.orbital.gitLastCommitMessage(flight.id).catch(() => '')
+      const last = await window.orbital.gitLastCommitMessage(worktree.id).catch(() => '')
       if (last) setMessage(last)
     }
   }
@@ -518,7 +518,7 @@ export default function GitPanel(): JSX.Element {
         </div>
       </div>
 
-      {/* branch picker: local branches + create-and-switch (root Flight only) */}
+      {/* branch picker: local branches + create-and-switch (root Worktree only) */}
       {pickerPos && (
         <ContextMenu pos={pickerPos} width={PICKER_WIDTH} onClose={() => setPickerPos(null)}>
           <div className="max-h-56 overflow-y-auto">
@@ -566,7 +566,7 @@ export default function GitPanel(): JSX.Element {
         <button
           type="button"
           disabled={!!busy}
-          onClick={() => void exec('pull', () => window.orbital.gitPull(flight.id))}
+          onClick={() => void exec('pull', () => window.orbital.gitPull(worktree.id))}
           className={`flex-1 py-[7px] inline-flex items-center justify-center gap-1.5 ${SECONDARY}`}
         >
           {busy === 'pull' && spinner}
@@ -575,7 +575,7 @@ export default function GitPanel(): JSX.Element {
         <button
           type="button"
           disabled={!!busy}
-          onClick={() => void exec('fetch', () => window.orbital.gitFetch(flight.id))}
+          onClick={() => void exec('fetch', () => window.orbital.gitFetch(worktree.id))}
           className={`flex-1 py-[7px] inline-flex items-center justify-center gap-1.5 ${SECONDARY}`}
         >
           {busy === 'fetch' && spinner}
@@ -583,7 +583,7 @@ export default function GitPanel(): JSX.Element {
         </button>
         <button
           type="button"
-          onClick={() => openModal('newFlight', { workspace })}
+          onClick={() => openModal('newWorktree', { project })}
           className={`flex-1 py-[7px] inline-flex items-center justify-center gap-1 ${SECONDARY}`}
         >
           <Plus size={13} strokeWidth={1.5} />
@@ -611,7 +611,7 @@ export default function GitPanel(): JSX.Element {
             {staged.length > 0 && (
               <IconBtn
                 title="Unstage all"
-                onClick={() => void exec('unstageAll', () => window.orbital.gitUnstageAll(flight.id))}
+                onClick={() => void exec('unstageAll', () => window.orbital.gitUnstageAll(worktree.id))}
                 disabled={!!busy}
                 className="text-faint hover:text-text"
               >
@@ -638,7 +638,7 @@ export default function GitPanel(): JSX.Element {
                   action="unstage"
                   armed={false}
                   disabled={!!busy}
-                  onAction={() => void exec('unstage', () => window.orbital.gitUnstage(flight.id, f.path))}
+                  onAction={() => void exec('unstage', () => window.orbital.gitUnstage(worktree.id, f.path))}
                   onOpenDiff={() => openDiff(f)}
                 />
               )}
@@ -658,7 +658,7 @@ export default function GitPanel(): JSX.Element {
                   <span className="text-[10px] font-bold text-red-2">Discard all?</span>
                   <IconBtn
                     title="Confirm — discard all changes and delete untracked files"
-                    onClick={() => void exec('discardAll', () => window.orbital.gitDiscardAll(flight.id))}
+                    onClick={() => void exec('discardAll', () => window.orbital.gitDiscardAll(worktree.id))}
                     disabled={!!busy}
                     className="text-red-2 hover:text-red"
                   >
@@ -680,7 +680,7 @@ export default function GitPanel(): JSX.Element {
                   </IconBtn>
                   <IconBtn
                     title="Stage all"
-                    onClick={() => void exec('stageAll', () => window.orbital.gitStageAll(flight.id))}
+                    onClick={() => void exec('stageAll', () => window.orbital.gitStageAll(worktree.id))}
                     disabled={!!busy}
                     className="text-faint hover:text-accent"
                   >
@@ -708,10 +708,10 @@ export default function GitPanel(): JSX.Element {
                   action="stage"
                   armed={armed === f.path}
                   disabled={!!busy}
-                  onAction={() => void exec('stage', () => window.orbital.gitStage(flight.id, f.path))}
+                  onAction={() => void exec('stage', () => window.orbital.gitStage(worktree.id, f.path))}
                   onOpenDiff={() => openDiff(f)}
                   onArm={() => setArmed(f.path)}
-                  onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(flight.id, f.path))}
+                  onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(worktree.id, f.path))}
                   onDisarm={() => setArmed(null)}
                 />
               )}
@@ -758,7 +758,7 @@ export default function GitPanel(): JSX.Element {
           <button
             type="button"
             disabled={!!busy}
-            onClick={() => void exec('push', () => window.orbital.gitPush(flight.id))}
+            onClick={() => void exec('push', () => window.orbital.gitPush(worktree.id))}
             className={`flex-none px-4 py-[9px] inline-flex items-center justify-center gap-1.5 rounded-btn ${SECONDARY}`}
           >
             {busy === 'push' && spinner}

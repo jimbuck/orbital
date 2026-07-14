@@ -17,7 +17,7 @@ const MAX_BUFFER = 200_000
  * How long a prepared PTY waits for the renderer to report its real size before
  * spawning at the 80×24 default anyway. The common case (a visible tab) reports
  * within a frame or two, well under this; the fallback only elapses for a tab
- * that is never viewed (e.g. restored into a background flight on boot).
+ * that is never viewed (e.g. restored into a background worktree on boot).
  */
 const DEFERRED_SPAWN_FALLBACK_MS = 1500
 

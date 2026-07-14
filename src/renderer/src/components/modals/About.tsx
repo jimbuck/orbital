@@ -86,7 +86,7 @@ export default function About(): React.JSX.Element {
         <span className="text-faint">Stack</span>
         <span className="text-text-3">Electron · React · Tailwind · node-pty · xterm.js · SQLite</span>
         <span className="text-faint">CLI</span>
-        <span className="font-mono text-text-3">orbital status · flights · flight new · tab new · task add</span>
+        <span className="font-mono text-text-3">orbital status · worktrees · worktree new · tab new · task add</span>
       </div>
     </ModalShell>
   )

@@ -52,13 +52,13 @@ export default function BrowserTab({ tab }: { tab: Tab }): JSX.Element {
     const wv = webviewRef.current
     if (!wv) return
     const onReady = (): void => {
-      void window.orbital.registerBrowserView(wv.getWebContentsId(), tab.flightId, tab.paneId)
+      void window.orbital.registerBrowserView(wv.getWebContentsId(), tab.worktreeId, tab.paneId)
     }
     wv.addEventListener('dom-ready', onReady)
     return () => {
       wv.removeEventListener('dom-ready', onReady)
     }
-  }, [url, tab.flightId, tab.paneId])
+  }, [url, tab.worktreeId, tab.paneId])
 
   const navigate = (): void => {
     const next = normalizeUrl(input)

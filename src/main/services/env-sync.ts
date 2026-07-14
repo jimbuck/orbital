@@ -8,7 +8,7 @@ import picomatch from 'picomatch'
 // is never live-watched — mirroring dependency churn would melt the watcher;
 // a package-manager install in the worktree handles later drift.
 // `.orbital-worktrees` is excluded defensively: worktrees normally live
-// beside the repo (see worktree.ts), but if a workspace root happens to
+// beside the repo (see worktree.ts), but if a project root happens to
 // enclose one, recursive globs like `**/.env` must never sync files out of
 // sibling worktrees.
 // The recursive fs.watch delivers every descendant path, so these are filtered
@@ -106,8 +106,8 @@ export async function syncEnvFiles(
  * and asynchronously. Deliberately separate from syncEnvFiles's file-by-file
  * walk: node_modules holds hundreds of thousands of files, so a synchronous walk
  * + per-file copy would freeze the main process for minutes. `fs.cp` yields
- * between operations, so the caller runs this in the BACKGROUND while the Flight
- * is already usable. No-op when the root has no node_modules.
+ * between operations, so the caller runs this in the BACKGROUND while the
+ * Worktree is already usable. No-op when the root has no node_modules.
  */
 export async function copyNodeModulesTree(rootPath: string, worktreePath: string): Promise<void> {
   const src = path.join(rootPath, 'node_modules')

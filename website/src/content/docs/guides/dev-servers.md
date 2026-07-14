@@ -3,7 +3,7 @@ title: Dev servers
 description: Let the cockpit know which dev servers are live, and open them in one click.
 ---
 
-When an agent (or you) starts a dev server inside a Flight, tell Orbital:
+When an agent (or you) starts a dev server inside a worktree, tell Orbital:
 
 ```sh
 orbital server add 3000            # → http://localhost:3000
@@ -12,12 +12,12 @@ orbital server add https://dev.nebula.test:8443
 ```
 
 Port-only and host-only forms are normalized to full URLs. Registrations are
-**per Flight** and live only while Orbital runs — dev servers die with their
+**per worktree** and live only while Orbital runs — dev servers die with their
 terminals, so there's nothing stale to clean up after a restart.
 
 ## What you see
 
-The title bar shows a green **"N dev servers"** pill for the active Flight.
+The title bar shows a green **"N dev servers"** pill for the active worktree.
 Click it to pick a server — it opens in an in-app browser tab right next to
 your agent:
 

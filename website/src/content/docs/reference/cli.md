@@ -1,11 +1,11 @@
 ---
 title: The orbital CLI
-description: Complete reference for the CLI available inside every Flight terminal.
+description: Complete reference for the CLI available inside every worktree terminal.
 ---
 
 Every terminal Orbital spawns has `orbital` on its `PATH`, connected back to the
 running app over a local pipe. It's how agents (and you) drive the cockpit from
-inside a Flight. Outside an Orbital terminal the identity environment variables
+inside a worktree. Outside an Orbital terminal the identity environment variables
 are absent and most commands will refuse to run.
 
 ## Status
@@ -17,23 +17,23 @@ orbital status <idle|working|needs-attention|error|done>
 Sets the calling terminal's status. `needs-attention` triggers the alert
 pipeline (rail badge, title-bar banner, taskbar badge, optional chime).
 
-## Flights
+## Worktrees
 
 ```sh
-orbital flights
+orbital worktrees
 ```
 
-Lists the workspace's Flights: status, name, branch, id.
+Lists the project's worktrees: status, name, branch, id.
 
 ```sh
-orbital flight new [--worktree <branch>] [name]
+orbital worktree new [--worktree <branch>] [name]
 ```
 
-Creates a worktree Flight. The branch is slugified; an existing branch is
+Creates a linked worktree. The branch is slugified; an existing branch is
 attached to, otherwise a new one is forked. Env files sync automatically.
 
 ```sh
-orbital flight new --worktree feature/checkout "Checkout flow"
+orbital worktree new --worktree feature/checkout "Checkout flow"
 ```
 
 ## Tabs
@@ -42,7 +42,7 @@ orbital flight new --worktree feature/checkout "Checkout flow"
 orbital tab new <terminal|browser|editor|agent> [arg]
 ```
 
-Opens a tab in the calling Flight. The argument is type-specific: a URL for
+Opens a tab in the calling worktree. The argument is type-specific: a URL for
 `browser`, a file path for `editor`, a provider name for `agent`.
 
 ```sh
@@ -79,21 +79,24 @@ orbital server remove <url|port>
 orbital server list
 ```
 
-Registers/deregisters a live dev server for the calling Flight. `3000` expands
+Registers/deregisters a live dev server for the calling worktree. `3000` expands
 to `http://localhost:3000`; `remove` matches by exact URL or by port.
 Registered servers appear in the title-bar pill and the add-tab menu. See
 [Dev servers](/orbital/guides/dev-servers/).
 
 ## Environment
 
-Orbital injects these into every Flight terminal:
+Orbital injects these into every worktree terminal:
 
 | Variable | Meaning |
 |---|---|
 | `ORBITAL_TERMINAL_ID` | The calling terminal's tab id |
-| `ORBITAL_FLIGHT_ID` | The Flight the terminal belongs to |
-| `ORBITAL_WORKSPACE_ID` | The Flight's workspace |
+| `ORBITAL_WORKTREE_ID` | The worktree the terminal belongs to |
+| `ORBITAL_PROJECT_ID` | The worktree's project |
 | `ORBITAL_SOCKET` | The control pipe the CLI connects to |
 
 `orbital hook <event>` is used internally by the Claude Code hooks; it exits
 silently outside Orbital sessions and never blocks Claude.
+
+> `orbital flights` and `orbital flight new` still work as hidden aliases for the
+> renamed `worktrees` / `worktree new` commands, so existing scripts keep running.

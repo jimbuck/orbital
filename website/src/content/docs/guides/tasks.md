@@ -1,9 +1,9 @@
 ---
 title: Tasks
-description: Capture work in one keystroke, launch it as a Flight, and let agents work the same board.
+description: Capture work in one keystroke, launch it as a worktree, and let agents work the same board.
 ---
 
-Each workspace has a lightweight task tracker in the right panel — designed for
+Each project has a lightweight task tracker in the right panel — designed for
 capture speed, not ceremony.
 
 ## Capturing and editing
@@ -16,20 +16,20 @@ capture speed, not ceremony.
 
 ## Board views
 
-Toggle **List / Board** for a per-workspace kanban:
+Toggle **List / Board** for a per-project kanban:
 
-![The per-workspace board view](../../../assets/screenshots/09-tasks-board.png)
+![The per-project board view](../../../assets/screenshots/09-tasks-board.png)
 
-The expand button opens the **full board** — every workspace as a swim-lane,
-with drag-and-drop between status columns *and* between workspaces:
+The expand button opens the **full board** — every project as a swim-lane,
+with drag-and-drop between status columns *and* between projects:
 
-![The all-workspaces board](../../../assets/screenshots/10-board-all.png)
+![The all-projects board](../../../assets/screenshots/10-board-all.png)
 
-## From task to Flight
+## From task to worktree
 
-Press the ▶ button on any unlinked task to open **New Flight** pre-filled and
+Press the ▶ button on any unlinked task to open **New Worktree** pre-filled and
 pre-linked: the branch name comes from the task title, and once created the task
-shows a link to its Flight. Finish the work, mark the task done, delete the
+shows a link to its worktree. Finish the work, mark the task done, delete the
 worktree — the full loop lives in one panel.
 
 ## Tasks for agents

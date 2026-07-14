@@ -3,17 +3,17 @@
  *
  * An `agent` tab is a PTY-backed tab that boots straight into a coding agent.
  * Each provider knows how to resolve the executable + argv to spawn for a given
- * Flight. Claude and Codex are implemented; the registry is the extension point
+ * Worktree. Claude and Codex are implemented; the registry is the extension point
  * for Gemini / etc. (add a provider + register it here — no other plumbing).
  */
-import type { Workspace, Flight } from '@shared/types'
+import type { Project, Worktree } from '@shared/types'
 
 export interface AgentContext {
-  workspace: Workspace
-  flight: Flight
+  project: Project
+  worktree: Worktree
   /** Absolute path to the briefing file Orbital generated for this launch, or null. */
   briefingPath: string | null
-  /** Explicit executable path configured on the workspace, if any. */
+  /** Explicit executable path configured on the project, if any. */
   execPath?: string
 }
 
@@ -25,7 +25,7 @@ export interface ResolvedCommand {
 }
 
 export interface AgentProvider {
-  /** Stable id stored on the tab + workspace (e.g. 'claude'). */
+  /** Stable id stored on the tab + project (e.g. 'claude'). */
   id: string
   displayName: string
   /** Files that hint a project uses this provider (future auto-detection; unused for now). */

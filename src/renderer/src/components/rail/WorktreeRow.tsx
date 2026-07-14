@@ -1,28 +1,28 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { Pencil, CircleOff, FolderOpen, Terminal, FolderX, Trash2 } from 'lucide-react'
-import type { Flight } from '@shared/types'
+import type { Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
-import { StatusDot, flightStatusLabel, flightStatusTextClass } from '@renderer/lib/status'
+import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 
 type DeleteMode = 'none' | 'confirm' | 'force'
 
 /**
- * A single worktree Flight entry inside an expanded workspace (the root Flight
- * is the workspace header itself). Click selects it; the leading dot + optional
+ * A single linked Worktree entry inside an expanded project (the root Worktree
+ * is the project header itself). Click selects it; the leading dot + optional
  * "needs you" label carry its status. Right-click opens a context menu (rename
  * inline, force-clear a stuck status, close keeping the worktree, or delete the
  * worktree).
  */
-export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
-  const setActiveFlight = useStore((s) => s.setActiveFlight)
-  const isActive = useStore((s) => s.activeFlightId === flight.id)
-  const settingUp = useStore((s) => s.settingUpFlights.includes(flight.id))
-  const isDone = flight.status === 'done'
+export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.Element {
+  const setActiveWorktree = useStore((s) => s.setActiveWorktree)
+  const isActive = useStore((s) => s.activeWorktreeId === worktree.id)
+  const settingUp = useStore((s) => s.settingUpWorktrees.includes(worktree.id))
+  const isDone = worktree.status === 'done'
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [renaming, setRenaming] = useState(false)
-  const [draft, setDraft] = useState(flight.name)
+  const [draft, setDraft] = useState(worktree.name)
   const [del, setDel] = useState<DeleteMode>('none')
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -46,14 +46,14 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
   }
 
   const startRename = (): void => {
-    setDraft(flight.name)
+    setDraft(worktree.name)
     setRenaming(true)
     closeMenu()
   }
   const commitRename = (): void => {
     const name = draft.trim()
     setRenaming(false)
-    if (name && name !== flight.name) void window.orbital.renameFlight(flight.id, name)
+    if (name && name !== worktree.name) void window.orbital.renameWorktree(worktree.id, name)
   }
   const onRenameKey = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') {
@@ -67,17 +67,17 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
 
   // Force-reset an out-of-sync status (e.g. a spinner wedged by a lost hook event).
   const clearStatus = (): void => {
-    void window.orbital.clearFlightStatus(flight.id)
+    void window.orbital.clearWorktreeStatus(worktree.id)
     closeMenu()
   }
 
   const remove = async (removeWorktree: boolean, force = false): Promise<void> => {
     try {
-      await window.orbital.removeFlight(flight.id, { removeWorktree, force })
+      await window.orbital.removeWorktree(worktree.id, { removeWorktree, force })
       closeMenu()
     } catch (e) {
       // git refuses a dirty worktree without --force; offer a force step.
-      setError(e instanceof Error ? e.message : 'Failed to remove the Flight.')
+      setError(e instanceof Error ? e.message : 'Failed to remove the Worktree.')
       setDel('force')
     }
   }
@@ -87,11 +87,11 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
       <div
         role="button"
         tabIndex={0}
-        onClick={() => !renaming && setActiveFlight(flight.id)}
+        onClick={() => !renaming && setActiveWorktree(worktree.id)}
         onKeyDown={(e) => {
           if (!renaming && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault()
-            setActiveFlight(flight.id)
+            setActiveWorktree(worktree.id)
           }
         }}
         onContextMenu={openMenu}
@@ -103,7 +103,7 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
           {settingUp ? (
             <span className="inline-block size-[11px] rounded-full border-[1.6px] border-accent border-t-transparent animate-spin" />
           ) : (
-            <StatusDot status={flight.status} />
+            <StatusDot status={worktree.status} />
           )}
         </span>
 
@@ -125,9 +125,9 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
                   isActive ? 'text-text' : isDone ? 'text-text-3' : 'text-text-2'
                 }`}
               >
-                {flight.name}
+                {worktree.name}
               </span>
-              <span className="mt-[2px] block truncate font-mono text-[10px] text-faint">{flight.branch}</span>
+              <span className="mt-[2px] block truncate font-mono text-[10px] text-faint">{worktree.branch}</span>
             </>
           )}
         </span>
@@ -141,11 +141,11 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
           </span>
         ) : (
           !renaming &&
-          flight.status === 'needs_attention' && (
+          worktree.status === 'needs_attention' && (
             <span
-              className={`flex-none whitespace-nowrap text-[9.5px] font-bold ${flightStatusTextClass(flight.status)}`}
+              className={`flex-none whitespace-nowrap text-[9.5px] font-bold ${worktreeStatusTextClass(worktree.status)}`}
             >
-              {flightStatusLabel(flight.status)}
+              {worktreeStatusLabel(worktree.status)}
             </span>
           )
         )}
@@ -165,7 +165,7 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
                 label="Open in Explorer"
                 onClick={() => {
-                  void window.orbital.openPath(flight.worktreePath)
+                  void window.orbital.openPath(worktree.path)
                   closeMenu()
                 }}
               />
@@ -173,13 +173,13 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
                 icon={<Terminal size={13} strokeWidth={1.5} />}
                 label="Open in External Terminal"
                 onClick={() => {
-                  void window.orbital.openInTerminal(flight.worktreePath)
+                  void window.orbital.openInTerminal(worktree.path)
                   closeMenu()
                 }}
               />
               <MenuItem
                 icon={<FolderX size={13} strokeWidth={1.5} />}
-                label="Close Flight"
+                label="Close Worktree"
                 hint="keep worktree"
                 onClick={() => void remove(false)}
               />
@@ -195,7 +195,7 @@ export default function FlightRow({ flight }: { flight: Flight }): JSX.Element {
 
           {del === 'confirm' && (
             <MenuConfirm
-              message="Remove this Flight and delete its worktree?"
+              message="Remove this Worktree and delete it?"
               confirmLabel="Delete"
               danger={false}
               onConfirm={() => void remove(true)}

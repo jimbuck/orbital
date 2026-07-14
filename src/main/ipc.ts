@@ -9,23 +9,23 @@ import {
   normalizeStatus,
   normalizeTaskStatus,
   isPtyTabType,
-  type CreateFlightOptions,
-  type RemoveFlightOptions,
+  type CreateWorktreeOptions,
+  type RemoveWorktreeOptions,
   type TabType,
   type TabConfig,
   type TerminalStatus,
   type SplitDirection,
   type SplitWhere,
   type TaskPatch,
-  type WorkspaceAgentPatch,
-  type Flight,
+  type ProjectAgentPatch,
+  type Worktree,
   type Tab,
   type ControlRequest,
   type ControlResponse
 } from '@shared/types'
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
-import { createWorktreeFlight, removeWorktree } from './services/worktree'
+import { createLinkedWorktree, removeWorktree } from './services/worktree'
 import { copyNodeModulesTree, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
@@ -39,38 +39,38 @@ import { logger, summarizeArgs } from './services/logger'
 /* ---- helpers ----------------------------------------------------------- */
 
 /**
- * Kick off a freshly created worktree Flight's background setup: bulk-copy
- * node_modules off the critical path (awaiting it would block flight creation
- * for minutes), flagging the flight as "setting up" so the rail shows a spinner
- * until the copy finishes. No-op for root Flights or when node_modules isn't a
- * sync target.
+ * Kick off a freshly created linked Worktree's background setup: bulk-copy
+ * node_modules off the critical path (awaiting it would block worktree creation
+ * for minutes), flagging the worktree as "setting up" so the rail shows a
+ * spinner until the copy finishes. No-op for root Worktrees or when
+ * node_modules isn't a sync target.
  */
-function beginWorktreeSetup(flight: Flight, repoPath: string): void {
-  if (flight.kind !== 'worktree') return
+function beginWorktreeSetup(worktree: Worktree, repoPath: string): void {
+  if (worktree.kind !== 'linked') return
   if (!targetsNodeModules(repo.settings.get().envSyncPatterns)) return
-  runtime.markSettingUp(flight.id)
-  void copyNodeModulesTree(repoPath, flight.worktreePath).finally(() => runtime.clearSettingUp(flight.id))
+  runtime.markSettingUp(worktree.id)
+  void copyNodeModulesTree(repoPath, worktree.path).finally(() => runtime.clearSettingUp(worktree.id))
 }
 
-function terminalEnv(flight: Flight, tabId: string): Record<string, string> {
+function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> {
   const path = `${cliDir()}${PATH_DELIM}${process.env.PATH ?? ''}`
   return {
     [ENV.terminalId]: tabId,
-    [ENV.flightId]: flight.id,
-    [ENV.workspaceId]: flight.workspaceId,
+    [ENV.worktreeId]: worktree.id,
+    [ENV.projectId]: worktree.projectId,
     [ENV.socket]: controlPipePath(),
     PATH: path,
     Path: path
   }
 }
 
-function spawnTerminal(flight: Flight, tab: Tab): void {
+function spawnTerminal(worktree: Worktree, tab: Tab): void {
   const shellPref = repo.settings.get().defaultShell || undefined
   runtime.terminals.prepare({
     tabId: tab.id,
-    cwd: flight.worktreePath,
+    cwd: worktree.path,
     shell: shellPref,
-    env: terminalEnv(flight, tab.id)
+    env: terminalEnv(worktree, tab.id)
   })
 }
 
@@ -79,35 +79,35 @@ function spawnTerminal(flight: Flight, tab: Tab): void {
  * (it shells out to `where`/`which`); on failure the tab shows a clear notice and
  * flips to `error` instead of sitting as a silent dead pane.
  */
-async function spawnAgent(flight: Flight, tab: Tab): Promise<void> {
-  const ws = repo.workspaces.get(flight.workspaceId)
-  if (!ws) return
-  const provider = getProvider(tab.config.agentProvider || ws.defaultAgentProvider)
+async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
+  const project = repo.projects.get(worktree.projectId)
+  if (!project) return
+  const provider = getProvider(tab.config.agentProvider || project.defaultAgentProvider)
   try {
     const briefingPath = writeBriefing({
-      workspace: ws,
-      flight,
+      project,
+      worktree,
       tabId: tab.id,
       providerName: provider.id === 'claude' ? 'Claude Code' : provider.displayName,
       // Read the live settings.json (the source of truth), not the cached DB mirror.
       hooksInstalled: claudeHooks.status().installed
     })
     const command = await provider.resolveCommand({
-      workspace: ws,
-      flight,
+      project,
+      worktree,
       briefingPath,
-      execPath: ws.agentExecPath
+      execPath: project.agentExecPath
     })
     // The tab may have been closed during the async executable lookup; don't spawn
     // a PTY nothing references (it could never be killed before app exit).
     if (!repo.tabs.get(tab.id)) {
-      deleteBriefing(flight.id, tab.id)
+      deleteBriefing(worktree.id, tab.id)
       return
     }
     runtime.terminals.prepare({
       tabId: tab.id,
-      cwd: flight.worktreePath,
-      env: terminalEnv(flight, tab.id),
+      cwd: worktree.path,
+      env: terminalEnv(worktree, tab.id),
       command
     })
   } catch (err) {
@@ -118,33 +118,33 @@ async function spawnAgent(flight: Flight, tab: Tab): Promise<void> {
       `\r\n\x1b[31mOrbital could not launch ${provider.displayName}:\x1b[0m\r\n  ${msg}\r\n`
     )
     repo.tabs.updateStatus(tab.id, 'error')
-    repo.flights.recomputeStatus(flight.id)
+    repo.worktrees.recomputeStatus(worktree.id)
     runtime.broadcastState()
     runtime.broadcastAlert()
   }
 }
 
 /** Start the PTY for a freshly created PTY-backed tab (terminal or agent). */
-function startPtyTab(flight: Flight, tab: Tab): void {
-  if (tab.type === 'agent') void spawnAgent(flight, tab)
-  else if (tab.type === 'terminal') spawnTerminal(flight, tab)
+function startPtyTab(worktree: Worktree, tab: Tab): void {
+  if (tab.type === 'agent') void spawnAgent(worktree, tab)
+  else if (tab.type === 'terminal') spawnTerminal(worktree, tab)
 }
 
-/** Create a tab in a Flight (resolving the target pane) and start its PTY if PTY-backed. */
-function createTabInFlight(flightId: string, paneId: string | null, type: TabType, config?: TabConfig): Tab {
-  const flight = repo.flights.get(flightId)
-  if (!flight) throw new Error(`flight ${flightId} not found`)
-  const targetPane = paneId ?? repo.panes.firstPaneId(flightId)
-  if (!targetPane) throw new Error(`flight ${flightId} has no pane`)
-  const tab = repo.tabs.create({ flightId, paneId: targetPane, type, config })
-  startPtyTab(flight, tab)
+/** Create a tab in a Worktree (resolving the target pane) and start its PTY if PTY-backed. */
+function createTabInWorktree(worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig): Tab {
+  const worktree = repo.worktrees.get(worktreeId)
+  if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
+  const targetPane = paneId ?? repo.panes.firstPaneId(worktreeId)
+  if (!targetPane) throw new Error(`worktree ${worktreeId} has no pane`)
+  const tab = repo.tabs.create({ worktreeId, paneId: targetPane, type, config })
+  startPtyTab(worktree, tab)
   return tab
 }
 
-function killFlightTerminals(flightId: string): void {
-  const flight = repo.flights.get(flightId)
-  if (!flight) return
-  for (const pane of flight.panes) {
+function killWorktreeTerminals(worktreeId: string): void {
+  const worktree = repo.worktrees.get(worktreeId)
+  if (!worktree) return
+  for (const pane of worktree.panes) {
     for (const tab of pane.tabs) {
       if (isPtyTabType(tab.type)) runtime.terminals.kill(tab.id)
     }
@@ -157,37 +157,37 @@ function killPaneTerminals(paneId: string): void {
   }
 }
 
-/** Drop an empty pane, collapsing the layout to its sibling — never the Flight's last pane. */
-function collapseIfEmpty(flightId: string, paneId: string): void {
-  const flight = repo.flights.get(flightId)
-  if (!flight || flight.panes.length <= 1) return
-  const pane = flight.panes.find((p) => p.id === paneId)
+/** Drop an empty pane, collapsing the layout to its sibling — never the Worktree's last pane. */
+function collapseIfEmpty(worktreeId: string, paneId: string): void {
+  const worktree = repo.worktrees.get(worktreeId)
+  if (!worktree || worktree.panes.length <= 1) return
+  const pane = worktree.panes.find((p) => p.id === paneId)
   if (!pane || pane.tabs.length > 0) return
-  const next = removePane(flight.layout, paneId)
-  if (next) repo.flights.setLayout(flightId, next)
+  const next = removePane(worktree.layout, paneId)
+  if (next) repo.worktrees.setLayout(worktreeId, next)
   repo.panes.remove(paneId)
 }
 
-/** Register a workspace: create its root Flight and start its watchers. */
-async function registerWorkspace(repoPath: string): Promise<Flight | null> {
-  const existing = repo.workspaces.getByPath(repoPath)
+/** Register a project: create its root Worktree and start its watchers. */
+async function registerProject(repoPath: string): Promise<Worktree | null> {
+  const existing = repo.projects.getByPath(repoPath)
   if (existing) {
     runtime.gitWatcher.watch(repoPath)
     runtime.ensureEnvWatcher(existing.id)
-    return repo.flights.list().find((f) => f.workspaceId === existing.id && f.kind === 'root') ?? null
+    return repo.worktrees.list().find((w) => w.projectId === existing.id && w.kind === 'root') ?? null
   }
   const name = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath
-  const ws = repo.workspaces.create({ name, repoPath })
+  const project = repo.projects.create({ name, repoPath })
   const branch = await git.currentBranch(repoPath).catch(() => 'main')
-  const root = repo.flights.create({
-    workspaceId: ws.id,
+  const root = repo.worktrees.create({
+    projectId: project.id,
     kind: 'root',
     name: 'main',
-    worktreePath: repoPath,
+    path: repoPath,
     branch
   })
   runtime.gitWatcher.watch(repoPath)
-  runtime.ensureEnvWatcher(ws.id)
+  runtime.ensureEnvWatcher(project.id)
   return root
 }
 
@@ -199,7 +199,7 @@ async function registerWorkspace(repoPath: string): Promise<Flight | null> {
  * Claude hooks are registered async, so each event arrives from its own
  * short-lived `orbital hook` process and pipe DELIVERY order is not fire order:
  * the PostToolUse of a turn's final tool call regularly lands after the Stop
- * that ended the turn, wedging an idle flight on the "working" spinner. Every
+ * that ended the turn, wedging an idle worktree on the "working" spinner. Every
  * status-bearing request carries the moment it was fired (stamped by the CLI
  * before its stdin wait); an event older than the last one applied is stale.
  */
@@ -268,8 +268,8 @@ export function registerIpc(): void {
   h(IPC.getState, () => runtime.appState())
   h(IPC.setSettings, (_e, settings) => {
     const s = repo.settings.set(settings)
-    // Env-sync patterns are global settings — refresh every workspace's watcher.
-    for (const ws of repo.workspaces.list()) runtime.ensureEnvWatcher(ws.id)
+    // Env-sync patterns are global settings — refresh every project's watcher.
+    for (const project of repo.projects.list()) runtime.ensureEnvWatcher(project.id)
     // Toggling periodicFetch starts/stops the background fetcher live.
     runtime.configureFetch()
     // Toggling debug logging takes effect immediately (no restart needed).
@@ -278,8 +278,8 @@ export function registerIpc(): void {
     return s
   })
 
-  // ---- workspaces ----
-  h(IPC.addWorkspace, async () => {
+  // ---- projects ----
+  h(IPC.addProject, async () => {
     const win = runtime.window ?? undefined
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Open a git repository' })
@@ -290,118 +290,118 @@ export function registerIpc(): void {
       await dialog.showMessageBox(win ?? new BrowserWindow({ show: false }), {
         type: 'warning',
         message: 'Not a git repository',
-        detail: `${dir} is not inside a git repository. Orbital workspaces must be git repos.`
+        detail: `${dir} is not inside a git repository. Orbital projects must be git repos.`
       })
       return null
     }
-    await registerWorkspace(dir)
-    const ws = repo.workspaces.getByPath(dir)!
+    await registerProject(dir)
+    const project = repo.projects.getByPath(dir)!
     broadcastAll()
-    return ws
+    return project
   })
 
-  h(IPC.removeWorkspace, (_e, workspaceId: string) => {
-    const ws = repo.workspaces.get(workspaceId)
-    if (!ws) return
-    for (const f of repo.flights.list()) {
-      if (f.workspaceId !== workspaceId) continue
-      killFlightTerminals(f.id)
-      runtime.clearDevServers(f.id)
-      if (f.kind === 'worktree') runtime.gitWatcher.unwatch(f.worktreePath)
-      for (const pane of f.panes) {
-        for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(f.id, t.id)
+  h(IPC.removeProject, (_e, projectId: string) => {
+    const project = repo.projects.get(projectId)
+    if (!project) return
+    for (const w of repo.worktrees.list()) {
+      if (w.projectId !== projectId) continue
+      killWorktreeTerminals(w.id)
+      runtime.clearDevServers(w.id)
+      if (w.kind === 'linked') runtime.gitWatcher.unwatch(w.path)
+      for (const pane of w.panes) {
+        for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(w.id, t.id)
       }
     }
-    runtime.gitWatcher.unwatch(ws.repoPath)
-    runtime.removeEnvWatcher(workspaceId)
-    repo.workspaces.remove(workspaceId)
+    runtime.gitWatcher.unwatch(project.repoPath)
+    runtime.removeEnvWatcher(projectId)
+    repo.projects.remove(projectId)
     broadcastAll()
   })
 
-  h(IPC.renameWorkspace, (_e, workspaceId: string, name: string) => {
+  h(IPC.renameProject, (_e, projectId: string, name: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    repo.workspaces.rename(workspaceId, trimmed)
+    repo.projects.rename(projectId, trimmed)
     broadcast()
   })
 
-  // ---- flights / panes / tabs ----
-  h(IPC.createFlight, async (_e, workspaceId: string, opts: CreateFlightOptions) => {
-    const ws = repo.workspaces.get(workspaceId)
-    if (!ws) throw new Error(`workspace ${workspaceId} not found`)
-    const branch = (opts.branch || opts.name || `flight-${Date.now()}`).trim()
-    const flight = await createWorktreeFlight({
-      workspace: ws,
+  // ---- worktrees / panes / tabs ----
+  h(IPC.createWorktree, async (_e, projectId: string, opts: CreateWorktreeOptions) => {
+    const project = repo.projects.get(projectId)
+    if (!project) throw new Error(`project ${projectId} not found`)
+    const branch = (opts.branch || opts.name || `worktree-${Date.now()}`).trim()
+    const worktree = await createLinkedWorktree({
+      project,
       branch,
       name: opts.name,
       baseRef: opts.baseRef,
       taskId: opts.taskId
     })
-    // Link the originating task to this Flight (so it shows the Flight ref and
+    // Link the originating task to this Worktree (so it shows the Worktree ref and
     // drops out of the "unlinked tasks" picker).
-    if (opts.taskId) repo.tasks.setFlight(opts.taskId, flight.id)
-    runtime.gitWatcher.watch(flight.worktreePath)
-    runtime.ensureEnvWatcher(workspaceId)
-    beginWorktreeSetup(flight, ws.repoPath)
+    if (opts.taskId) repo.tasks.setWorktree(opts.taskId, worktree.id)
+    runtime.gitWatcher.watch(worktree.path)
+    runtime.ensureEnvWatcher(projectId)
+    beginWorktreeSetup(worktree, project.repoPath)
     broadcastAll()
-    return repo.flights.get(flight.id)!
+    return repo.worktrees.get(worktree.id)!
   })
 
-  h(IPC.removeFlight, async (_e, flightId: string, opts: RemoveFlightOptions) => {
-    const flight = repo.flights.get(flightId)
-    if (!flight) return
-    if (flight.kind === 'root') throw new Error('the root Flight cannot be removed')
+  h(IPC.removeWorktree, async (_e, worktreeId: string, opts: RemoveWorktreeOptions) => {
+    const worktree = repo.worktrees.get(worktreeId)
+    if (!worktree) return
+    if (worktree.kind === 'root') throw new Error('the root Worktree cannot be removed')
     if (opts.removeWorktree) {
-      const ws = repo.workspaces.get(flight.workspaceId)
-      if (ws) {
+      const project = repo.projects.get(worktree.projectId)
+      if (project) {
         // Dirty guard BEFORE tearing anything down, so a refused removal leaves
-        // the Flight fully intact and its unpushed work is not silently
+        // the Worktree fully intact and its unpushed work is not silently
         // orphaned (PRD §5 unpushed-work guard).
-        if (!opts.force && !(await git.status(flight.worktreePath)).clean) {
+        if (!opts.force && !(await git.status(worktree.path)).clean) {
           throw new Error('The worktree has uncommitted changes.')
         }
         // Release everything holding handles inside the worktree before git
         // deletes it — on Windows a PTY cwd'd there (or a directory watcher)
         // locks the folder and makes the removal fail on the first attempt.
-        runtime.gitWatcher.unwatch(flight.worktreePath)
-        runtime.envWatchers.get(ws.id)?.unregister(flight.worktreePath)
-        killFlightTerminals(flightId)
+        runtime.gitWatcher.unwatch(worktree.path)
+        runtime.envWatchers.get(project.id)?.unregister(worktree.path)
+        killWorktreeTerminals(worktreeId)
         try {
-          await removeWorktree(ws.repoPath, flight.worktreePath, opts.force)
+          await removeWorktree(project.repoPath, worktree.path, opts.force)
         } catch (err) {
-          // Removal still failed — restore the Flight to a usable state
+          // Removal still failed — restore the Worktree to a usable state
           // (watchers back on, fresh PTYs) before surfacing the error.
-          runtime.gitWatcher.watch(flight.worktreePath)
-          runtime.ensureEnvWatcher(ws.id)
-          for (const pane of flight.panes) {
-            for (const tab of pane.tabs) if (isPtyTabType(tab.type)) startPtyTab(flight, tab)
+          runtime.gitWatcher.watch(worktree.path)
+          runtime.ensureEnvWatcher(project.id)
+          for (const pane of worktree.panes) {
+            for (const tab of pane.tabs) if (isPtyTabType(tab.type)) startPtyTab(worktree, tab)
           }
           broadcastAll()
           throw err
         }
       }
     }
-    runtime.gitWatcher.unwatch(flight.worktreePath)
-    runtime.clearDevServers(flightId)
-    killFlightTerminals(flightId)
-    for (const pane of flight.panes) {
-      for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(flightId, t.id)
+    runtime.gitWatcher.unwatch(worktree.path)
+    runtime.clearDevServers(worktreeId)
+    killWorktreeTerminals(worktreeId)
+    for (const pane of worktree.panes) {
+      for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(worktreeId, t.id)
     }
-    repo.flights.remove(flightId)
+    repo.worktrees.remove(worktreeId)
     broadcastAll()
   })
 
-  h(IPC.renameFlight, (_e, flightId: string, name: string) => {
+  h(IPC.renameWorktree, (_e, worktreeId: string, name: string) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    repo.flights.rename(flightId, trimmed)
+    repo.worktrees.rename(worktreeId, trimmed)
     broadcast()
   })
 
-  h(IPC.clearFlightStatus, (_e, flightId: string) => {
-    const flight = repo.flights.get(flightId)
-    if (!flight) return
-    for (const pane of flight.panes) {
+  h(IPC.clearWorktreeStatus, (_e, worktreeId: string) => {
+    const worktree = repo.worktrees.get(worktreeId)
+    if (!worktree) return
+    for (const pane of worktree.panes) {
       for (const tab of pane.tabs) {
         if (!isPtyTabType(tab.type)) continue
         // The user's force-clear supersedes anything already in flight: hook
@@ -411,22 +411,22 @@ export function registerIpc(): void {
         repo.tabs.updateStatus(tab.id, 'idle')
       }
     }
-    repo.flights.recomputeStatus(flightId)
+    repo.worktrees.recomputeStatus(worktreeId)
     broadcastAll()
   })
 
-  h(IPC.listBranches, async (_e, workspaceId: string) => {
-    const ws = repo.workspaces.get(workspaceId)
-    if (!ws) return { branches: [], head: 'HEAD' }
+  h(IPC.listBranches, async (_e, projectId: string) => {
+    const project = repo.projects.get(projectId)
+    if (!project) return { branches: [], head: 'HEAD' }
     const [branches, head] = await Promise.all([
-      git.listBranches(ws.repoPath).catch(() => [] as string[]),
-      git.currentBranch(ws.repoPath).catch(() => 'main')
+      git.listBranches(project.repoPath).catch(() => [] as string[]),
+      git.currentBranch(project.repoPath).catch(() => 'main')
     ])
     return { branches, head }
   })
 
-  h(IPC.setWorkspaceAgent, (_e, workspaceId: string, patch: WorkspaceAgentPatch) => {
-    repo.workspaces.updateAgent(workspaceId, patch)
+  h(IPC.setProjectAgent, (_e, projectId: string, patch: ProjectAgentPatch) => {
+    repo.projects.updateAgent(projectId, patch)
     broadcast()
   })
 
@@ -446,8 +446,8 @@ export function registerIpc(): void {
     return st
   })
 
-  h(IPC.createTab, (_e, flightId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
-    const tab = createTabInFlight(flightId, paneId, type, config)
+  h(IPC.createTab, (_e, worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
+    const tab = createTabInWorktree(worktreeId, paneId, type, config)
     broadcast()
     return tab
   })
@@ -456,11 +456,11 @@ export function registerIpc(): void {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
     if (isPtyTabType(tab.type)) runtime.terminals.kill(tabId)
-    if (tab.type === 'agent') deleteBriefing(tab.flightId, tabId)
+    if (tab.type === 'agent') deleteBriefing(tab.worktreeId, tabId)
     repo.tabs.remove(tabId)
     // Closing the last tab leaves the (now empty) pane in place — it shows the
     // "Open a terminal" prompt. Panes only collapse when a tab is dragged out.
-    repo.flights.recomputeStatus(tab.flightId)
+    repo.worktrees.recomputeStatus(tab.worktreeId)
     broadcastAll()
   })
 
@@ -482,49 +482,49 @@ export function registerIpc(): void {
     if (!tab || tab.paneId === targetPaneId) return
     const source = tab.paneId
     repo.tabs.move(tabId, targetPaneId)
-    collapseIfEmpty(tab.flightId, source)
+    collapseIfEmpty(tab.worktreeId, source)
     broadcast()
   })
 
-  h(IPC.splitPane, (_e, flightId: string, paneId: string, dir: SplitDirection, where: SplitWhere) => {
-    const flight = repo.flights.get(flightId)
-    if (!flight) throw new Error(`flight ${flightId} not found`)
-    const pane = repo.panes.create(flightId)
-    repo.flights.setLayout(flightId, splitAt(flight.layout, paneId, dir, where, pane.id))
+  h(IPC.splitPane, (_e, worktreeId: string, paneId: string, dir: SplitDirection, where: SplitWhere) => {
+    const worktree = repo.worktrees.get(worktreeId)
+    if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
+    const pane = repo.panes.create(worktreeId)
+    repo.worktrees.setLayout(worktreeId, splitAt(worktree.layout, paneId, dir, where, pane.id))
     broadcast()
     return pane
   })
 
-  h(IPC.closePane, (_e, flightId: string, paneId: string) => {
-    const flight = repo.flights.get(flightId)
-    if (!flight) return
-    if (flight.panes.length <= 1) throw new Error('cannot close the last pane')
+  h(IPC.closePane, (_e, worktreeId: string, paneId: string) => {
+    const worktree = repo.worktrees.get(worktreeId)
+    if (!worktree) return
+    if (worktree.panes.length <= 1) throw new Error('cannot close the last pane')
     killPaneTerminals(paneId)
-    const next = removePane(flight.layout, paneId)
-    if (next) repo.flights.setLayout(flightId, next)
+    const next = removePane(worktree.layout, paneId)
+    if (next) repo.worktrees.setLayout(worktreeId, next)
     repo.panes.remove(paneId) // cascades the pane's tabs
-    repo.flights.recomputeStatus(flightId)
+    repo.worktrees.recomputeStatus(worktreeId)
     broadcastAll()
   })
 
   h(IPC.moveTabToEdge, (_e, tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom') => {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
-    const flight = repo.flights.get(tab.flightId)
-    if (!flight) return
+    const worktree = repo.worktrees.get(tab.worktreeId)
+    if (!worktree) return
     const source = tab.paneId
     const { dir, where } = edgeToSplit(edge)
-    const pane = repo.panes.create(flight.id)
-    repo.flights.setLayout(flight.id, splitAt(flight.layout, targetPaneId, dir, where, pane.id))
+    const pane = repo.panes.create(worktree.id)
+    repo.worktrees.setLayout(worktree.id, splitAt(worktree.layout, targetPaneId, dir, where, pane.id))
     repo.tabs.move(tabId, pane.id)
-    collapseIfEmpty(flight.id, source)
+    collapseIfEmpty(worktree.id, source)
     broadcast()
   })
 
-  h(IPC.setSplitRatio, (_e, flightId: string, splitId: string, ratio: number) => {
-    const flight = repo.flights.get(flightId)
-    if (!flight) return
-    repo.flights.setLayout(flightId, setRatio(flight.layout, splitId, ratio))
+  h(IPC.setSplitRatio, (_e, worktreeId: string, splitId: string, ratio: number) => {
+    const worktree = repo.worktrees.get(worktreeId)
+    if (!worktree) return
+    repo.worktrees.setLayout(worktreeId, setRatio(worktree.layout, splitId, ratio))
     broadcast()
   })
 
@@ -546,7 +546,7 @@ export function registerIpc(): void {
       const next = attentionKind.get(tabId) === 'permission_prompt' ? 'working' : 'idle'
       attentionKind.delete(tabId)
       repo.tabs.updateStatus(tabId, next)
-      repo.flights.recomputeStatus(tab.flightId)
+      repo.worktrees.recomputeStatus(tab.worktreeId)
       runtime.broadcastState()
       runtime.broadcastAlert()
     }
@@ -558,71 +558,71 @@ export function registerIpc(): void {
   h(IPC.pasteClipboardImage, () => savePastedImage())
 
   // ---- git ----
-  const flightRepoPath = (flightId: string): string => {
-    const f = repo.flights.get(flightId)
-    if (!f) throw new Error(`flight ${flightId} not found`)
-    return f.worktreePath
+  const worktreeRepoPath = (worktreeId: string): string => {
+    const w = repo.worktrees.get(worktreeId)
+    if (!w) throw new Error(`worktree ${worktreeId} not found`)
+    return w.path
   }
-  h(IPC.gitStatus, (_e, flightId: string) => git.status(flightRepoPath(flightId)))
-  h(IPC.gitStage, async (_e, flightId: string, path: string) => {
-    await git.stage(flightRepoPath(flightId), path)
+  h(IPC.gitStatus, (_e, worktreeId: string) => git.status(worktreeRepoPath(worktreeId)))
+  h(IPC.gitStage, async (_e, worktreeId: string, path: string) => {
+    await git.stage(worktreeRepoPath(worktreeId), path)
     broadcast()
   })
-  h(IPC.gitUnstage, async (_e, flightId: string, path: string) => {
-    await git.unstage(flightRepoPath(flightId), path)
+  h(IPC.gitUnstage, async (_e, worktreeId: string, path: string) => {
+    await git.unstage(worktreeRepoPath(worktreeId), path)
     broadcast()
   })
-  h(IPC.gitStageAll, async (_e, flightId: string) => {
-    await git.stageAll(flightRepoPath(flightId))
+  h(IPC.gitStageAll, async (_e, worktreeId: string) => {
+    await git.stageAll(worktreeRepoPath(worktreeId))
     broadcast()
   })
-  h(IPC.gitUnstageAll, async (_e, flightId: string) => {
-    await git.unstageAll(flightRepoPath(flightId))
+  h(IPC.gitUnstageAll, async (_e, worktreeId: string) => {
+    await git.unstageAll(worktreeRepoPath(worktreeId))
     broadcast()
   })
-  h(IPC.gitDiscard, async (_e, flightId: string, path: string) => {
-    await git.discard(flightRepoPath(flightId), path)
+  h(IPC.gitDiscard, async (_e, worktreeId: string, path: string) => {
+    await git.discard(worktreeRepoPath(worktreeId), path)
     broadcast()
   })
-  h(IPC.gitDiscardAll, async (_e, flightId: string) => {
-    await git.discardAll(flightRepoPath(flightId))
+  h(IPC.gitDiscardAll, async (_e, worktreeId: string) => {
+    await git.discardAll(worktreeRepoPath(worktreeId))
     broadcast()
   })
-  h(IPC.gitCommit, async (_e, flightId: string, message: string, amend?: boolean) => {
-    await git.commit(flightRepoPath(flightId), message, amend)
+  h(IPC.gitCommit, async (_e, worktreeId: string, message: string, amend?: boolean) => {
+    await git.commit(worktreeRepoPath(worktreeId), message, amend)
     broadcast()
   })
-  h(IPC.gitLastCommitMessage, (_e, flightId: string) => git.lastCommitMessage(flightRepoPath(flightId)))
-  h(IPC.gitPush, (_e, flightId: string) => git.push(flightRepoPath(flightId)))
-  h(IPC.gitPull, async (_e, flightId: string) => {
-    await git.pull(flightRepoPath(flightId))
+  h(IPC.gitLastCommitMessage, (_e, worktreeId: string) => git.lastCommitMessage(worktreeRepoPath(worktreeId)))
+  h(IPC.gitPush, (_e, worktreeId: string) => git.push(worktreeRepoPath(worktreeId)))
+  h(IPC.gitPull, async (_e, worktreeId: string) => {
+    await git.pull(worktreeRepoPath(worktreeId))
     broadcast()
   })
-  h(IPC.gitFetch, (_e, flightId: string) => git.fetch(flightRepoPath(flightId)))
-  h(IPC.gitCheckout, async (_e, flightId: string, branch: string, create?: boolean) => {
-    const f = repo.flights.get(flightId)
-    if (!f) throw new Error(`flight ${flightId} not found`)
-    // Worktree Flights are pinned to their branch; only the root checkout may move HEAD.
-    if (f.kind !== 'root') throw new Error('branches can only be switched on the root Flight')
-    await git.checkout(f.worktreePath, branch, create)
-    // Persist the new HEAD onto the Flight so the rail/panel reflect it immediately.
-    await runtime.refreshBranch(f.worktreePath)
+  h(IPC.gitFetch, (_e, worktreeId: string) => git.fetch(worktreeRepoPath(worktreeId)))
+  h(IPC.gitCheckout, async (_e, worktreeId: string, branch: string, create?: boolean) => {
+    const w = repo.worktrees.get(worktreeId)
+    if (!w) throw new Error(`worktree ${worktreeId} not found`)
+    // Linked Worktrees are pinned to their branch; only the root checkout may move HEAD.
+    if (w.kind !== 'root') throw new Error('branches can only be switched on the root Worktree')
+    await git.checkout(w.path, branch, create)
+    // Persist the new HEAD onto the Worktree so the rail/panel reflect it immediately.
+    await runtime.refreshBranch(w.path)
     broadcast()
   })
-  h(IPC.gitDiff, (_e, flightId: string, path: string, staged: boolean) =>
-    git.diff(flightRepoPath(flightId), path, staged)
+  h(IPC.gitDiff, (_e, worktreeId: string, path: string, staged: boolean) =>
+    git.diff(worktreeRepoPath(worktreeId), path, staged)
   )
-  h(IPC.fileTree, (_e, flightId: string) => git.fileTree(flightRepoPath(flightId)))
-  h(IPC.readFile, (_e, flightId: string, path: string) => git.readFile(flightRepoPath(flightId), path))
-  h(IPC.readFileBase64, (_e, flightId: string, path: string) => git.readFileBase64(flightRepoPath(flightId), path))
-  h(IPC.writeFile, async (_e, flightId: string, path: string, content: string) => {
-    await git.writeFile(flightRepoPath(flightId), path, content)
+  h(IPC.fileTree, (_e, worktreeId: string) => git.fileTree(worktreeRepoPath(worktreeId)))
+  h(IPC.readFile, (_e, worktreeId: string, path: string) => git.readFile(worktreeRepoPath(worktreeId), path))
+  h(IPC.readFileBase64, (_e, worktreeId: string, path: string) => git.readFileBase64(worktreeRepoPath(worktreeId), path))
+  h(IPC.writeFile, async (_e, worktreeId: string, path: string, content: string) => {
+    await git.writeFile(worktreeRepoPath(worktreeId), path, content)
     broadcast()
   })
 
   // ---- tasks ----
-  h(IPC.createTask, (_e, workspaceId: string, title: string, description?: string, tags?: string[]) => {
-    const t = repo.tasks.create({ workspaceId, title, description, tags })
+  h(IPC.createTask, (_e, projectId: string, title: string, description?: string, tags?: string[]) => {
+    const t = repo.tasks.create({ projectId, title, description, tags })
     broadcast()
     return t
   })
@@ -640,14 +640,14 @@ export function registerIpc(): void {
   h(IPC.openExternal, (_e, url: string) => shell.openExternal(url))
   // A <webview>'s popups (Ctrl/Cmd-click, target=_blank, window.open) can only be
   // intercepted on the guest's webContents in main. Route them to a NEW internal
-  // browser tab in the same flight/pane and deny the real popup window.
-  h(IPC.registerBrowserView, (_e, webContentsId: number, flightId: string, paneId: string) => {
+  // browser tab in the same worktree/pane and deny the real popup window.
+  h(IPC.registerBrowserView, (_e, webContentsId: number, worktreeId: string, paneId: string) => {
     const wc = webContents.fromId(webContentsId)
     if (!wc) return
     wc.setWindowOpenHandler((details) => {
       const url = details.url
-      if (/^https?:\/\//i.test(url) && repo.flights.get(flightId)) {
-        createTabInFlight(flightId, paneId, 'browser', { url })
+      if (/^https?:\/\//i.test(url) && repo.worktrees.get(worktreeId)) {
+        createTabInWorktree(worktreeId, paneId, 'browser', { url })
         runtime.broadcastState()
       }
       return { action: 'deny' }
@@ -750,11 +750,11 @@ function parseTagList(raw: string): string[] {
     .filter(Boolean)
 }
 
-/** Resolve a task by full id or unique id prefix within a workspace. */
-function resolveTask(workspaceId: string, idArg: string): { task?: ReturnType<typeof repo.tasks.get>; error?: string } {
+/** Resolve a task by full id or unique id prefix within a project. */
+function resolveTask(projectId: string, idArg: string): { task?: ReturnType<typeof repo.tasks.get>; error?: string } {
   const candidates = repo.tasks
     .list()
-    .filter((t) => t.workspaceId === workspaceId && (t.id === idArg || t.id.startsWith(idArg)))
+    .filter((t) => t.projectId === projectId && (t.id === idArg || t.id.startsWith(idArg)))
   if (candidates.length === 0) return { error: `no task matches id '${idArg}'` }
   if (candidates.length > 1) return { error: `id '${idArg}' is ambiguous (${candidates.length} matches)` }
   return { task: candidates[0] }
@@ -763,7 +763,7 @@ function resolveTask(workspaceId: string, idArg: string): { task?: ReturnType<ty
 export async function handleControl(req: ControlRequest): Promise<ControlResponse> {
   // Record every incoming CLI command up front so a crash mid-dispatch still
   // leaves a trail of what the CLI was asking the app to do.
-  logger.cli(req.cmd, { args: req.args, flightId: req.flightId, workspaceId: req.workspaceId })
+  logger.cli(req.cmd, { args: req.args, worktreeId: req.worktreeId, projectId: req.projectId })
   try {
     switch (req.cmd) {
       case 'status': {
@@ -776,38 +776,38 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           // CLI-set needs-attention has no prompt kind — typing then resets to idle.
           attentionKind.delete(req.terminalId)
           repo.tabs.updateStatus(req.terminalId, status)
-          repo.flights.recomputeStatus(tab.flightId)
+          repo.worktrees.recomputeStatus(tab.worktreeId)
           runtime.broadcastState()
           runtime.broadcastAlert()
         }
         return { ok: true, data: { status } }
       }
-      case 'flights': {
-        const wsId = req.workspaceId
-        const list = repo.flights
+      case 'worktrees': {
+        const pid = req.projectId
+        const list = repo.worktrees
           .list()
-          .filter((f) => !wsId || f.workspaceId === wsId)
-          .map((f) => ({ id: f.id, name: f.name, branch: f.branch, status: f.status, kind: f.kind }))
+          .filter((w) => !pid || w.projectId === pid)
+          .map((w) => ({ id: w.id, name: w.name, branch: w.branch, status: w.status, kind: w.kind }))
         return { ok: true, data: list }
       }
-      case 'flight-new': {
-        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
-        const ws = repo.workspaces.get(req.workspaceId)
-        if (!ws) return { ok: false, error: 'workspace not found' }
-        const branch = String(req.args.worktree ?? req.args.name ?? `flight-${Date.now()}`)
-        const flight = await createWorktreeFlight({
-          workspace: ws,
+      case 'worktree-new': {
+        if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+        const project = repo.projects.get(req.projectId)
+        if (!project) return { ok: false, error: 'project not found' }
+        const branch = String(req.args.worktree ?? req.args.name ?? `worktree-${Date.now()}`)
+        const worktree = await createLinkedWorktree({
+          project,
           branch,
           name: req.args.name ? String(req.args.name) : undefined
         })
-        runtime.gitWatcher.watch(flight.worktreePath)
-        runtime.ensureEnvWatcher(ws.id)
-        beginWorktreeSetup(flight, ws.repoPath)
+        runtime.gitWatcher.watch(worktree.path)
+        runtime.ensureEnvWatcher(project.id)
+        beginWorktreeSetup(worktree, project.repoPath)
         runtime.broadcastState()
-        return { ok: true, data: { id: flight.id, name: flight.name, branch: flight.branch } }
+        return { ok: true, data: { id: worktree.id, name: worktree.name, branch: worktree.branch } }
       }
       case 'tab-new': {
-        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
+        if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
         const type = String(req.args.type ?? 'terminal') as TabType
         if (!['terminal', 'browser', 'editor', 'agent'].includes(type)) {
           return { ok: false, error: `unknown tab type '${type}'` }
@@ -821,13 +821,13 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
               : type === 'agent'
                 ? { agentProvider: arg }
                 : {}
-        const tab = createTabInFlight(req.flightId, null, type, config)
+        const tab = createTabInWorktree(req.worktreeId, null, type, config)
         runtime.broadcastState()
         return { ok: true, data: { id: tab.id, type: tab.type } }
       }
       case 'hook': {
         // Invoked by Claude Code hooks via `orbital hook <event>`. The CLI only
-        // reaches here for Orbital-spawned sessions (it guards on ORBITAL_FLIGHT_ID).
+        // reaches here for Orbital-spawned sessions (it guards on ORBITAL_WORKTREE_ID).
         if (!req.terminalId) return { ok: true }
         const tab = repo.tabs.get(req.terminalId)
         if (!tab) return { ok: true }
@@ -843,17 +843,17 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           attentionKind.delete(req.terminalId)
         }
         repo.tabs.updateStatus(req.terminalId, status)
-        repo.flights.recomputeStatus(tab.flightId)
+        repo.worktrees.recomputeStatus(tab.worktreeId)
         runtime.broadcastState()
         runtime.broadcastAlert()
         return { ok: true, data: { status } }
       }
       case 'task-add': {
-        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const title = String(req.args.title ?? '').trim()
         if (!title) return { ok: false, error: 'task title required' }
         const task = repo.tasks.create({
-          workspaceId: req.workspaceId,
+          projectId: req.projectId,
           title,
           description: req.args.description ? String(req.args.description) : undefined,
           tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined
@@ -862,26 +862,26 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         return { ok: true, data: { id: task.id, title: task.title } }
       }
       case 'task-list': {
-        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const all = req.args.all === true || req.args.all === 'true'
         const list = repo.tasks
           .list()
-          .filter((t) => t.workspaceId === req.workspaceId && (all || t.status !== 'done'))
+          .filter((t) => t.projectId === req.projectId && (all || t.status !== 'done'))
           .map((t) => ({
             id: t.id,
             status: t.status,
             title: t.title,
             description: t.description,
             tags: t.tags,
-            flightId: t.flightId
+            worktreeId: t.worktreeId
           }))
         return { ok: true, data: list }
       }
       case 'task-show': {
-        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const idArg = String(req.args.id ?? '').trim()
         if (!idArg) return { ok: false, error: 'task id required' }
-        const { task, error } = resolveTask(req.workspaceId, idArg)
+        const { task, error } = resolveTask(req.projectId, idArg)
         if (!task) return { ok: false, error }
         return {
           ok: true,
@@ -891,15 +891,15 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
             title: task.title,
             description: task.description,
             tags: task.tags,
-            flightId: task.flightId
+            worktreeId: task.worktreeId
           }
         }
       }
       case 'task-update': {
-        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const idArg = String(req.args.id ?? '').trim()
         if (!idArg) return { ok: false, error: 'task id required' }
-        const { task, error } = resolveTask(req.workspaceId, idArg)
+        const { task, error } = resolveTask(req.projectId, idArg)
         if (!task) return { ok: false, error }
         const patch: TaskPatch = {}
         if (req.args.status !== undefined) {
@@ -916,32 +916,32 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         return { ok: true, data: { id: updated.id, status: updated.status, title: updated.title } }
       }
       case 'task-delete': {
-        if (!req.workspaceId) return { ok: false, error: 'no ORBITAL_WORKSPACE_ID in environment' }
+        if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const idArg = String(req.args.id ?? '').trim()
         if (!idArg) return { ok: false, error: 'task id required' }
-        const { task, error } = resolveTask(req.workspaceId, idArg)
+        const { task, error } = resolveTask(req.projectId, idArg)
         if (!task) return { ok: false, error }
         repo.tasks.remove(task.id)
         runtime.broadcastState()
         return { ok: true, data: { id: task.id, title: task.title } }
       }
       case 'server-add': {
-        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
+        if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
         const url = normalizeServerUrl(String(req.args.url ?? ''))
         if (!url) return { ok: false, error: `invalid server url '${req.args.url}'` }
-        const servers = runtime.addDevServer(req.flightId, url)
+        const servers = runtime.addDevServer(req.worktreeId, url)
         return { ok: true, data: { url, servers } }
       }
       case 'server-remove': {
-        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
+        if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
         const url = normalizeServerUrl(String(req.args.url ?? ''))
         if (!url) return { ok: false, error: `invalid server url '${req.args.url}'` }
-        const servers = runtime.removeDevServer(req.flightId, url)
+        const servers = runtime.removeDevServer(req.worktreeId, url)
         return { ok: true, data: { url, servers } }
       }
       case 'server-list': {
-        if (!req.flightId) return { ok: false, error: 'no ORBITAL_FLIGHT_ID in environment' }
-        return { ok: true, data: runtime.devServersFor(req.flightId) }
+        if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
+        return { ok: true, data: runtime.devServersFor(req.worktreeId) }
       }
       default:
         return { ok: false, error: `unknown command '${(req as ControlRequest).cmd}'` }
@@ -953,18 +953,18 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
   }
 }
 
-/** On startup, resume watchers for already-registered workspaces and their worktrees. */
-export function resumeWorkspaces(): void {
+/** On startup, resume watchers for already-registered projects and their worktrees. */
+export function resumeProjects(): void {
   const checkouts = new Set<string>()
-  for (const ws of repo.workspaces.list()) {
-    runtime.gitWatcher.watch(ws.repoPath)
-    runtime.ensureEnvWatcher(ws.id)
-    checkouts.add(ws.repoPath)
+  for (const project of repo.projects.list()) {
+    runtime.gitWatcher.watch(project.repoPath)
+    runtime.ensureEnvWatcher(project.id)
+    checkouts.add(project.repoPath)
   }
-  for (const f of repo.flights.list()) {
-    if (f.kind === 'worktree' && existsSync(f.worktreePath)) {
-      runtime.gitWatcher.watch(f.worktreePath)
-      checkouts.add(f.worktreePath)
+  for (const w of repo.worktrees.list()) {
+    if (w.kind === 'linked' && existsSync(w.path)) {
+      runtime.gitWatcher.watch(w.path)
+      checkouts.add(w.path)
     }
   }
   // Branches can move while the app is closed — resync stored names to git HEAD.
@@ -977,31 +977,31 @@ export function resumeWorkspaces(): void {
  */
 export function resumeTerminals(): void {
   const keepBriefings = new Set<string>()
-  for (const flight of repo.flights.list()) {
+  for (const worktree of repo.worktrees.list()) {
     // Track every current agent tab so the prune below only drops orphans.
-    for (const pane of flight.panes) {
+    for (const pane of worktree.panes) {
       for (const tab of pane.tabs) {
-        if (tab.type === 'agent') keepBriefings.add(briefingKey(flight.id, tab.id))
+        if (tab.type === 'agent') keepBriefings.add(briefingKey(worktree.id, tab.id))
       }
     }
     // A worktree may have been removed externally while the app was closed;
-    // node-pty throws synchronously on a missing cwd, so skip such Flights.
-    if (!existsSync(flight.worktreePath)) continue
-    for (const pane of flight.panes) {
+    // node-pty throws synchronously on a missing cwd, so skip such Worktrees.
+    if (!existsSync(worktree.path)) continue
+    for (const pane of worktree.panes) {
       for (const tab of pane.tabs) {
         if (!isPtyTabType(tab.type)) continue
         repo.tabs.updateStatus(tab.id, 'idle')
         try {
           // spawnAgent owns its own error handling; spawnTerminal can throw synchronously.
-          startPtyTab(flight, tab)
+          startPtyTab(worktree, tab)
         } catch (err) {
           console.error(`failed to respawn ${tab.type} ${tab.id}:`, err)
         }
       }
     }
-    repo.flights.recomputeStatus(flight.id)
+    repo.worktrees.recomputeStatus(worktree.id)
   }
-  // Drop briefing files left behind by tabs/flights removed while the app was closed.
+  // Drop briefing files left behind by tabs/worktrees removed while the app was closed.
   pruneBriefings(keepBriefings)
   prunePastedImages()
 }

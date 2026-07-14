@@ -15,8 +15,8 @@ import TaskCardContextMenu from '../panel/TaskCardContextMenu'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import AddTaskCard from '../panel/AddTaskCard'
 import Settings from './Settings'
-import AddWorkspace from './AddWorkspace'
-import NewFlight from './NewFlight'
+import AddProject from './AddProject'
+import NewWorktree from './NewWorktree'
 import EditTask from './EditTask'
 import About from './About'
 
@@ -118,19 +118,19 @@ export function ModalShell({
 }
 
 /* ============================================================================
- * Full-board modal ("All tasks") — tasks for the active workspace, by status.
+ * Full-board modal ("All tasks") — tasks across all projects, by status.
  * ========================================================================== */
 
 function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void }): React.JSX.Element {
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
   const openModal = useStore((s) => s.openModal)
-  // Look up the card's workspace the same way TaskCardContextMenu does, so the
-  // Create Flight flow can seed the New Flight modal with the right workspace.
-  const workspace = useStore((s) => s.workspaces.find((w) => w.id === task.workspaceId))
-  // "No linked flight" mirrors TaskCardContextMenu: a fresh todo with no Flight
-  // yet. If the task already has a matching Flight, don't offer Create Flight.
-  const hasFlight = useStore((s) => !!task.flightId && s.flights.some((f) => f.id === task.flightId))
-  const showCreateFlight = task.status === 'todo' && !hasFlight
+  // Look up the card's project the same way TaskCardContextMenu does, so the
+  // Create Worktree flow can seed the New Worktree modal with the right project.
+  const project = useStore((s) => s.projects.find((p) => p.id === task.projectId))
+  // "No linked worktree" mirrors TaskCardContextMenu: a fresh todo with no Worktree
+  // yet. If the task already has a matching Worktree, don't offer Create Worktree.
+  const hasWorktree = useStore((s) => !!task.worktreeId && s.worktrees.some((w) => w.id === task.worktreeId))
+  const showCreateWorktree = task.status === 'todo' && !hasWorktree
   return (
     <div
       draggable
@@ -154,21 +154,21 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         </span>
       </div>
       <TaskTagsDisplay task={task} />
-      {showCreateFlight && (
+      {showCreateWorktree && (
         // stopPropagation + a no-op mouseDown keep the click from starting a
         // card drag. openModal now STACKS over the board (see ModalRoot), so
-        // New Flight opens on top and closing it returns here.
+        // New Worktree opens on top and closing it returns here.
         <button
           type="button"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
-            openModal('newFlight', { workspace, task })
+            openModal('newWorktree', { project, task })
           }}
           className="mt-2 inline-flex items-center gap-1 rounded-btn border border-line-2 px-2 py-1 text-[10.5px] font-semibold text-accent hover:bg-hover transition-colors no-drag"
         >
           <Plus size={12} strokeWidth={1.5} />
-          Create Flight
+          Create Worktree
         </button>
       )}
       {menuPos && <TaskCardContextMenu task={task} pos={menuPos} onClose={() => setMenuPos(null)} />}
@@ -177,18 +177,18 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
 }
 
 function FullBoard(): React.JSX.Element {
-  const workspaces = useStore((s) => s.workspaces)
+  const projects = useStore((s) => s.projects)
   const tasks = useStore((s) => s.tasks)
   const closeModal = useStore((s) => s.closeModal)
   const [hoverCell, setHoverCell] = useState<string | null>(null)
 
-  // Dropping a card on a cell sets its status (column) and workspace (lane).
-  const dropTask = (taskId: string, workspaceId: string, status: TaskStatus): void => {
+  // Dropping a card on a cell sets its status (column) and project (lane).
+  const dropTask = (taskId: string, projectId: string, status: TaskStatus): void => {
     const task = tasks.find((t) => t.id === taskId)
     if (!task) return
     const patch: TaskPatch = {}
     if (task.status !== status) patch.status = status
-    if (task.workspaceId !== workspaceId) patch.workspaceId = workspaceId
+    if (task.projectId !== projectId) patch.projectId = projectId
     if (Object.keys(patch).length) void window.orbital.updateTask(taskId, patch)
   }
 
@@ -200,9 +200,9 @@ function FullBoard(): React.JSX.Element {
     >
       <header className="flex flex-none items-center justify-between px-[18px] py-[15px] border-b border-soft">
         <div className="min-w-0">
-          <div className="text-[15px] font-bold text-text">All tasks across your workspaces</div>
+          <div className="text-[15px] font-bold text-text">All tasks across your projects</div>
           <div className="mt-0.5 text-[11.5px] text-dim">
-            {workspaces.length} workspace{workspaces.length === 1 ? '' : 's'} · {tasks.length} task
+            {projects.length} project{projects.length === 1 ? '' : 's'} · {tasks.length} task
             {tasks.length === 1 ? '' : 's'}
           </div>
         </div>
@@ -217,11 +217,11 @@ function FullBoard(): React.JSX.Element {
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-[18px]">
-        {workspaces.length === 0 ? (
-          <div className="text-[12px] text-faint">No workspaces yet.</div>
+        {projects.length === 0 ? (
+          <div className="text-[12px] text-faint">No projects yet.</div>
         ) : (
           <div className="min-w-[820px]">
-            {/* Status column headers, offset by the workspace-label gutter.
+            {/* Status column headers, offset by the project-label gutter.
                 No bottom padding so the header sits flush on the first lane. */}
             <div className="sticky top-0 z-10 flex gap-2 bg-panel">
               <div className="w-[150px] flex-none" />
@@ -243,21 +243,21 @@ function FullBoard(): React.JSX.Element {
               })}
             </div>
 
-            {/* One swim-lane per workspace, split by a dashed lane line. */}
-            {workspaces.map((ws, i) => (
+            {/* One swim-lane per project, split by a dashed lane line. */}
+            {projects.map((p, i) => (
               <div
-                key={ws.id}
+                key={p.id}
                 className={`flex gap-2 ${i > 0 ? 'border-t border-dashed border-line-strong' : ''}`}
               >
                 <div className="flex w-[150px] flex-none items-center gap-2 py-3">
                   <span className="size-[7px] flex-none rounded-full bg-dim" />
-                  <span className="truncate text-[12px] font-bold text-text-2" title={ws.repoPath}>
-                    {ws.name}
+                  <span className="truncate text-[12px] font-bold text-text-2" title={p.repoPath}>
+                    {p.name}
                   </span>
                 </div>
                 {TASK_STATUSES.map((status) => {
-                  const cell = tasks.filter((t) => t.workspaceId === ws.id && t.status === status)
-                  const cellKey = `${ws.id}:${status}`
+                  const cell = tasks.filter((t) => t.projectId === p.id && t.status === status)
+                  const cellKey = `${p.id}:${status}`
                   const isHover = hoverCell === cellKey
                   return (
                     <div
@@ -270,7 +270,7 @@ function FullBoard(): React.JSX.Element {
                       onDrop={(e) => {
                         e.preventDefault()
                         const id = e.dataTransfer.getData('text/plain')
-                        if (id) dropTask(id, ws.id, status)
+                        if (id) dropTask(id, p.id, status)
                         setHoverCell(null)
                       }}
                       className={`group/col flex min-h-[88px] flex-1 flex-col gap-2 border-x p-2 transition-colors ${
@@ -280,7 +280,7 @@ function FullBoard(): React.JSX.Element {
                       {cell.map((task) => (
                         <BoardTaskCard key={task.id} task={task} onDragEnd={() => setHoverCell(null)} />
                       ))}
-                      <AddTaskCard workspaceId={ws.id} status={status} />
+                      <AddTaskCard projectId={p.id} status={status} />
                     </div>
                   )
                 })}
@@ -329,8 +329,8 @@ export default function ModalRoot(): React.JSX.Element | null {
             className="fixed inset-0 grid place-items-center bg-[#05070b]/70 p-8 no-drag"
           >
             {entry.type === 'settings' && <Settings />}
-            {entry.type === 'addWorkspace' && <AddWorkspace />}
-            {entry.type === 'newFlight' && <NewFlight />}
+            {entry.type === 'addProject' && <AddProject />}
+            {entry.type === 'newWorktree' && <NewWorktree />}
             {entry.type === 'editTask' && <EditTask />}
             {entry.type === 'board' && <FullBoard />}
             {entry.type === 'about' && <About />}

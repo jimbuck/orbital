@@ -4,8 +4,8 @@ import {
   type OrbitalApi,
   type AppState,
   type Settings,
-  type Workspace,
-  type Flight,
+  type Project,
+  type Worktree,
   type Tab,
   type Pane,
   type Task,
@@ -13,10 +13,10 @@ import {
   type TabConfig,
   type SplitDirection,
   type SplitWhere,
-  type CreateFlightOptions,
-  type RemoveFlightOptions,
+  type CreateWorktreeOptions,
+  type RemoveWorktreeOptions,
   type TaskPatch,
-  type WorkspaceAgentPatch,
+  type ProjectAgentPatch,
   type ClaudeHooksStatus,
   type ClaudeHooksPlan,
   type GitStatus,
@@ -42,31 +42,31 @@ const api: OrbitalApi = {
   getState: () => ipcRenderer.invoke(IPC.getState) as Promise<AppState>,
   setSettings: (settings: Settings) => ipcRenderer.invoke(IPC.setSettings, settings) as Promise<Settings>,
 
-  // workspaces
-  addWorkspace: () => ipcRenderer.invoke(IPC.addWorkspace) as Promise<Workspace | null>,
-  removeWorkspace: (id: string) => ipcRenderer.invoke(IPC.removeWorkspace, id) as Promise<void>,
-  renameWorkspace: (id: string, name: string) =>
-    ipcRenderer.invoke(IPC.renameWorkspace, id, name) as Promise<void>,
+  // projects
+  addProject: () => ipcRenderer.invoke(IPC.addProject) as Promise<Project | null>,
+  removeProject: (id: string) => ipcRenderer.invoke(IPC.removeProject, id) as Promise<void>,
+  renameProject: (id: string, name: string) =>
+    ipcRenderer.invoke(IPC.renameProject, id, name) as Promise<void>,
 
-  // flights / panes / tabs
-  createFlight: (workspaceId: string, opts: CreateFlightOptions) =>
-    ipcRenderer.invoke(IPC.createFlight, workspaceId, opts) as Promise<Flight>,
-  removeFlight: (flightId: string, opts: RemoveFlightOptions) =>
-    ipcRenderer.invoke(IPC.removeFlight, flightId, opts) as Promise<void>,
-  renameFlight: (flightId: string, name: string) =>
-    ipcRenderer.invoke(IPC.renameFlight, flightId, name) as Promise<void>,
-  clearFlightStatus: (flightId: string) =>
-    ipcRenderer.invoke(IPC.clearFlightStatus, flightId) as Promise<void>,
-  listBranches: (workspaceId: string) =>
-    ipcRenderer.invoke(IPC.listBranches, workspaceId) as Promise<BranchInfo>,
-  setWorkspaceAgent: (workspaceId: string, patch: WorkspaceAgentPatch) =>
-    ipcRenderer.invoke(IPC.setWorkspaceAgent, workspaceId, patch) as Promise<void>,
+  // worktrees / panes / tabs
+  createWorktree: (projectId: string, opts: CreateWorktreeOptions) =>
+    ipcRenderer.invoke(IPC.createWorktree, projectId, opts) as Promise<Worktree>,
+  removeWorktree: (worktreeId: string, opts: RemoveWorktreeOptions) =>
+    ipcRenderer.invoke(IPC.removeWorktree, worktreeId, opts) as Promise<void>,
+  renameWorktree: (worktreeId: string, name: string) =>
+    ipcRenderer.invoke(IPC.renameWorktree, worktreeId, name) as Promise<void>,
+  clearWorktreeStatus: (worktreeId: string) =>
+    ipcRenderer.invoke(IPC.clearWorktreeStatus, worktreeId) as Promise<void>,
+  listBranches: (projectId: string) =>
+    ipcRenderer.invoke(IPC.listBranches, projectId) as Promise<BranchInfo>,
+  setProjectAgent: (projectId: string, patch: ProjectAgentPatch) =>
+    ipcRenderer.invoke(IPC.setProjectAgent, projectId, patch) as Promise<void>,
   claudeHooksStatus: () => ipcRenderer.invoke(IPC.claudeHooksStatus) as Promise<ClaudeHooksStatus>,
   claudeHooksPlan: () => ipcRenderer.invoke(IPC.claudeHooksPlan) as Promise<ClaudeHooksPlan>,
   installClaudeHooks: () => ipcRenderer.invoke(IPC.installClaudeHooks) as Promise<ClaudeHooksStatus>,
   removeClaudeHooks: () => ipcRenderer.invoke(IPC.removeClaudeHooks) as Promise<ClaudeHooksStatus>,
-  createTab: (flightId: string, paneId: string | null, type: TabType, config?: TabConfig) =>
-    ipcRenderer.invoke(IPC.createTab, flightId, paneId, type, config) as Promise<Tab>,
+  createTab: (worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig) =>
+    ipcRenderer.invoke(IPC.createTab, worktreeId, paneId, type, config) as Promise<Tab>,
   closeTab: (tabId: string) => ipcRenderer.invoke(IPC.closeTab, tabId) as Promise<void>,
   renameTab: (tabId: string, title: string) =>
     ipcRenderer.invoke(IPC.renameTab, tabId, title) as Promise<void>,
@@ -74,14 +74,14 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.setActiveTab, paneId, tabId) as Promise<void>,
   moveTab: (tabId: string, targetPaneId: string) =>
     ipcRenderer.invoke(IPC.moveTab, tabId, targetPaneId) as Promise<void>,
-  splitPane: (flightId: string, paneId: string, dir: SplitDirection, where: SplitWhere) =>
-    ipcRenderer.invoke(IPC.splitPane, flightId, paneId, dir, where) as Promise<Pane>,
-  closePane: (flightId: string, paneId: string) =>
-    ipcRenderer.invoke(IPC.closePane, flightId, paneId) as Promise<void>,
+  splitPane: (worktreeId: string, paneId: string, dir: SplitDirection, where: SplitWhere) =>
+    ipcRenderer.invoke(IPC.splitPane, worktreeId, paneId, dir, where) as Promise<Pane>,
+  closePane: (worktreeId: string, paneId: string) =>
+    ipcRenderer.invoke(IPC.closePane, worktreeId, paneId) as Promise<void>,
   moveTabToEdge: (tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom') =>
     ipcRenderer.invoke(IPC.moveTabToEdge, tabId, targetPaneId, edge) as Promise<void>,
-  setSplitRatio: (flightId: string, splitId: string, ratio: number) =>
-    ipcRenderer.invoke(IPC.setSplitRatio, flightId, splitId, ratio) as Promise<void>,
+  setSplitRatio: (worktreeId: string, splitId: string, ratio: number) =>
+    ipcRenderer.invoke(IPC.setSplitRatio, worktreeId, splitId, ratio) as Promise<void>,
 
   // terminals (fire-and-forget)
   terminalInput: (tabId: string, data: string) => ipcRenderer.send(IPC.terminalInput, tabId, data),
@@ -93,45 +93,45 @@ const api: OrbitalApi = {
   pasteClipboardImage: () => ipcRenderer.invoke(IPC.pasteClipboardImage) as Promise<string | null>,
 
   // git
-  gitStatus: (flightId: string) => ipcRenderer.invoke(IPC.gitStatus, flightId) as Promise<GitStatus>,
-  gitStage: (flightId: string, path: string) => ipcRenderer.invoke(IPC.gitStage, flightId, path) as Promise<void>,
-  gitUnstage: (flightId: string, path: string) =>
-    ipcRenderer.invoke(IPC.gitUnstage, flightId, path) as Promise<void>,
-  gitStageAll: (flightId: string) => ipcRenderer.invoke(IPC.gitStageAll, flightId) as Promise<void>,
-  gitUnstageAll: (flightId: string) => ipcRenderer.invoke(IPC.gitUnstageAll, flightId) as Promise<void>,
-  gitDiscard: (flightId: string, path: string) =>
-    ipcRenderer.invoke(IPC.gitDiscard, flightId, path) as Promise<void>,
-  gitDiscardAll: (flightId: string) => ipcRenderer.invoke(IPC.gitDiscardAll, flightId) as Promise<void>,
-  gitCommit: (flightId: string, message: string, amend?: boolean) =>
-    ipcRenderer.invoke(IPC.gitCommit, flightId, message, amend) as Promise<void>,
-  gitLastCommitMessage: (flightId: string) =>
-    ipcRenderer.invoke(IPC.gitLastCommitMessage, flightId) as Promise<string>,
-  gitPush: (flightId: string) => ipcRenderer.invoke(IPC.gitPush, flightId) as Promise<void>,
-  gitPull: (flightId: string) => ipcRenderer.invoke(IPC.gitPull, flightId) as Promise<void>,
-  gitFetch: (flightId: string) => ipcRenderer.invoke(IPC.gitFetch, flightId) as Promise<void>,
-  gitCheckout: (flightId: string, branch: string, create?: boolean) =>
-    ipcRenderer.invoke(IPC.gitCheckout, flightId, branch, create) as Promise<void>,
-  gitDiff: (flightId: string, path: string, staged: boolean) =>
-    ipcRenderer.invoke(IPC.gitDiff, flightId, path, staged) as Promise<FileDiff>,
-  fileTree: (flightId: string) => ipcRenderer.invoke(IPC.fileTree, flightId) as Promise<FileNode[]>,
-  readFile: (flightId: string, path: string) =>
-    ipcRenderer.invoke(IPC.readFile, flightId, path) as Promise<string>,
-  readFileBase64: (flightId: string, path: string) =>
-    ipcRenderer.invoke(IPC.readFileBase64, flightId, path) as Promise<string>,
-  writeFile: (flightId: string, path: string, content: string) =>
-    ipcRenderer.invoke(IPC.writeFile, flightId, path, content) as Promise<void>,
+  gitStatus: (worktreeId: string) => ipcRenderer.invoke(IPC.gitStatus, worktreeId) as Promise<GitStatus>,
+  gitStage: (worktreeId: string, path: string) => ipcRenderer.invoke(IPC.gitStage, worktreeId, path) as Promise<void>,
+  gitUnstage: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.gitUnstage, worktreeId, path) as Promise<void>,
+  gitStageAll: (worktreeId: string) => ipcRenderer.invoke(IPC.gitStageAll, worktreeId) as Promise<void>,
+  gitUnstageAll: (worktreeId: string) => ipcRenderer.invoke(IPC.gitUnstageAll, worktreeId) as Promise<void>,
+  gitDiscard: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.gitDiscard, worktreeId, path) as Promise<void>,
+  gitDiscardAll: (worktreeId: string) => ipcRenderer.invoke(IPC.gitDiscardAll, worktreeId) as Promise<void>,
+  gitCommit: (worktreeId: string, message: string, amend?: boolean) =>
+    ipcRenderer.invoke(IPC.gitCommit, worktreeId, message, amend) as Promise<void>,
+  gitLastCommitMessage: (worktreeId: string) =>
+    ipcRenderer.invoke(IPC.gitLastCommitMessage, worktreeId) as Promise<string>,
+  gitPush: (worktreeId: string) => ipcRenderer.invoke(IPC.gitPush, worktreeId) as Promise<void>,
+  gitPull: (worktreeId: string) => ipcRenderer.invoke(IPC.gitPull, worktreeId) as Promise<void>,
+  gitFetch: (worktreeId: string) => ipcRenderer.invoke(IPC.gitFetch, worktreeId) as Promise<void>,
+  gitCheckout: (worktreeId: string, branch: string, create?: boolean) =>
+    ipcRenderer.invoke(IPC.gitCheckout, worktreeId, branch, create) as Promise<void>,
+  gitDiff: (worktreeId: string, path: string, staged: boolean) =>
+    ipcRenderer.invoke(IPC.gitDiff, worktreeId, path, staged) as Promise<FileDiff>,
+  fileTree: (worktreeId: string) => ipcRenderer.invoke(IPC.fileTree, worktreeId) as Promise<FileNode[]>,
+  readFile: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.readFile, worktreeId, path) as Promise<string>,
+  readFileBase64: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.readFileBase64, worktreeId, path) as Promise<string>,
+  writeFile: (worktreeId: string, path: string, content: string) =>
+    ipcRenderer.invoke(IPC.writeFile, worktreeId, path, content) as Promise<void>,
 
   // tasks
-  createTask: (workspaceId: string, title: string, description?: string, tags?: string[]) =>
-    ipcRenderer.invoke(IPC.createTask, workspaceId, title, description, tags) as Promise<Task>,
+  createTask: (projectId: string, title: string, description?: string, tags?: string[]) =>
+    ipcRenderer.invoke(IPC.createTask, projectId, title, description, tags) as Promise<Task>,
   updateTask: (taskId: string, patch: TaskPatch) =>
     ipcRenderer.invoke(IPC.updateTask, taskId, patch) as Promise<Task>,
   deleteTask: (taskId: string) => ipcRenderer.invoke(IPC.deleteTask, taskId) as Promise<void>,
 
   // browser / window
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
-  registerBrowserView: (webContentsId: number, flightId: string, paneId: string) =>
-    ipcRenderer.invoke(IPC.registerBrowserView, webContentsId, flightId, paneId) as Promise<void>,
+  registerBrowserView: (webContentsId: number, worktreeId: string, paneId: string) =>
+    ipcRenderer.invoke(IPC.registerBrowserView, webContentsId, worktreeId, paneId) as Promise<void>,
   openPath: (path: string) => ipcRenderer.invoke(IPC.openPath, path) as Promise<void>,
   openInTerminal: (path: string) => ipcRenderer.invoke(IPC.openInTerminal, path) as Promise<void>,
   openLogFolder: () => ipcRenderer.invoke(IPC.openLogFolder) as Promise<void>,

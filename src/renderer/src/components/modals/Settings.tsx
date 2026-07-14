@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
-import { useStore, activeWorkspace } from '@renderer/store'
+import { useStore, activeProject } from '@renderer/store'
 import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan, ThemeMode } from '@shared/types'
 import { SUPPORTED_AGENTS } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
@@ -67,7 +67,7 @@ const envChip =
   'inline-flex items-center gap-2 rounded-[7px] bg-accent/10 border border-accent/25 pl-[11px] pr-[9px] py-[5px] font-mono text-[11.5px] text-blue'
 
 export default function Settings(): React.JSX.Element {
-  const ws = useStore(activeWorkspace)
+  const project = useStore(activeProject)
   const settings = useStore((s) => s.settings)
   const closeModal = useStore((s) => s.closeModal)
 
@@ -87,9 +87,9 @@ export default function Settings(): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Per-workspace agent config.
-  const [agentProvider, setAgentProvider] = useState(() => ws?.defaultAgentProvider ?? 'claude')
-  const [agentExecPath, setAgentExecPath] = useState(() => ws?.agentExecPath ?? '')
+  // Per-project agent config.
+  const [agentProvider, setAgentProvider] = useState(() => project?.defaultAgentProvider ?? 'claude')
+  const [agentExecPath, setAgentExecPath] = useState(() => project?.agentExecPath ?? '')
 
   // Machine-global Claude status hooks.
   const [hooks, setHooks] = useState<ClaudeHooksStatus | null>(null)
@@ -143,7 +143,7 @@ export default function Settings(): React.JSX.Element {
     })
   }
 
-  // The default-agent picker only offers enabled agents; if the workspace's
+  // The default-agent picker only offers enabled agents; if the project's
   // current default was disabled, still show it so the select has a valid value.
   const agentOptions = SUPPORTED_AGENTS.filter(
     (a) => enabledAgents.includes(a.id) || a.id === agentProvider
@@ -161,8 +161,8 @@ export default function Settings(): React.JSX.Element {
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
-      if (ws) {
-        await window.orbital.setWorkspaceAgent(ws.id, {
+      if (project) {
+        await window.orbital.setProjectAgent(project.id, {
           defaultAgentProvider: agentProvider,
           agentExecPath: agentExecPath.trim()
         })
@@ -187,7 +187,7 @@ export default function Settings(): React.JSX.Element {
   return (
     <ModalShell
       title="Settings"
-      subtitle={`Workspace · ${ws?.name ?? '—'}`}
+      subtitle={`Project · ${project?.name ?? '—'}`}
       width={540}
       onClose={closeModal}
       footer={
@@ -204,8 +204,8 @@ export default function Settings(): React.JSX.Element {
       {/* Environment file sync */}
       <div className={sectionLabel}>Environment file sync</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
-        Files matching these patterns are copied from the root checkout into every worktree Flight and kept in sync.
-        Applies to all workspaces.
+        Files matching these patterns are copied from the root checkout into every Worktree and kept in sync.
+        Applies to all projects.
       </p>
       <div className="mt-3 flex flex-wrap gap-[7px]">
         {patterns.map((p) => (
@@ -317,7 +317,7 @@ export default function Settings(): React.JSX.Element {
       {/* Agent */}
       <div className={sectionLabel}>Agent</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
-        An agent tab boots the coding CLI straight into the Flight&apos;s worktree. Hide agents you
+        An agent tab boots the coding CLI straight into the Worktree&apos;s working directory. Hide agents you
         don&apos;t use from the new-tab menus.
       </p>
       <div className="mt-2">
@@ -371,7 +371,7 @@ export default function Settings(): React.JSX.Element {
           <div className="min-w-0">
             <div className="text-[12.5px] font-semibold text-text-2">Claude status hooks</div>
             <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
-              Let flights report status from Claude&apos;s own lifecycle events — no agent
+              Let Worktrees report status from Claude&apos;s own lifecycle events — no agent
               self-reporting needed. Writes only to{' '}
               <span className="break-all font-mono text-text-2">
                 {hooks?.settingsPath ?? '~/.claude/settings.json'}
@@ -457,7 +457,7 @@ export default function Settings(): React.JSX.Element {
       <div className="mt-1">
         <AlertRow
           title="Global indicator"
-          desc="Banner when any Flight needs you"
+          desc="Banner when any Worktree needs you"
           checked={alerts.indicator}
           onChange={(v) => setAlerts((a) => ({ ...a, indicator: v }))}
         />

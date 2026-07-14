@@ -31,7 +31,7 @@ Agents are fast, but they block on you: permission prompts, questions, finished
 work waiting for review. Run three of them in plain terminal windows and you're
 the bottleneck, alt-tabbing around to find the one that stalled ten minutes ago.
 Orbital turns that mess into a mission control: park each agent in its own
-isolated **Flight**, glance at the rail to see who's `working` and who
+isolated **worktree**, glance at the rail to see who's `working` and who
 `needs you`, answer the blocked one, and get back to what you were doing.
 
 **Orbital never wraps or re-implements your agent.** It spawns the real
@@ -42,30 +42,30 @@ subscription instead of metered API tokens. **Claude Code is fully supported
 at launch; Codex support is planned.** The full product spec lives in
 [`Orbital_PRD_v1.1.md`](./Orbital_PRD_v1.1.md).
 
-![The Orbital cockpit: workspaces and Flights in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)
+![The Orbital cockpit: projects and worktrees in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)
 
 ## What you get
 
-### Flights: one isolated working surface per stream of work
-- Every workspace (a local git repo) starts with a **root Flight** on your main
-  checkout, and can spawn **worktree Flights** — each is a real `git worktree`
+### Worktrees: one isolated working surface per stream of work
+- Every project (a local git repo) starts with a **root worktree** on your main
+  checkout, and can spawn **linked worktrees** — each is a real `git worktree`
   on its own branch, created in one click (with a base-ref picker), so agents
   never trample each other's changes.
 - Your `.env` files (and any glob patterns you configure) are **synced into new
   worktrees automatically** and kept in sync while you work — checkouts are
   runnable immediately. The root checkout is the source of truth: a sync always
   **overwrites** the worktree copy, so edit synced files at the root, not in a
-  worktree.
-- Flights are laid out as **split panes**: drag a tab to any edge to split
+  linked worktree.
+- Worktrees are laid out as **split panes**: drag a tab to any edge to split
   horizontally or vertically, drag dividers to resize, nest as deep as you like.
   Layouts persist across restarts.
-- Right-click a Flight to rename it, close it (keeping the worktree), or delete
+- Right-click a worktree to rename it, close it (keeping it on disk), or delete
   the worktree — with a guard that refuses to silently discard unpushed work.
 
 ### Tabs: terminals, agents, browser, editor
 - **Terminal** — a real PTY running your preferred shell, with WebGL rendering,
   clickable links, and proper multi-line paste (bracketed paste for TUIs).
-- **Agent** — boots straight into your coding agent (per-workspace provider and
+- **Agent** — boots straight into your coding agent (per-project provider and
   executable path are configurable). If an agent exits, its tab cleans itself up.
 - **Browser** — plain-click a URL in any terminal and it opens as an in-app
   preview tab next to your agent; Ctrl+click sends it to your system browser.
@@ -76,7 +76,7 @@ at launch; Codex support is planned.** The full product spec lives in
 
 ### Status: know who needs you without looking
 Each terminal carries a status — `idle · working · needs-attention · error ·
-done` — and every Flight and workspace rolls up the most urgent one. When an
+done` — and every worktree and project rolls up the most urgent one. When an
 agent flips to needs-attention you get a **three-way alert**: the rail badge
 pulses, a title-bar banner appears, and the Windows taskbar icon gets a badge
 (plus an optional chime). Each is individually toggleable in Settings.
@@ -95,43 +95,43 @@ Statuses update automatically two ways:
 2. **The `orbital` CLI** — any agent (or script) can set its own status
    explicitly; see below.
 
-### Tasks: capture work, launch it as a Flight
-- A lightweight per-workspace tracker: capture with one keystroke, edit titles
+### Tasks: capture work, launch it as a worktree
+- A lightweight per-project tracker: capture with one keystroke, edit titles
   inline, move through `todo → in progress → ready for review → done`.
-- **Start a Flight from a task** — one click creates the branch + worktree +
+- **Start a worktree from a task** — one click creates the branch + worktree +
   terminal, pre-linked so the task shows where its work lives.
-- A **full board view** across all workspaces with drag-and-drop between both
-  status columns and workspace lanes.
+- A **full board view** across all projects with drag-and-drop between both
+  status columns and project lanes.
 - Agents can file follow-up work themselves with `orbital task add`.
 
-![The all-workspaces task board with drag-and-drop swim-lanes](website/src/assets/screenshots/10-board-all.png)
+![The all-projects task board with drag-and-drop swim-lanes](website/src/assets/screenshots/10-board-all.png)
 
 ### The `orbital` CLI
-Every Flight terminal has `orbital` on PATH, wired back to the app over a local
+Every worktree terminal has `orbital` on PATH, wired back to the app over a local
 pipe — so agents can drive the cockpit:
 
 ```sh
 orbital status <idle|working|needs-attention|error|done>   # set this terminal's status
-orbital flights                                            # list Flights in this workspace
-orbital flight new [--worktree <branch>] [name]            # spin up a new worktree Flight
-orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this Flight
+orbital worktrees                                          # list worktrees in this project
+orbital worktree new [--worktree <branch>] [name]          # spin up a new linked worktree
+orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this worktree
 orbital task add "<title>" [--description <text>]          # capture a task
 orbital task list [--all]                                  # open tasks (id, status, title)
 orbital task update <id> --status <status>                 # progress a task (id prefix ok)
 orbital task done <id>                                     # shorthand for --status done
 orbital server add <url|port>                              # register a live dev server
 orbital server remove <url|port>                           # deregister it
-orbital server list                                        # this Flight's live servers
+orbital server list                                        # this worktree's live servers
 ```
 
-When a Flight has registered dev servers, the title bar shows a green
+When a worktree has registered dev servers, the title bar shows a green
 "N dev servers" pill and the add-tab menu lists each one — one click opens it
 in an in-app browser tab next to your agent.
 
 ![The dev-server pill and its dropdown in the title bar](website/src/assets/screenshots/05-dev-servers.png)
 
 ### Git, without leaving the cockpit
-The right panel is a full working-tree surface for the active Flight: branch +
+The right panel is a full working-tree surface for the active worktree: branch +
 ahead/behind, stage/unstage individual files or everything, two-step-confirmed
 discard (including discard-all), commit with **amend** (prefilled from HEAD),
 push (sets upstream automatically), pull, fetch — and every changed file opens
@@ -144,7 +144,7 @@ worktrees, so the panel is always current.
 ### Quality of life
 - Frameless, keyboard-friendly dark UI designed for long sessions.
 - Everything persists in SQLite under your user profile — never inside a repo.
-- Right-click a workspace to remove it from Orbital (repo and worktrees stay on
+- Right-click a project to remove it from Orbital (repo and worktrees stay on
   disk); hover any task card to delete it, with an inline confirm.
 - Packaged builds **auto-update in the background** from GitHub releases; a
   quiet pill in the title bar tells you when a restart will finish the update.
@@ -153,17 +153,17 @@ worktrees, so the panel is always current.
 
 The workflow Orbital is built around:
 
-1. **Add your repos** as workspaces (the **+** in the left rail).
+1. **Add your repos** as projects (the **+** in the left rail).
 2. **Install the Claude Code hooks** (Settings → Claude status hooks) so
    statuses take care of themselves.
 3. **Capture tasks as they occur to you** — yours or your agents' — instead of
    interrupting what you're doing.
-4. When you're ready to parallelize, **start a Flight from a task**: branch,
+4. When you're ready to parallelize, **start a worktree from a task**: branch,
    worktree, env files, terminal — one click. Boot an agent tab and brief it.
-5. **Work in the root Flight yourself** while worktree Flights grind away.
+5. **Work in the root worktree yourself** while linked worktrees grind away.
    The rail tells you the moment any of them needs input; answer, and go back.
 6. **Land finished work from the git panel** — review the diff, stage, commit,
-   push — then right-click the Flight, delete the worktree, and mark the task
+   push — then right-click the worktree, delete it, and mark the task
    done.
 
 Three to five concurrent agents is the sweet spot: enough parallelism to keep
@@ -179,7 +179,7 @@ npm start          # build the CLI, then launch the app (electron-vite dev)
 ```
 
 Then click **+** in the left rail, pick a local git repo, and you have a root
-Flight with a live terminal. Run `claude` (or any agent) in it — or create an
+worktree with a live terminal. Run `claude` (or any agent) in it — or create an
 **agent tab** and let Orbital boot it for you.
 
 ### Native build notes (Windows)
