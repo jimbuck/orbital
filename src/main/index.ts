@@ -12,7 +12,7 @@ import {
 } from './services/workspace-config'
 import { initGlobalConfig, upsertRecentWorkspace } from './services/global-config'
 import { getSettings, migrateLegacySettings } from './services/settings'
-import { registerIpc, handleControl, resumeProjects, resumeTerminals } from './ipc'
+import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
@@ -180,6 +180,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     updater.stop()
+    stopWorktreesWatchers()
     runtime.shutdown()
     closeDb()
   })

@@ -511,6 +511,55 @@ async function worktreePrune(repoPath: string): Promise<void> {
   await run(repoPath, ['worktree', 'prune'])
 }
 
+/** One checkout as reported by `git worktree list --porcelain`. */
+export interface GitWorktreeEntry {
+  /** Absolute path of the checkout (git reports forward slashes on Windows). */
+  path: string
+  /** Checked-out branch name (e.g. `feature/x`), or null when HEAD is detached. */
+  branch: string | null
+  /** True for a bare repo entry (no working tree to show). */
+  bare: boolean
+  /** True when git flags the entry as prunable (its directory is gone). */
+  prunable: boolean
+}
+
+/**
+ * Every checkout of the repo `repoPath` belongs to, main checkout first —
+ * the discovery source that lets ANY `git worktree add`, wherever it was run,
+ * surface in Orbital.
+ */
+async function worktreeList(repoPath: string): Promise<GitWorktreeEntry[]> {
+  const out = await run(repoPath, ['worktree', 'list', '--porcelain'])
+  const entries: GitWorktreeEntry[] = []
+  let cur: GitWorktreeEntry | null = null
+  for (const line of out.split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) {
+      cur = { path: line.slice('worktree '.length).trim(), branch: null, bare: false, prunable: false }
+      entries.push(cur)
+    } else if (!cur) {
+      continue
+    } else if (line.startsWith('branch ')) {
+      cur.branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '')
+    } else if (line === 'bare') {
+      cur.bare = true
+    } else if (line.startsWith('prunable')) {
+      cur.prunable = true
+    }
+    // `HEAD <sha>`, `detached`, `locked` — not needed; detached is branch: null.
+  }
+  return entries
+}
+
+/**
+ * The repo's shared git dir (`.git` of the main checkout) — where the
+ * `worktrees/` administrative directory lives. Works from any checkout.
+ */
+async function commonGitDir(repoPath: string): Promise<string> {
+  const out = await run(repoPath, ['rev-parse', '--git-common-dir'])
+  // Git may answer with a relative path (commonly just `.git`).
+  return resolve(repoPath, out.trim())
+}
+
 export const git = {
   isRepo,
   currentBranch,
@@ -536,7 +585,9 @@ export const git = {
   writeFile,
   worktreeAdd,
   worktreeRemove,
-  worktreePrune
+  worktreePrune,
+  worktreeList,
+  commonGitDir
 }
 
 /* ----------------------------------------------------------------------------

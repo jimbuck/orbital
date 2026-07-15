@@ -22,6 +22,13 @@ A **worktree** is a working surface bound to one working directory:
   `C:\Projects\.orbital-worktrees\nebula-shop\<branch>` — so they never pollute
   the repo itself.
 
+Orbital is a worktree *dashboard*, not just a worktree creator: every checkout
+`git worktree list` reports shows up under the project automatically, wherever
+it lives and however it was created. Run `git worktree add` in any terminal and
+the new worktree appears in the rail within a second; remove one externally and
+its entry (with its tabs and layout) goes away. Discovery runs at launch and
+live, by watching each repo's `.git/worktrees` directory.
+
 Branch names are slugified for you ("Login flow" → `login-flow`) and collisions
 get numeric suffixes. If the branch already exists, Orbital attaches to it;
 otherwise it forks a new branch from the base ref you chose (default `HEAD`).

@@ -25,6 +25,7 @@ import {
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree } from './services/worktree'
+import { planWorktreeSync, WorktreesWatcher } from './services/worktree-scan'
 import { copyNodeModulesTree, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
@@ -197,6 +198,7 @@ async function registerProject(repoPath: string): Promise<Worktree | null> {
   if (existing) {
     runtime.gitWatcher.watch(repoPath)
     runtime.ensureEnvWatcher(existing.id)
+    ensureWorktreesWatcher(existing)
     return repo.worktrees.list().find((w) => w.projectId === existing.id && w.kind === 'root') ?? null
   }
   const name = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath
@@ -211,7 +213,97 @@ async function registerProject(repoPath: string): Promise<Worktree | null> {
   })
   runtime.gitWatcher.watch(repoPath)
   runtime.ensureEnvWatcher(project.id)
+  ensureWorktreesWatcher(project)
   return root
+}
+
+/* ---- git worktree auto-discovery ---------------------------------------- */
+
+/** One admin-dir watcher per project so external worktree add/remove shows live. */
+const worktreesWatchers = new Map<string, WorktreesWatcher>()
+
+function ensureWorktreesWatcher(project: { id: string; repoPath: string }): void {
+  if (worktreesWatchers.has(project.id)) return
+  const watcher = new WorktreesWatcher(project.repoPath)
+  worktreesWatchers.set(project.id, watcher)
+  watcher.on('changed', () => void reconcileProjectWorktrees(project.id))
+  void watcher.start()
+}
+
+function removeWorktreesWatcher(projectId: string): void {
+  worktreesWatchers.get(projectId)?.stop()
+  worktreesWatchers.delete(projectId)
+}
+
+/** Stop every discovery watcher (app shutdown). */
+export function stopWorktreesWatchers(): void {
+  for (const watcher of worktreesWatchers.values()) watcher.stop()
+  worktreesWatchers.clear()
+}
+
+/** Tear down everything the runtime holds for a Worktree (PTYs, watchers, servers, briefings). */
+function releaseWorktreeRuntime(worktree: Worktree): void {
+  killWorktreeTerminals(worktree.id)
+  runtime.clearDevServers(worktree.id)
+  if (worktree.kind === 'linked') {
+    runtime.gitWatcher.unwatch(worktree.path)
+    runtime.envWatchers.get(worktree.projectId)?.unregister(worktree.path)
+  }
+  for (const pane of worktree.panes) {
+    for (const tab of pane.tabs) if (tab.type === 'agent') deleteBriefing(worktree.id, tab.id)
+  }
+}
+
+/**
+ * Make a project's Worktrees match `git worktree list`: adopt checkouts created
+ * outside Orbital, drop rows whose checkout is gone (their tabs/layout go too —
+ * UI state is keyed to a live checkout), and resync branches. Broadcasts only
+ * when something actually changed.
+ */
+export async function reconcileProjectWorktrees(projectId: string): Promise<void> {
+  const project = repo.projects.get(projectId)
+  if (!project) return
+  let entries
+  try {
+    entries = await git.worktreeList(project.repoPath)
+  } catch {
+    return // repo dir missing or not a git repo — leave the stored rows alone
+  }
+  const rows = repo.worktrees.list().filter((w) => w.projectId === projectId)
+  // A checkout that IS another project belongs to that project's rail entry.
+  const skip = repo.projects
+    .list()
+    .filter((p) => p.id !== projectId)
+    .map((p) => p.repoPath)
+  const plan = planWorktreeSync(project, rows, entries, skip)
+  if (!plan.createRoot && plan.adopt.length === 0 && plan.remove.length === 0 && plan.branchUpdates.length === 0) {
+    return
+  }
+
+  // A project that entered via the workspace YAML starts without a root row.
+  if (plan.createRoot) {
+    repo.worktrees.create({
+      projectId,
+      kind: 'root',
+      name: 'main',
+      path: project.repoPath,
+      branch: plan.createRoot.branch
+    })
+  }
+  for (const a of plan.adopt) {
+    repo.worktrees.create({ projectId, kind: 'linked', name: a.name, path: a.path, branch: a.branch })
+    runtime.gitWatcher.watch(a.path)
+  }
+  // Registers every linked checkout (including the just-adopted) for env sync.
+  if (plan.adopt.length > 0) runtime.ensureEnvWatcher(projectId)
+  for (const row of plan.remove) {
+    releaseWorktreeRuntime(row)
+    repo.worktrees.remove(row.id)
+  }
+  for (const u of plan.branchUpdates) repo.worktrees.updateBranchByPath(u.path, u.branch)
+
+  runtime.broadcastState()
+  runtime.broadcastAlert()
 }
 
 /* ---- status-event ordering ---------------------------------------------- */
@@ -369,6 +461,8 @@ export function registerIpc(): void {
     }
     await registerProject(dir)
     const project = repo.projects.getByPath(dir)!
+    // Adopt any worktrees the repo already has — they show up immediately.
+    await reconcileProjectWorktrees(project.id)
     syncWorkspaceFromDb()
     broadcastAll()
     return project
@@ -378,16 +472,11 @@ export function registerIpc(): void {
     const project = repo.projects.get(projectId)
     if (!project) return
     for (const w of repo.worktrees.list()) {
-      if (w.projectId !== projectId) continue
-      killWorktreeTerminals(w.id)
-      runtime.clearDevServers(w.id)
-      if (w.kind === 'linked') runtime.gitWatcher.unwatch(w.path)
-      for (const pane of w.panes) {
-        for (const t of pane.tabs) if (t.type === 'agent') deleteBriefing(w.id, t.id)
-      }
+      if (w.projectId === projectId) releaseWorktreeRuntime(w)
     }
     runtime.gitWatcher.unwatch(project.repoPath)
     runtime.removeEnvWatcher(projectId)
+    removeWorktreesWatcher(projectId)
     repo.projects.remove(projectId)
     syncWorkspaceFromDb()
     broadcastAll()
@@ -1036,6 +1125,7 @@ export function resumeProjects(): void {
   for (const project of repo.projects.list()) {
     runtime.gitWatcher.watch(project.repoPath)
     runtime.ensureEnvWatcher(project.id)
+    ensureWorktreesWatcher(project)
     checkouts.add(project.repoPath)
   }
   for (const w of repo.worktrees.list()) {
@@ -1044,8 +1134,12 @@ export function resumeProjects(): void {
       checkouts.add(w.path)
     }
   }
-  // Branches can move while the app is closed — resync stored names to git HEAD.
-  void Promise.all([...checkouts].map((p) => runtime.refreshBranch(p))).then(() => runtime.broadcastState())
+  // Reconcile every project against `git worktree list` (adopt checkouts created
+  // outside Orbital while it was closed, drop vanished ones), then resync
+  // branches — they can move while the app is closed.
+  void Promise.all(repo.projects.list().map((p) => reconcileProjectWorktrees(p.id)))
+    .then(() => Promise.all([...checkouts].map((p) => runtime.refreshBranch(p))))
+    .then(() => runtime.broadcastState())
 }
 
 /**
