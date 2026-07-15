@@ -208,6 +208,12 @@ export interface Task {
   updatedAt: number
 }
 
+/**
+ * The renderer-facing settings shape. Behind this flat object the fields live in
+ * two stores: {@link WORKSPACE_SETTING_KEYS workspace-scoped} fields persist in
+ * the workspace's YAML config, everything else in the machine-global store —
+ * the renderer never needs to know which is which.
+ */
 export interface Settings {
   defaultShell: string
   alerts: {
@@ -217,7 +223,7 @@ export interface Settings {
   }
   /** Whether Orbital's Claude status hooks are installed in ~/.claude/settings.json. */
   claudeHooksInstalled: boolean
-  /** Global wildcard list for env-file sync, applied to every project (PRD §5). */
+  /** Wildcard list for env-file sync, applied to every project in the workspace (PRD §5). */
   envSyncPatterns: string[]
   /** Auto-run `git fetch` per project on an interval so ahead/behind stays current. */
   periodicFetch: boolean
@@ -229,12 +235,23 @@ export interface Settings {
   theme: ThemeMode
 }
 
+/** Settings that belong to a workspace (persisted in its YAML config file). */
+export const WORKSPACE_SETTING_KEYS = ['envSyncPatterns', 'periodicFetch', 'enabledAgents'] as const
+
+/** The workspace-scoped slice of {@link Settings}. */
+export type WorkspaceSettings = Pick<Settings, (typeof WORKSPACE_SETTING_KEYS)[number]>
+
+/** The machine-global slice of {@link Settings} (persisted in the global store). */
+export type GlobalSettings = Omit<Settings, keyof WorkspaceSettings>
+
 /** Full application state pushed to / pulled by the renderer. */
 export interface AppState {
   projects: Project[]
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings
+  /** The workspace this instance is running (id/name/config file location). */
+  workspace: WorkspaceInfo
   /**
    * Live dev servers registered via `orbital server add`, keyed by worktreeId.
    * Runtime-only state (not persisted) — servers die with their terminals.
@@ -428,6 +445,11 @@ export const IPC = {
   // state
   getState: 'orbital:getState',
   setSettings: 'orbital:setSettings',
+  // workspaces
+  listWorkspaces: 'orbital:listWorkspaces',
+  openWorkspace: 'orbital:openWorkspace',
+  createWorkspace: 'orbital:createWorkspace',
+  removeRecentWorkspace: 'orbital:removeRecentWorkspace',
   // projects
   addProject: 'orbital:addProject',
   removeProject: 'orbital:removeProject',
@@ -512,6 +534,20 @@ export interface OrbitalApi {
   // state
   getState(): Promise<AppState>
   setSettings(settings: Settings): Promise<Settings>
+
+  // workspaces
+  /** Recently-opened workspaces from the global store (current one included). */
+  listWorkspaces(): Promise<WorkspaceInfo[]>
+  /**
+   * Launch a separate instance for the workspace at `configPath`; with no path,
+   * a native file picker chooses the YAML. Opening the current workspace just
+   * refocuses this window. Null when the picker is cancelled.
+   */
+  openWorkspace(configPath?: string): Promise<WorkspaceInfo | null>
+  /** Create a fresh workspace YAML via a native save dialog, then launch it. */
+  createWorkspace(): Promise<WorkspaceInfo | null>
+  /** Drop an entry from the recents registry (does not touch the file). */
+  removeRecentWorkspace(configPath: string): Promise<WorkspaceInfo[]>
 
   // projects
   addProject(): Promise<Project | null>
@@ -720,7 +756,22 @@ export interface WorkspaceConfig {
   version: number
   /** Stable workspace id — also keys this instance's control pipe. */
   id: string
-  /** Human-facing workspace name (shown in the picker / title bar, later). */
+  /** Human-facing workspace name (shown in the picker / title bar). */
   name: string
+  /**
+   * Workspace-scoped settings. Absent in configs written before the settings
+   * split (or hand-authored without one) — the settings service seeds/merges
+   * defaults, so every field is optional here.
+   */
+  settings?: Partial<WorkspaceSettings>
   projects: WorkspaceProjectConfig[]
+}
+
+/** A workspace as listed in the picker (the global store's recents registry). */
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  /** Absolute path to the workspace's YAML config file. */
+  configPath: string
+  lastOpenedAt: number
 }

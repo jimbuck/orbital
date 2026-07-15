@@ -27,7 +27,8 @@ import {
   type TerminalExitEvent,
   type TerminalBuffer,
   type AlertEvent,
-  type UpdateStatus
+  type UpdateStatus,
+  type WorkspaceInfo
 } from '@shared/types'
 
 /** Subscribe to a main->renderer push channel; returns an unsubscribe fn. */
@@ -41,6 +42,14 @@ const api: OrbitalApi = {
   // state
   getState: () => ipcRenderer.invoke(IPC.getState) as Promise<AppState>,
   setSettings: (settings: Settings) => ipcRenderer.invoke(IPC.setSettings, settings) as Promise<Settings>,
+
+  // workspaces
+  listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces) as Promise<WorkspaceInfo[]>,
+  openWorkspace: (configPath?: string) =>
+    ipcRenderer.invoke(IPC.openWorkspace, configPath) as Promise<WorkspaceInfo | null>,
+  createWorkspace: () => ipcRenderer.invoke(IPC.createWorkspace) as Promise<WorkspaceInfo | null>,
+  removeRecentWorkspace: (configPath: string) =>
+    ipcRenderer.invoke(IPC.removeRecentWorkspace, configPath) as Promise<WorkspaceInfo[]>,
 
   // projects
   addProject: () => ipcRenderer.invoke(IPC.addProject) as Promise<Project | null>,

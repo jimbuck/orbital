@@ -4,16 +4,28 @@ import { getDb, closeDb } from './db/database'
 import { runtime, repo } from './runtime'
 import { updater } from './services/updater'
 import { logger } from './services/logger'
-import { loadWorkspaceConfig, activeControlPipePath } from './services/workspace-config'
+import {
+  loadWorkspaceConfig,
+  resolveBootWorkspace,
+  activeControlPipePath,
+  activeWorkspaceInfo
+} from './services/workspace-config'
+import { initGlobalConfig, upsertRecentWorkspace } from './services/global-config'
+import { getSettings, migrateLegacySettings } from './services/settings'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
-// Sandbox override for tests/demos: point all persistent state (DB, briefings)
-// at a different profile dir so a scripted run never touches the real one.
-if (process.env['ORBITAL_USER_DATA']) {
-  app.setPath('userData', process.env['ORBITAL_USER_DATA'])
-}
+// Settle this instance's workspace before ANYTHING opens: the profile dir keys
+// the single-instance lock and every persistent path. `--workspace <file>` (or
+// ORBITAL_WORKSPACE) runs a config from anywhere on disk in its own derived
+// profile; ORBITAL_USER_DATA sandboxes everything (tests/demos) into one dir;
+// neither means the default profile — the pre-workspace behavior.
+const bootWorkspace = resolveBootWorkspace(app.getPath('userData'))
+app.setPath('userData', bootWorkspace.profileDir)
+// The machine-global store (shared settings + the recent-workspaces registry)
+// lives OUTSIDE any workspace profile, so every instance sees one copy.
+initGlobalConfig(bootWorkspace.globalDir)
 
 // Must match `appId` in electron-builder.yml so notifications, taskbar pinning
 // and jump-list identity line up between the dev run and the installed app.
@@ -105,12 +117,14 @@ if (!gotLock) {
     // group, pinning and notifications to "Orbital" rather than to "Electron".
     app.setAppUserModelId(APP_ID)
     getDb()
-    // A workspace is a YAML file (in this profile dir) listing the projects it
-    // contains — the source of truth for the project set. Load it (seeding from
-    // the DB on an existing install's first run), then reconcile the `projects`
-    // table to match so the rest of the app reads projects exactly as before.
+    // The workspace YAML is the source of truth for the project set. Load it
+    // (seeding from the DB on an existing install's first run), reconcile the
+    // `projects` table to match, move any pre-split settings blob out of the DB
+    // into the split stores, and record this workspace in the picker's recents.
     const workspace = loadWorkspaceConfig()
     repo.projects.reconcile(workspace.projects)
+    migrateLegacySettings()
+    upsertRecentWorkspace(activeWorkspaceInfo())
     // Bring the opt-in debug logger up first thing so it can capture the rest of
     // startup. It writes to Electron's per-user logs dir and no-ops unless the
     // setting is on. The crash handlers add a log breadcrumb but must NOT change
@@ -119,7 +133,7 @@ if (!gotLock) {
     // listener otherwise suppresses Node's default print-and-exit, silently
     // limping on in a corrupted state — and, with logging off, with no record.)
     logger.init(app.getPath('logs'))
-    logger.setEnabled(repo.settings.get().debugLogging)
+    logger.setEnabled(getSettings().debugLogging)
     process.on('uncaughtException', (err) => {
       logger.error('uncaughtException', { message: err.message, stack: err.stack })
       console.error(err)

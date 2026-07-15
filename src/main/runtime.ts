@@ -6,6 +6,8 @@ import { AlertManager } from './services/alerts'
 import { EnvSyncWatcher } from './services/env-sync'
 import * as repo from './db/repositories'
 import { deleteBriefing } from './services/agents/briefing'
+import { getSettings } from './services/settings'
+import { activeWorkspaceInfo } from './services/workspace-config'
 import { IPC, isPtyTabType, type AppState } from '@shared/types'
 
 /**
@@ -39,7 +41,7 @@ class Runtime {
   init(): void {
     this.alerts = new AlertManager(
       () => this.window,
-      () => repo.settings.get()
+      () => getSettings()
     )
 
     this.terminals.on('data', (e) => this.send(IPC.evtTerminalData, e))
@@ -88,13 +90,22 @@ class Runtime {
     }
   }
 
-  /** Persisted state plus the runtime-only dev-server registry and setting-up flags. */
+  /**
+   * Persisted DB state plus the split-store settings, this instance's workspace
+   * identity, and the runtime-only dev-server registry and setting-up flags.
+   */
   appState(): AppState {
     const devServers: Record<string, string[]> = {}
     for (const [worktreeId, urls] of this.devServers) {
       if (urls.size > 0) devServers[worktreeId] = [...urls]
     }
-    return { ...repo.getAppState(), devServers, settingUpWorktrees: [...this.settingUp] }
+    return {
+      ...repo.getAppState(),
+      settings: getSettings(),
+      workspace: activeWorkspaceInfo(),
+      devServers,
+      settingUpWorktrees: [...this.settingUp]
+    }
   }
 
   /** Flag a worktree as setting up (background prep) so the rail shows a spinner. */
@@ -199,11 +210,11 @@ class Runtime {
     )
   }
 
-  /** Ensure an env-sync watcher exists & is running for a project (patterns come from global settings). */
+  /** Ensure an env-sync watcher exists & is running for a project (patterns are a workspace setting). */
   ensureEnvWatcher(projectId: string): void {
     const project = repo.projects.get(projectId)
     if (!project) return
-    const patterns = repo.settings.get().envSyncPatterns
+    const patterns = getSettings().envSyncPatterns
     let w = this.envWatchers.get(projectId)
     if (!w) {
       w = new EnvSyncWatcher(project.repoPath, patterns)
@@ -232,7 +243,7 @@ class Runtime {
    * The tick reads the project list live, so this works even before resume.
    */
   configureFetch(): void {
-    const enabled = repo.settings.get().periodicFetch
+    const enabled = getSettings().periodicFetch
     if (enabled && !this.fetchTimer) {
       this.fetchTimer = setInterval(() => void this.fetchAll(), Runtime.FETCH_INTERVAL_MS)
     } else if (!enabled && this.fetchTimer) {

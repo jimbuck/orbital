@@ -3,7 +3,8 @@ import { rm } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { git } from './git'
 import { syncEnvFiles } from './env-sync'
-import { worktrees as worktreeRepo, settings as settingsRepo } from '../db/repositories'
+import { worktrees as worktreeRepo } from '../db/repositories'
+import { getSettings } from './settings'
 import type { Project, Worktree } from '@shared/types'
 
 /** Turn a branch/title into a filesystem- and git-safe slug. */
@@ -101,7 +102,7 @@ export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Pr
   // separately by the caller (in the background), so it never blocks flight
   // creation — see ipc.ts / runtime.markSettingUp.
   try {
-    await syncEnvFiles(project.repoPath, worktreePath, settingsRepo.get().envSyncPatterns)
+    await syncEnvFiles(project.repoPath, worktreePath, getSettings().envSyncPatterns)
   } catch {
     /* env sync is non-fatal */
   }

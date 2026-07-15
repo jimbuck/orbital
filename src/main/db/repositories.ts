@@ -6,7 +6,6 @@ import {
   type Pane,
   type Tab,
   type Task,
-  type Settings,
   type AppState,
   type WorktreeKind,
   type TabType,
@@ -17,27 +16,12 @@ import {
   type TaskPatch,
   type WorkspaceProjectConfig,
   aggregateStatus,
-  isPtyTabType,
-  DEFAULT_ENV_SYNC_PATTERNS,
-  SUPPORTED_AGENTS
+  isPtyTabType
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
 
 export const id = (): string => randomUUID()
 const now = (): number => Date.now()
-
-const DEFAULT_SETTINGS: Settings = {
-  defaultShell: '',
-  alerts: { indicator: true, sound: true, taskbarBadge: true },
-  claudeHooksInstalled: false,
-  envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
-  periodicFetch: true,
-  debugLogging: false,
-  enabledAgents: SUPPORTED_AGENTS.map((a) => a.id),
-  // Existing installs merge over this default, so they stay dark and keep the
-  // current look; only an explicit change opts a user into light/system.
-  theme: 'dark'
-}
 
 /* ---- row -> entity mappers --------------------------------------------- */
 
@@ -419,37 +403,18 @@ export const tasks = {
 }
 
 /* ============================================================================
- * Settings (single-row key/value store)
- * ========================================================================== */
-
-export const settings = {
-  get(): Settings {
-    const r = getDb().prepare("SELECT value FROM settings WHERE key = 'app'").get() as any
-    if (!r) return DEFAULT_SETTINGS
-    try {
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(r.value) }
-    } catch {
-      return DEFAULT_SETTINGS
-    }
-  },
-  set(s: Settings): Settings {
-    getDb()
-      .prepare("INSERT INTO settings (key, value) VALUES ('app', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
-      .run(JSON.stringify(s))
-    return s
-  }
-}
-
-/* ============================================================================
  * Full hydrated state
  * ========================================================================== */
 
-/** Persisted state; the runtime layers its in-memory `devServers` / `settingUpWorktrees` on top. */
-export function getAppState(): Omit<AppState, 'devServers' | 'settingUpWorktrees'> {
+/**
+ * Persisted DB state; the runtime layers settings (split across the global and
+ * workspace stores), the workspace identity, and the in-memory `devServers` /
+ * `settingUpWorktrees` registries on top.
+ */
+export function getAppState(): Omit<AppState, 'devServers' | 'settings' | 'workspace' | 'settingUpWorktrees'> {
   return {
     projects: projects.list(),
     worktrees: worktrees.list(),
-    tasks: tasks.list(),
-    settings: settings.get()
+    tasks: tasks.list()
   }
 }

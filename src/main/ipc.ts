@@ -34,7 +34,16 @@ import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
 import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
-import { activeControlPipePath, syncWorkspaceFromDb } from './services/workspace-config'
+import {
+  activeControlPipePath,
+  activeWorkspace,
+  activeWorkspaceInfo,
+  createWorkspaceFile,
+  readWorkspaceInfo,
+  syncWorkspaceFromDb
+} from './services/workspace-config'
+import { listRecentWorkspaces, removeRecentWorkspace, upsertRecentWorkspace } from './services/global-config'
+import { getSettings, setSettings } from './services/settings'
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -47,7 +56,7 @@ import { activeControlPipePath, syncWorkspaceFromDb } from './services/workspace
  */
 function beginWorktreeSetup(worktree: Worktree, repoPath: string): void {
   if (worktree.kind !== 'linked') return
-  if (!targetsNodeModules(repo.settings.get().envSyncPatterns)) return
+  if (!targetsNodeModules(getSettings().envSyncPatterns)) return
   runtime.markSettingUp(worktree.id)
   void copyNodeModulesTree(repoPath, worktree.path).finally(() => runtime.clearSettingUp(worktree.id))
 }
@@ -65,7 +74,7 @@ function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> 
 }
 
 function spawnTerminal(worktree: Worktree, tab: Tab): void {
-  const shellPref = repo.settings.get().defaultShell || undefined
+  const shellPref = getSettings().defaultShell || undefined
   runtime.terminals.prepare({
     tabId: tab.id,
     cwd: worktree.path,
@@ -168,6 +177,20 @@ function collapseIfEmpty(worktreeId: string, paneId: string): void {
   repo.panes.remove(paneId)
 }
 
+/**
+ * Launch a separate Orbital instance for the workspace file at `configPath`.
+ * The child derives its own profile dir (and control pipe) from the file's
+ * workspace id, so it runs side by side with this instance; if that workspace
+ * is already open, the child hits its single-instance lock, focuses the
+ * existing window, and quits — either way the caller just fires and forgets.
+ */
+function launchWorkspace(configPath: string): void {
+  // Packaged: the exe IS the app. Dev: process.execPath is electron.exe, which
+  // needs the app dir as its first argument (same shape electron-vite uses).
+  const args = app.isPackaged ? ['--workspace', configPath] : [app.getAppPath(), '--workspace', configPath]
+  spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref()
+}
+
 /** Register a project: create its root Worktree and start its watchers. */
 async function registerProject(repoPath: string): Promise<Worktree | null> {
   const existing = repo.projects.getByPath(repoPath)
@@ -267,8 +290,9 @@ export function registerIpc(): void {
   // ---- state / settings ----
   h(IPC.getState, () => runtime.appState())
   h(IPC.setSettings, (_e, settings) => {
-    const s = repo.settings.set(settings)
-    // Env-sync patterns are global settings — refresh every project's watcher.
+    // Splits across the global store and the workspace YAML behind the facade.
+    const s = setSettings(settings)
+    // Env-sync patterns are a workspace setting — refresh every project's watcher.
     for (const project of repo.projects.list()) runtime.ensureEnvWatcher(project.id)
     // Toggling periodicFetch starts/stops the background fetcher live.
     runtime.configureFetch()
@@ -277,6 +301,55 @@ export function registerIpc(): void {
     broadcast()
     return s
   })
+
+  // ---- workspaces ----
+  h(IPC.listWorkspaces, () => listRecentWorkspaces())
+
+  h(IPC.openWorkspace, async (_e, configPath?: string) => {
+    let file = configPath
+    if (!file) {
+      const win = runtime.window ?? undefined
+      const result = win
+        ? await dialog.showOpenDialog(win, {
+            title: 'Open a workspace',
+            filters: [{ name: 'Orbital workspace', extensions: ['yaml', 'yml'] }],
+            properties: ['openFile']
+          })
+        : await dialog.showOpenDialog({ properties: ['openFile'] })
+      if (result.canceled || result.filePaths.length === 0) return null
+      file = result.filePaths[0]
+    }
+    const info = readWorkspaceInfo(file) // throws a readable error for a bad file
+    // Opening the workspace this instance already runs just means "focus me".
+    if (info.id === activeWorkspace().id) {
+      const win = runtime.window
+      if (win) {
+        if (win.isMinimized()) win.restore()
+        win.focus()
+      }
+      return activeWorkspaceInfo()
+    }
+    upsertRecentWorkspace(info)
+    launchWorkspace(file)
+    return info
+  })
+
+  h(IPC.createWorkspace, async () => {
+    const win = runtime.window ?? undefined
+    const opts = {
+      title: 'Create a workspace',
+      defaultPath: 'orbital.workspace.yaml',
+      filters: [{ name: 'Orbital workspace', extensions: ['yaml', 'yml'] }]
+    }
+    const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    if (result.canceled || !result.filePath) return null
+    const info = createWorkspaceFile(result.filePath)
+    upsertRecentWorkspace(info)
+    launchWorkspace(result.filePath)
+    return info
+  })
+
+  h(IPC.removeRecentWorkspace, (_e, configPath: string) => removeRecentWorkspace(configPath))
 
   // ---- projects ----
   h(IPC.addProject, async () => {
@@ -439,13 +512,13 @@ export function registerIpc(): void {
   h(IPC.claudeHooksPlan, () => claudeHooks.plan())
   h(IPC.installClaudeHooks, () => {
     const st = claudeHooks.install()
-    repo.settings.set({ ...repo.settings.get(), claudeHooksInstalled: st.installed })
+    setSettings({ ...getSettings(), claudeHooksInstalled: st.installed })
     broadcast()
     return st
   })
   h(IPC.removeClaudeHooks, () => {
     const st = claudeHooks.remove()
-    repo.settings.set({ ...repo.settings.get(), claudeHooksInstalled: st.installed })
+    setSettings({ ...getSettings(), claudeHooksInstalled: st.installed })
     broadcast()
     return st
   })

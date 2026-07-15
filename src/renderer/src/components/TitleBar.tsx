@@ -25,6 +25,9 @@ interface Menu {
 export default function TitleBar(): JSX.Element {
   const projName = useStore((s) => activeProject(s)?.name ?? 'orbital')
   const worktreeName = useStore((s) => activeWorktree(s)?.name)
+  // Prefix the breadcrumb with the workspace only when it's a named one — the
+  // implicit default profile workspace would just be noise.
+  const workspaceName = useStore((s) => (s.workspace && s.workspace.name !== 'Default' ? s.workspace.name : null))
   const alertCount = useStore((s) => s.alertCount)
   const updateStatus = useStore((s) => s.updateStatus)
   const openModal = useStore((s) => s.openModal)
@@ -58,6 +61,8 @@ export default function TitleBar(): JSX.Element {
       items: [
         { label: 'Add Project…', onClick: () => openModal('addProject') },
         { label: 'New Worktree…', onClick: () => openModal('newWorktree', { project }), disabled: !project },
+        { sep: true, label: '' },
+        { label: 'Workspaces…', onClick: () => openModal('workspaces') },
         { label: 'Settings…', onClick: () => openModal('settings') },
         { sep: true, label: '' },
         { label: 'Quit', onClick: () => window.orbital.windowClose() }
@@ -172,9 +177,15 @@ export default function TitleBar(): JSX.Element {
         </nav>
       </div>
 
-      {/* Center: project ▸ worktree breadcrumb (non-interactive, so dragging still works) */}
+      {/* Center: workspace ▸ project ▸ worktree breadcrumb (non-interactive, so dragging still works) */}
       <div className="pointer-events-none absolute left-1/2 top-0 flex h-full max-w-[40%] -translate-x-1/2 items-center">
         <span className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-dim">
+          {workspaceName && (
+            <>
+              <span className="truncate text-faint">{workspaceName}</span>
+              <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />
+            </>
+          )}
           <span className="truncate">{projName}</span>
           {worktreeName && (
             <>

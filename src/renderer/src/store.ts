@@ -1,7 +1,15 @@
 import { create } from 'zustand'
-import type { AppState, Project, Worktree, Task, Settings, UpdateStatus } from '@shared/types'
+import type { AppState, Project, Worktree, Task, Settings, UpdateStatus, WorkspaceInfo } from '@shared/types'
 
-export type ModalType = 'settings' | 'addProject' | 'newWorktree' | 'board' | 'about' | 'editTask' | null
+export type ModalType =
+  | 'settings'
+  | 'addProject'
+  | 'newWorktree'
+  | 'board'
+  | 'about'
+  | 'editTask'
+  | 'workspaces'
+  | null
 
 interface UIState {
   ready: boolean
@@ -28,6 +36,8 @@ interface Data {
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings | null
+  /** The workspace this instance is running (null until the first state push). */
+  workspace: WorkspaceInfo | null
   /** Live dev servers per worktree (from `orbital server add`). */
   devServers: Record<string, string[]>
   /** Worktree ids still setting up (background node_modules copy). */
@@ -55,6 +65,7 @@ export const useStore = create<Store>((set, get) => ({
   worktrees: [],
   tasks: [],
   settings: null,
+  workspace: null,
   devServers: {},
   settingUpWorktrees: [],
 
@@ -109,6 +120,7 @@ export const useStore = create<Store>((set, get) => ({
       worktrees: s.worktrees,
       tasks: s.tasks,
       settings: s.settings,
+      workspace: s.workspace,
       devServers: s.devServers,
       settingUpWorktrees: s.settingUpWorktrees,
       activeProjectId,

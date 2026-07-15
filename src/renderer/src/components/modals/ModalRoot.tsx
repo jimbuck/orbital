@@ -19,6 +19,7 @@ import AddProject from './AddProject'
 import NewWorktree from './NewWorktree'
 import EditTask from './EditTask'
 import About from './About'
+import Workspaces from './Workspaces'
 
 /* ============================================================================
  * Shared modal primitives
@@ -334,6 +335,7 @@ export default function ModalRoot(): React.JSX.Element | null {
             {entry.type === 'editTask' && <EditTask />}
             {entry.type === 'board' && <FullBoard />}
             {entry.type === 'about' && <About />}
+            {entry.type === 'workspaces' && <Workspaces />}
           </div>
         )
       })}
