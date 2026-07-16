@@ -74,17 +74,24 @@ npm run dev   # electron-vite dev with renderer HMR (main/preload changes still 
 
 ## Gotchas (all actually hit)
 
-- **Single-instance lock.** If Orbital is already running, a new instance quits
-  instantly. Check/kill first: `Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force`.
-  Same cleanup if the driver crashes — the app child is NOT auto-killed.
+- **Single-instance lock (per workspace).** The lock is keyed by the instance's
+  profile dir (`<root>/profiles/<workspace-id>`), so there is one window per
+  WORKSPACE; a second launch of the same workspace quits instantly and focuses
+  the first. Kill strays with `Get-Process electron -ErrorAction SilentlyContinue | Stop-Process -Force`
+  (same cleanup if the driver crashes — the app child is NOT auto-killed).
   **If the user's installed cockpit (`Orbital.exe`) is running, do NOT kill it** —
-  set `ORBITAL_USER_DATA=<fresh dir>` in the driver's environment instead: the lock
-  is keyed by userData, so a sandboxed instance runs side-by-side with its own empty
-  DB. The AddWorkspace flow needs a native folder picker, so seed the sandbox DB
-  directly (sqlite via python; schema is in `src/main/db/database.ts` — insert a
-  workspace + root flight + one pane row). Caveat: both instances bind the same
-  control-channel pipe, so `orbital` CLI calls can misroute while the sandbox runs —
-  keep runs short.
+  set `ORBITAL_USER_DATA=<fresh dir>` in the driver's environment instead: it
+  relocates the whole app-storage root (the shared `orbital.db` + profiles), so a
+  sandboxed instance runs side-by-side. The Add Project flow needs a native folder
+  picker, so seed the sandbox DB directly (sqlite via python; schema is in
+  `src/main/db/database.ts`). Easiest recipe: boot once against the empty sandbox
+  (creates the schema + a Default workspace row), then insert projects with
+  `workspace_id = (SELECT id FROM workspaces)` + a root worktree + one pane row.
+  A no-arg launch opens the most recently opened workspace;
+  `ORBITAL_WORKSPACE_ID=<id>` (or `--workspace-id`) pins one. Each instance binds
+  its own control pipe (`orbital-control-<id16>`), and `ORBITAL_SOCKET` in its
+  terminals points at the right one — but a CLI invoked OUTSIDE an Orbital
+  terminal falls back to the legacy global pipe name and may find nothing.
 - **`app.close()` can hang** when PTY children linger; the driver's `quit`
   races it against a 10s deadline and then hard-kills. If a run still leaves an
   `electron.exe` behind, use the Stop-Process line above.

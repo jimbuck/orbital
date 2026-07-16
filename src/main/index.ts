@@ -1,31 +1,28 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu } from 'electron'
-import { getDb, closeDb } from './db/database'
-import { runtime, repo } from './runtime'
+import { closeDb } from './db/database'
+import { runtime } from './runtime'
 import { updater } from './services/updater'
 import { logger } from './services/logger'
 import {
-  loadWorkspaceConfig,
   resolveBootWorkspace,
   activeControlPipePath,
-  activeWorkspaceInfo
-} from './services/workspace-config'
-import { initGlobalConfig, upsertRecentWorkspace } from './services/global-config'
-import { getSettings, migrateLegacySettings } from './services/settings'
+  migrateLegacyWorkspaceFiles
+} from './services/workspaces'
+import { getSettings } from './services/settings'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
-// Settle this instance's workspace before ANYTHING opens: the profile dir keys
-// the single-instance lock and every persistent path. `--workspace <file>` (or
-// ORBITAL_WORKSPACE) runs a config from anywhere on disk in its own derived
-// profile; ORBITAL_USER_DATA sandboxes everything (tests/demos) into one dir;
-// neither means the default profile — the pre-workspace behavior.
+// Settle this instance's workspace before ANYTHING opens. All data lives in ONE
+// global DB under the app-storage root (workspaces are rows in it); what varies
+// per instance is which workspace it scopes to (`--workspace-id` /
+// ORBITAL_WORKSPACE_ID, defaulting to the most recently opened) and its own
+// Chromium profile dir — which also keys the single-instance lock, giving
+// exactly one window per workspace. ORBITAL_USER_DATA relocates the whole root
+// for sandboxed test runs.
 const bootWorkspace = resolveBootWorkspace(app.getPath('userData'))
 app.setPath('userData', bootWorkspace.profileDir)
-// The machine-global store (shared settings + the recent-workspaces registry)
-// lives OUTSIDE any workspace profile, so every instance sees one copy.
-initGlobalConfig(bootWorkspace.globalDir)
 
 // Must match `appId` in electron-builder.yml so notifications, taskbar pinning
 // and jump-list identity line up between the dev run and the installed app.
@@ -116,15 +113,9 @@ if (!gotLock) {
     // Register Orbital's identity with Windows so the shell attributes the taskbar
     // group, pinning and notifications to "Orbital" rather than to "Electron".
     app.setAppUserModelId(APP_ID)
-    getDb()
-    // The workspace YAML is the source of truth for the project set. Load it
-    // (seeding from the DB on an existing install's first run), reconcile the
-    // `projects` table to match, move any pre-split settings blob out of the DB
-    // into the split stores, and record this workspace in the picker's recents.
-    const workspace = loadWorkspaceConfig()
-    repo.projects.reconcile(workspace.projects)
-    migrateLegacySettings()
-    upsertRecentWorkspace(activeWorkspaceInfo())
+    // The global DB opened (and migrated) during boot resolution; fold in any
+    // files left behind by the short-lived files-as-source-of-truth design.
+    migrateLegacyWorkspaceFiles(bootWorkspace.globalRoot)
     // Bring the opt-in debug logger up first thing so it can capture the rest of
     // startup. It writes to Electron's per-user logs dir and no-ops unless the
     // setting is on. The crash handlers add a log breadcrumb but must NOT change

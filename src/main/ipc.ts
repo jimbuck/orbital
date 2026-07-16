@@ -35,15 +35,7 @@ import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
 import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
-import {
-  activeControlPipePath,
-  activeWorkspace,
-  activeWorkspaceInfo,
-  createWorkspaceFile,
-  readWorkspaceInfo,
-  syncWorkspaceFromDb
-} from './services/workspace-config'
-import { listRecentWorkspaces, removeRecentWorkspace, upsertRecentWorkspace } from './services/global-config'
+import { activeControlPipePath, exportWorkspaceToFile, importWorkspaceFromFile } from './services/workspaces'
 import { getSettings, setSettings } from './services/settings'
 
 /* ---- helpers ----------------------------------------------------------- */
@@ -179,16 +171,18 @@ function collapseIfEmpty(worktreeId: string, paneId: string): void {
 }
 
 /**
- * Launch a separate Orbital instance for the workspace file at `configPath`.
- * The child derives its own profile dir (and control pipe) from the file's
- * workspace id, so it runs side by side with this instance; if that workspace
- * is already open, the child hits its single-instance lock, focuses the
- * existing window, and quits — either way the caller just fires and forgets.
+ * Launch a separate Orbital instance scoped to `workspaceId`. Each workspace
+ * gets its own profile dir (and control pipe), so it runs side by side with
+ * this instance; if that workspace is already open, the child hits its
+ * single-instance lock, focuses the existing window, and quits — either way
+ * the caller just fires and forgets.
  */
-function launchWorkspace(configPath: string): void {
+function launchWorkspace(workspaceId: string): void {
   // Packaged: the exe IS the app. Dev: process.execPath is electron.exe, which
   // needs the app dir as its first argument (same shape electron-vite uses).
-  const args = app.isPackaged ? ['--workspace', configPath] : [app.getAppPath(), '--workspace', configPath]
+  const args = app.isPackaged
+    ? ['--workspace-id', workspaceId]
+    : [app.getAppPath(), '--workspace-id', workspaceId]
   spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref()
 }
 
@@ -395,53 +389,78 @@ export function registerIpc(): void {
   })
 
   // ---- workspaces ----
-  h(IPC.listWorkspaces, () => listRecentWorkspaces())
+  h(IPC.listWorkspaces, () => repo.workspaces.list())
 
-  h(IPC.openWorkspace, async (_e, configPath?: string) => {
-    let file = configPath
-    if (!file) {
-      const win = runtime.window ?? undefined
-      const result = win
-        ? await dialog.showOpenDialog(win, {
-            title: 'Open a workspace',
-            filters: [{ name: 'Orbital workspace', extensions: ['yaml', 'yml'] }],
-            properties: ['openFile']
-          })
-        : await dialog.showOpenDialog({ properties: ['openFile'] })
-      if (result.canceled || result.filePaths.length === 0) return null
-      file = result.filePaths[0]
-    }
-    const info = readWorkspaceInfo(file) // throws a readable error for a bad file
+  h(IPC.openWorkspace, (_e, workspaceId: string) => {
+    const info = repo.workspaces.get(workspaceId)
+    if (!info) throw new Error('workspace not found')
     // Opening the workspace this instance already runs just means "focus me".
-    if (info.id === activeWorkspace().id) {
+    if (workspaceId === repo.requireWorkspaceId()) {
       const win = runtime.window
       if (win) {
         if (win.isMinimized()) win.restore()
         win.focus()
       }
-      return activeWorkspaceInfo()
+      return info
     }
-    upsertRecentWorkspace(info)
-    launchWorkspace(file)
+    launchWorkspace(workspaceId)
     return info
   })
 
-  h(IPC.createWorkspace, async () => {
+  h(IPC.createWorkspace, (_e, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return null
+    const info = repo.workspaces.create(trimmed)
+    launchWorkspace(info.id)
+    return info
+  })
+
+  h(IPC.renameWorkspace, (_e, workspaceId: string, name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    repo.workspaces.rename(workspaceId, trimmed)
+    // The title-bar breadcrumb shows the current workspace's name.
+    if (workspaceId === repo.requireWorkspaceId()) broadcast()
+  })
+
+  h(IPC.removeWorkspace, (_e, workspaceId: string) => {
+    // Deleting the workspace out from under this window would strand it; the
+    // picker greys out the current workspace instead. (An instance of ANOTHER
+    // workspace being open while it's deleted is the user's call — its window
+    // keeps running on in-memory state until closed.)
+    if (workspaceId === repo.requireWorkspaceId()) {
+      throw new Error('switch to another workspace before deleting this one')
+    }
+    repo.workspaces.remove(workspaceId)
+    return repo.workspaces.list()
+  })
+
+  h(IPC.exportWorkspace, async (_e, workspaceId: string) => {
+    const ws = repo.workspaces.get(workspaceId)
+    if (!ws) throw new Error('workspace not found')
     const win = runtime.window ?? undefined
     const opts = {
-      title: 'Create a workspace',
-      defaultPath: 'orbital.workspace.yaml',
+      title: 'Export workspace',
+      defaultPath: `${ws.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.workspace.yaml`,
       filters: [{ name: 'Orbital workspace', extensions: ['yaml', 'yml'] }]
     }
     const result = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
     if (result.canceled || !result.filePath) return null
-    const info = createWorkspaceFile(result.filePath)
-    upsertRecentWorkspace(info)
-    launchWorkspace(result.filePath)
-    return info
+    exportWorkspaceToFile(workspaceId, result.filePath)
+    return result.filePath
   })
 
-  h(IPC.removeRecentWorkspace, (_e, configPath: string) => removeRecentWorkspace(configPath))
+  h(IPC.importWorkspace, async () => {
+    const win = runtime.window ?? undefined
+    const opts = {
+      title: 'Import workspace',
+      filters: [{ name: 'Orbital workspace', extensions: ['yaml', 'yml'] }],
+      properties: ['openFile' as const]
+    }
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (result.canceled || result.filePaths.length === 0) return null
+    return importWorkspaceFromFile(result.filePaths[0]) // throws readable errors
+  })
 
   // ---- projects ----
   h(IPC.addProject, async () => {
@@ -463,7 +482,6 @@ export function registerIpc(): void {
     const project = repo.projects.getByPath(dir)!
     // Adopt any worktrees the repo already has — they show up immediately.
     await reconcileProjectWorktrees(project.id)
-    syncWorkspaceFromDb()
     broadcastAll()
     return project
   })
@@ -478,7 +496,6 @@ export function registerIpc(): void {
     runtime.removeEnvWatcher(projectId)
     removeWorktreesWatcher(projectId)
     repo.projects.remove(projectId)
-    syncWorkspaceFromDb()
     broadcastAll()
   })
 
@@ -486,7 +503,6 @@ export function registerIpc(): void {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.projects.rename(projectId, trimmed)
-    syncWorkspaceFromDb()
     broadcast()
   })
 
@@ -592,7 +608,6 @@ export function registerIpc(): void {
 
   h(IPC.setProjectAgent, (_e, projectId: string, patch: ProjectAgentPatch) => {
     repo.projects.updateAgent(projectId, patch)
-    syncWorkspaceFromDb()
     broadcast()
   })
 

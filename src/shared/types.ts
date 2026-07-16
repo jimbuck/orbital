@@ -449,7 +449,10 @@ export const IPC = {
   listWorkspaces: 'orbital:listWorkspaces',
   openWorkspace: 'orbital:openWorkspace',
   createWorkspace: 'orbital:createWorkspace',
-  removeRecentWorkspace: 'orbital:removeRecentWorkspace',
+  renameWorkspace: 'orbital:renameWorkspace',
+  removeWorkspace: 'orbital:removeWorkspace',
+  exportWorkspace: 'orbital:exportWorkspace',
+  importWorkspace: 'orbital:importWorkspace',
   // projects
   addProject: 'orbital:addProject',
   removeProject: 'orbital:removeProject',
@@ -536,18 +539,25 @@ export interface OrbitalApi {
   setSettings(settings: Settings): Promise<Settings>
 
   // workspaces
-  /** Recently-opened workspaces from the global store (current one included). */
+  /** Every workspace in the global DB, most recently opened first. */
   listWorkspaces(): Promise<WorkspaceInfo[]>
   /**
-   * Launch a separate instance for the workspace at `configPath`; with no path,
-   * a native file picker chooses the YAML. Opening the current workspace just
-   * refocuses this window. Null when the picker is cancelled.
+   * Launch a separate instance for the workspace with `workspaceId` (opening
+   * the current one just refocuses this window).
    */
-  openWorkspace(configPath?: string): Promise<WorkspaceInfo | null>
-  /** Create a fresh workspace YAML via a native save dialog, then launch it. */
-  createWorkspace(): Promise<WorkspaceInfo | null>
-  /** Drop an entry from the recents registry (does not touch the file). */
-  removeRecentWorkspace(configPath: string): Promise<WorkspaceInfo[]>
+  openWorkspace(workspaceId: string): Promise<WorkspaceInfo | null>
+  /** Create a new empty workspace named `name`, then launch it. */
+  createWorkspace(name: string): Promise<WorkspaceInfo | null>
+  renameWorkspace(workspaceId: string, name: string): Promise<void>
+  /**
+   * Delete a workspace and everything in it (projects/worktrees/tasks rows —
+   * nothing on disk). The current workspace can't delete itself.
+   */
+  removeWorkspace(workspaceId: string): Promise<WorkspaceInfo[]>
+  /** Write a workspace (projects + settings) to a shareable YAML via save dialog. */
+  exportWorkspace(workspaceId: string): Promise<string | null>
+  /** Create a new workspace from a shared YAML via open dialog. */
+  importWorkspace(): Promise<WorkspaceInfo | null>
 
   // projects
   addProject(): Promise<Project | null>
@@ -751,27 +761,27 @@ export interface WorkspaceProjectConfig {
   agentExecPath?: string
 }
 
-/** The parsed contents of a workspace's YAML config file. */
+/**
+ * The Export/Import Workspace file format (YAML). Workspaces themselves live in
+ * the global DB; this shape exists purely for sharing a workspace between
+ * machines or people.
+ */
 export interface WorkspaceConfig {
   version: number
-  /** Stable workspace id — also keys this instance's control pipe. */
+  /** The exporting workspace's id (import assigns a fresh one on collision). */
   id: string
   /** Human-facing workspace name (shown in the picker / title bar). */
   name: string
-  /**
-   * Workspace-scoped settings. Absent in configs written before the settings
-   * split (or hand-authored without one) — the settings service seeds/merges
-   * defaults, so every field is optional here.
-   */
+  /** Workspace-scoped settings. Every field optional — defaults fill gaps. */
   settings?: Partial<WorkspaceSettings>
   projects: WorkspaceProjectConfig[]
 }
 
-/** A workspace as listed in the picker (the global store's recents registry). */
+/** A workspace as listed in the picker (a row of the global `workspaces` table). */
 export interface WorkspaceInfo {
   id: string
   name: string
-  /** Absolute path to the workspace's YAML config file. */
-  configPath: string
   lastOpenedAt: number
+  /** How many projects the workspace holds (picker display). */
+  projectCount: number
 }

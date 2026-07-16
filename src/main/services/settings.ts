@@ -6,18 +6,15 @@ import {
   type WorkspaceSettings
 } from '@shared/types'
 import { getDb } from '../db/database'
-import { getGlobalSettings, setGlobalSettings } from './global-config'
-import { getWorkspaceSettings, updateWorkspaceSettings } from './workspace-config'
+import { requireWorkspaceId, workspaces } from '../db/repositories'
 
 /**
  * The settings facade. The renderer (and the rest of main) reads and writes one
- * flat {@link Settings} object; behind it the fields are split across two
- * stores — workspace-scoped fields (env-sync patterns, periodic fetch, enabled
- * agents) persist in the active workspace's YAML config, machine-global fields
- * (theme, alerts, shell, logging, Claude hooks) in the global store shared by
- * every instance. Settings created before the split lived as a JSON blob in the
- * per-profile SQLite DB; {@link migrateLegacySettings} seeds both stores from
- * that blob once so nothing resets on upgrade.
+ * flat {@link Settings} object; behind it the fields live in two places in the
+ * global DB — workspace-scoped fields (env-sync patterns, periodic fetch,
+ * enabled agents) on the active workspace's row, machine-global fields (theme,
+ * alerts, shell, logging, Claude hooks) in the settings table, shared by every
+ * workspace and instance.
  */
 
 const DEFAULT_SETTINGS: Settings = {
@@ -51,40 +48,44 @@ function splitWorkspace(s: Settings): WorkspaceSettings {
   }
 }
 
-/** The assembled settings: defaults ← global store ← active workspace config. */
-export function getSettings(): Settings {
-  return { ...DEFAULT_SETTINGS, ...getGlobalSettings(), ...getWorkspaceSettings() }
-}
-
-/** Split a full settings object across the global and workspace stores. */
-export function setSettings(s: Settings): Settings {
-  setGlobalSettings(splitGlobal(s))
-  updateWorkspaceSettings(splitWorkspace(s))
-  return getSettings()
-}
-
-/** The pre-split settings blob from this profile's DB, if one was ever saved. */
-function legacyDbSettings(): Partial<Settings> | null {
-  const row = getDb().prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
-  if (!row) return null
-  try {
-    const parsed = JSON.parse(row.value)
-    return parsed && typeof parsed === 'object' ? (parsed as Partial<Settings>) : null
-  } catch {
-    return null
-  }
-}
-
 /**
- * One-time move of settings out of the profile DB into the split stores. Each
- * store is only seeded while it has never been written (so this can run every
- * boot without clobbering later edits), and the DB blob is left in place for
- * rollback. New profiles with no blob simply start from defaults on first save.
+ * The global slice from the settings table. Pre-split blobs also carried the
+ * workspace fields; picking only the global keys keeps those leftovers from
+ * shadowing a workspace's own (or default) values.
  */
-export function migrateLegacySettings(): void {
-  const legacy = legacyDbSettings()
-  if (!legacy) return
-  const merged = { ...DEFAULT_SETTINGS, ...legacy }
-  if (getGlobalSettings() === undefined) setGlobalSettings(splitGlobal(merged))
-  if (getWorkspaceSettings() === undefined) updateWorkspaceSettings(splitWorkspace(merged))
+function readGlobalSettings(): Partial<GlobalSettings> {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
+  if (!row) return {}
+  let blob: Record<string, unknown>
+  try {
+    blob = JSON.parse(row.value)
+  } catch {
+    return {}
+  }
+  if (!blob || typeof blob !== 'object') return {}
+  const out: Record<string, unknown> = {}
+  for (const key of ['defaultShell', 'alerts', 'claudeHooksInstalled', 'debugLogging', 'theme'] as const) {
+    if (blob[key] !== undefined) out[key] = blob[key]
+  }
+  return out as Partial<GlobalSettings>
+}
+
+function writeGlobalSettings(s: GlobalSettings): void {
+  getDb()
+    .prepare(
+      "INSERT INTO settings (key, value) VALUES ('app', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    )
+    .run(JSON.stringify(s))
+}
+
+/** The assembled settings: defaults ← global slice ← active workspace's slice. */
+export function getSettings(): Settings {
+  return { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...workspaces.getSettings(requireWorkspaceId()) }
+}
+
+/** Split a full settings object across the global table and the workspace row. */
+export function setSettings(s: Settings): Settings {
+  writeGlobalSettings(splitGlobal(s))
+  workspaces.updateSettings(requireWorkspaceId(), splitWorkspace(s))
+  return getSettings()
 }

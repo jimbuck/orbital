@@ -7,7 +7,6 @@ import { EnvSyncWatcher } from './services/env-sync'
 import * as repo from './db/repositories'
 import { deleteBriefing } from './services/agents/briefing'
 import { getSettings } from './services/settings'
-import { activeWorkspaceInfo } from './services/workspace-config'
 import { IPC, isPtyTabType, type AppState } from '@shared/types'
 
 /**
@@ -102,7 +101,7 @@ class Runtime {
     return {
       ...repo.getAppState(),
       settings: getSettings(),
-      workspace: activeWorkspaceInfo(),
+      workspace: repo.workspaces.active(),
       devServers,
       settingUpWorktrees: [...this.settingUp]
     }

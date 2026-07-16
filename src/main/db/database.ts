@@ -1,20 +1,36 @@
 import { join } from 'node:path'
-import { app } from 'electron'
+import { mkdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
-import { DEFAULT_ENV_SYNC_PATTERNS } from '@shared/types'
+import { DEFAULT_ENV_SYNC_PATTERNS, WORKSPACE_SETTING_KEYS } from '@shared/types'
 
 let db: Database.Database | null = null
+let dbDir: string | null = null
 
 /**
- * Open (and migrate) the Orbital SQLite store. State lives in the app's
- * userData directory — never in a project repo (PRD §12, §15).
+ * Point the store at the GLOBAL app-storage root. One DB serves every
+ * workspace and every running instance (WAL + busy timeout make cross-process
+ * access safe); instances differ only in which workspace they scope to and in
+ * their Chromium profile dir. Must be called once, before the first getDb().
+ */
+export function initDb(dir: string): void {
+  dbDir = dir
+}
+
+/**
+ * Open (and migrate) the Orbital SQLite store — the single global DB under the
+ * app-storage root, never in a project repo (PRD §12, §15).
  */
 export function getDb(): Database.Database {
   if (db) return db
-  const file = join(app.getPath('userData'), 'orbital.db')
-  db = new Database(file)
+  if (!dbDir) throw new Error('database not initialized — call initDb(dir) first')
+  mkdirSync(dbDir, { recursive: true })
+  db = new Database(join(dbDir, 'orbital.db'))
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // Several instances (one per workspace) share this DB — wait out, rather than
+  // throw on, another process's in-flight write.
+  db.pragma('busy_timeout = 5000')
   migrate(db)
   return db
 }
@@ -34,10 +50,19 @@ function migrate(d: Database.Database): void {
   renameLegacySchema(d)
 
   d.exec(`
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id             TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      settings       TEXT NOT NULL DEFAULT '{}',
+      created_at     INTEGER NOT NULL,
+      last_opened_at INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       id                     TEXT PRIMARY KEY,
+      workspace_id           TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       name                   TEXT NOT NULL,
-      repo_path              TEXT NOT NULL UNIQUE,
+      repo_path              TEXT NOT NULL,
       env_sync_patterns      TEXT NOT NULL DEFAULT '[]',
       default_agent_provider TEXT NOT NULL DEFAULT 'claude',
       agent_exec_path        TEXT NOT NULL DEFAULT '',
@@ -104,8 +129,96 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'projects', 'default_agent_provider', "TEXT NOT NULL DEFAULT 'claude'")
   addColumnIfMissing(d, 'projects', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
+  const defaultWorkspaceId = ensureDefaultWorkspace(d)
+  scopeProjectsToWorkspaces(d, defaultWorkspaceId)
+  // Only after scoping — a pre-workspaces `projects` table lacks the column
+  // these reference until the rebuild above has run.
+  d.exec(`
+    CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
+    -- The same repo may be a project in several workspaces, but only once each.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_ws_path ON projects(workspace_id, repo_path);
+  `)
   migrateEnvPatternsToSettings(d)
   migrateEnvPatternsRecursive(d)
+}
+
+/**
+ * Guarantee at least one workspace exists (every project row must belong to
+ * one). The first-ever workspace is "Default", seeded with the workspace-scoped
+ * slice of the legacy settings blob so custom env-sync patterns survive the
+ * move into per-workspace settings. Returns the oldest workspace's id.
+ */
+function ensureDefaultWorkspace(d: Database.Database): string {
+  const existing = d.prepare('SELECT id FROM workspaces ORDER BY created_at LIMIT 1').get() as
+    | { id: string }
+    | undefined
+  if (existing) return existing.id
+  let wsSettings: Record<string, unknown> = {}
+  try {
+    const row = d.prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
+    if (row) {
+      const blob = JSON.parse(row.value) as Record<string, unknown>
+      for (const key of WORKSPACE_SETTING_KEYS) {
+        if (blob[key] !== undefined) wsSettings[key] = blob[key]
+      }
+    }
+  } catch {
+    wsSettings = {} // unparseable blob — the workspace starts from defaults
+  }
+  const id = randomUUID()
+  const now = Date.now()
+  d.prepare('INSERT INTO workspaces (id, name, settings, created_at, last_opened_at) VALUES (?, ?, ?, ?, ?)').run(
+    id,
+    'Default',
+    JSON.stringify(wsSettings),
+    now,
+    now
+  )
+  return id
+}
+
+/**
+ * Move a pre-workspaces `projects` table under workspace scoping: add the
+ * `workspace_id` column (all existing projects join the default workspace) and
+ * swap the global `repo_path` UNIQUE for a per-workspace one — the same repo
+ * may be a project in several workspaces. SQLite can't alter constraints in
+ * place, so this is the standard rebuild-and-rename, done once (keyed on the
+ * column's absence). Child tables reference projects by name, so they survive
+ * the rename untouched (FK enforcement is suspended for the swap).
+ */
+function scopeProjectsToWorkspaces(d: Database.Database, defaultWorkspaceId: string): void {
+  const cols = (d.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map((r) => r.name)
+  if (cols.includes('workspace_id')) return
+  d.pragma('foreign_keys = OFF')
+  const tx = d.transaction(() => {
+    d.exec(`
+      CREATE TABLE projects_new (
+        id                     TEXT PRIMARY KEY,
+        workspace_id           TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        name                   TEXT NOT NULL,
+        repo_path              TEXT NOT NULL,
+        env_sync_patterns      TEXT NOT NULL DEFAULT '[]',
+        default_agent_provider TEXT NOT NULL DEFAULT 'claude',
+        agent_exec_path        TEXT NOT NULL DEFAULT '',
+        added_at               INTEGER NOT NULL
+      );
+    `)
+    d.prepare(
+      `INSERT INTO projects_new (id, workspace_id, name, repo_path, env_sync_patterns, default_agent_provider, agent_exec_path, added_at)
+       SELECT id, ?, name, repo_path, env_sync_patterns, default_agent_provider, agent_exec_path, added_at FROM projects`
+    ).run(defaultWorkspaceId)
+    d.exec(`
+      DROP TABLE projects;
+      ALTER TABLE projects_new RENAME TO projects;
+      CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_ws_path ON projects(workspace_id, repo_path);
+    `)
+  })
+  try {
+    tx()
+  } finally {
+    d.pragma('foreign_keys = ON')
+  }
 }
 
 /**

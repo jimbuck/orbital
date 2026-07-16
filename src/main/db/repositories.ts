@@ -14,7 +14,8 @@ import {
   type TaskStatus,
   type LayoutNode,
   type TaskPatch,
-  type WorkspaceProjectConfig,
+  type WorkspaceInfo,
+  type WorkspaceSettings,
   aggregateStatus,
   isPtyTabType
 } from '@shared/types'
@@ -63,26 +64,124 @@ function mapTask(r: any): Task {
 }
 
 /* ============================================================================
- * Projects
+ * Workspaces
+ * ========================================================================== */
+
+/**
+ * The workspace this INSTANCE is scoped to — set once at boot, before anything
+ * reads state. Every project (and, through projects, every worktree and task)
+ * the instance sees belongs to this workspace; the underlying DB is shared by
+ * all workspaces and instances.
+ */
+let activeWorkspaceId: string | null = null
+
+export function setActiveWorkspaceId(workspaceId: string): void {
+  activeWorkspaceId = workspaceId
+}
+
+export function requireWorkspaceId(): string {
+  if (!activeWorkspaceId) throw new Error('active workspace not set — boot resolution must run first')
+  return activeWorkspaceId
+}
+
+function mapWorkspace(r: any): WorkspaceInfo {
+  return { id: r.id, name: r.name, lastOpenedAt: r.last_opened_at, projectCount: r.project_count ?? 0 }
+}
+
+export const workspaces = {
+  /** Every workspace, most recently opened first (the picker's list). */
+  list(): WorkspaceInfo[] {
+    return getDb()
+      .prepare(
+        `SELECT w.*, (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS project_count
+         FROM workspaces w ORDER BY w.last_opened_at DESC, w.created_at`
+      )
+      .all()
+      .map(mapWorkspace)
+  },
+  get(workspaceId: string): WorkspaceInfo | undefined {
+    const r = getDb()
+      .prepare(
+        `SELECT w.*, (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS project_count
+         FROM workspaces w WHERE w.id = ?`
+      )
+      .get(workspaceId)
+    return r ? mapWorkspace(r) : undefined
+  },
+  /** The instance's own workspace. */
+  active(): WorkspaceInfo {
+    const ws = workspaces.get(requireWorkspaceId())
+    if (!ws) throw new Error('active workspace row missing')
+    return ws
+  },
+  /** The workspace a no-argument launch opens: the most recently used one. */
+  mostRecentId(): string | undefined {
+    const r = getDb()
+      .prepare('SELECT id FROM workspaces ORDER BY last_opened_at DESC, created_at LIMIT 1')
+      .get() as { id: string } | undefined
+    return r?.id
+  },
+  create(name: string, settings: Partial<WorkspaceSettings> = {}): WorkspaceInfo {
+    const wid = id()
+    getDb()
+      .prepare('INSERT INTO workspaces (id, name, settings, created_at, last_opened_at) VALUES (?, ?, ?, ?, 0)')
+      .run(wid, name, JSON.stringify(settings), now())
+    return workspaces.get(wid)!
+  },
+  rename(workspaceId: string, name: string): void {
+    getDb().prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, workspaceId)
+  },
+  /** Delete a workspace; its projects (and their worktrees/tasks) cascade away. */
+  remove(workspaceId: string): void {
+    getDb().prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId)
+  },
+  touchOpened(workspaceId: string): void {
+    getDb().prepare('UPDATE workspaces SET last_opened_at = ? WHERE id = ?').run(now(), workspaceId)
+  },
+  getSettings(workspaceId: string): Partial<WorkspaceSettings> {
+    const r = getDb().prepare('SELECT settings FROM workspaces WHERE id = ?').get(workspaceId) as
+      | { settings: string }
+      | undefined
+    if (!r) return {}
+    try {
+      const parsed = JSON.parse(r.settings)
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      return {}
+    }
+  },
+  updateSettings(workspaceId: string, settings: WorkspaceSettings): void {
+    getDb().prepare('UPDATE workspaces SET settings = ? WHERE id = ?').run(JSON.stringify(settings), workspaceId)
+  }
+}
+
+/* ============================================================================
+ * Projects (always scoped to the instance's active workspace)
  * ========================================================================== */
 
 export const projects = {
-  list(): Project[] {
-    return getDb().prepare('SELECT * FROM projects ORDER BY added_at').all().map(mapProject)
+  /** The active workspace's projects; pass `workspaceId` to read another's (export). */
+  list(workspaceId?: string): Project[] {
+    return getDb()
+      .prepare('SELECT * FROM projects WHERE workspace_id = ? ORDER BY added_at')
+      .all(workspaceId ?? requireWorkspaceId())
+      .map(mapProject)
   },
   get(pid: string): Project | undefined {
     const r = getDb().prepare('SELECT * FROM projects WHERE id = ?').get(pid)
     return r ? mapProject(r) : undefined
   },
   getByPath(repoPath: string): Project | undefined {
-    const r = getDb().prepare('SELECT * FROM projects WHERE repo_path = ?').get(repoPath)
+    const r = getDb()
+      .prepare('SELECT * FROM projects WHERE workspace_id = ? AND repo_path = ?')
+      .get(requireWorkspaceId(), repoPath)
     return r ? mapProject(r) : undefined
   },
-  create(input: { name: string; repoPath: string }): Project {
+  create(input: { name: string; repoPath: string; workspaceId?: string }): Project {
     const pid = id()
     getDb()
-      .prepare('INSERT INTO projects (id, name, repo_path, added_at) VALUES (?, ?, ?, ?)')
-      .run(pid, input.name, input.repoPath, now())
+      .prepare('INSERT INTO projects (id, workspace_id, name, repo_path, added_at) VALUES (?, ?, ?, ?, ?)')
+      .run(pid, input.workspaceId ?? requireWorkspaceId(), input.name, input.repoPath, now())
     return projects.get(pid)!
   },
   remove(pid: string): void {
@@ -97,52 +196,6 @@ export const projects = {
     getDb()
       .prepare('UPDATE projects SET default_agent_provider = ?, agent_exec_path = ? WHERE id = ?')
       .run(patch.defaultAgentProvider ?? cur.defaultAgentProvider, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
-  },
-  /**
-   * Make the `projects` table match a workspace config's project list (the YAML
-   * is the source of truth). Rows absent from the config are deleted — their
-   * worktrees, panes, tabs and tasks cascade away — and each config entry is
-   * upserted by its stable id, preserving `added_at` (hence list order) for rows
-   * that already exist. Runs in one transaction so a mid-reconcile failure can't
-   * leave the projection half-applied. Returns the ids that were deleted so the
-   * caller can release any runtime resources (watchers, terminals) for them.
-   */
-  reconcile(configProjects: WorkspaceProjectConfig[]): { removed: string[] } {
-    const db = getDb()
-    const keep = new Set(configProjects.map((p) => p.id))
-    const removed: string[] = []
-    const tx = db.transaction(() => {
-      for (const row of projects.list()) {
-        if (!keep.has(row.id)) {
-          projects.remove(row.id)
-          removed.push(row.id)
-        }
-      }
-      const upsert = db.prepare(
-        `INSERT INTO projects (id, name, repo_path, default_agent_provider, agent_exec_path, added_at)
-         VALUES (@id, @name, @repoPath, @provider, @execPath, @addedAt)
-         ON CONFLICT(id) DO UPDATE SET
-           name = excluded.name,
-           repo_path = excluded.repo_path,
-           default_agent_provider = excluded.default_agent_provider,
-           agent_exec_path = excluded.agent_exec_path`
-      )
-      let seq = now()
-      for (const p of configProjects) {
-        upsert.run({
-          id: p.id,
-          name: p.name,
-          repoPath: p.path,
-          provider: p.agentProvider || 'claude',
-          execPath: p.agentExecPath ?? '',
-          // New rows land after existing ones, in config order; existing rows
-          // keep their stored added_at via the ON CONFLICT branch above.
-          addedAt: seq++
-        })
-      }
-    })
-    tx()
-    return { removed }
   }
 }
 
@@ -203,10 +256,15 @@ function resolveLayout(raw: string, paneIdList: string[]): LayoutNode {
 }
 
 export const worktrees = {
-  /** Hydrate all worktrees with two batched queries (not one per worktree/pane). */
+  /** Hydrate the active workspace's worktrees with batched queries (not one per worktree/pane). */
   list(): Worktree[] {
     const db = getDb()
-    const rows = db.prepare('SELECT * FROM worktrees ORDER BY created_at').all() as any[]
+    const rows = db
+      .prepare(
+        `SELECT w.* FROM worktrees w JOIN projects p ON p.id = w.project_id
+         WHERE p.workspace_id = ? ORDER BY w.created_at`
+      )
+      .all(requireWorkspaceId()) as any[]
     if (rows.length === 0) return []
 
     const tabsByPane = new Map<string, any[]>()
@@ -228,7 +286,11 @@ export const worktrees = {
   },
   /** Lightweight id+status projection for alert badging — skips pane/tab hydration. */
   listStatuses(): Pick<Worktree, 'id' | 'status'>[] {
-    return getDb().prepare('SELECT id, status FROM worktrees').all() as Pick<Worktree, 'id' | 'status'>[]
+    return getDb()
+      .prepare(
+        `SELECT w.id, w.status FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE p.workspace_id = ?`
+      )
+      .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'status'>[]
   },
   get(wid: string): Worktree | undefined {
     const r = getDb().prepare('SELECT * FROM worktrees WHERE id = ?').get(wid)
@@ -360,7 +422,13 @@ export const tabs = {
 
 export const tasks = {
   list(): Task[] {
-    return getDb().prepare('SELECT * FROM tasks ORDER BY created_at, id').all().map(mapTask)
+    return getDb()
+      .prepare(
+        `SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id
+         WHERE p.workspace_id = ? ORDER BY t.created_at, t.id`
+      )
+      .all(requireWorkspaceId())
+      .map(mapTask)
   },
   get(tid: string): Task | undefined {
     const r = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(tid)
