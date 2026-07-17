@@ -5,8 +5,8 @@ import GitPanel from './GitPanel'
 import TaskTracker from './TaskTracker'
 
 /**
- * The cockpit's right rail: the Git surface for the active Flight (bordered off
- * below) followed by the workspace Task tracker. Each section scrolls on its
+ * The cockpit's right rail: the Git surface for the active Worktree (bordered off
+ * below) followed by the project Task tracker. Each section scrolls on its
  * own — a long changed-file list caps at ~half the panel so the task list stays
  * reachable, and the task list scrolls independently below it.
  */

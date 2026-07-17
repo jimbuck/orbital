@@ -10,7 +10,7 @@ description: Install Orbital on Windows, or build it from source.
 - **git** on your `PATH`.
 - Your coding agent's CLI installed and authenticated as usual — **Claude Code**
   is fully supported at launch (Codex support is planned), and any interactive
-  CLI runs fine in a plain Flight terminal.
+  CLI runs fine in a plain worktree terminal.
 
 ## Install the app
 

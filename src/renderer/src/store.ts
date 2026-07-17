@@ -1,15 +1,23 @@
 import { create } from 'zustand'
-import type { AppState, Workspace, Flight, Task, Settings, UpdateStatus } from '@shared/types'
+import type { AppState, Project, Worktree, Task, Settings, UpdateStatus, WorkspaceInfo } from '@shared/types'
 
-export type ModalType = 'settings' | 'addWorkspace' | 'newFlight' | 'board' | 'about' | 'editTask' | null
+export type ModalType =
+  | 'settings'
+  | 'addProject'
+  | 'newWorktree'
+  | 'board'
+  | 'about'
+  | 'editTask'
+  | 'workspaces'
+  | null
 
 interface UIState {
   ready: boolean
-  activeWorkspaceId: string | null
-  activeFlightId: string | null
+  activeProjectId: string | null
+  activeWorktreeId: string | null
   expanded: Record<string, boolean>
   modal: ModalType
-  /** Free-form payload for the open modal (e.g. the workspace a New Flight targets). */
+  /** Free-form payload for the open modal (e.g. the project a New Worktree targets). */
   modalData: unknown
   /**
    * Ordered stack of open modals — enables stacking (e.g. a task modal on top of
@@ -17,28 +25,30 @@ interface UIState {
    * existing single-modal consumers keep working unchanged.
    */
   modalStack: { type: Exclude<ModalType, null>; data: unknown }[]
-  /** Count of Flights currently needing attention (drives the title-bar banner). */
+  /** Count of Worktrees currently needing attention (drives the title-bar banner). */
   alertCount: number
   /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
   updateStatus: UpdateStatus
 }
 
 interface Data {
-  workspaces: Workspace[]
-  flights: Flight[]
+  projects: Project[]
+  worktrees: Worktree[]
   tasks: Task[]
   settings: Settings | null
-  /** Live dev servers per flight (from `orbital server add`). */
+  /** The workspace this instance is running (null until the first state push). */
+  workspace: WorkspaceInfo | null
+  /** Live dev servers per worktree (from `orbital server add`). */
   devServers: Record<string, string[]>
-  /** Flight ids whose worktree is still setting up (background node_modules copy). */
-  settingUpFlights: string[]
+  /** Worktree ids still setting up (background node_modules copy). */
+  settingUpWorktrees: string[]
 }
 
 interface Actions {
   init: () => Promise<void>
   applyState: (s: AppState) => void
-  setActiveWorkspace: (id: string) => void
-  setActiveFlight: (id: string) => void
+  setActiveProject: (id: string) => void
+  setActiveWorktree: (id: string) => void
   toggleExpanded: (id: string) => void
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
@@ -51,17 +61,18 @@ let initStarted = false
 
 export const useStore = create<Store>((set, get) => ({
   // data
-  workspaces: [],
-  flights: [],
+  projects: [],
+  worktrees: [],
   tasks: [],
   settings: null,
+  workspace: null,
   devServers: {},
-  settingUpFlights: [],
+  settingUpWorktrees: [],
 
   // ui
   ready: false,
-  activeWorkspaceId: null,
-  activeFlightId: null,
+  activeProjectId: null,
+  activeWorktreeId: null,
   expanded: {},
   modal: null,
   modalData: null,
@@ -87,50 +98,51 @@ export const useStore = create<Store>((set, get) => ({
 
   applyState(s) {
     const prev = get()
-    let activeWorkspaceId = prev.activeWorkspaceId
-    if (!activeWorkspaceId || !s.workspaces.some((w) => w.id === activeWorkspaceId)) {
-      activeWorkspaceId = s.workspaces[0]?.id ?? null
+    let activeProjectId = prev.activeProjectId
+    if (!activeProjectId || !s.projects.some((p) => p.id === activeProjectId)) {
+      activeProjectId = s.projects[0]?.id ?? null
     }
 
-    const wsFlights = s.flights.filter((f) => f.workspaceId === activeWorkspaceId)
-    let activeFlightId = prev.activeFlightId
-    if (!activeFlightId || !wsFlights.some((f) => f.id === activeFlightId)) {
-      // Prefer the root Flight, else the first Flight of the active workspace.
-      activeFlightId = (wsFlights.find((f) => f.kind === 'root') ?? wsFlights[0])?.id ?? null
+    const projectWorktrees = s.worktrees.filter((w) => w.projectId === activeProjectId)
+    let activeWorktreeId = prev.activeWorktreeId
+    if (!activeWorktreeId || !projectWorktrees.some((w) => w.id === activeWorktreeId)) {
+      // Prefer the root Worktree, else the first Worktree of the active project.
+      activeWorktreeId = (projectWorktrees.find((w) => w.kind === 'root') ?? projectWorktrees[0])?.id ?? null
     }
 
     const expanded = { ...prev.expanded }
-    if (activeWorkspaceId && expanded[activeWorkspaceId] === undefined) {
-      expanded[activeWorkspaceId] = true
+    if (activeProjectId && expanded[activeProjectId] === undefined) {
+      expanded[activeProjectId] = true
     }
 
     set({
-      workspaces: s.workspaces,
-      flights: s.flights,
+      projects: s.projects,
+      worktrees: s.worktrees,
       tasks: s.tasks,
       settings: s.settings,
+      workspace: s.workspace,
       devServers: s.devServers,
-      settingUpFlights: s.settingUpFlights,
-      activeWorkspaceId,
-      activeFlightId,
+      settingUpWorktrees: s.settingUpWorktrees,
+      activeProjectId,
+      activeWorktreeId,
       expanded,
-      alertCount: s.flights.filter((f) => f.status === 'needs_attention').length
+      alertCount: s.worktrees.filter((w) => w.status === 'needs_attention').length
     })
   },
 
-  setActiveWorkspace(id) {
-    const wsFlights = get().flights.filter((f) => f.workspaceId === id)
-    const activeFlightId = (wsFlights.find((f) => f.kind === 'root') ?? wsFlights[0])?.id ?? null
+  setActiveProject(id) {
+    const projectWorktrees = get().worktrees.filter((w) => w.projectId === id)
+    const activeWorktreeId = (projectWorktrees.find((w) => w.kind === 'root') ?? projectWorktrees[0])?.id ?? null
     set((s) => ({
-      activeWorkspaceId: id,
-      activeFlightId,
+      activeProjectId: id,
+      activeWorktreeId,
       expanded: { ...s.expanded, [id]: true }
     }))
   },
 
-  setActiveFlight(id) {
-    const flight = get().flights.find((f) => f.id === id)
-    set({ activeFlightId: id, activeWorkspaceId: flight ? flight.workspaceId : get().activeWorkspaceId })
+  setActiveWorktree(id) {
+    const worktree = get().worktrees.find((w) => w.id === id)
+    set({ activeWorktreeId: id, activeProjectId: worktree ? worktree.projectId : get().activeProjectId })
   },
 
   toggleExpanded(id) {
@@ -145,7 +157,7 @@ export const useStore = create<Store>((set, get) => ({
     }
     // Otherwise push a new layer and mirror it as the top. Pushing is
     // backward-compatible: with nothing open the stack holds a single entry
-    // (same as before); opening editTask/newFlight over the board yields
+    // (same as before); opening editTask/newWorktree over the board yields
     // [board, editTask] so BOTH render (see ModalRoot).
     set((s) => {
       const modalStack = [...s.modalStack, { type, data: data ?? null }]
@@ -166,14 +178,14 @@ export const useStore = create<Store>((set, get) => ({
 
 /* ---- Selectors --------------------------------------------------------- */
 
-export function activeWorkspace(s: Store): Workspace | undefined {
-  return s.workspaces.find((w) => w.id === s.activeWorkspaceId)
+export function activeProject(s: Store): Project | undefined {
+  return s.projects.find((p) => p.id === s.activeProjectId)
 }
 
-export function activeFlight(s: Store): Flight | undefined {
-  return s.flights.find((f) => f.id === s.activeFlightId)
+export function activeWorktree(s: Store): Worktree | undefined {
+  return s.worktrees.find((w) => w.id === s.activeWorktreeId)
 }
 
-export function tasksForWorkspace(s: Store, workspaceId: string): Task[] {
-  return s.tasks.filter((t) => t.workspaceId === workspaceId)
+export function tasksForProject(s: Store, projectId: string): Task[] {
+  return s.tasks.filter((t) => t.projectId === projectId)
 }

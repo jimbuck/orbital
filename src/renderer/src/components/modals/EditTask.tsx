@@ -42,7 +42,7 @@ export default function EditTask(): JSX.Element {
 
   // Recently-used tags to suggest, so users reuse existing tags instead of
   // retyping and creating near-duplicates. Drawn from other tasks in the same
-  // workspace, ordered by how recently a task carrying the tag was touched.
+  // project, ordered by how recently a task carrying the tag was touched.
   // Declared before the `if (!task)` early return to keep hook order stable;
   // guarded to return [] when there's no task to edit.
   const tagSuggestions = useMemo<string[]>(() => {
@@ -52,7 +52,7 @@ export default function EditTask(): JSX.Element {
     // For each tag, remember the most recent updatedAt of a task that carries it.
     const recency = new Map<string, number>()
     for (const t of allTasks) {
-      if (t.workspaceId !== task.workspaceId) continue
+      if (t.projectId !== task.projectId) continue
       for (const tag of t.tags) {
         if (selected.has(tag)) continue
         if (draft && !tag.toLowerCase().includes(draft)) continue

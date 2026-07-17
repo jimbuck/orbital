@@ -3,8 +3,9 @@ import { rm } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { git } from './git'
 import { syncEnvFiles } from './env-sync'
-import { flights as flightRepo, settings as settingsRepo } from '../db/repositories'
-import type { Workspace, Flight } from '@shared/types'
+import { worktrees as worktreeRepo } from '../db/repositories'
+import { getSettings } from './settings'
+import type { Project, Worktree } from '@shared/types'
 
 /** Turn a branch/title into a filesystem- and git-safe slug. */
 export function slugify(input: string): string {
@@ -14,7 +15,7 @@ export function slugify(input: string): string {
       .trim()
       .replace(/[^a-z0-9/_-]+/g, '-')
       .replace(/-+/g, '-')
-      .replace(/^[-/]+|[-/]+$/g, '') || 'flight'
+      .replace(/^[-/]+|[-/]+$/g, '') || 'worktree'
   )
 }
 
@@ -22,12 +23,12 @@ export function slugify(input: string): string {
  * Worktrees live in a sibling directory so they never pollute the repo's own
  * working tree: <repoParent>/.orbital-worktrees/<repoName>/<slug>.
  */
-export function worktreeBaseDir(workspace: Workspace): string {
-  return join(dirname(workspace.repoPath), '.orbital-worktrees', basename(workspace.repoPath))
+export function worktreeBaseDir(project: Project): string {
+  return join(dirname(project.repoPath), '.orbital-worktrees', basename(project.repoPath))
 }
 
-function uniqueWorktreePath(workspace: Workspace, slug: string): string {
-  const base = worktreeBaseDir(workspace)
+function uniqueWorktreePath(project: Project, slug: string): string {
+  const base = worktreeBaseDir(project)
   let candidate = join(base, slug.replace(/\//g, '-'))
   let n = 2
   while (existsSync(candidate)) {
@@ -37,8 +38,8 @@ function uniqueWorktreePath(workspace: Workspace, slug: string): string {
   return candidate
 }
 
-export interface CreateWorktreeFlightInput {
-  workspace: Workspace
+export interface CreateLinkedWorktreeInput {
+  project: Project
   /** Branch to check out or create. */
   branch: string
   name?: string
@@ -47,19 +48,19 @@ export interface CreateWorktreeFlightInput {
 }
 
 /**
- * Create a git worktree on `branch`, register a worktree Flight for it, and
- * sync the workspace's env files into the new checkout (PRD §5, §8).
+ * Create a git worktree on `branch`, register a linked Worktree for it, and
+ * sync the project's env files into the new checkout (PRD §5, §8).
  */
-export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Promise<Flight> {
-  const { workspace } = input
-  const repoPath = workspace.repoPath
-  // Slugify so a multi-word Flight name (e.g. "Login flow") becomes a valid git
+export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Promise<Worktree> {
+  const { project } = input
+  const repoPath = project.repoPath
+  // Slugify so a multi-word Worktree name (e.g. "Login flow") becomes a valid git
   // ref ("login-flow"); an explicit ref like "feat/login" passes through.
   const raw = input.branch.trim()
   const baseSlug = slugify(raw)
 
   let branch = baseSlug
-  let worktreePath = uniqueWorktreePath(workspace, baseSlug)
+  let worktreePath = uniqueWorktreePath(project, baseSlug)
   let attached = false
 
   if (await git.branchExists(repoPath, baseSlug)) {
@@ -82,15 +83,15 @@ export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Pr
       branch = `${baseSlug}-${n}`
       n++
     }
-    worktreePath = uniqueWorktreePath(workspace, branch)
+    worktreePath = uniqueWorktreePath(project, branch)
     await git.worktreeAdd(repoPath, { branch, worktreePath, baseRef: input.baseRef, newBranch: true })
   }
 
-  const flight = flightRepo.create({
-    workspaceId: workspace.id,
-    kind: 'worktree',
+  const worktree = worktreeRepo.create({
+    projectId: project.id,
+    kind: 'linked',
     name: input.name?.trim() || raw,
-    worktreePath,
+    path: worktreePath,
     branch,
     taskId: input.taskId ?? null
   })
@@ -101,16 +102,16 @@ export async function createWorktreeFlight(input: CreateWorktreeFlightInput): Pr
   // separately by the caller (in the background), so it never blocks flight
   // creation — see ipc.ts / runtime.markSettingUp.
   try {
-    await syncEnvFiles(workspace.repoPath, worktreePath, settingsRepo.get().envSyncPatterns)
+    await syncEnvFiles(project.repoPath, worktreePath, getSettings().envSyncPatterns)
   } catch {
     /* env sync is non-fatal */
   }
 
-  return flight
+  return worktree
 }
 
 /**
- * Remove the git worktree backing a Flight. The caller has already decided the
+ * Remove the git worktree backing a Worktree. The caller has already decided the
  * removal should proceed (the dirty guard passed, or force was given), so this
  * tears the worktree down as reliably as it can rather than giving up on the
  * first refusal.
@@ -124,7 +125,7 @@ export async function removeWorktree(repoPath: string, worktreePath: string, for
     return
   }
 
-  // On Windows the directory can stay locked for a beat after the Flight's PTYs
+  // On Windows the directory can stay locked for a beat after the Worktree's PTYs
   // are killed: conpty releases the shell's cwd handle asynchronously (kill() is
   // fire-and-forget), and a directory watcher may not have fully torn down yet.
   // While any handle lingers `git worktree remove` fails with a delete/permission

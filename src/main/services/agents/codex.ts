@@ -1,7 +1,7 @@
 /**
  * OpenAI Codex CLI agent provider.
  *
- * Boots `codex` directly in the Flight's worktree. The Codex CLI has no
+ * Boots `codex` directly in the Worktree's checkout. The Codex CLI has no
  * --append-system-prompt-file equivalent, so the briefing file is not passed.
  */
 import type { AgentContext, AgentProvider, ResolvedCommand } from './provider'

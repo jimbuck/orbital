@@ -22,17 +22,25 @@ export type ControlHandler = (req: ControlRequest) => Promise<ControlResponse>
 const MAX_LINE_BYTES = 1024 * 1024
 
 export class ControlChannel {
-  readonly pipePath: string = controlPipePath()
+  /**
+   * The bound pipe path. Defaults to the legacy global name; the boot sequence
+   * passes this instance's per-workspace path to {@link start} so concurrent
+   * instances never collide.
+   */
+  pipePath: string = controlPipePath()
 
   private server: net.Server | null = null
   private readonly sockets = new Set<net.Socket>()
 
   /**
    * Bind the control server and route every decoded request through `handler`.
-   * Resolves once the server is listening; rejects if binding fails.
+   * When `pipePath` is given it becomes this channel's bound path (the CLI is
+   * handed the same value via `ORBITAL_SOCKET`). Resolves once the server is
+   * listening; rejects if binding fails.
    */
-  async start(handler: ControlHandler): Promise<void> {
+  async start(handler: ControlHandler, pipePath?: string): Promise<void> {
     if (this.server) return
+    if (pipePath) this.pipePath = pipePath
 
     // A unix socket file left behind by a crash blocks rebind with EADDRINUSE.
     // Windows named pipes have no filesystem entry, so this only applies off-win32.

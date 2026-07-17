@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Tab } from '@shared/types'
-import { useStore, activeFlight } from '@renderer/store'
+import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { registerTerminal } from '@renderer/lib/editActions'
 
@@ -85,8 +85,8 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
         if (event.ctrlKey || event.metaKey) {
           void window.orbital.openExternal(uri)
         } else {
-          const f = activeFlight(useStore.getState())
-          if (f) void window.orbital.createTab(f.id, paneIdRef.current, 'browser', { url: uri })
+          const w = activeWorktree(useStore.getState())
+          if (w) void window.orbital.createTab(w.id, paneIdRef.current, 'browser', { url: uri })
         }
       })
     )

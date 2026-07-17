@@ -1,11 +1,11 @@
 ---
 title: Running agents
-description: Agent tabs, per-workspace providers, briefings, and the Claude Code hooks.
+description: Agent tabs, per-project providers, briefings, and the Claude Code hooks.
 ---
 
 ## Two ways to run an agent
 
-1. **In a plain terminal.** Every Flight terminal is a real shell — run `claude`
+1. **In a plain terminal.** Every worktree terminal is a real shell — run `claude`
    (or any agent CLI) like you always do.
 2. **As an agent tab.** Click **+** in a tab strip and pick **Claude**. The tab
    boots directly into the agent, shows a status dot instead of an icon, and
@@ -13,7 +13,7 @@ description: Agent tabs, per-workspace providers, briefings, and the Claude Code
 
 ![The add-tab menu: Terminal, Claude, Browser, Editor — plus live dev servers](../../../assets/screenshots/06-add-tab-menu.png)
 
-Per workspace you can configure which provider agent tabs launch and an explicit
+Per project you can configure which provider agent tabs launch and an explicit
 executable path (Settings), for setups where the agent isn't on `PATH`.
 **Claude Code is the fully supported harness at launch; Codex support is
 planned.**
@@ -25,7 +25,7 @@ your subscription's pricing rather than metered tokens.
 
 ## The briefing
 
-Agent tabs launch with a short generated briefing: which workspace/Flight/branch
+Agent tabs launch with a short generated briefing: which project/worktree/branch
 the agent is in, and how to use the `orbital` CLI — filing tasks, progressing
 the task board, and registering dev servers. The briefing lives in Orbital's own
 app-data folder, never in your repo.
@@ -50,9 +50,9 @@ tool use, *needs-attention* on permission and idle prompts, *idle* on stop,
 
 A rhythm that works well:
 
-- Keep **3–5 Flights** active: enough parallelism to keep you busy purely with
+- Keep **3–5 worktrees** active: enough parallelism to keep you busy purely with
   decisions and reviews, few enough that a chime always means something.
-- Do your own work in the **root Flight** while worktree Flights grind.
-- When an agent finishes, review its diff in the git panel *in that Flight* —
+- Do your own work in the **root worktree** while linked worktrees grind.
+- When an agent finishes, review its diff in the git panel *in that worktree* —
   the working directory is already correct.
 - Have agents file follow-ups with `orbital task add` instead of expanding scope.

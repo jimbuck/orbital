@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
 import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
-import type { Flight, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
+import type { Worktree, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
 import { SUPPORTED_AGENTS } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
-import { useStore, activeFlight } from '@renderer/store'
+import { useStore, activeWorktree } from '@renderer/store'
 import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
 import EditorTab from './EditorTab'
@@ -14,49 +14,49 @@ export const TAB_DND = 'application/x-orbital-tab'
 
 /**
  * The tiled pane area — the main body of the cockpit. Renders the active
- * Flight's binary layout tree: split nodes become resizable flex containers,
+ * Worktree's binary layout tree: split nodes become resizable flex containers,
  * pane leaves render a TabStrip over the active tab. Tabs can be dragged between
  * panes; dropping near an edge splits the target toward that edge.
  */
 export default function PaneGroup(): JSX.Element {
-  const flight = useStore(activeFlight)
+  const worktree = useStore(activeWorktree)
 
-  if (!flight) {
+  if (!worktree) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-bg text-faint">
         <Orbit size={26} strokeWidth={1.5} className="opacity-60" />
-        <span className="text-sm">No Flight selected</span>
+        <span className="text-sm">No Worktree selected</span>
       </div>
     )
   }
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-bg">
-      {flight.layout ? (
-        <LayoutView node={flight.layout} flight={flight} />
+      {worktree.layout ? (
+        <LayoutView node={worktree.layout} worktree={worktree} />
       ) : (
         // Defensive fallback if the layout tree is momentarily absent.
-        flight.panes.map((p) => <PaneView key={p.id} pane={p} flight={flight} />)
+        worktree.panes.map((p) => <PaneView key={p.id} pane={p} worktree={worktree} />)
       )}
     </div>
   )
 }
 
-function LayoutView({ node, flight }: { node: LayoutNode; flight: Flight }): JSX.Element | null {
+function LayoutView({ node, worktree }: { node: LayoutNode; worktree: Worktree }): JSX.Element | null {
   if (!node) return null
   if (node.type === 'pane') {
-    const pane = flight.panes.find((p) => p.id === node.paneId)
-    return pane ? <PaneView pane={pane} flight={flight} /> : null
+    const pane = worktree.panes.find((p) => p.id === node.paneId)
+    return pane ? <PaneView pane={pane} worktree={worktree} /> : null
   }
-  return <SplitView node={node} flight={flight} />
+  return <SplitView node={node} worktree={worktree} />
 }
 
 function SplitView({
   node,
-  flight
+  worktree
 }: {
   node: Extract<LayoutNode, { type: 'split' }>
-  flight: Flight
+  worktree: Worktree
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [dragRatio, setDragRatio] = useState<number | null>(null)
@@ -86,7 +86,7 @@ function SplitView({
       stop()
       const final = fracAt(ev.clientX, ev.clientY)
       setDragRatio(null)
-      void window.orbital.setSplitRatio(flight.id, node.id, final)
+      void window.orbital.setSplitRatio(worktree.id, node.id, final)
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
@@ -96,7 +96,7 @@ function SplitView({
   return (
     <div ref={ref} className={`flex min-h-0 min-w-0 flex-1 ${isRow ? 'flex-row' : 'flex-col'}`}>
       <div className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: ratio, flexBasis: 0 }}>
-        <LayoutView node={node.a} flight={flight} />
+        <LayoutView node={node.a} worktree={worktree} />
       </div>
       <div
         onMouseDown={startResize}
@@ -107,7 +107,7 @@ function SplitView({
         } ${dragRatio !== null ? 'bg-accent/60' : ''}`}
       />
       <div className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: 1 - ratio, flexBasis: 0 }}>
-        <LayoutView node={node.b} flight={flight} />
+        <LayoutView node={node.b} worktree={worktree} />
       </div>
     </div>
   )
@@ -144,7 +144,7 @@ const OVERLAY_POS: Record<DropEdge, string> = {
   bottom: 'inset-x-0 bottom-0 h-1/2'
 }
 
-function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element {
+function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.Element {
   const [dropEdge, setDropEdge] = useState<DropEdge | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0]
@@ -180,7 +180,7 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-pane">
-      <TabStrip pane={pane} flight={flight} />
+      <TabStrip pane={pane} worktree={worktree} />
       <div ref={bodyRef} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave} className="relative min-h-0 flex-1">
         {/* PTY-backed tabs (terminal + agent) stay mounted so their PTY survives switches. */}
         {ptyTabs.map((t) => (
@@ -209,7 +209,7 @@ function PaneView({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element
               {openers.map(({ type, label, Icon, config }) => (
                 <button
                   key={label}
-                  onClick={() => window.orbital.createTab(flight.id, pane.id, type, config)}
+                  onClick={() => window.orbital.createTab(worktree.id, pane.id, type, config)}
                   className="flex w-[84px] flex-col items-center gap-2 rounded-btn border border-line-2 bg-hover px-3 py-3.5 text-text-2 outline-none transition-colors hover:border-line-strong hover:bg-panel-2 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60"
                 >
                   <Icon size={18} strokeWidth={1.5} />

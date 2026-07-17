@@ -1,10 +1,10 @@
 ---
 title: The git panel
-description: Stage, diff, commit, and push the active Flight without leaving the cockpit.
+description: Stage, diff, commit, and push the active worktree without leaving the cockpit.
 ---
 
-The right panel's git section always shows the **active Flight's** working tree —
-in a worktree Flight that's the worktree, in the root Flight your main checkout.
+The right panel's git section always shows the **active worktree's** working tree —
+in a linked worktree that's its own checkout, in the root worktree your main checkout.
 
 ## What's there
 
@@ -34,10 +34,10 @@ tool: the panel refreshes on its own, no manual reload.
 
 ## A review flow that works
 
-When an agent reports done in `nebula-shop`'s `checkout-flow` Flight:
+When an agent reports done in `nebula-shop`'s `checkout-flow` worktree:
 
-1. Activate the Flight — the panel is already scoped to its worktree.
+1. Activate the worktree — the panel is already scoped to it.
 2. Walk the changed files, reading each diff.
 3. Stage what's good; leave (or discard) what isn't.
-4. Commit, push, open the PR from the Flight's terminal.
-5. Right-click the Flight → **Delete worktree** once merged.
+4. Commit, push, open the PR from the worktree's terminal.
+5. Right-click the worktree → **Delete worktree** once merged.

@@ -8,10 +8,10 @@ import type { TaskStatus } from '@shared/types'
  * input that creates a task directly in that column's status.
  */
 export default function AddTaskCard({
-  workspaceId,
+  projectId,
   status
 }: {
-  workspaceId: string
+  projectId: string
   status: TaskStatus
 }): JSX.Element {
   const [editing, setEditing] = useState(false)
@@ -27,7 +27,7 @@ export default function AddTaskCard({
     setDraft('')
     setEditing(false)
     if (!title) return
-    const task = await window.orbital.createTask(workspaceId, title)
+    const task = await window.orbital.createTask(projectId, title)
     if (status !== 'todo') await window.orbital.updateTask(task.id, { status })
   }
 

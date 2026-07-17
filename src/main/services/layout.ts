@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the Flight pane layout — a binary tree of splits and pane
+ * Pure helpers for the Worktree pane layout — a binary tree of splits and pane
  * leaves (see LayoutNode in the shared contract). All functions are immutable:
  * they return a new tree rather than mutating in place.
  */

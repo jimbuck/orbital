@@ -1,6 +1,6 @@
 import { useEffect, useState, type JSX } from 'react'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe } from 'lucide-react'
-import { useStore, activeWorkspace, activeFlight } from '@renderer/store'
+import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 
@@ -18,27 +18,30 @@ interface Menu {
 
 /**
  * Native (frameless) window titlebar: the Orbital brand + an app menu bar
- * (File / View / Help) on the left, the workspace ▸ flight breadcrumb centered,
+ * (File / View / Help) on the left, the project ▸ worktree breadcrumb centered,
  * and the needs-attention banner + window controls on the right. The bar itself
  * is the drag region; interactive clusters opt out with `no-drag`.
  */
 export default function TitleBar(): JSX.Element {
-  const wsName = useStore((s) => activeWorkspace(s)?.name ?? 'orbital')
-  const flightName = useStore((s) => activeFlight(s)?.name)
+  const projName = useStore((s) => activeProject(s)?.name ?? 'orbital')
+  const worktreeName = useStore((s) => activeWorktree(s)?.name)
+  // Prefix the breadcrumb with the workspace only when it's a named one — the
+  // implicit default profile workspace would just be noise.
+  const workspaceName = useStore((s) => (s.workspace && s.workspace.name !== 'Default' ? s.workspace.name : null))
   const alertCount = useStore((s) => s.alertCount)
   const updateStatus = useStore((s) => s.updateStatus)
   const openModal = useStore((s) => s.openModal)
-  const workspace = useStore(activeWorkspace)
+  const project = useStore(activeProject)
 
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [devMenu, setDevMenu] = useState(false)
 
-  const activeFlightId = useStore((s) => s.activeFlightId)
-  const servers = useStore((s) => (s.activeFlightId ? s.devServers[s.activeFlightId] : undefined)) ?? []
+  const activeWorktreeId = useStore((s) => s.activeWorktreeId)
+  const servers = useStore((s) => (s.activeWorktreeId ? s.devServers[s.activeWorktreeId] : undefined)) ?? []
 
   const openServer = (url: string): void => {
     setDevMenu(false)
-    if (activeFlightId) void window.orbital.createTab(activeFlightId, null, 'browser', { url })
+    if (activeWorktreeId) void window.orbital.createTab(activeWorktreeId, null, 'browser', { url })
   }
 
   // Escape closes an open menu (WAI-ARIA menu-button pattern).
@@ -56,8 +59,10 @@ export default function TitleBar(): JSX.Element {
       id: 'file',
       label: 'File',
       items: [
-        { label: 'Add Workspace…', onClick: () => openModal('addWorkspace') },
-        { label: 'New Flight…', onClick: () => openModal('newFlight', { workspace }), disabled: !workspace },
+        { label: 'Add Project…', onClick: () => openModal('addProject') },
+        { label: 'New Worktree…', onClick: () => openModal('newWorktree', { project }), disabled: !project },
+        { sep: true, label: '' },
+        { label: 'Workspaces…', onClick: () => openModal('workspaces') },
         { label: 'Settings…', onClick: () => openModal('settings') },
         { sep: true, label: '' },
         { label: 'Quit', onClick: () => window.orbital.windowClose() }
@@ -172,14 +177,20 @@ export default function TitleBar(): JSX.Element {
         </nav>
       </div>
 
-      {/* Center: workspace ▸ flight breadcrumb (non-interactive, so dragging still works) */}
+      {/* Center: workspace ▸ project ▸ worktree breadcrumb (non-interactive, so dragging still works) */}
       <div className="pointer-events-none absolute left-1/2 top-0 flex h-full max-w-[40%] -translate-x-1/2 items-center">
         <span className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-dim">
-          <span className="truncate">{wsName}</span>
-          {flightName && (
+          {workspaceName && (
+            <>
+              <span className="truncate text-faint">{workspaceName}</span>
+              <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />
+            </>
+          )}
+          <span className="truncate">{projName}</span>
+          {worktreeName && (
             <>
               <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />
-              <span className="truncate text-text-3">{flightName}</span>
+              <span className="truncate text-text-3">{worktreeName}</span>
             </>
           )}
         </span>
@@ -192,7 +203,7 @@ export default function TitleBar(): JSX.Element {
           <div className="relative mr-2">
             <button
               type="button"
-              title="Live dev servers in this Flight — click to open one in a browser tab"
+              title="Live dev servers in this Worktree — click to open one in a browser tab"
               aria-haspopup="menu"
               aria-expanded={devMenu}
               onClick={() => setDevMenu((v) => !v)}

@@ -2,10 +2,10 @@
  * Opt-in Claude Code status hooks.
  *
  * Installs hooks into the USER-GLOBAL ~/.claude/settings.json (never a repo, never
- * a worktree) so the cockpit learns a flight's status from Claude's own lifecycle
+ * a worktree) so the cockpit learns a worktree's status from Claude's own lifecycle
  * events at zero context cost. Because that file fires for EVERY Claude session on
  * the machine, each hook routes through `orbital hook <event>`, whose CLI guard
- * exits 0 immediately when ORBITAL_FLIGHT_ID is absent — so non-Orbital sessions
+ * exits 0 immediately when ORBITAL_WORKTREE_ID is absent — so non-Orbital sessions
  * are unaffected.
  *
  * All Orbital entries carry the HOOK_MARKER token, which makes merge idempotent and

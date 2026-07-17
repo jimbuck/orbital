@@ -3,7 +3,7 @@ title: The editor
 description: File tree, syntax-highlighted source and diffs, previews, images, and quick edits.
 ---
 
-An **editor tab** shows the active Flight's files: a tree on the left, the
+An **editor tab** shows the active worktree's files: a tree on the left, the
 selected file on the right with a mode toggle in the header.
 
 ## The file tree
@@ -20,7 +20,7 @@ Source renders with **syntax highlighting** (Shiki, the same engine as VS Code
 grammars) across TypeScript, Python, Rust, Go, CSS, YAML, Dockerfile, and dozens
 more. Very large files fall back to plain text to stay snappy.
 
-Click **Edit** for quick inline changes — a save writes straight to the Flight's
+Click **Edit** for quick inline changes — a save writes straight to the worktree's
 working tree. It's for config tweaks and small fixes, not a replacement for your
 IDE.
 

@@ -1,7 +1,7 @@
 import { useState, type JSX, type KeyboardEvent } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ChevronRight, Maximize2, Play, Plus } from 'lucide-react'
-import { useStore, activeWorkspace, tasksForWorkspace } from '@renderer/store'
+import { useStore, activeProject, tasksForProject } from '@renderer/store'
 import { taskChipClass, taskStatusLabel } from '@renderer/lib/status'
 import type { Task } from '@shared/types'
 import TaskTitleButton from './TaskTitleButton'
@@ -10,59 +10,59 @@ import TaskCardContextMenu from './TaskCardContextMenu'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 
 /**
- * Task tracker for the active workspace. Captures new tasks as a list, opens a
- * task in the edit modal (via its title), and bridges a task to a Flight; the
- * expand button opens the full kanban board across all workspaces. Task data is
+ * Task tracker for the active project. Captures new tasks as a list, opens a
+ * task in the edit modal (via its title), and bridges a task to a Worktree; the
+ * expand button opens the full kanban board across all projects. Task data is
  * sourced from the store, which is kept live by the `onStateChanged`
  * subscription, so mutations need no manual reload.
  */
 export default function TaskTracker(): JSX.Element {
-  const workspace = useStore(activeWorkspace)
-  const flights = useStore((s) => s.flights)
+  const project = useStore(activeProject)
+  const worktrees = useStore((s) => s.worktrees)
   const openModal = useStore((s) => s.openModal)
-  const setActiveFlight = useStore((s) => s.setActiveFlight)
+  const setActiveWorktree = useStore((s) => s.setActiveWorktree)
   const tasks = useStore(
     useShallow((s) => {
-      const ws = activeWorkspace(s)
-      return ws ? tasksForWorkspace(s, ws.id) : []
+      const p = activeProject(s)
+      return p ? tasksForProject(s, p.id) : []
     })
   )
 
   const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState<{ task: Task; pos: MenuPos } | null>(null)
 
-  const flightName = (flightId: string | null): string | undefined =>
-    flightId ? flights.find((f) => f.id === flightId)?.name : undefined
+  const worktreeName = (worktreeId: string | null): string | undefined =>
+    worktreeId ? worktrees.find((w) => w.id === worktreeId)?.name : undefined
 
   const onCaptureKey = async (e: KeyboardEvent<HTMLInputElement>): Promise<void> => {
     if (e.key !== 'Enter') return
     const title = draft.trim()
-    if (!title || !workspace) return
+    if (!title || !project) return
     e.preventDefault()
     setDraft('')
-    await window.orbital.createTask(workspace.id, title)
+    await window.orbital.createTask(project.id, title)
   }
 
-  // Open the New Flight modal prefilled with (and pre-linked to) this task,
+  // Open the New Worktree modal prefilled with (and pre-linked to) this task,
   // letting the user pick a base ref before the worktree is created.
-  const startFlight = (task: Task): void => {
-    openModal('newFlight', { workspace, task })
+  const startWorktree = (task: Task): void => {
+    openModal('newWorktree', { project, task })
   }
 
-  /** Inline mono link to a task's bound Flight. */
-  const flightLink = (task: Task, small: boolean): JSX.Element | null => {
-    const name = flightName(task.flightId)
-    if (!task.flightId || !name) return null
+  /** Inline mono link to a task's bound Worktree. */
+  const worktreeLink = (task: Task, small: boolean): JSX.Element | null => {
+    const name = worktreeName(task.worktreeId)
+    if (!task.worktreeId || !name) return null
     return (
       <button
         type="button"
-        onClick={() => setActiveFlight(task.flightId!)}
+        onClick={() => setActiveWorktree(task.worktreeId!)}
         className={`inline-flex items-center mt-2 w-fit font-mono text-blue hover:underline outline-none focus-visible:ring-2 focus-visible:ring-accent/60 rounded ${
           small ? 'gap-1 text-[9.5px]' : 'gap-1.5 text-[10px]'
         }`}
       >
         <span className={`flex-none rounded-full bg-accent ${small ? 'size-[5px]' : 'size-1.5'}`} />
-        Flight {name}
+        Worktree {name}
         <ChevronRight size={small ? 11 : 12} strokeWidth={1.5} />
       </button>
     )
@@ -74,16 +74,16 @@ export default function TaskTracker(): JSX.Element {
       <div className="flex items-center justify-between mb-[10px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Tasks</span>
-          {workspace && (
-            <span className="font-mono text-[11px] text-faint truncate" title={workspace.name}>
-              {workspace.name}
+          {project && (
+            <span className="font-mono text-[11px] text-faint truncate" title={project.name}>
+              {project.name}
             </span>
           )}
         </div>
         <button
           type="button"
           onClick={() => openModal('board')}
-          title="Open full board — all workspaces"
+          title="Open full board — all projects"
           aria-label="Open full board"
           className="size-6 flex-none rounded-md border border-line-2 flex items-center justify-center text-muted hover:bg-hover hover:text-text transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >
@@ -98,7 +98,7 @@ export default function TaskTracker(): JSX.Element {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => void onCaptureKey(e)}
-          disabled={!workspace}
+          disabled={!project}
           placeholder="Capture a task…"
           className="allow-select flex-1 min-w-0 bg-transparent text-[12px] text-text placeholder:text-faint outline-none disabled:opacity-50"
         />
@@ -138,15 +138,15 @@ export default function TaskTracker(): JSX.Element {
 
               <TaskTagsDisplay task={task} />
 
-              {flightLink(task, false)}
+              {worktreeLink(task, false)}
 
-              {!task.flightId && (
+              {!task.worktreeId && (
                 <div className="mt-[9px] flex justify-end">
                   <button
                     type="button"
-                    onClick={() => startFlight(task)}
-                    title="Start a Flight from this task"
-                    aria-label="Start a Flight from this task"
+                    onClick={() => startWorktree(task)}
+                    title="Start a Worktree from this task"
+                    aria-label="Start a Worktree from this task"
                     className="inline-flex size-[22px] flex-none items-center justify-center rounded-full bg-accent text-[#06122e] outline-none transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
                     <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />

@@ -11,7 +11,7 @@ import {
   SplitSquareVertical,
   Columns2
 } from 'lucide-react'
-import type { Flight, Pane, Tab, TabConfig, TabType } from '@shared/types'
+import type { Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
 import { SUPPORTED_AGENTS } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
@@ -94,17 +94,17 @@ function tabTitle(tab: Tab, defaultAgentProvider?: string): string {
  * pane-options menu (split across / below / close). The strip is also a drop
  * target — dropping a tab here moves it into this pane.
  */
-export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight }): JSX.Element {
+export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.Element {
   const [addOpen, setAddOpen] = useState(false)
   const [paneMenu, setPaneMenu] = useState(false)
   const [tabMenu, setTabMenu] = useState<{ pos: MenuPos; tab: Tab } | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
-  const onlyPane = flight.panes.length <= 1
-  const servers = useStore((s) => s.devServers[flight.id]) ?? []
+  const onlyPane = worktree.panes.length <= 1
+  const servers = useStore((s) => s.devServers[worktree.id]) ?? []
   const defaultAgentProvider = useStore(
-    (s) => s.workspaces.find((w) => w.id === flight.workspaceId)?.defaultAgentProvider
+    (s) => s.projects.find((p) => p.id === worktree.projectId)?.defaultAgentProvider
   )
   // Global per-agent visibility: hide agent tab types the user disabled in Settings.
   // Undefined (existing installs) means all agents are enabled.
@@ -119,7 +119,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
 
   const addTab = (type: TabType, config?: TabConfig): void => {
     setAddOpen(false)
-    void window.orbital.createTab(flight.id, pane.id, type, config)
+    void window.orbital.createTab(worktree.id, pane.id, type, config)
   }
 
   const openTabMenu = (e: React.MouseEvent, tab: Tab): void => {
@@ -334,7 +334,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
                 label="Split across"
                 onClick={() => {
                   setPaneMenu(false)
-                  void window.orbital.splitPane(flight.id, pane.id, 'row', 'after')
+                  void window.orbital.splitPane(worktree.id, pane.id, 'row', 'after')
                 }}
               />
               <PaneMenuItem
@@ -342,7 +342,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
                 label="Split below"
                 onClick={() => {
                   setPaneMenu(false)
-                  void window.orbital.splitPane(flight.id, pane.id, 'column', 'after')
+                  void window.orbital.splitPane(worktree.id, pane.id, 'column', 'after')
                 }}
               />
               <div className="my-1 h-px bg-soft" />
@@ -353,7 +353,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
                 disabled={onlyPane}
                 onClick={() => {
                   setPaneMenu(false)
-                  void window.orbital.closePane(flight.id, pane.id)
+                  void window.orbital.closePane(worktree.id, pane.id)
                 }}
               />
             </div>
@@ -375,7 +375,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
             label="Split across"
             onClick={() => {
               setTabMenu(null)
-              void window.orbital.splitPane(flight.id, pane.id, 'row', 'after')
+              void window.orbital.splitPane(worktree.id, pane.id, 'row', 'after')
             }}
           />
           <MenuItem
@@ -383,7 +383,7 @@ export default function TabStrip({ pane, flight }: { pane: Pane; flight: Flight 
             label="Split below"
             onClick={() => {
               setTabMenu(null)
-              void window.orbital.splitPane(flight.id, pane.id, 'column', 'after')
+              void window.orbital.splitPane(worktree.id, pane.id, 'column', 'after')
             }}
           />
           <div className="my-1 h-px bg-soft" />

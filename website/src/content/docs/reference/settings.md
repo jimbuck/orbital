@@ -20,13 +20,13 @@ The three needs-attention channels are individually toggleable:
 | Sound | A quiet chime on the *rising edge* (a newly blocked agent) |
 | Taskbar badge | The taskbar icon's satellite swells and glows amber |
 
-## Env-file sync (per workspace)
+## Env-file sync (per project)
 
 Glob patterns for untracked files to copy into new worktrees and keep synced
 from the root checkout — `.env` and `.env.*` by default. Add patterns like
 `.claude/settings.local.json` if your tooling keeps local config out of git.
 
-## Agent (per workspace)
+## Agent (per project)
 
 - **Default provider** — which agent an agent tab boots (Claude today).
 - **Executable path** — explicit path override when the agent CLI isn't on

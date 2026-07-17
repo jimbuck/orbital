@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 
 /**
- * Directory holding the bundled `orbital` CLI + shims. Prepended to every Flight
+ * Directory holding the bundled `orbital` CLI + shims. Prepended to every Worktree
  * terminal's PATH, and referenced by absolute path from the global Claude hooks.
  */
 export function cliDir(): string {

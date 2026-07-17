@@ -3,11 +3,11 @@ import type { TerminalStatus, TaskStatus } from '@shared/types'
 
 /* ============================================================================
  * Status vocabulary — colors, labels and dot renderings copied from the
- * Orbital design guide ("Flight status dots" + "Status chip"). Color always
+ * Orbital design guide ("Worktree status dots" + "Status chip"). Color always
  * means a status; never decorate with it.
  * ========================================================================== */
 
-export function flightStatusLabel(s: TerminalStatus): string {
+export function worktreeStatusLabel(s: TerminalStatus): string {
   switch (s) {
     case 'needs_attention':
       return 'needs you'
@@ -22,8 +22,8 @@ export function flightStatusLabel(s: TerminalStatus): string {
   }
 }
 
-/** Text tint for a Flight's status label in the rail. */
-export function flightStatusTextClass(s: TerminalStatus): string {
+/** Text tint for a Worktree's status label in the rail. */
+export function worktreeStatusTextClass(s: TerminalStatus): string {
   switch (s) {
     case 'needs_attention':
       return 'text-amber-2'
@@ -39,7 +39,7 @@ export function flightStatusTextClass(s: TerminalStatus): string {
 }
 
 /**
- * The glanceable status dot for a Flight or terminal, rendered exactly as the
+ * The glanceable status dot for a Worktree or terminal, rendered exactly as the
  * design's legend specifies (pulsing amber, accent spinner, red glow, hollow
  * green ring, dim dot).
  */

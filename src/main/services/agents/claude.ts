@@ -1,8 +1,8 @@
 /**
  * Claude Code agent provider.
  *
- * Boots `claude` directly in the Flight's worktree (not a shell the user has to
- * type into), pre-briefed with per-flight context via --append-system-prompt-file.
+ * Boots `claude` directly in the Worktree's checkout (not a shell the user has to
+ * type into), pre-briefed with per-worktree context via --append-system-prompt-file.
  */
 import type { AgentContext, AgentProvider, ResolvedCommand } from './provider'
 import { resolveExecutable } from './executable'

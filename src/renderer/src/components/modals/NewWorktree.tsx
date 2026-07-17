@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, FolderGit2 } from 'lucide-react'
-import { useStore, activeWorkspace, tasksForWorkspace } from '@renderer/store'
-import type { Workspace, Task, BranchInfo } from '@shared/types'
+import { useStore, activeProject, tasksForProject } from '@renderer/store'
+import type { Project, Task, BranchInfo } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 
-/** modalData payload for the New Flight modal. */
-interface NewFlightData {
-  workspace?: Workspace
+/** modalData payload for the New Worktree modal. */
+interface NewWorktreeData {
+  project?: Project
   /** Pre-link this task and seed the branch/name from it (play-button flow). */
   task?: Task
 }
@@ -55,21 +55,21 @@ function Select({
   )
 }
 
-export default function NewFlight(): React.JSX.Element {
+export default function NewWorktree(): React.JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
-  const setActiveFlight = useStore((s) => s.setActiveFlight)
-  const data = useStore((s) => s.modalData) as NewFlightData | null
-  const fallback = useStore(activeWorkspace)
-  const workspace = data?.workspace ?? fallback
+  const setActiveWorktree = useStore((s) => s.setActiveWorktree)
+  const data = useStore((s) => s.modalData) as NewWorktreeData | null
+  const fallback = useStore(activeProject)
+  const project = data?.project ?? fallback
 
-  // Subscribe via useShallow: tasksForWorkspace() builds a fresh array each call,
+  // Subscribe via useShallow: tasksForProject() builds a fresh array each call,
   // and a selector that returns a new reference every render makes zustand v5's
   // useSyncExternalStore loop forever ("Maximum update depth exceeded").
-  const allTasks = useStore(useShallow((s) => (workspace ? tasksForWorkspace(s, workspace.id) : [])))
+  const allTasks = useStore(useShallow((s) => (project ? tasksForProject(s, project.id) : [])))
   const prefill = data?.task
-  // Only tasks without a Flight can be linked — plus the prefill task itself.
+  // Only tasks without a Worktree can be linked — plus the prefill task itself.
   const linkable = useMemo(
-    () => allTasks.filter((t) => !t.flightId || t.id === prefill?.id),
+    () => allTasks.filter((t) => !t.worktreeId || t.id === prefill?.id),
     [allTasks, prefill?.id]
   )
 
@@ -82,23 +82,23 @@ export default function NewFlight(): React.JSX.Element {
   const [busy, setBusy] = useState(false)
 
   // Load the repo's branches + what HEAD points at for the base-ref picker.
-  const workspaceId = workspace?.id
+  const projectId = project?.id
   useEffect(() => {
-    if (!workspaceId) return
+    if (!projectId) return
     let alive = true
-    void window.orbital.listBranches(workspaceId).then((r) => {
+    void window.orbital.listBranches(projectId).then((r) => {
       if (alive) setInfo(r)
     })
     return () => {
       alive = false
     }
-  }, [workspaceId])
+  }, [projectId])
 
-  // No workspace to target — surface a clear message instead of a broken form.
-  if (!workspace) {
+  // No project to target — surface a clear message instead of a broken form.
+  if (!project) {
     return (
       <ModalShell
-        title="New Flight"
+        title="New Worktree"
         width={520}
         onClose={closeModal}
         footer={
@@ -107,7 +107,7 @@ export default function NewFlight(): React.JSX.Element {
           </button>
         }
       >
-        <p className="text-[12.5px] text-text-3">Add a workspace first, then create a Flight on it.</p>
+        <p className="text-[12.5px] text-text-3">Add a project first, then create a Worktree on it.</p>
       </ModalShell>
     )
   }
@@ -131,17 +131,17 @@ export default function NewFlight(): React.JSX.Element {
     setBusy(true)
     setError(null)
     try {
-      const flight = await window.orbital.createFlight(workspace.id, {
+      const worktree = await window.orbital.createWorktree(project.id, {
         branch: trimmedBranch,
         name: name.trim() || trimmedBranch,
         worktree: true,
         baseRef: baseRef || undefined,
         taskId: linkedTaskId || undefined
       })
-      setActiveFlight(flight.id)
+      setActiveWorktree(worktree.id)
       closeModal()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create the Flight.')
+      setError(e instanceof Error ? e.message : 'Failed to create the Worktree.')
       setBusy(false)
     }
   }
@@ -155,8 +155,8 @@ export default function NewFlight(): React.JSX.Element {
 
   return (
     <ModalShell
-      title="New Flight"
-      subtitle={`Creates a git worktree and a Flight · ${workspace.name}`}
+      title="New Worktree"
+      subtitle={`Creates a git worktree · ${project.name}`}
       width={520}
       onClose={closeModal}
       footer={
@@ -165,7 +165,7 @@ export default function NewFlight(): React.JSX.Element {
             Cancel
           </button>
           <button type="button" className={primaryBtn} onClick={submit} disabled={busy || !branch.trim()}>
-            Create Flight
+            Create Worktree
           </button>
         </>
       }
@@ -185,7 +185,7 @@ export default function NewFlight(): React.JSX.Element {
       />
 
       <label className={`${fieldLabel} mt-4 block`} htmlFor="nf-name">
-        Flight name <span className="font-normal text-faint">· optional</span>
+        Worktree name <span className="font-normal text-faint">· optional</span>
       </label>
       <input
         id="nf-name"
@@ -233,7 +233,7 @@ export default function NewFlight(): React.JSX.Element {
 
       <div className="mt-2.5 flex items-center gap-2 text-[11px] text-dim">
         <FolderGit2 size={13} strokeWidth={1.5} className="flex-none text-faint" />
-        <span className="truncate font-mono">{workspace.repoPath}</span>
+        <span className="truncate font-mono">{project.repoPath}</span>
       </div>
 
       {error && <div className="mt-3 text-[11.5px] text-red-2">{error}</div>}

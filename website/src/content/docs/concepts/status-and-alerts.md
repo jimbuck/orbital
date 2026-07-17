@@ -13,18 +13,18 @@ Every terminal and agent tab carries one of five statuses:
 | `error` | Something failed |
 | `done` | The current task is complete |
 
-A Flight surfaces the most attention-worthy status among its terminals
-(`needs-attention` beats `error` beats `working` …), and a workspace surfaces
-the most attention-worthy Flight. One glance at the rail answers "who needs me?"
+A worktree surfaces the most attention-worthy status among its terminals
+(`needs-attention` beats `error` beats `working` …), and a project surfaces
+the most attention-worthy worktree. One glance at the rail answers "who needs me?"
 
 ![An agent needing attention: rail badge, title-bar banner, taskbar badge](../../../assets/screenshots/04-status-alert.png)
 
 ## The three-way alert
 
-When a Flight flips to needs-attention:
+When a worktree flips to needs-attention:
 
-1. The **rail** shows an amber count badge on the workspace and a "needs you"
-   label on the Flight.
+1. The **rail** shows an amber count badge on the project and a "needs you"
+   label on the worktree.
 2. The **title bar** shows an "N agents need you" banner.
 3. The **Windows taskbar** icon lights up — the orbiting satellite in the app
    icon swells and glows amber — and an optional **chime** plays on the rising

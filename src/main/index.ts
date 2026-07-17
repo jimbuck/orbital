@@ -1,18 +1,28 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu } from 'electron'
-import { getDb, closeDb } from './db/database'
-import { runtime, repo } from './runtime'
+import { closeDb } from './db/database'
+import { runtime } from './runtime'
 import { updater } from './services/updater'
 import { logger } from './services/logger'
-import { registerIpc, handleControl, resumeWorkspaces, resumeTerminals } from './ipc'
+import {
+  resolveBootWorkspace,
+  activeControlPipePath,
+  migrateLegacyWorkspaceFiles
+} from './services/workspaces'
+import { getSettings } from './services/settings'
+import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
-// Sandbox override for tests/demos: point all persistent state (DB, briefings)
-// at a different profile dir so a scripted run never touches the real one.
-if (process.env['ORBITAL_USER_DATA']) {
-  app.setPath('userData', process.env['ORBITAL_USER_DATA'])
-}
+// Settle this instance's workspace before ANYTHING opens. All data lives in ONE
+// global DB under the app-storage root (workspaces are rows in it); what varies
+// per instance is which workspace it scopes to (`--workspace-id` /
+// ORBITAL_WORKSPACE_ID, defaulting to the most recently opened) and its own
+// Chromium profile dir — which also keys the single-instance lock, giving
+// exactly one window per workspace. ORBITAL_USER_DATA relocates the whole root
+// for sandboxed test runs.
+const bootWorkspace = resolveBootWorkspace(app.getPath('userData'))
+app.setPath('userData', bootWorkspace.profileDir)
 
 // Must match `appId` in electron-builder.yml so notifications, taskbar pinning
 // and jump-list identity line up between the dev run and the installed app.
@@ -103,7 +113,9 @@ if (!gotLock) {
     // Register Orbital's identity with Windows so the shell attributes the taskbar
     // group, pinning and notifications to "Orbital" rather than to "Electron".
     app.setAppUserModelId(APP_ID)
-    getDb()
+    // The global DB opened (and migrated) during boot resolution; fold in any
+    // files left behind by the short-lived files-as-source-of-truth design.
+    migrateLegacyWorkspaceFiles(bootWorkspace.globalRoot)
     // Bring the opt-in debug logger up first thing so it can capture the rest of
     // startup. It writes to Electron's per-user logs dir and no-ops unless the
     // setting is on. The crash handlers add a log breadcrumb but must NOT change
@@ -112,7 +124,7 @@ if (!gotLock) {
     // listener otherwise suppresses Node's default print-and-exit, silently
     // limping on in a corrupted state — and, with logging off, with no record.)
     logger.init(app.getPath('logs'))
-    logger.setEnabled(repo.settings.get().debugLogging)
+    logger.setEnabled(getSettings().debugLogging)
     process.on('uncaughtException', (err) => {
       logger.error('uncaughtException', { message: err.message, stack: err.stack })
       console.error(err)
@@ -129,10 +141,11 @@ if (!gotLock) {
     runtime.setWindow(win)
     win.on('closed', () => runtime.setWindow(null))
 
-    resumeWorkspaces()
+    resumeProjects()
     // Start the CLI control channel BEFORE respawning terminals so a single bad
-    // worktree can never prevent the orbital-CLI pipe from coming up.
-    await runtime.control.start(handleControl).catch((err) => {
+    // worktree can never prevent the orbital-CLI pipe from coming up. The pipe is
+    // scoped to this workspace so multiple instances never collide on one name.
+    await runtime.control.start(handleControl, activeControlPipePath()).catch((err) => {
       console.error('control channel failed to start:', err)
     })
     resumeTerminals()
@@ -147,7 +160,9 @@ if (!gotLock) {
         w.on('closed', () => runtime.setWindow(null))
       }
     })
-  }).catch((err) => console.error('startup failed:', err))
+  }).catch((err) => {
+    console.error('startup failed:', err)
+  })
 
   // Quitting the app stops the agents (PTYs); minimizing does not (PRD §5, §12).
   app.on('window-all-closed', () => {
@@ -156,6 +171,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     updater.stop()
+    stopWorktreesWatchers()
     runtime.shutdown()
     closeDb()
   })

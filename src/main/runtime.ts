@@ -6,6 +6,7 @@ import { AlertManager } from './services/alerts'
 import { EnvSyncWatcher } from './services/env-sync'
 import * as repo from './db/repositories'
 import { deleteBriefing } from './services/agents/briefing'
+import { getSettings } from './services/settings'
 import { IPC, isPtyTabType, type AppState } from '@shared/types'
 
 /**
@@ -15,7 +16,7 @@ import { IPC, isPtyTabType, type AppState } from '@shared/types'
  */
 class Runtime {
   private static readonly COALESCE_MS = 50
-  /** How often the background fetcher runs `git fetch` per workspace. */
+  /** How often the background fetcher runs `git fetch` per project. */
   private static readonly FETCH_INTERVAL_MS = 3 * 60_000
 
   window: BrowserWindow | null = null
@@ -23,11 +24,11 @@ class Runtime {
   readonly gitWatcher = new GitWatcher()
   readonly control = new ControlChannel()
   alerts!: AlertManager
-  /** One env-sync watcher per workspace, watching its root checkout. */
+  /** One env-sync watcher per project, watching its root checkout. */
   readonly envWatchers = new Map<string, EnvSyncWatcher>()
-  /** Live dev servers per flight (from `orbital server add`) — runtime-only state. */
+  /** Live dev servers per worktree (from `orbital server add`) — runtime-only state. */
   private readonly devServers = new Map<string, Set<string>>()
-  /** Flights whose worktree is still doing background setup (node_modules copy) — runtime-only. */
+  /** Worktrees still doing background setup (node_modules copy) — runtime-only. */
   private readonly settingUp = new Set<string>()
   private readonly pendingBroadcasts = new Map<string, NodeJS.Timeout>()
   private readonly lastBroadcastAt = new Map<string, number>()
@@ -39,7 +40,7 @@ class Runtime {
   init(): void {
     this.alerts = new AlertManager(
       () => this.window,
-      () => repo.settings.get()
+      () => getSettings()
     )
 
     this.terminals.on('data', (e) => this.send(IPC.evtTerminalData, e))
@@ -49,20 +50,20 @@ class Runtime {
       if (!tab) return
       // An agent (Claude) session that exits on its own closes its tab. Note that
       // TerminalManager.kill() does NOT emit 'exit', so this fires only on a real
-      // process exit (e.g. `/exit` or a crash), never on flight/app teardown.
+      // process exit (e.g. `/exit` or a crash), never on worktree/app teardown.
       if (tab.type === 'agent') {
-        deleteBriefing(tab.flightId, tab.id)
+        deleteBriefing(tab.worktreeId, tab.id)
         repo.tabs.remove(tab.id)
-        repo.flights.recomputeStatus(tab.flightId)
+        repo.worktrees.recomputeStatus(tab.worktreeId)
         this.broadcastState()
         this.broadcastAlert()
         return
       }
       // A dead terminal PTY keeps its tab but must stop contributing a stale status
-      // to the Flight aggregate (else the rail/taskbar stay stuck on working/needs-you).
+      // to the Worktree aggregate (else the rail/taskbar stay stuck on working/needs-you).
       if (isPtyTabType(tab.type)) {
         repo.tabs.updateStatus(e.tabId, 'idle')
-        repo.flights.recomputeStatus(tab.flightId)
+        repo.worktrees.recomputeStatus(tab.worktreeId)
         this.broadcastState()
         this.broadcastAlert()
       }
@@ -74,7 +75,7 @@ class Runtime {
     })
 
     // Background `git fetch` so ahead/behind stays current without a manual Fetch.
-    // Reads workspaces live each tick, so this is safe before workspaces are resumed.
+    // Reads projects live each tick, so this is safe before projects are resumed.
     this.configureFetch()
   }
 
@@ -88,33 +89,42 @@ class Runtime {
     }
   }
 
-  /** Persisted state plus the runtime-only dev-server registry and setting-up flags. */
+  /**
+   * Persisted DB state plus the split-store settings, this instance's workspace
+   * identity, and the runtime-only dev-server registry and setting-up flags.
+   */
   appState(): AppState {
     const devServers: Record<string, string[]> = {}
-    for (const [flightId, urls] of this.devServers) {
-      if (urls.size > 0) devServers[flightId] = [...urls]
+    for (const [worktreeId, urls] of this.devServers) {
+      if (urls.size > 0) devServers[worktreeId] = [...urls]
     }
-    return { ...repo.getAppState(), devServers, settingUpFlights: [...this.settingUp] }
+    return {
+      ...repo.getAppState(),
+      settings: getSettings(),
+      workspace: repo.workspaces.active(),
+      devServers,
+      settingUpWorktrees: [...this.settingUp]
+    }
   }
 
-  /** Flag a flight as setting up (background worktree prep) so the rail shows a spinner. */
-  markSettingUp(flightId: string): void {
-    if (this.settingUp.has(flightId)) return
-    this.settingUp.add(flightId)
+  /** Flag a worktree as setting up (background prep) so the rail shows a spinner. */
+  markSettingUp(worktreeId: string): void {
+    if (this.settingUp.has(worktreeId)) return
+    this.settingUp.add(worktreeId)
     this.broadcastState()
   }
 
-  /** Clear a flight's setting-up flag once its background prep finishes. */
-  clearSettingUp(flightId: string): void {
-    if (this.settingUp.delete(flightId)) this.broadcastState()
+  /** Clear a worktree's setting-up flag once its background prep finishes. */
+  clearSettingUp(worktreeId: string): void {
+    if (this.settingUp.delete(worktreeId)) this.broadcastState()
   }
 
-  /** Register a live dev server for a flight; returns the flight's server list. */
-  addDevServer(flightId: string, url: string): string[] {
-    let set = this.devServers.get(flightId)
+  /** Register a live dev server for a worktree; returns the worktree's server list. */
+  addDevServer(worktreeId: string, url: string): string[] {
+    let set = this.devServers.get(worktreeId)
     if (!set) {
       set = new Set()
-      this.devServers.set(flightId, set)
+      this.devServers.set(worktreeId, set)
     }
     set.add(url)
     this.broadcastState()
@@ -122,8 +132,8 @@ class Runtime {
   }
 
   /** Deregister a dev server (by exact URL, or by port when `url` is port-only). */
-  removeDevServer(flightId: string, url: string): string[] {
-    const set = this.devServers.get(flightId)
+  removeDevServer(worktreeId: string, url: string): string[] {
+    const set = this.devServers.get(worktreeId)
     if (!set) return []
     const port = ((): string => {
       try {
@@ -141,28 +151,28 @@ class Runtime {
       }
       if (existing === url || samePort) set.delete(existing)
     }
-    if (set.size === 0) this.devServers.delete(flightId)
+    if (set.size === 0) this.devServers.delete(worktreeId)
     this.broadcastState()
-    return [...(this.devServers.get(flightId) ?? [])]
+    return [...(this.devServers.get(worktreeId) ?? [])]
   }
 
-  devServersFor(flightId: string): string[] {
-    return [...(this.devServers.get(flightId) ?? [])]
+  devServersFor(worktreeId: string): string[] {
+    return [...(this.devServers.get(worktreeId) ?? [])]
   }
 
-  clearDevServers(flightId: string): void {
-    if (this.devServers.delete(flightId)) this.broadcastState()
+  clearDevServers(worktreeId: string): void {
+    if (this.devServers.delete(worktreeId)) this.broadcastState()
   }
 
   /**
-   * Re-read HEAD for a checkout and persist it onto its flights. `flights.branch`
+   * Re-read HEAD for a checkout and persist it onto its worktrees. `worktree.branch`
    * is captured at creation and otherwise never updated, so without this the rail
-   * shows a stale name after any external checkout — especially for root flights,
+   * shows a stale name after any external checkout — especially for root worktrees,
    * whose checkout is the shared main repo where the user moves HEAD freely.
    */
-  async refreshBranch(worktreePath: string): Promise<void> {
-    const branch = await git.currentBranch(worktreePath).catch(() => null)
-    if (branch) repo.flights.updateBranchByWorktree(worktreePath, branch)
+  async refreshBranch(path: string): Promise<void> {
+    const branch = await git.currentBranch(path).catch(() => null)
+    if (branch) repo.worktrees.updateBranchByPath(path, branch)
   }
 
   /** Push the full hydrated app state to the renderer (coalesced). */
@@ -173,7 +183,7 @@ class Runtime {
   /** Recompute needs-attention, update the taskbar badge, notify the renderer (coalesced). */
   broadcastAlert(): void {
     if (!this.alerts) return
-    this.coalesce('alert', () => this.send(IPC.evtAlert, this.alerts.update(repo.flights.listStatuses())))
+    this.coalesce('alert', () => this.send(IPC.evtAlert, this.alerts.update(repo.worktrees.listStatuses())))
   }
 
   /**
@@ -199,40 +209,40 @@ class Runtime {
     )
   }
 
-  /** Ensure an env-sync watcher exists & is running for a workspace (patterns come from global settings). */
-  ensureEnvWatcher(workspaceId: string): void {
-    const ws = repo.workspaces.get(workspaceId)
-    if (!ws) return
-    const patterns = repo.settings.get().envSyncPatterns
-    let w = this.envWatchers.get(workspaceId)
+  /** Ensure an env-sync watcher exists & is running for a project (patterns are a workspace setting). */
+  ensureEnvWatcher(projectId: string): void {
+    const project = repo.projects.get(projectId)
+    if (!project) return
+    const patterns = getSettings().envSyncPatterns
+    let w = this.envWatchers.get(projectId)
     if (!w) {
-      w = new EnvSyncWatcher(ws.repoPath, patterns)
-      this.envWatchers.set(workspaceId, w)
+      w = new EnvSyncWatcher(project.repoPath, patterns)
+      this.envWatchers.set(projectId, w)
       w.start()
     } else {
       w.updatePatterns(patterns)
     }
-    // (Re)register every worktree Flight of this workspace.
-    for (const f of repo.flights.list()) {
-      if (f.workspaceId === workspaceId && f.kind === 'worktree') w.register(f.worktreePath)
+    // (Re)register every linked Worktree of this project.
+    for (const wt of repo.worktrees.list()) {
+      if (wt.projectId === projectId && wt.kind === 'linked') w.register(wt.path)
     }
   }
 
-  removeEnvWatcher(workspaceId: string): void {
-    const w = this.envWatchers.get(workspaceId)
+  removeEnvWatcher(projectId: string): void {
+    const w = this.envWatchers.get(projectId)
     if (w) {
       w.stop()
-      this.envWatchers.delete(workspaceId)
+      this.envWatchers.delete(projectId)
     }
   }
 
   /**
    * Start/stop the background `git fetch` scheduler to match the `periodicFetch`
    * setting. Idempotent — safe to call at startup and again on every settings save.
-   * The tick reads the workspace list live, so this works even before resume.
+   * The tick reads the project list live, so this works even before resume.
    */
   configureFetch(): void {
-    const enabled = repo.settings.get().periodicFetch
+    const enabled = getSettings().periodicFetch
     if (enabled && !this.fetchTimer) {
       this.fetchTimer = setInterval(() => void this.fetchAll(), Runtime.FETCH_INTERVAL_MS)
     } else if (!enabled && this.fetchTimer) {
@@ -242,8 +252,8 @@ class Runtime {
   }
 
   /**
-   * One tick: `git fetch` each workspace's shared repo. Worktrees share the repo's
-   * refs, so one fetch per repoPath updates ahead/behind for all its flights. Each
+   * One tick: `git fetch` each project's shared repo. Worktrees share the repo's
+   * refs, so one fetch per repoPath updates ahead/behind for all its worktrees. Each
    * fetch is best-effort (an offline remote must not abort the rest), and the whole
    * run is guarded so a slow tick never overlaps the next.
    */
@@ -252,9 +262,9 @@ class Runtime {
     this.fetching = true
     try {
       let changed = false
-      for (const ws of repo.workspaces.list()) {
+      for (const project of repo.projects.list()) {
         try {
-          await git.fetch(ws.repoPath)
+          await git.fetch(project.repoPath)
           changed = true
         } catch {
           /* offline / no remote — skip this repo, keep fetching the others */
