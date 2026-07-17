@@ -20,7 +20,12 @@ export default function Workspaces(): React.JSX.Element {
 
   const refresh = async (): Promise<void> => setList(await window.orbital.listWorkspaces())
   useEffect(() => {
-    void refresh()
+    // Initial load runs outside `run()` — handle its rejection here so an IPC
+    // failure surfaces an error instead of hanging on "Loading…" forever.
+    refresh().catch((e) => {
+      setList([])
+      setError(e instanceof Error ? e.message : 'Failed to load workspaces.')
+    })
   }, [])
 
   const run = async (fn: () => Promise<void>): Promise<void> => {
