@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.13.2](https://github.com/jimbuck/orbital/compare/v1.13.1...v1.13.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* background worktree node_modules copy and show a setting-up indicator ([bda2e18](https://github.com/jimbuck/orbital/commit/bda2e18021f89297b7b719e14d4bd7e2ea4f64f8))
+
 ## [1.13.1](https://github.com/jimbuck/orbital/compare/v1.13.0...v1.13.1) (2026-07-10)
 
 
