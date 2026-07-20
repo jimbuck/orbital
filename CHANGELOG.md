@@ -2,6 +2,14 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.14.0](https://github.com/jimbuck/orbital/compare/v1.13.3...v1.14.0) (2026-07-20)
+
+
+### Features
+
+* edit workspace name in Settings ([#7](https://github.com/jimbuck/orbital/issues/7)) ([bb64e2a](https://github.com/jimbuck/orbital/commit/bb64e2a88bdf3847b5d71edc564b7df9c834b055))
+* include workspace name in the OS window title ([#8](https://github.com/jimbuck/orbital/issues/8)) ([ded7a91](https://github.com/jimbuck/orbital/commit/ded7a9142efadb6cd828693fdfdba2755670573c))
+
 ## [1.13.3](https://github.com/jimbuck/orbital/compare/v1.13.2...v1.13.3) (2026-07-20)
 
 
