@@ -81,6 +81,18 @@ class Runtime {
 
   setWindow(win: BrowserWindow | null): void {
     this.window = win
+    this.refreshWindowTitle()
+  }
+
+  /**
+   * The OS window title (taskbar, Alt-Tab) carries the workspace name so
+   * side-by-side instances are tellable apart. The implicit "Default" workspace
+   * stays plain "Orbital" — same convention as the title-bar breadcrumb.
+   */
+  refreshWindowTitle(): void {
+    if (!this.window || this.window.isDestroyed()) return
+    const name = repo.workspaces.active().name
+    this.window.setTitle(name !== 'Default' ? `${name} — Orbital` : 'Orbital')
   }
 
   send(channel: string, payload: unknown): void {

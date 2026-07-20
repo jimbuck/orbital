@@ -54,6 +54,11 @@ function createWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
 
+  // The renderer's static <title> would reset the window title to plain
+  // "Orbital" on every (re)load; the workspace-aware title is owned by
+  // runtime.refreshWindowTitle().
+  win.on('page-title-updated', (e) => e.preventDefault())
+
   // Push the initial state once the renderer is live.
   win.webContents.on('did-finish-load', () => runtime.broadcastState())
 

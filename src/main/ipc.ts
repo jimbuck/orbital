@@ -419,8 +419,12 @@ export function registerIpc(): void {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.workspaces.rename(workspaceId, trimmed)
-    // The title-bar breadcrumb shows the current workspace's name.
-    if (workspaceId === repo.requireWorkspaceId()) broadcast()
+    // The title-bar breadcrumb and the OS window title show the current
+    // workspace's name.
+    if (workspaceId === repo.requireWorkspaceId()) {
+      broadcast()
+      runtime.refreshWindowTitle()
+    }
   })
 
   h(IPC.removeWorkspace, (_e, workspaceId: string) => {

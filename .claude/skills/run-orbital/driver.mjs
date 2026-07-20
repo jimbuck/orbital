@@ -213,6 +213,15 @@ const COMMANDS = {
     for (const w of app.windows()) console.log(' ', w.url())
   },
 
+  // Native window title (BrowserWindow.getTitle()) — NOT document.title, which
+  // stays a static "Orbital"; the main process owns the workspace-aware title.
+  async wtitle() {
+    if (!app) return console.log('ERROR: launch first')
+    console.log(
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.getTitle()).join(' | '))
+    )
+  },
+
   async sleep(ms) {
     await sleep(parseInt(ms, 10) || 500)
   },
