@@ -42,6 +42,8 @@ export interface CreateLinkedWorktreeInput {
   project: Project
   /** Branch to check out or create. */
   branch: string
+  /** Check out this existing branch (local, or `origin/x` remote) instead of creating one. */
+  existingBranch?: string
   name?: string
   baseRef?: string
   taskId?: string | null
@@ -54,43 +56,71 @@ export interface CreateLinkedWorktreeInput {
 export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Promise<Worktree> {
   const { project } = input
   const repoPath = project.repoPath
-  // Slugify so a multi-word Worktree name (e.g. "Login flow") becomes a valid git
-  // ref ("login-flow"); an explicit ref like "feat/login" passes through.
-  const raw = input.branch.trim()
-  const baseSlug = slugify(raw)
 
-  let branch = baseSlug
-  let worktreePath = uniqueWorktreePath(project, baseSlug)
-  let attached = false
+  let branch: string
+  let worktreePath: string
 
-  if (await git.branchExists(repoPath, baseSlug)) {
-    // The branch already exists: attach a worktree to it (only possible when it
-    // is not already checked out in another worktree).
-    try {
-      await git.worktreeAdd(repoPath, { branch: baseSlug, worktreePath, newBranch: false })
-      attached = true
-    } catch {
-      // Already checked out elsewhere — fall through and fork a fresh branch.
+  if (input.existingBranch) {
+    // "Open existing branch": check the picked branch out into the new worktree
+    // instead of forking a fresh one. A remote-only pick ("origin/pr-42") gets a
+    // local tracking branch named after it.
+    const picked = input.existingBranch.trim()
+    const isLocal = await git.branchExists(repoPath, picked)
+    branch = isLocal ? picked : picked.replace(/^[^/]+\//, '')
+    worktreePath = uniqueWorktreePath(project, slugify(branch))
+    if (isLocal || (await git.branchExists(repoPath, branch))) {
+      try {
+        await git.worktreeAdd(repoPath, { branch, worktreePath, newBranch: false })
+      } catch (err) {
+        // git refuses to check a branch out into two worktrees — say so plainly
+        // instead of surfacing the raw fatal.
+        const msg = err instanceof Error ? err.message : String(err)
+        if (/already (checked out|used by)/i.test(msg)) {
+          throw new Error(`Branch "${branch}" is already checked out in another worktree.`)
+        }
+        throw err
+      }
+    } else {
+      await git.worktreeAdd(repoPath, { branch, worktreePath, baseRef: picked, newBranch: true, track: true })
     }
-  }
+  } else {
+    // Slugify so a multi-word Worktree name (e.g. "Login flow") becomes a valid git
+    // ref ("login-flow"); an explicit ref like "feat/login" passes through.
+    const baseSlug = slugify(input.branch.trim())
 
-  if (!attached) {
-    // Create a NEW branch, suffixing the slug until the ref is free, and reuse
-    // that unique slug for the worktree directory (PRD §8 collision suffixing).
     branch = baseSlug
-    let n = 2
-    while (await git.branchExists(repoPath, branch)) {
-      branch = `${baseSlug}-${n}`
-      n++
+    worktreePath = uniqueWorktreePath(project, baseSlug)
+    let attached = false
+
+    if (await git.branchExists(repoPath, baseSlug)) {
+      // The branch already exists: attach a worktree to it (only possible when it
+      // is not already checked out in another worktree).
+      try {
+        await git.worktreeAdd(repoPath, { branch: baseSlug, worktreePath, newBranch: false })
+        attached = true
+      } catch {
+        // Already checked out elsewhere — fall through and fork a fresh branch.
+      }
     }
-    worktreePath = uniqueWorktreePath(project, branch)
-    await git.worktreeAdd(repoPath, { branch, worktreePath, baseRef: input.baseRef, newBranch: true })
+
+    if (!attached) {
+      // Create a NEW branch, suffixing the slug until the ref is free, and reuse
+      // that unique slug for the worktree directory (PRD §8 collision suffixing).
+      branch = baseSlug
+      let n = 2
+      while (await git.branchExists(repoPath, branch)) {
+        branch = `${baseSlug}-${n}`
+        n++
+      }
+      worktreePath = uniqueWorktreePath(project, branch)
+      await git.worktreeAdd(repoPath, { branch, worktreePath, baseRef: input.baseRef, newBranch: true })
+    }
   }
 
   const worktree = worktreeRepo.create({
     projectId: project.id,
     kind: 'linked',
-    name: input.name?.trim() || raw,
+    name: input.name?.trim() || branch,
     path: worktreePath,
     branch,
     taskId: input.taskId ?? null

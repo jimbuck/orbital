@@ -129,6 +129,19 @@ async function listBranches(repoPath: string): Promise<string[]> {
   return toLines(r.stdout).filter(Boolean)
 }
 
+/** Remote-tracking branch names (e.g. `origin/pr-42`), most-recently-committed first. */
+async function listRemoteBranches(repoPath: string): Promise<string[]> {
+  const r = await capture(repoPath, [
+    'for-each-ref',
+    '--format=%(refname:short)',
+    '--sort=-committerdate',
+    'refs/remotes'
+  ])
+  if (r.code !== 0) return []
+  // Drop the symbolic `origin/HEAD` pointer — it's not a checkout target.
+  return toLines(r.stdout).filter((b) => b && !b.endsWith('/HEAD'))
+}
+
 /**
  * Concurrent `status` calls for the same checkout share one spawn: the git panel
  * and the file tree both refresh on the same state broadcast, and porcelain
@@ -473,18 +486,15 @@ async function writeFile(repoPath: string, relPath: string, content: string): Pr
 
 async function worktreeAdd(
   repoPath: string,
-  opts: { branch: string; worktreePath: string; baseRef?: string; newBranch?: boolean }
+  opts: { branch: string; worktreePath: string; baseRef?: string; newBranch?: boolean; track?: boolean }
 ): Promise<void> {
   if (opts.newBranch) {
     // Create a fresh branch forked from baseRef (or HEAD) in the new worktree.
-    await run(repoPath, [
-      'worktree',
-      'add',
-      '-b',
-      opts.branch,
-      opts.worktreePath,
-      opts.baseRef || 'HEAD'
-    ])
+    // `track` sets the baseRef (a remote-tracking branch) as upstream.
+    const args = ['worktree', 'add']
+    if (opts.track) args.push('--track')
+    args.push('-b', opts.branch, opts.worktreePath, opts.baseRef || 'HEAD')
+    await run(repoPath, args)
   } else {
     // Check out an existing branch into the new worktree.
     await run(repoPath, ['worktree', 'add', opts.worktreePath, opts.branch])
@@ -565,6 +575,7 @@ export const git = {
   currentBranch,
   branchExists,
   listBranches,
+  listRemoteBranches,
   status,
   stage,
   unstage,

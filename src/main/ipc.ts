@@ -521,6 +521,7 @@ export function registerIpc(): void {
     const worktree = await createLinkedWorktree({
       project,
       branch,
+      existingBranch: opts.existingBranch,
       name: opts.name,
       baseRef: opts.baseRef,
       taskId: opts.taskId
@@ -605,12 +606,17 @@ export function registerIpc(): void {
 
   h(IPC.listBranches, async (_e, projectId: string) => {
     const project = repo.projects.get(projectId)
-    if (!project) return { branches: [], head: 'HEAD' }
-    const [branches, head] = await Promise.all([
+    if (!project) return { branches: [], remotes: [], head: 'HEAD' }
+    const [branches, allRemotes, head] = await Promise.all([
       git.listBranches(project.repoPath).catch(() => [] as string[]),
+      git.listRemoteBranches(project.repoPath).catch(() => [] as string[]),
       git.currentBranch(project.repoPath).catch(() => 'main')
     ])
-    return { branches, head }
+    // Only surface remote branches that have no local counterpart — picking the
+    // local one is always the better checkout target.
+    const locals = new Set(branches)
+    const remotes = allRemotes.filter((r) => !locals.has(r.replace(/^[^/]+\//, '')))
+    return { branches, remotes, head }
   })
 
   h(IPC.setProjectAgent, (_e, projectId: string, patch: ProjectAgentPatch) => {

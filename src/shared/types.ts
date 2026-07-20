@@ -297,6 +297,8 @@ export interface GitStatus {
 /** Branch list for a project plus the branch HEAD currently points at. */
 export interface BranchInfo {
   branches: string[]
+  /** Remote-tracking branches (e.g. `origin/pr-42`) with no matching local branch. */
+  remotes: string[]
   /** What "HEAD" resolves to right now (the checked-out branch). */
   head: string
 }
@@ -335,6 +337,8 @@ export interface FileNode {
 export interface CreateWorktreeOptions {
   /** Existing branch to check out, or a new branch name to create. */
   branch?: string
+  /** Check out this existing branch (local, or `origin/x` remote) instead of creating one. */
+  existingBranch?: string
   /** Create a worktree (default) or attach to an existing path. */
   name?: string
   taskId?: string
