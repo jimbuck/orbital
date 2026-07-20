@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import PanelResizeHandle from '../PanelResizeHandle'
+import { CollapsedPane, PaneCollapseTab } from '../PaneCollapse'
 import GitPanel from './GitPanel'
 import TaskTracker from './TaskTracker'
 
@@ -11,13 +12,15 @@ import TaskTracker from './TaskTracker'
  * reachable, and the task list scrolls independently below it.
  */
 export default function RightPanel(): JSX.Element {
-  const { width, dragging, startResize, resetWidth } = usePanelWidth({
+  const { width, collapsed, dragging, startResize, resetWidth, toggleCollapsed } = usePanelWidth({
     storageKey: 'orbital.rightPanelWidth',
     defaultWidth: 344,
     min: 280,
     max: 560,
     handleEdge: 'left'
   })
+
+  if (collapsed) return <CollapsedPane edge="left" label="git & tasks panel" onExpand={toggleCollapsed} />
 
   return (
     <aside style={{ width }} className="relative flex flex-none flex-col bg-rail border-l border-line">
@@ -30,6 +33,7 @@ export default function RightPanel(): JSX.Element {
         </div>
       </div>
       <PanelResizeHandle edge="left" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
+      <PaneCollapseTab edge="left" label="git & tasks panel" onCollapse={toggleCollapsed} />
     </aside>
   )
 }

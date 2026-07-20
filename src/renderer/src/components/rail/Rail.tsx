@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import PanelResizeHandle from '../PanelResizeHandle'
+import { CollapsedPane, PaneCollapseTab } from '../PaneCollapse'
 import Project from './Project'
 import RailFooter from './RailFooter'
 
@@ -14,13 +15,15 @@ import RailFooter from './RailFooter'
 export default function Rail(): JSX.Element {
   const projects = useStore((s) => s.projects)
   const openModal = useStore((s) => s.openModal)
-  const { width, dragging, startResize, resetWidth } = usePanelWidth({
+  const { width, collapsed, dragging, startResize, resetWidth, toggleCollapsed } = usePanelWidth({
     storageKey: 'orbital.railWidth',
     defaultWidth: 266,
     min: 200,
     max: 440,
     handleEdge: 'right'
   })
+
+  if (collapsed) return <CollapsedPane edge="right" label="projects panel" onExpand={toggleCollapsed} />
 
   return (
     <aside style={{ width }} className="relative flex flex-none flex-col border-r border-line bg-rail">
@@ -49,6 +52,7 @@ export default function Rail(): JSX.Element {
 
       <RailFooter />
       <PanelResizeHandle edge="right" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
+      <PaneCollapseTab edge="right" label="projects panel" onCollapse={toggleCollapsed} />
     </aside>
   )
 }
