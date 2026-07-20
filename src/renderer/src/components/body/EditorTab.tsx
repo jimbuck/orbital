@@ -5,6 +5,7 @@ import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
+import { useFileTree } from '@renderer/lib/fileTree'
 
 /** Shiki bundled theme id for each resolved app theme. */
 function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
@@ -448,9 +449,11 @@ function findNode(nodes: FileNode[], path: string): FileNode | null {
  * File / Diff / Preview mode toggle — Diff when the file has changes, Preview
  * for markdown and HTML.
  */
-export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
+export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }): JSX.Element {
   const worktreeId = useStore((s) => activeWorktree(s)?.id)
-  const [tree, setTree] = useState<FileNode[]>([])
+  // Shared, per-worktree file tree: dedupes fetches across editor tabs and only
+  // refetches on state changes while this tab is active (see lib/fileTree).
+  const { tree, refresh: refetchTree } = useFileTree(worktreeId, active)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<Selected | null>(null)
   const [mode, setMode] = useState<ViewMode>('file')
@@ -461,33 +464,6 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const reqRef = useRef(0)
-  // Current tree refetch, exposed for the manual refresh button; the effect
-  // below keeps it bound to the live worktree and its `alive` guard.
-  const refetchTreeRef = useRef<() => void>(() => {})
-
-  // Load the tree, and keep it fresh: any state broadcast (git watcher, staging,
-  // commits, saves) refetches it debounced, so badges track the repo live.
-  useEffect(() => {
-    if (!worktreeId) return
-    let alive = true
-    let timer: number | undefined
-    const refetch = (): void => {
-      void window.orbital.fileTree(worktreeId).then((nodes) => {
-        if (alive) setTree(nodes)
-      })
-    }
-    refetchTreeRef.current = refetch
-    refetch()
-    const unsub = window.orbital.onStateChanged(() => {
-      window.clearTimeout(timer)
-      timer = window.setTimeout(refetch, 400)
-    })
-    return () => {
-      alive = false
-      unsub()
-      window.clearTimeout(timer)
-    }
-  }, [worktreeId])
 
   // Directories containing at least one changed file get a dot in the tree.
   const changedDirs = useMemo(() => {
@@ -621,7 +597,7 @@ export default function EditorTab({ tab }: { tab: Tab }): JSX.Element {
             type="button"
             title="Refresh file tree"
             aria-label="Refresh file tree"
-            onClick={() => refetchTreeRef.current()}
+            onClick={() => refetchTree()}
             className={`flex-none rounded p-0.5 text-faint hover:text-text-2 ${FOCUS}`}
           >
             <RefreshCw size={12} strokeWidth={1.5} />

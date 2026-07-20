@@ -151,6 +151,10 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
   // Terminal AND agent tabs are PTY-backed and share the xterm view; keep both
   // mounted (hidden when inactive) so their PTYs survive tab switches.
   const ptyTabs = pane.tabs.filter((t) => t.type === 'terminal' || t.type === 'agent')
+  // Editor tabs keep in-memory-only state (selected file, unsaved draft, tree
+  // expansion, view mode, scroll); keep them mounted (hidden when inactive) so
+  // that state survives switching away and back.
+  const editorTabs = pane.tabs.filter((t) => t.type === 'editor')
   // Global per-agent visibility: hide agent openers the user disabled in Settings.
   // Undefined (existing installs) means all agents are enabled.
   const enabledAgents = useStore((s) => s.settings?.enabledAgents) ?? SUPPORTED_AGENTS.map((a) => a.id)
@@ -189,13 +193,18 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
           </div>
         ))}
 
-        {activeTab && activeTab.type === 'editor' && (
-          <div className="absolute inset-0">
-            {/* Keyed by tab id: without it React reuses the instance across editor
-                tabs, so a newly created tab kept showing the previous tab's file. */}
-            <EditorTab key={activeTab.id} tab={activeTab} />
-          </div>
-        )}
+        {/* Editor tabs stay mounted so their in-memory state survives switches.
+            Keyed by tab id: without it React reuses the instance across editor
+            tabs, so a newly created tab kept showing the previous tab's file. */}
+        {editorTabs.map((t) => {
+          const isActive = !!activeTab && t.id === activeTab.id
+          return (
+            <div key={t.id} className={`absolute inset-0 ${isActive ? '' : 'hidden'}`}>
+              {/* `active` lets a hidden editor pause its background tree refetches. */}
+              <EditorTab tab={t} active={isActive} />
+            </div>
+          )
+        })}
         {activeTab && activeTab.type === 'browser' && (
           <div className="absolute inset-0">
             <BrowserTab tab={activeTab} />

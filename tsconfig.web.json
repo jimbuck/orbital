@@ -24,5 +24,11 @@
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.tsx",
     "src/shared/**/*"
+  ],
+  "exclude": [
+    "src/renderer/src/**/*.test.ts",
+    "src/renderer/src/**/*.test.tsx",
+    "src/renderer/src/**/*.spec.ts",
+    "src/renderer/src/**/*.spec.tsx"
   ]
 }
