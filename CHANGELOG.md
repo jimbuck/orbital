@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.13.3](https://github.com/jimbuck/orbital/compare/v1.13.2...v1.13.3) (2026-07-20)
+
+
+### Bug Fixes
+
+* modals no longer close on outside click or drag-release ([#6](https://github.com/jimbuck/orbital/issues/6)) ([1db6503](https://github.com/jimbuck/orbital/commit/1db650338ff0e75d601355e14e692ae4b2a9dfcc))
+
 ## [1.13.2](https://github.com/jimbuck/orbital/compare/v1.13.1...v1.13.2) (2026-07-17)
 
 
