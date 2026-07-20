@@ -92,7 +92,7 @@ class Runtime {
   refreshWindowTitle(): void {
     if (!this.window || this.window.isDestroyed()) return
     const name = repo.workspaces.active().name
-    this.window.setTitle(name !== 'Default' ? `${name} — Orbital` : 'Orbital')
+    this.window.setTitle(name !== 'Default' ? `${name} - Orbital` : 'Orbital')
   }
 
   send(channel: string, payload: unknown): void {
