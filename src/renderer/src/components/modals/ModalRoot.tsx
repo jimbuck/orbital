@@ -29,11 +29,6 @@ import Workspaces from './Workspaces'
  * at render time, so the import graph resolves cleanly.
  * ========================================================================== */
 
-/** Stop a click inside the panel from bubbling up to the backdrop dismiss. */
-export function stopBubble(e: React.MouseEvent): void {
-  e.stopPropagation()
-}
-
 /** Primary (accent) action button. */
 export const primaryBtn =
   'inline-flex items-center justify-center gap-2 rounded-btn px-[18px] py-[9px] text-[12.5px] font-bold ' +
@@ -88,7 +83,6 @@ export function ModalShell({
 }: ModalShellProps): React.JSX.Element {
   return (
     <div
-      onClick={stopBubble}
       style={{ width, minHeight, maxWidth: '94vw', animation: 'panelIn .16s ease-out' }}
       className="flex max-h-[84vh] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
     >
@@ -195,7 +189,6 @@ function FullBoard(): React.JSX.Element {
 
   return (
     <div
-      onClick={stopBubble}
       style={{ animation: 'panelIn .16s ease-out' }}
       className="flex h-[86vh] w-[2360px] max-w-[95vw] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
     >
@@ -316,29 +309,27 @@ export default function ModalRoot(): React.JSX.Element | null {
   if (modalStack.length === 0) return null
 
   // Render every stack entry as its own overlay layer, deeper layers on top.
-  // Only the TOP backdrop dismisses on click so clicking around a task modal
-  // doesn't blast through and also close the board beneath it.
+  // The backdrop deliberately does NOT dismiss on click: a text-selection drag
+  // that starts inside the panel and releases outside would register as a
+  // backdrop click and close the modal. Closing is explicit only — the X
+  // button, Cancel/Save/Delete actions, or Escape.
   return (
     <>
-      {modalStack.map((entry, i) => {
-        const isTop = i === modalStack.length - 1
-        return (
-          <div
-            key={`${i}:${entry.type}`}
-            onClick={isTop ? closeModal : (e) => e.stopPropagation()}
-            style={{ animation: 'overlayIn .12s ease-out', zIndex: 50 + i * 10 }}
-            className="fixed inset-0 grid place-items-center bg-[#05070b]/70 p-8 no-drag"
-          >
-            {entry.type === 'settings' && <Settings />}
-            {entry.type === 'addProject' && <AddProject />}
-            {entry.type === 'newWorktree' && <NewWorktree />}
-            {entry.type === 'editTask' && <EditTask />}
-            {entry.type === 'board' && <FullBoard />}
-            {entry.type === 'about' && <About />}
-            {entry.type === 'workspaces' && <Workspaces />}
-          </div>
-        )
-      })}
+      {modalStack.map((entry, i) => (
+        <div
+          key={`${i}:${entry.type}`}
+          style={{ animation: 'overlayIn .12s ease-out', zIndex: 50 + i * 10 }}
+          className="fixed inset-0 grid place-items-center bg-[#05070b]/70 p-8 no-drag"
+        >
+          {entry.type === 'settings' && <Settings />}
+          {entry.type === 'addProject' && <AddProject />}
+          {entry.type === 'newWorktree' && <NewWorktree />}
+          {entry.type === 'editTask' && <EditTask />}
+          {entry.type === 'board' && <FullBoard />}
+          {entry.type === 'about' && <About />}
+          {entry.type === 'workspaces' && <Workspaces />}
+        </div>
+      ))}
     </>
   )
 }
