@@ -37,6 +37,7 @@ import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
 import { activeControlPipePath, exportWorkspaceToFile, importWorkspaceFromFile } from './services/workspaces'
 import { getSettings, setSettings } from './services/settings'
+import { refreshJumpList } from './services/jump-list'
 
 /* ---- helpers ----------------------------------------------------------- */
 
@@ -425,6 +426,7 @@ export function registerIpc(): void {
       broadcast()
       runtime.refreshWindowTitle()
     }
+    refreshJumpList()
   })
 
   h(IPC.removeWorkspace, (_e, workspaceId: string) => {
@@ -436,6 +438,7 @@ export function registerIpc(): void {
       throw new Error('switch to another workspace before deleting this one')
     }
     repo.workspaces.remove(workspaceId)
+    refreshJumpList()
     return repo.workspaces.list()
   })
 

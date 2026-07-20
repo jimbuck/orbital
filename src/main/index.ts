@@ -10,6 +10,7 @@ import {
   migrateLegacyWorkspaceFiles
 } from './services/workspaces'
 import { getSettings } from './services/settings'
+import { refreshJumpList } from './services/jump-list'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -111,6 +112,9 @@ if (!gotLock) {
       if (win.isMinimized()) win.restore()
       win.focus()
     }
+    // The relaunch (e.g. from the taskbar jump list) bumped this workspace's
+    // last_opened_at during its boot resolution before hitting the lock.
+    refreshJumpList()
   })
 
   app.whenReady().then(async () => {
@@ -154,6 +158,10 @@ if (!gotLock) {
       console.error('control channel failed to start:', err)
     })
     resumeTerminals()
+
+    // Publish the taskbar jump list of recent workspaces (boot resolution
+    // already bumped this workspace's last_opened_at, so it sorts first).
+    refreshJumpList()
 
     // Background update check against GitHub releases (no-op in dev).
     updater.init((channel, payload) => runtime.send(channel, payload))
