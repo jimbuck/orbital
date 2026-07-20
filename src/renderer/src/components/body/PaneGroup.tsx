@@ -196,11 +196,15 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
         {/* Editor tabs stay mounted so their in-memory state survives switches.
             Keyed by tab id: without it React reuses the instance across editor
             tabs, so a newly created tab kept showing the previous tab's file. */}
-        {editorTabs.map((t) => (
-          <div key={t.id} className={`absolute inset-0 ${activeTab && t.id === activeTab.id ? '' : 'hidden'}`}>
-            <EditorTab tab={t} />
-          </div>
-        ))}
+        {editorTabs.map((t) => {
+          const isActive = !!activeTab && t.id === activeTab.id
+          return (
+            <div key={t.id} className={`absolute inset-0 ${isActive ? '' : 'hidden'}`}>
+              {/* `active` lets a hidden editor pause its background tree refetches. */}
+              <EditorTab tab={t} active={isActive} />
+            </div>
+          )
+        })}
         {activeTab && activeTab.type === 'browser' && (
           <div className="absolute inset-0">
             <BrowserTab tab={activeTab} />
