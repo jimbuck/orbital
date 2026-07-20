@@ -154,18 +154,36 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
       }
     }
 
+    // xterm.js installs its OWN `paste` DOM listener (on both its textarea and
+    // screen element) that writes the clipboard straight to the PTY. Our Ctrl+V
+    // key handler and the right-click / Edit-menu paths ALSO paste via
+    // pasteClipboard(), so every keyboard paste used to land twice —
+    // preventDefault() on the keydown does not cancel the browser's follow-up
+    // `paste` event. Swallow that native paste in the capture phase, before it
+    // descends to xterm's listeners, making pasteClipboard() the single code
+    // path that ever writes a paste to the PTY. (term.paste() drives the PTY
+    // directly and never dispatches a DOM `paste` event, so it is unaffected.)
+    const suppressNativePaste = (e: ClipboardEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    container.addEventListener('paste', suppressNativePaste, true)
+
     // Keyboard paste: Ctrl/Cmd+V and the terminal-standard Ctrl+Shift+V.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
-        e.preventDefault() // stop the browser's own (often no-op) paste → no double paste
+        e.preventDefault()
         pasteClipboard()
-        return false // and stop xterm from also sending a literal 'v'
+        return false // paste ourselves (above) and stop xterm sending a literal 'v'
       }
       return true
     })
 
-    // Mouse copy/paste (PuTTY model): right-click with a selection copies it,
-    // otherwise right-click pastes. Suppresses the browser's default context menu.
+    // Mouse copy/paste (PuTTY model): right-click with a selection copies it
+    // (then clears it), otherwise right-click pastes. hasSelection() is read once,
+    // up front, so exactly one of copy/paste runs — and with the native paste
+    // suppressed above, a copy can no longer be raced by a stray second paste.
+    // Suppresses the browser's default context menu.
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault()
       if (term.hasSelection()) copySelection()
@@ -204,6 +222,7 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
       cancelAnimationFrame(raf)
       unsubscribe()
       exitUnsub()
+      container.removeEventListener('paste', suppressNativePaste, true)
       container.removeEventListener('contextmenu', onContextMenu)
       unregisterEdit()
       resizeObserver.disconnect()
