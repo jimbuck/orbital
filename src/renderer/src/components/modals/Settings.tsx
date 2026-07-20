@@ -69,9 +69,11 @@ const envChip =
 export default function Settings(): React.JSX.Element {
   const project = useStore(activeProject)
   const settings = useStore((s) => s.settings)
+  const workspace = useStore((s) => s.workspace)
   const closeModal = useStore((s) => s.closeModal)
 
   // Editable working copies seeded from the current store state.
+  const [workspaceName, setWorkspaceName] = useState(() => workspace?.name ?? '')
   const [patterns, setPatterns] = useState<string[]>(() => settings?.envSyncPatterns ?? [])
   const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
@@ -161,6 +163,10 @@ export default function Settings(): React.JSX.Element {
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
+      const wsName = workspaceName.trim()
+      if (workspace && wsName && wsName !== workspace.name) {
+        await window.orbital.renameWorkspace(workspace.id, wsName)
+      }
       if (project) {
         await window.orbital.setProjectAgent(project.id, {
           defaultAgentProvider: agentProvider,
@@ -201,6 +207,22 @@ export default function Settings(): React.JSX.Element {
         </>
       }
     >
+      {/* Workspace */}
+      <div className={sectionLabel}>Workspace</div>
+      <label className={`${fieldLabel} mt-2.5 block`} htmlFor="workspace-name">
+        Name <span className="font-normal text-faint">· shown in the title bar and workspace picker</span>
+      </label>
+      <input
+        id="workspace-name"
+        value={workspaceName}
+        onChange={(e) => setWorkspaceName(e.target.value)}
+        placeholder={workspace?.name ?? 'Workspace name'}
+        spellCheck={false}
+        className={`mt-1.5 ${inputBase}`}
+      />
+
+      <div className="my-[18px] h-px bg-soft" />
+
       {/* Environment file sync */}
       <div className={sectionLabel}>Environment file sync</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
