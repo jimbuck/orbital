@@ -245,25 +245,40 @@ function buildFileTree(files: GitFileStatus[]): TreeNode[] {
   return collapseChains(root.children!)
 }
 
+/** Every file leaf under a node — a directory's descendants, or the leaf itself. */
+function collectFiles(node: TreeNode): GitFileStatus[] {
+  if (node.file) return [node.file]
+  const out: GitFileStatus[] = []
+  for (const child of node.children!) out.push(...collectFiles(child))
+  return out
+}
+
 /**
  * Recursively render one tree node. File leaves defer to `renderLeaf` (the
- * unchanged `GitFileRow`); directory rows toggle a collapsed key on click.
- * Indentation grows with depth via left padding.
+ * unchanged `GitFileRow`); directory rows toggle a collapsed key on click and
+ * carry hover-revealed folder actions from `renderDirActions` (applied to every
+ * descendant file). `armedDir` marks the folder whose discard is awaiting
+ * confirmation, tinting its row like an armed file. Indentation grows with depth.
  */
 function TreeRow({
   node,
   depth,
   section,
   collapsed,
+  armedDir,
   onToggle,
-  renderLeaf
+  renderLeaf,
+  renderDirActions
 }: {
   node: TreeNode
   depth: number
   section: 's' | 'u'
   collapsed: Set<string>
+  /** Full path of the folder armed for discard (unstaged section only), else null. */
+  armedDir: string | null
   onToggle: (key: string) => void
   renderLeaf: (file: GitFileStatus) => JSX.Element
+  renderDirActions: (node: TreeNode) => ReactNode
 }): JSX.Element {
   const indent = { paddingLeft: depth * 12 }
 
@@ -274,18 +289,25 @@ function TreeRow({
   const key = `${section}:${node.path}`
   const open = !collapsed.has(key)
   const Chevron = open ? ChevronDown : ChevronRight
+  const armed = armedDir === node.path
   return (
     <>
-      <div style={indent}>
+      <div
+        style={indent}
+        className={`group flex items-center gap-1 rounded-md pr-[7px] ${
+          armed ? 'bg-red/10' : 'hover:bg-hover'
+        }`}
+      >
         <button
           type="button"
           onClick={() => onToggle(key)}
           title={node.path}
-          className={`flex w-full items-center gap-1 rounded-md px-[7px] py-[4px] text-left hover:bg-hover ${FOCUS}`}
+          className={`flex min-w-0 flex-1 items-center gap-1 rounded-md px-[7px] py-[4px] text-left ${FOCUS}`}
         >
           <Chevron size={13} strokeWidth={1.5} className="flex-none text-faint" />
           <span className="min-w-0 truncate font-mono text-[11.5px] text-faint">{node.name}</span>
         </button>
+        {renderDirActions(node)}
       </div>
       {open &&
         node.children!.map((child) => (
@@ -295,8 +317,10 @@ function TreeRow({
             depth={depth + 1}
             section={section}
             collapsed={collapsed}
+            armedDir={armedDir}
             onToggle={onToggle}
             renderLeaf={renderLeaf}
+            renderDirActions={renderDirActions}
           />
         ))}
     </>
@@ -414,6 +438,12 @@ export default function GitPanel(): JSX.Element {
     await refresh()
   }
 
+  /** Apply a per-file git op to a folder's descendants in order, as one operation. */
+  const forEachFile = (
+    files: GitFileStatus[],
+    op: (path: string) => Promise<void>
+  ): Promise<void> => files.reduce((p, f) => p.then(() => op(f.path)), Promise.resolve())
+
   /** Open (or re-focus) an editor tab showing this file's staged/unstaged diff. */
   const openDiff = (f: GitFileStatus): void => {
     for (const pane of worktree.panes) {
@@ -468,6 +498,78 @@ export default function GitPanel(): JSX.Element {
   const commitDisabled = !!busy || !message.trim() || (staged.length === 0 && !amend)
 
   const spinner = <Loader2 size={12} strokeWidth={2} className="flex-none animate-spin" />
+
+  // Hover-revealed folder action span shared by both sections; mirrors the file
+  // row's action strip (same wrapper opacity + focus behaviour).
+  const dirActions = (children: ReactNode): JSX.Element => (
+    <span className="flex flex-none items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+      {children}
+    </span>
+  )
+
+  /** Unstage every file under a staged folder. */
+  const renderStagedDirActions = (node: TreeNode): ReactNode => {
+    const files = collectFiles(node)
+    return dirActions(
+      <IconBtn
+        title="Unstage folder"
+        onClick={() =>
+          void exec('unstage', () => forEachFile(files, (p) => window.orbital.gitUnstage(worktree.id, p)))
+        }
+        disabled={!!busy}
+        className="text-faint hover:text-text"
+      >
+        <Minus size={14} strokeWidth={1.5} />
+      </IconBtn>
+    )
+  }
+
+  /** Stage every file under a changed folder, or discard them all (armed confirm). */
+  const renderUnstagedDirActions = (node: TreeNode): ReactNode => {
+    const files = collectFiles(node)
+    if (armed === node.path) {
+      return (
+        <span className="flex flex-none items-center gap-1">
+          <span className="text-[10px] font-bold text-red-2">Discard {files.length}?</span>
+          <IconBtn
+            title={`Confirm — discard changes in ${files.length} file${files.length === 1 ? '' : 's'}`}
+            onClick={() =>
+              void exec('discard', () => forEachFile(files, (p) => window.orbital.gitDiscard(worktree.id, p)))
+            }
+            disabled={!!busy}
+            className="text-red-2 hover:text-red"
+          >
+            <Check size={14} strokeWidth={2} />
+          </IconBtn>
+          <IconBtn title="Cancel" onClick={() => setArmed(null)} className="text-faint hover:text-text">
+            <X size={14} strokeWidth={1.5} />
+          </IconBtn>
+        </span>
+      )
+    }
+    return dirActions(
+      <>
+        <IconBtn
+          title="Discard folder"
+          onClick={() => setArmed(node.path)}
+          disabled={!!busy}
+          className="text-faint hover:text-red-2"
+        >
+          <Undo2 size={13} strokeWidth={1.5} />
+        </IconBtn>
+        <IconBtn
+          title="Stage folder"
+          onClick={() =>
+            void exec('stage', () => forEachFile(files, (p) => window.orbital.gitStage(worktree.id, p)))
+          }
+          disabled={!!busy}
+          className="text-accent hover:text-blue"
+        >
+          <Plus size={14} strokeWidth={1.5} />
+        </IconBtn>
+      </>
+    )
+  }
 
   return (
     <div className="border-b border-soft">
@@ -631,7 +733,9 @@ export default function GitPanel(): JSX.Element {
               depth={0}
               section="s"
               collapsed={collapsedDirs}
+              armedDir={null}
               onToggle={toggleDir}
+              renderDirActions={renderStagedDirActions}
               renderLeaf={(f) => (
                 <GitFileRow
                   file={f}
@@ -701,7 +805,9 @@ export default function GitPanel(): JSX.Element {
               depth={0}
               section="u"
               collapsed={collapsedDirs}
+              armedDir={armed}
               onToggle={toggleDir}
+              renderDirActions={renderUnstagedDirActions}
               renderLeaf={(f) => (
                 <GitFileRow
                   file={f}
