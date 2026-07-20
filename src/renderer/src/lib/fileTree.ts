@@ -76,6 +76,9 @@ function refetchNow(entry: Entry): void {
   clearTimeout(entry.timer)
   entry.timer = undefined
   entry.fetching = true
+  // Clear before the RPC so a state change arriving mid-fetch re-dirties us and
+  // is chased below (clearing on completion would swallow those changes).
+  entry.dirty = false
   void bridge()
     .fileTree(entry.worktreeId)
     .then((tree) => {
@@ -83,7 +86,6 @@ function refetchNow(entry: Entry): void {
       if (!entry.alive) return
       entry.tree = tree
       entry.loadedOnce = true
-      entry.dirty = false
       for (const s of entry.subscribers) s.onTree(tree)
       // A state change during the fetch re-dirtied us — chase it (only while visible).
       if (entry.dirty && anyActive(entry)) scheduleRefetch(entry)
@@ -183,6 +185,11 @@ export function useFileTree(
 ): { tree: FileNode[]; refresh: () => void } {
   const [tree, setTree] = useState<FileNode[]>([])
   const handleRef = useRef<FileTreeHandle | null>(null)
+  // Track the latest `active` so a handle (re)acquired when `worktreeId`
+  // resolves is synced immediately, without putting `active` in this effect's
+  // deps (which would tear down and reacquire on every visibility toggle).
+  const activeRef = useRef(active)
+  activeRef.current = active
 
   useEffect(() => {
     if (!worktreeId) {
@@ -190,6 +197,7 @@ export function useFileTree(
       return
     }
     const handle = acquireFileTree(worktreeId, setTree)
+    handle.setActive(activeRef.current)
     handleRef.current = handle
     return () => {
       handle.release()

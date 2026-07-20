@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, render } from '@testing-library/react'
+import { createElement, useEffect, useState } from 'react'
 import type { FileNode } from '@shared/types'
 import {
   acquireFileTree,
+  useFileTree,
   __setFileTreeBridge,
   __setFileTreeDebounce,
   __resetFileTreeRegistry
@@ -30,6 +33,35 @@ function makeBridge() {
     },
     setTree: (t: FileNode[]): void => {
       tree = t
+    }
+  }
+}
+
+/** A fake bridge whose fileTree calls stay pending until `resolveAll` is called. */
+function makeDeferredBridge() {
+  const listeners = new Set<() => void>()
+  const calls: string[] = []
+  let pending: Array<() => void> = []
+  let tree: FileNode[] = []
+  return {
+    bridge: {
+      fileTree: (id: string): Promise<FileNode[]> => {
+        calls.push(id)
+        return new Promise<FileNode[]>((resolve) => pending.push(() => resolve(tree)))
+      },
+      onStateChanged: (cb: () => void): (() => void) => {
+        listeners.add(cb)
+        return () => listeners.delete(cb)
+      }
+    },
+    calls,
+    emit: (): void => {
+      for (const l of [...listeners]) l()
+    },
+    resolveAll: (): void => {
+      const p = pending
+      pending = []
+      for (const r of p) r()
     }
   }
 }
@@ -120,6 +152,54 @@ describe('fileTree registry', () => {
     expect(b.calls.length).toBe(2)
 
     h.release()
+  })
+
+  it('chases a state change that arrives during an in-flight fetch', async () => {
+    const b = makeDeferredBridge()
+    __setFileTreeBridge(b.bridge)
+
+    const h = acquireFileTree('w6', () => {})
+    h.setActive(true) // first fetch starts and stays in flight
+    await tick()
+    expect(b.calls.length).toBe(1)
+
+    b.emit() // state change while the fetch is in flight → entry re-dirtied
+    await tick() // debounce timer fires but bails (fetch still in flight)
+    expect(b.calls.length).toBe(1)
+
+    b.resolveAll() // fetch completes → dirty is still set, so it chases
+    await tick()
+    await tick()
+    expect(b.calls.length).toBe(2)
+
+    b.resolveAll()
+    h.release()
+  })
+
+  it('loads the tree when worktreeId resolves after mount while active stays true', async () => {
+    const b = makeBridge()
+    __setFileTreeBridge(b.bridge)
+
+    // A visible editor whose worktree id is not known until after first render.
+    function Harness(): null {
+      const [id, setId] = useState<string | undefined>(undefined)
+      useFileTree(id, true) // active is true the whole time and never changes
+      useEffect(() => {
+        setId('w7')
+      }, [])
+      return null
+    }
+
+    await act(async () => {
+      render(createElement(Harness))
+    })
+    await act(async () => {
+      await tick()
+    })
+
+    // The reacquired handle must be synced active, so the initial fetch happens.
+    expect(b.calls).toEqual(['w7'])
+    cleanup()
   })
 
   it('hands a late-joining consumer the cached tree without a new fetch', async () => {
