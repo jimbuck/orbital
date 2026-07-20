@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.14.1](https://github.com/jimbuck/orbital/compare/v1.14.0...v1.14.1) (2026-07-20)
+
+
+### Bug Fixes
+
+* use regular dash instead of emdash in window title ([10273a5](https://github.com/jimbuck/orbital/commit/10273a52d34d4fc82175ef07da0a69d6001f1f53))
+
 # [1.14.0](https://github.com/jimbuck/orbital/compare/v1.13.3...v1.14.0) (2026-07-20)
 
 
