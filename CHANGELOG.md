@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.14.2](https://github.com/jimbuck/orbital/compare/v1.14.1...v1.14.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* persist file editor state across tab switches ([#9](https://github.com/jimbuck/orbital/issues/9)) ([4ce6b50](https://github.com/jimbuck/orbital/commit/4ce6b5050b3e6094e38e82ca6b8308404bf30484))
+
 ## [1.14.1](https://github.com/jimbuck/orbital/compare/v1.14.0...v1.14.1) (2026-07-20)
 
 
