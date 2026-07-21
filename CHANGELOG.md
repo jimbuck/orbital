@@ -2,6 +2,21 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.15.0](https://github.com/jimbuck/orbital/compare/v1.14.2...v1.15.0) (2026-07-21)
+
+
+### Bug Fixes
+
+* single-fire terminal paste and right-click copy/paste rules ([bb25793](https://github.com/jimbuck/orbital/commit/bb25793ab7475b1bf3044c8339f1d72a2b96765d))
+
+
+### Features
+
+* folder-level stage/unstage/revert buttons in git panel ([32fee59](https://github.com/jimbuck/orbital/commit/32fee590268c958c9acff7d22fe784ece3c73370))
+* make left/right panes collapsible ([325752c](https://github.com/jimbuck/orbital/commit/325752c461288f60af8c8dba64b2a7ce5f7c5185))
+* open an existing branch in a new worktree ([8196fa4](https://github.com/jimbuck/orbital/commit/8196fa4c2377623d53582ef0c1535e4ab0746fc6))
+* recent workspaces jump list on the Windows taskbar ([58c31fa](https://github.com/jimbuck/orbital/commit/58c31fa1d55e99de36efff8e423f4d883e3ef54c))
+
 ## [1.14.2](https://github.com/jimbuck/orbital/compare/v1.14.1...v1.14.2) (2026-07-20)
 
 
