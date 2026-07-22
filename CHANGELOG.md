@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.16.0](https://github.com/jimbuck/orbital/compare/v1.15.0...v1.16.0) (2026-07-22)
+
+
+### Features
+
+* globally unique task numbers ([adbfefc](https://github.com/jimbuck/orbital/commit/adbfefc2c43f146c45e2ef6f0b1ea2e042b627c5)), closes [12/#12](https://github.com/jimbuck/orbital/issues/12)
+
 # [1.15.0](https://github.com/jimbuck/orbital/compare/v1.14.2...v1.15.0) (2026-07-21)
 
 
