@@ -31,10 +31,10 @@ Usage:
   orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all]
-  orbital task show <id>
-  orbital task update <id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
-  orbital task done <id>
-  orbital task delete <id>
+  orbital task show <number|id>
+  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
+  orbital task done <number|id>
+  orbital task delete <number|id>
   orbital server add <url|port>
   orbital server remove <url|port>
   orbital server list
@@ -46,7 +46,7 @@ Examples:
   orbital tab new browser http://localhost:5173
   orbital task add "Write tests" --description "cover the parser"
   orbital task list
-  orbital task done 4f21c
+  orbital task done 12
   orbital server add 5173
   orbital server remove 5173
 `
@@ -282,8 +282,9 @@ function printTasks(data: unknown): void {
     list.map((task) => {
       const o = (task ?? {}) as Record<string, unknown>
       return {
-        // The short prefix is enough for `orbital task update/done`.
-        id: String(o.id ?? '').slice(0, 8),
+        // The task number addresses `orbital task update/done`; a uuid prefix
+        // is the fallback for rows from an app build that predates numbers.
+        id: o.seq != null ? `#${o.seq}` : String(o.id ?? '').slice(0, 8),
         status: String(o.status ?? ''),
         title: String(o.title ?? ''),
         tags: Array.isArray(o.tags) ? o.tags.join(',') : '',
@@ -297,6 +298,7 @@ function printTasks(data: unknown): void {
 function printTaskDetail(data: unknown): void {
   const o = (data ?? {}) as Record<string, unknown>
   const rows: [string, string][] = [
+    ['number', o.seq != null ? `#${o.seq}` : '(none)'],
     ['id', String(o.id ?? '')],
     ['status', String(o.status ?? '')],
     ['title', String(o.title ?? '')],
@@ -330,7 +332,7 @@ function confirmation(req: ControlRequest, data: unknown): string {
     case 'tab-new':
       return `opened ${String(req.args.type ?? '')} tab`
     case 'task-add':
-      return `task added: ${String(d.title ?? req.args.title ?? '')}`
+      return `task added: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
     case 'task-update':
       return `task updated: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
     case 'task-delete':

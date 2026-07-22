@@ -52,6 +52,7 @@ function mapTab(r: any): Tab {
 function mapTask(r: any): Task {
   return {
     id: r.id,
+    seq: r.seq,
     projectId: r.project_id,
     title: r.title,
     description: r.description ?? '',
@@ -420,6 +421,23 @@ export const tabs = {
  * Tasks
  * ========================================================================== */
 
+/**
+ * Allocate the next human-facing task number: a monotonic counter (settings key
+ * 'taskSeq') floored by MAX(seq), so numbers stay globally unique across every
+ * workspace, never reuse a deleted task's, and self-heal if the counter row is
+ * missing (pre-migration DBs). Must run inside the caller's write transaction.
+ */
+function nextTaskSeq(db: ReturnType<typeof getDb>): number {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'taskSeq'").get() as { value: string } | undefined
+  const counter = row ? Number.parseInt(row.value, 10) || 0 : 0
+  const maxSeq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM tasks').get() as { m: number }).m
+  const seq = Math.max(counter, maxSeq) + 1
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('taskSeq', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run(String(seq))
+  return seq
+}
+
 export const tasks = {
   list(): Task[] {
     return getDb()
@@ -437,11 +455,25 @@ export const tasks = {
   create(input: { projectId: string; title: string; description?: string; tags?: string[] }): Task {
     const tid = id()
     const t = now()
-    getDb()
-      .prepare(
-        'INSERT INTO tasks (id, project_id, title, description, tags, status, worktree_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)'
+    const db = getDb()
+    // BEGIN IMMEDIATE so the counter read and insert are atomic across the
+    // several instances sharing this DB — a deferred transaction could hand two
+    // processes the same number.
+    db.transaction(() => {
+      db.prepare(
+        'INSERT INTO tasks (id, seq, project_id, title, description, tags, status, worktree_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)'
+      ).run(
+        tid,
+        nextTaskSeq(db),
+        input.projectId,
+        input.title,
+        input.description ?? '',
+        JSON.stringify(input.tags ?? []),
+        'todo',
+        t,
+        t
       )
-      .run(tid, input.projectId, input.title, input.description ?? '', JSON.stringify(input.tags ?? []), 'todo', t, t)
+    }).immediate()
     return tasks.get(tid)!
   },
   update(tid: string, patch: TaskPatch): Task {

@@ -107,6 +107,7 @@ function migrate(d: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS tasks (
       id           TEXT PRIMARY KEY,
+      seq          INTEGER,
       project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       title        TEXT NOT NULL,
       description  TEXT NOT NULL DEFAULT '',
@@ -129,6 +130,9 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'projects', 'default_agent_provider', "TEXT NOT NULL DEFAULT 'claude'")
   addColumnIfMissing(d, 'projects', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
+  addColumnIfMissing(d, 'tasks', 'seq', 'INTEGER')
+  backfillTaskSeqs(d)
+  d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')
   const defaultWorkspaceId = ensureDefaultWorkspace(d)
   scopeProjectsToWorkspaces(d, defaultWorkspaceId)
   // Only after scoping — a pre-workspaces `projects` table lacks the column
@@ -255,6 +259,26 @@ function renameLegacySchema(d: Database.Database): void {
 
     // WorktreeKind: 'root' | 'linked' (was 'root' | 'worktree').
     d.exec("UPDATE worktrees SET kind = 'linked' WHERE kind = 'worktree'")
+  })
+  tx()
+}
+
+/**
+ * Number tasks that predate the `seq` column: creation order, continuing after
+ * the highest number already assigned. `seq` is the human-facing task number —
+ * globally unique across all workspaces (the DB is global) and never reused;
+ * allocation for new tasks lives in the tasks repository. Idempotent: once no
+ * NULL rows remain this is a no-op.
+ */
+function backfillTaskSeqs(d: Database.Database): void {
+  const rows = d.prepare('SELECT id FROM tasks WHERE seq IS NULL ORDER BY created_at, id').all() as Array<{
+    id: string
+  }>
+  if (rows.length === 0) return
+  const tx = d.transaction(() => {
+    let next = (d.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM tasks').get() as { m: number }).m + 1
+    const update = d.prepare('UPDATE tasks SET seq = ? WHERE id = ?')
+    for (const r of rows) update.run(next++, r.id)
   })
   tx()
 }

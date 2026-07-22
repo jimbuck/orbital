@@ -197,6 +197,8 @@ export interface Worktree {
 
 export interface Task {
   id: string
+  /** Human-facing task number: globally unique, assigned in creation order, never reused. */
+  seq: number
   projectId: string
   title: string
   description: string

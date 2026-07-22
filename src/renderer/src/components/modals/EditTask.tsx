@@ -172,7 +172,7 @@ export default function EditTask(): JSX.Element {
 
   return (
     <ModalShell
-      title="Edit task"
+      title={`Edit task #${task.seq}`}
       width={1040}
       minHeight={760}
       bodyClassName="flex flex-col"

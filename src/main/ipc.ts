@@ -944,11 +944,15 @@ function parseTagList(raw: string): string[] {
     .filter(Boolean)
 }
 
-/** Resolve a task by full id or unique id prefix within a project. */
+/** Resolve a task by number (`12` / `#12`), full id, or unique id prefix within a project. */
 function resolveTask(projectId: string, idArg: string): { task?: ReturnType<typeof repo.tasks.get>; error?: string } {
-  const candidates = repo.tasks
-    .list()
-    .filter((t) => t.projectId === projectId && (t.id === idArg || t.id.startsWith(idArg)))
+  const inProject = repo.tasks.list().filter((t) => t.projectId === projectId)
+  if (/^#?\d+$/.test(idArg)) {
+    const seq = Number.parseInt(idArg.replace('#', ''), 10)
+    const task = inProject.find((t) => t.seq === seq)
+    return task ? { task } : { error: `no task matches number '${idArg}'` }
+  }
+  const candidates = inProject.filter((t) => t.id === idArg || t.id.startsWith(idArg))
   if (candidates.length === 0) return { error: `no task matches id '${idArg}'` }
   if (candidates.length > 1) return { error: `id '${idArg}' is ambiguous (${candidates.length} matches)` }
   return { task: candidates[0] }
@@ -1053,7 +1057,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined
         })
         runtime.broadcastState()
-        return { ok: true, data: { id: task.id, title: task.title } }
+        return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }
       }
       case 'task-list': {
         if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
@@ -1063,6 +1067,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           .filter((t) => t.projectId === req.projectId && (all || t.status !== 'done'))
           .map((t) => ({
             id: t.id,
+            seq: t.seq,
             status: t.status,
             title: t.title,
             description: t.description,
@@ -1081,6 +1086,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           ok: true,
           data: {
             id: task.id,
+            seq: task.seq,
             status: task.status,
             title: task.title,
             description: task.description,
@@ -1107,7 +1113,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         if (Object.keys(patch).length === 0) return { ok: false, error: 'nothing to update' }
         const updated = repo.tasks.update(task.id, patch)
         runtime.broadcastState()
-        return { ok: true, data: { id: updated.id, status: updated.status, title: updated.title } }
+        return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title } }
       }
       case 'task-delete': {
         if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
@@ -1117,7 +1123,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         if (!task) return { ok: false, error }
         repo.tasks.remove(task.id)
         runtime.broadcastState()
-        return { ok: true, data: { id: task.id, title: task.title } }
+        return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }
       }
       case 'server-add': {
         if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }

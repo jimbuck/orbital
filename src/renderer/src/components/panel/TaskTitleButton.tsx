@@ -20,7 +20,7 @@ export default function TaskTitleButton({ task, className }: { task: Task; class
       title="Open task"
       className={`w-full cursor-pointer text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 rounded ${className}`}
     >
-      {task.title}
+      <span className="font-mono font-normal text-faint">#{task.seq}</span> {task.title}
     </button>
   )
 }
