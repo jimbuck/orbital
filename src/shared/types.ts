@@ -222,6 +222,8 @@ export interface Settings {
     indicator: boolean
     sound: boolean
     taskbarBadge: boolean
+    /** Flash the taskbar button (FlashWindow) when a Worktree flips to needs-attention. */
+    taskbarFlash: boolean
   }
   /** Whether Orbital's Claude status hooks are installed in ~/.claude/settings.json. */
   claudeHooksInstalled: boolean

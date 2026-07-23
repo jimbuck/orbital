@@ -27,8 +27,8 @@ When a worktree flips to needs-attention:
    label on the worktree.
 2. The **title bar** shows an "N agents need you" banner.
 3. The **Windows taskbar** icon lights up — the orbiting satellite in the app
-   icon swells and glows amber — and an optional **chime** plays on the rising
-   edge.
+   icon swells and glows amber — the taskbar button **flashes** while Orbital
+   is in the background, and an optional **chime** plays on the rising edge.
 
 Each channel can be toggled independently in Settings.
 

@@ -9,7 +9,10 @@ import type { Worktree, Settings, AlertEvent } from '@shared/types'
  * The badge is the app icon itself: when a Worktree needs attention the window
  * icon swaps to a variant where the orbiting satellite swells and glows amber
  * (resources/icons/icon-alert.png, rendered from build/icon-alert.svg by
- * scripts/render-icons.js), and swaps back once everything is quiet.
+ * scripts/render-icons.js), and swaps back once everything is quiet. On the
+ * rising edge the taskbar button also flashes (flashFrame) while the window is
+ * backgrounded, so a new needs-attention is visible even when the cockpit is
+ * behind other windows.
  *
  * On every state change the orchestrator calls `update(worktrees)`; the manager
  * computes how many Worktrees need attention, swaps the window icon, and returns
@@ -42,15 +45,20 @@ export class AlertManager {
     // a recreated window or a mid-alert settings toggle converges on next tick.
     const win = this.getWindow()
     if (win && !win.isDestroyed()) {
-      const badge = count > 0 && this.getSettings().alerts.taskbarBadge
+      const alerts = this.getSettings().alerts
+      const badge = count > 0 && alerts.taskbarBadge
       const icon = this.icon(badge ? 'alert' : 'normal')
-      if (!icon.isEmpty()) {
-        try {
-          win.setIcon(icon)
-        } catch {
-          // The window can still be destroyed between the check and the call;
-          // the badge is best-effort, so swallow and keep the loop alive.
-        }
+      try {
+        if (!icon.isEmpty()) win.setIcon(icon)
+        // Flash the taskbar button on the rising edge while the cockpit is in
+        // the background — Windows stops the flash itself when the window comes
+        // to the foreground; cancel explicitly once nothing needs attention (or
+        // the toggle is off) so a still-backgrounded button stops asking.
+        if (alerts.taskbarFlash && rising && !win.isFocused()) win.flashFrame(true)
+        else if (count === 0 || !alerts.taskbarFlash) win.flashFrame(false)
+      } catch {
+        // The window can still be destroyed between the check and the calls;
+        // the badge/flash are best-effort, so swallow and keep the loop alive.
       }
     }
 

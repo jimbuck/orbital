@@ -19,7 +19,7 @@ import { requireWorkspaceId, workspaces } from '../db/repositories'
 
 const DEFAULT_SETTINGS: Settings = {
   defaultShell: '',
-  alerts: { indicator: true, sound: true, taskbarBadge: true },
+  alerts: { indicator: true, sound: true, taskbarBadge: true, taskbarFlash: true },
   claudeHooksInstalled: false,
   envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
   periodicFetch: true,
@@ -80,7 +80,12 @@ function writeGlobalSettings(s: GlobalSettings): void {
 
 /** The assembled settings: defaults ← global slice ← active workspace's slice. */
 export function getSettings(): Settings {
-  return { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...workspaces.getSettings(requireWorkspaceId()) }
+  const merged = { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...workspaces.getSettings(requireWorkspaceId()) }
+  // The top-level merge is shallow, so a stored alerts blob written before a
+  // toggle existed would shadow that toggle's default with undefined — deep-merge
+  // the alerts object so new alert settings arrive enabled on old installs.
+  merged.alerts = { ...DEFAULT_SETTINGS.alerts, ...merged.alerts }
+  return merged
 }
 
 /** Split a full settings object across the global table and the workspace row. */

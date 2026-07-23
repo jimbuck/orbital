@@ -8,7 +8,7 @@ import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase }
 /** Common Windows shells offered in the default-shell picker. */
 const SHELL_OPTIONS = ['pwsh.exe', 'powershell.exe', 'cmd.exe', 'wsl.exe', 'bash.exe', 'git-bash.exe']
 
-const DEFAULT_ALERTS: SettingsModel['alerts'] = { indicator: true, sound: true, taskbarBadge: false }
+const DEFAULT_ALERTS: SettingsModel['alerts'] = { indicator: true, sound: true, taskbarBadge: false, taskbarFlash: false }
 
 /** A 34×19 pill switch — accent track + white knob when on, dim otherwise. */
 export function Toggle({
@@ -494,6 +494,12 @@ export default function Settings(): React.JSX.Element {
           desc="The taskbar icon's satellite glows amber"
           checked={alerts.taskbarBadge}
           onChange={(v) => setAlerts((a) => ({ ...a, taskbarBadge: v }))}
+        />
+        <AlertRow
+          title="Taskbar flash"
+          desc="Flash the taskbar button while Orbital is in the background"
+          checked={alerts.taskbarFlash}
+          onChange={(v) => setAlerts((a) => ({ ...a, taskbarFlash: v }))}
         />
       </div>
     </ModalShell>
