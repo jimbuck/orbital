@@ -725,15 +725,17 @@ export function registerIpc(): void {
   // ---- terminals ----
   ipcMain.on(IPC.terminalInput, (_e, tabId: string, data: string) => {
     runtime.terminals.write(tabId, data)
-    // If the human types into an agent flagged needs-attention, they've responded —
-    // so it is no longer blocked on a human. Where it goes depends on why it was
-    // blocked: answering a permission prompt puts Claude straight to work (and a
-    // long approved tool emits no hook until it finishes) → working; typing at an
-    // idle prompt is just composing the next instruction → idle, and the
-    // UserPromptSubmit hook flips it to working on actual submit. Uses INPUT
-    // only — never scrapes terminal output (req 7).
+    // If the human types into a PTY flagged needs-attention, they've responded —
+    // so it is no longer blocked on a human. This covers agent tabs AND plain
+    // terminal tabs (an agent launched by hand, or `orbital status`, flags those
+    // just the same). Where it goes depends on why it was blocked: answering a
+    // permission prompt puts Claude straight to work (and a long approved tool
+    // emits no hook until it finishes) → working; typing at an idle prompt is
+    // just composing the next instruction → idle, and the UserPromptSubmit hook
+    // flips it to working on actual submit. Uses INPUT only — never scrapes
+    // terminal output (req 7).
     const tab = repo.tabs.get(tabId)
-    if (tab && tab.type === 'agent' && tab.status === 'needs_attention' && isHumanKeystroke(data)) {
+    if (tab && isPtyTabType(tab.type) && tab.status === 'needs_attention' && isHumanKeystroke(data)) {
       // The human's response supersedes anything already in flight: hook events
       // fired before this moment must not overwrite the flip below.
       statusAppliedAt.set(tabId, Date.now())

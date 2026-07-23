@@ -39,7 +39,8 @@ Each channel can be toggled independently in Settings.
   on tool use, *needs-attention* on permission/idle prompts, *idle* on stop,
   *done* on session end. See [Running agents](/orbital/guides/running-agents/).
 - **Explicitly, from any agent or script:** `orbital status needs-attention`.
-- **Typing clears it.** When you type into an agent that is needs-attention,
-  you have by definition responded — the status flips back to *working*
-  immediately instead of waiting for the next hook event.
+- **Typing clears it.** When you type into an agent or terminal that is
+  needs-attention, you have by definition responded — the status flips back
+  immediately (to *working* after a permission prompt, *idle* otherwise)
+  instead of waiting for the next hook event.
 - A terminal whose process exits stops contributing its stale status.
