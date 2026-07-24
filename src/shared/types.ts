@@ -331,6 +331,9 @@ export interface FileNode {
   type: 'file' | 'dir'
   /** git status badge for files, when changed. */
   gitState?: GitFileState
+  /** Matched by .gitignore — rendered dimmed. Ignored dirs come without
+   *  `children`; their contents are fetched lazily via `listDir` on expand. */
+  ignored?: boolean
   children?: FileNode[]
 }
 
@@ -506,6 +509,7 @@ export const IPC = {
   gitCheckout: 'orbital:gitCheckout',
   gitDiff: 'orbital:gitDiff',
   fileTree: 'orbital:fileTree',
+  listDir: 'orbital:listDir',
   readFile: 'orbital:readFile',
   readFileBase64: 'orbital:readFileBase64',
   writeFile: 'orbital:writeFile',
@@ -637,6 +641,8 @@ export interface OrbitalApi {
   gitCheckout(worktreeId: string, branch: string, create?: boolean): Promise<void>
   gitDiff(worktreeId: string, path: string, staged: boolean): Promise<FileDiff>
   fileTree(worktreeId: string): Promise<FileNode[]>
+  /** Immediate children of an ignored directory (not enumerated in fileTree). */
+  listDir(worktreeId: string, path: string): Promise<FileNode[]>
   readFile(worktreeId: string, path: string): Promise<string>
   /** Raw file bytes as base64 — for rendering binary content (images) in the editor. */
   readFileBase64(worktreeId: string, path: string): Promise<string>

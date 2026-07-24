@@ -12,7 +12,7 @@ import { promisify } from 'node:util'
 import { EventEmitter } from 'node:events'
 import { readFileSync, statSync, watch } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
-import { readFile as fsReadFile, writeFile as fsWriteFile, mkdir } from 'node:fs/promises'
+import { readFile as fsReadFile, writeFile as fsWriteFile, mkdir, readdir } from 'node:fs/promises'
 import { join, dirname, resolve } from 'node:path'
 import ignore from 'ignore'
 import type {
@@ -409,6 +409,14 @@ async function diff(repoPath: string, path: string, staged: boolean): Promise<Fi
  * File tree & file I/O
  * -------------------------------------------------------------------------- */
 
+/** Directories first, then alphabetical, recursively. */
+function sortNodes(nodes: FileNode[]): void {
+  nodes.sort((a, b) =>
+    a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name)
+  )
+  for (const n of nodes) if (n.children) sortNodes(n.children)
+}
+
 async function fileTree(repoPath: string): Promise<FileNode[]> {
   const out = await run(repoPath, [
     '-c',
@@ -420,6 +428,21 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
   ])
   const paths = Array.from(new Set(toLines(out).filter(Boolean)))
 
+  // Gitignored entries, shown dimmed in the tree. `--directory` collapses a
+  // fully-ignored directory (node_modules, dist, …) to a single `dir/` line
+  // instead of enumerating its contents — those load lazily via listDir when
+  // the user expands the directory.
+  const ignoredOut = await run(repoPath, [
+    '-c',
+    'core.quotePath=false',
+    'ls-files',
+    '--others',
+    '--ignored',
+    '--exclude-standard',
+    '--directory'
+  ])
+  const ignoredPaths = Array.from(new Set(toLines(ignoredOut).filter(Boolean)))
+
   // Badge changed files with their git state (prefer the working-tree state).
   const st = await status(repoPath)
   const stateByPath = new Map<string, GitFileState>()
@@ -428,6 +451,7 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
 
   const root: FileNode[] = []
   const childrenOf = new Map<string, FileNode[]>([['', root]])
+  const dirNodes = new Map<string, FileNode>()
 
   // Create (and cache) the children array for a directory, building ancestors.
   function ensureDir(dirPath: string): FileNode[] {
@@ -439,6 +463,7 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
     const node: FileNode = { name, path: dirPath, type: 'dir', children: [] }
     ensureDir(parent).push(node)
     childrenOf.set(dirPath, node.children!)
+    dirNodes.set(dirPath, node)
     return node.children!
   }
 
@@ -452,16 +477,54 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
     ensureDir(dir).push(node)
   }
 
-  // Directories first, then alphabetical, recursively.
-  function sortNodes(nodes: FileNode[]): void {
-    nodes.sort((a, b) =>
-      a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name)
-    )
-    for (const n of nodes) if (n.children) sortNodes(n.children)
+  for (const raw of ignoredPaths) {
+    const isDir = raw.endsWith('/')
+    const p = isDir ? raw.slice(0, -1) : raw
+    if (isDir) {
+      // git may list an ignored dir AND some of its contents (e.g. when the
+      // dir is ignored via a .gitignore inside it), so build it through
+      // ensureDir and just mark the node — never a duplicate sibling.
+      ensureDir(p)
+      dirNodes.get(p)!.ignored = true
+      continue
+    }
+    const slash = p.lastIndexOf('/')
+    const dir = slash === -1 ? '' : p.slice(0, slash)
+    const name = slash === -1 ? p : p.slice(slash + 1)
+    ensureDir(dir).push({ name, path: p, type: 'file', ignored: true })
   }
+
+  // An ignored dir that stayed empty was collapsed by --directory: drop the
+  // children array so the renderer knows to fetch its contents on expand.
+  function pruneCollapsedDirs(nodes: FileNode[]): void {
+    for (const n of nodes) {
+      if (!n.children) continue
+      pruneCollapsedDirs(n.children)
+      if (n.ignored && n.children.length === 0) delete n.children
+    }
+  }
+  pruneCollapsedDirs(root)
+
   sortNodes(root)
 
   return root
+}
+
+/**
+ * Immediate children of an ignored directory, read from disk (git knows nothing
+ * about them). Everything under an ignored directory is itself ignored; child
+ * dirs again come back without children, for another lazy expand.
+ */
+async function listDir(repoPath: string, relPath: string): Promise<FileNode[]> {
+  const entries = await readdir(join(repoPath, relPath), { withFileTypes: true })
+  const nodes: FileNode[] = entries.map((e) => {
+    const p = relPath ? `${relPath}/${e.name}` : e.name
+    return e.isDirectory()
+      ? { name: e.name, path: p, type: 'dir', ignored: true }
+      : { name: e.name, path: p, type: 'file', ignored: true }
+  })
+  sortNodes(nodes)
+  return nodes
 }
 
 async function readFile(repoPath: string, relPath: string): Promise<string> {
@@ -591,6 +654,7 @@ export const git = {
   checkout,
   diff,
   fileTree,
+  listDir,
   readFile,
   readFileBase64,
   writeFile,

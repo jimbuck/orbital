@@ -8,7 +8,10 @@ selected file on the right with a mode toggle in the header.
 
 ## The file tree
 
-- Tracked and untracked (non-ignored) files, directories first.
+- Tracked and untracked files, directories first.
+- Gitignored files and directories appear dimmed. A fully-ignored directory
+  (`node_modules`, `dist`, …) loads its contents on first expand, so huge
+  ignored trees cost nothing until you open them.
 - Changed files carry their git badge (`M`, `A`, `D`, `?`, …); collapsed
   directories containing changes get an amber dot.
 - The tree follows the repo live — agent edits and commits re-badge it
@@ -20,9 +23,10 @@ Source renders with **syntax highlighting** (Shiki, the same engine as VS Code
 grammars) across TypeScript, Python, Rust, Go, CSS, YAML, Dockerfile, and dozens
 more. Very large files fall back to plain text to stay snappy.
 
-Click **Edit** for quick inline changes — a save writes straight to the worktree's
-working tree. It's for config tweaks and small fixes, not a replacement for your
-IDE.
+Files are editable in place — just type. **Save** and **Cancel** light up in the
+header once the buffer differs from disk; a save writes straight to the
+worktree's working tree, and unsaved edits survive a peek at Diff or Preview.
+It's for config tweaks and small fixes, not a replacement for your IDE.
 
 ### Images
 

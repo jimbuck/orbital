@@ -809,6 +809,7 @@ export function registerIpc(): void {
     git.diff(worktreeRepoPath(worktreeId), path, staged)
   )
   h(IPC.fileTree, (_e, worktreeId: string) => git.fileTree(worktreeRepoPath(worktreeId)))
+  h(IPC.listDir, (_e, worktreeId: string, path: string) => git.listDir(worktreeRepoPath(worktreeId), path))
   h(IPC.readFile, (_e, worktreeId: string, path: string) => git.readFile(worktreeRepoPath(worktreeId), path))
   h(IPC.readFileBase64, (_e, worktreeId: string, path: string) => git.readFileBase64(worktreeRepoPath(worktreeId), path))
   h(IPC.writeFile, async (_e, worktreeId: string, path: string, content: string) => {

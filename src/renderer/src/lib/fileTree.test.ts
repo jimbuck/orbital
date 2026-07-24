@@ -42,7 +42,7 @@ function makeDeferredBridge() {
   const listeners = new Set<() => void>()
   const calls: string[] = []
   let pending: Array<() => void> = []
-  let tree: FileNode[] = []
+  const tree: FileNode[] = []
   return {
     bridge: {
       fileTree: (id: string): Promise<FileNode[]> => {

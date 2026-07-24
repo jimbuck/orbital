@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, Pencil, RefreshCw, Save, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, RefreshCw, Save, X } from 'lucide-react'
 import { marked } from 'marked'
 import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
@@ -121,45 +121,6 @@ function langFor(path: string): string | null {
 
 /** Above this size highlighting is skipped — a plain <pre> keeps huge files snappy. */
 const HIGHLIGHT_MAX = 300_000
-
-/** Read-only source view: shiki-highlighted when the grammar is known, plain otherwise. */
-function CodeView({ path, source }: { path: string; source: string }): JSX.Element {
-  const [html, setHtml] = useState<string | null>(null)
-  const theme = useResolvedTheme()
-
-  useEffect(() => {
-    let alive = true
-    setHtml(null)
-    const lang = langFor(path)
-    if (!lang || source.length > HIGHLIGHT_MAX) return
-    // Dynamic import so shiki (and only the needed grammar) loads on first use,
-    // keeping it out of the renderer's startup bundle.
-    void import('shiki')
-      .then(({ codeToHtml }) => codeToHtml(source, { lang, theme: shikiTheme(theme) }))
-      .then((h) => {
-        if (alive) setHtml(h)
-      })
-      .catch((err) => {
-        // Unknown grammar / load failure — the plain fallback below stays up.
-        console.warn(`shiki highlight failed for ${path}:`, err)
-      })
-    return () => {
-      alive = false
-    }
-    // theme is a dep so the view re-highlights when the app theme flips.
-  }, [path, source, theme])
-
-  if (html === null) {
-    return (
-      <pre className="allow-select px-4 py-3 font-mono text-[12px] leading-[1.6] text-text-2">
-        {source}
-      </pre>
-    )
-  }
-  return (
-    <div className="shiki-view allow-select px-4 py-3" dangerouslySetInnerHTML={{ __html: html }} />
-  )
-}
 
 /**
  * Editable source view with live syntax highlighting: a transparent-text
@@ -454,6 +415,9 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // Shared, per-worktree file tree: dedupes fetches across editor tabs and only
   // refetches on state changes while this tab is active (see lib/fileTree).
   const { tree, refresh: refetchTree } = useFileTree(worktreeId, active)
+  // Contents of expanded ignored directories, fetched on demand (the shared
+  // tree collapses fully-ignored dirs to a single childless node).
+  const [lazyChildren, setLazyChildren] = useState<Record<string, FileNode[]>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<Selected | null>(null)
   const [mode, setMode] = useState<ViewMode>('file')
@@ -461,7 +425,6 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   const [content, setContent] = useState<string | null>(null)
   const [imageData, setImageData] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const reqRef = useRef(0)
 
@@ -486,12 +449,24 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     return set
   }, [tree])
 
+  const loadDir = useCallback(
+    (path: string): void => {
+      if (!worktreeId) return
+      void window.orbital
+        .listDir(worktreeId, path)
+        .then((kids) => setLazyChildren((m) => ({ ...m, [path]: kids })))
+        .catch(() => {
+          // Unreadable (e.g. removed since the tree was fetched) — stays empty.
+        })
+    },
+    [worktreeId]
+  )
+
   const openFile = useCallback((node: FileNode, staged = false): void => {
     reqRef.current++
     setSelected({ path: node.path, gitState: node.gitState, staged })
     // Images open on the rendered image — their "diff" is just a binary notice.
     setMode(!imageMime(node.path) && (staged || node.gitState) ? 'diff' : 'file')
-    setEditing(false)
     setDiff(null)
     setContent(null)
     setImageData(null)
@@ -564,7 +539,6 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     const c = await window.orbital.readFile(worktreeId, selected.path)
     setContent(c)
     setDraft(c)
-    setEditing(false)
     setDiff(null) // saved content invalidates any cached diff
   }
 
@@ -580,6 +554,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
 
   const kind = selected ? previewKind(selected.path) : null
   const isImage = !!selected && !!imageMime(selected.path)
+  const dirty = content !== null && draft !== content
   const canDiff = !!selected && (!!selected.gitState || selected.staged)
   const modes: { id: ViewMode; label: string }[] = [
     { id: 'file', label: 'File' },
@@ -597,7 +572,11 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             type="button"
             title="Refresh file tree"
             aria-label="Refresh file tree"
-            onClick={() => refetchTree()}
+            onClick={() => {
+              // Drop lazily loaded ignored-dir contents too; expanded ones refetch.
+              setLazyChildren({})
+              refetchTree()
+            }}
             className={`flex-none rounded p-0.5 text-faint hover:text-text-2 ${FOCUS}`}
           >
             <RefreshCw size={12} strokeWidth={1.5} />
@@ -617,6 +596,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 onSelect={openFile}
                 selectedPath={selected?.path ?? null}
                 changedDirs={changedDirs}
+                lazyChildren={lazyChildren}
+                loadDir={loadDir}
               />
             ))
           )}
@@ -642,50 +623,35 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                   </span>
                 )}
 
-                {mode === 'file' &&
-                  !isImage &&
-                  content !== null &&
-                  (editing ? (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => {
-                          setEditing(false)
-                          setDraft(content)
-                        }}
-                        className={`flex items-center gap-1.5 rounded-chip px-2 py-1 text-[11px] font-medium text-text-3 hover:bg-hover ${FOCUS}`}
-                      >
-                        <X size={13} strokeWidth={1.5} />
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => void save()}
-                        className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-[#06122e] hover:brightness-110 ${FOCUS}`}
-                      >
-                        <Save size={13} strokeWidth={1.5} />
-                        Save
-                      </button>
-                    </div>
-                  ) : (
+                {mode === 'file' && !isImage && content !== null && (
+                  <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => setEditing(true)}
-                      className={`flex items-center gap-1.5 rounded-chip px-2 py-1 text-[11px] font-medium text-text-3 hover:bg-hover hover:text-text-2 ${FOCUS}`}
+                      onClick={() => setDraft(content)}
+                      disabled={!dirty}
+                      className={`flex items-center gap-1.5 rounded-chip px-2 py-1 text-[11px] font-medium text-text-3 hover:bg-hover disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
                     >
-                      <Pencil size={13} strokeWidth={1.5} />
-                      Edit
+                      <X size={13} strokeWidth={1.5} />
+                      Cancel
                     </button>
-                  ))}
+                    <button
+                      onClick={() => void save()}
+                      disabled={!dirty}
+                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-[#06122e] hover:brightness-110 disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
+                    >
+                      <Save size={13} strokeWidth={1.5} />
+                      Save
+                    </button>
+                  </div>
+                )}
 
                 {modes.length > 1 && (
                   <div className="flex items-center rounded-[7px] border border-line-2 bg-bg p-[2px]">
                     {modes.map((m) => (
                       <button
                         key={m.id}
-                        onClick={() => {
-                          if (m.id === mode) return
-                          setEditing(false)
-                          setDraft(content ?? '')
-                          setMode(m.id)
-                        }}
+                        // The draft survives mode switches — unsaved edits are
+                        // not discarded by peeking at the Diff or Preview.
+                        onClick={() => setMode(m.id)}
                         className={`rounded-[5px] px-2 py-[3px] text-[10.5px] font-semibold ${
                           mode === m.id ? 'bg-accent/15 text-blue' : 'text-muted hover:text-text-2'
                         } ${FOCUS}`}
@@ -716,11 +682,10 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                   File could not be read{selected.gitState === 'deleted' ? ' (deleted)' : ''}.
                 </div>
               ) : mode === 'preview' && kind ? (
-                <Preview kind={kind} source={content} onLink={onPreviewLink} />
-              ) : editing ? (
-                <CodeEditor path={selected.path} value={draft} onChange={setDraft} />
+                // Preview renders the draft, so unsaved edits show up live.
+                <Preview kind={kind} source={draft} onLink={onPreviewLink} />
               ) : (
-                <CodeView path={selected.path} source={content} />
+                <CodeEditor path={selected.path} value={draft} onChange={setDraft} />
               )}
             </div>
           </>
@@ -739,7 +704,9 @@ function TreeNode({
   toggle,
   onSelect,
   selectedPath,
-  changedDirs
+  changedDirs,
+  lazyChildren,
+  loadDir
 }: {
   node: FileNode
   depth: number
@@ -748,18 +715,28 @@ function TreeNode({
   onSelect: (node: FileNode) => void
   selectedPath: string | null
   changedDirs: Set<string>
+  lazyChildren: Record<string, FileNode[]>
+  loadDir: (path: string) => void
 }): JSX.Element {
   const pad = { paddingLeft: depth * 12 + 8 }
+  const open = node.type === 'dir' && !!expanded[node.path]
+  // Ignored dirs arrive without children — fetch their contents when expanded
+  // (and again after a manual refresh clears the lazy cache).
+  const needsLoad = open && !!node.ignored && !node.children && !lazyChildren[node.path]
+  useEffect(() => {
+    if (needsLoad) loadDir(node.path)
+  }, [needsLoad, node.path, loadDir])
+  const dim = node.ignored ? 'opacity-60' : ''
 
   if (node.type === 'dir') {
-    const open = !!expanded[node.path]
     const dirty = changedDirs.has(node.path)
+    const children = node.children ?? lazyChildren[node.path]
     return (
       <>
         <button
           onClick={() => toggle(node.path)}
           style={pad}
-          className={`flex w-full items-center gap-1.5 py-1 pr-2 text-left text-[12px] text-text-3 hover:bg-hover ${FOCUS}`}
+          className={`flex w-full items-center gap-1.5 py-1 pr-2 text-left text-[12px] text-text-3 hover:bg-hover ${dim} ${FOCUS}`}
         >
           <ChevronRight
             size={13}
@@ -774,7 +751,7 @@ function TreeNode({
           <span className="truncate">{node.name}</span>
           {dirty && !open && <span className="ml-auto mr-0.5 size-[5px] flex-none rounded-full bg-amber/70" />}
         </button>
-        {open && node.children?.map((child) => (
+        {open && children?.map((child) => (
           <TreeNode
             key={child.path}
             node={child}
@@ -784,6 +761,8 @@ function TreeNode({
             onSelect={onSelect}
             selectedPath={selectedPath}
             changedDirs={changedDirs}
+            lazyChildren={lazyChildren}
+            loadDir={loadDir}
           />
         ))}
       </>
@@ -798,7 +777,7 @@ function TreeNode({
       style={pad}
       className={`flex w-full items-center gap-2 py-1 pr-2 text-left text-[12px] hover:bg-hover ${
         isSelected ? 'bg-accent/10 text-text' : 'text-text-3'
-      } ${FOCUS}`}
+      } ${dim} ${FOCUS}`}
     >
       {badge ? (
         <span

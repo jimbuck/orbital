@@ -128,6 +128,8 @@ const api: OrbitalApi = {
   gitDiff: (worktreeId: string, path: string, staged: boolean) =>
     ipcRenderer.invoke(IPC.gitDiff, worktreeId, path, staged) as Promise<FileDiff>,
   fileTree: (worktreeId: string) => ipcRenderer.invoke(IPC.fileTree, worktreeId) as Promise<FileNode[]>,
+  listDir: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.listDir, worktreeId, path) as Promise<FileNode[]>,
   readFile: (worktreeId: string, path: string) =>
     ipcRenderer.invoke(IPC.readFile, worktreeId, path) as Promise<string>,
   readFileBase64: (worktreeId: string, path: string) =>
