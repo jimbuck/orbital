@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import type { ClaudeHooksPlan, ClaudeHooksStatus } from '@shared/types'
-import { orbitalShimPath } from './paths'
+import { hookShimPath } from './paths'
 
 /** Marker on every Orbital hook command; the basis for idempotent merge + clean uninstall. */
 const HOOK_MARKER = '--orbital-managed'
@@ -63,7 +63,7 @@ export function settingsPath(): string {
 
 /** The shell command Orbital registers for an event. Absolute shim path + marker. */
 function hookCommand(event: string): string {
-  return `"${orbitalShimPath()}" hook ${event} ${HOOK_MARKER}`
+  return `"${hookShimPath()}" hook ${event} ${HOOK_MARKER}`
 }
 
 /** The single hook group Orbital adds for an event (async so it never blocks Claude). */
