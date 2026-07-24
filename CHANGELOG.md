@@ -2,6 +2,18 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.18.0](https://github.com/jimbuck/orbital/compare/v1.17.0...v1.18.0) (2026-07-24)
+
+
+### Bug Fixes
+
+* point Claude hooks at the installed app, not a dev checkout ([0fb8c54](https://github.com/jimbuck/orbital/commit/0fb8c547cf32acb6a789fa35ac127f0167c8a068)), closes [#10](https://github.com/jimbuck/orbital/issues/10)
+
+
+### Features
+
+* confirm before closing a terminal with a running process ([604c11f](https://github.com/jimbuck/orbital/commit/604c11f20fb34c3acfeeb952633696c2abca4b42)), closes [#9](https://github.com/jimbuck/orbital/issues/9)
+
 # [1.17.0](https://github.com/jimbuck/orbital/compare/v1.16.0...v1.17.0) (2026-07-24)
 
 
