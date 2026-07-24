@@ -181,6 +181,11 @@ export class TerminalManager extends EventEmitter {
     else this.firstSize.set(tabId, { cols, rows })
   }
 
+  /** Whether the tab has a live PTY process (false for exited shells and static notices). */
+  isAlive(tabId: string): boolean {
+    return !!this.terminals.get(tabId)?.proc
+  }
+
   /** Current scrollback + sequence cut-point for replay; empty if unknown. */
   buffer(tabId: string): TerminalBuffer {
     const entry = this.terminals.get(tabId)

@@ -16,7 +16,7 @@ import { SUPPORTED_AGENTS } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
-import { ContextMenu, MenuItem, clampMenuPos, type MenuPos } from '../rail/menu'
+import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '../rail/menu'
 import { TAB_DND } from './PaneGroup'
 
 /** Compact display label for a dev-server URL: host:port (or the URL itself). */
@@ -98,6 +98,8 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   const [addOpen, setAddOpen] = useState(false)
   const [paneMenu, setPaneMenu] = useState(false)
   const [tabMenu, setTabMenu] = useState<{ pos: MenuPos; tab: Tab } | null>(null)
+  // Close was requested for tabs that still have a live process — confirm first.
+  const [closeConfirm, setCloseConfirm] = useState<{ pos: MenuPos; tabs: Tab[] } | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
@@ -139,9 +141,26 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
     if (title && title !== tabTitle(tab, defaultAgentProvider)) void window.orbital.renameTab(tab.id, title)
   }
 
-  const closeOthers = (tab: Tab): void => {
+  /**
+   * Close tabs, but confirm first when any is a terminal/agent whose process is
+   * still alive (an exited shell or a non-pty tab closes straight away).
+   */
+  const requestClose = async (pos: MenuPos, tabs: Tab[]): Promise<void> => {
+    const alive = await Promise.all(
+      tabs.map((t) =>
+        t.type === 'terminal' || t.type === 'agent' ? window.orbital.terminalAlive(t.id) : false
+      )
+    )
+    if (alive.some(Boolean)) setCloseConfirm({ pos, tabs })
+    else for (const t of tabs) void window.orbital.closeTab(t.id)
+  }
+
+  const closeOthers = (tab: Tab, pos: MenuPos): void => {
     setTabMenu(null)
-    for (const t of pane.tabs) if (t.id !== tab.id) void window.orbital.closeTab(t.id)
+    void requestClose(
+      pos,
+      pane.tabs.filter((t) => t.id !== tab.id)
+    )
   }
 
   const onStripDragOver = (e: React.DragEvent): void => {
@@ -239,7 +258,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                void window.orbital.closeTab(tab.id)
+                void requestClose(clampMenuPos(e, 220, 120), [tab])
               }}
               aria-label="Close tab"
               className={`-mr-1 flex size-4 items-center justify-center rounded text-faint hover:text-text-2 ${FOCUS}`}
@@ -393,7 +412,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             danger
             onClick={() => {
               setTabMenu(null)
-              void window.orbital.closeTab(tabMenu.tab.id)
+              void requestClose(tabMenu.pos, [tabMenu.tab])
             }}
           />
           {pane.tabs.length > 1 && (
@@ -401,9 +420,32 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
               icon={<CopyX size={13} strokeWidth={1.5} />}
               label="Close other tabs"
               danger
-              onClick={() => closeOthers(tabMenu.tab)}
+              onClick={() => closeOthers(tabMenu.tab, tabMenu.pos)}
             />
           )}
+        </ContextMenu>
+      )}
+
+      {/* Close confirm — the close target still has a running process */}
+      {closeConfirm && (
+        <ContextMenu pos={closeConfirm.pos} width={220} onClose={() => setCloseConfirm(null)}>
+          <MenuConfirm
+            message={
+              closeConfirm.tabs.length === 1
+                ? `Close “${tabTitle(closeConfirm.tabs[0], defaultAgentProvider)}”? ${
+                    closeConfirm.tabs[0].type === 'agent'
+                      ? 'Its agent session is still running.'
+                      : 'Its process is still running.'
+                  }`
+                : `Close ${closeConfirm.tabs.length} tabs? Some still have running processes.`
+            }
+            confirmLabel={closeConfirm.tabs.length === 1 ? 'Close tab' : 'Close tabs'}
+            onConfirm={() => {
+              for (const t of closeConfirm.tabs) void window.orbital.closeTab(t.id)
+              setCloseConfirm(null)
+            }}
+            onCancel={() => setCloseConfirm(null)}
+          />
         </ContextMenu>
       )}
     </div>

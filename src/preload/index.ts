@@ -102,6 +102,7 @@ const api: OrbitalApi = {
   terminalResize: (tabId: string, cols: number, rows: number) =>
     ipcRenderer.send(IPC.terminalResize, tabId, cols, rows),
   terminalBuffer: (tabId: string) => ipcRenderer.invoke(IPC.terminalBuffer, tabId) as Promise<TerminalBuffer>,
+  terminalAlive: (tabId: string) => ipcRenderer.invoke(IPC.terminalAlive, tabId) as Promise<boolean>,
   readClipboard: () => clipboard.readText(),
   writeClipboard: (text: string) => clipboard.writeText(text),
   pasteClipboardImage: () => ipcRenderer.invoke(IPC.pasteClipboardImage) as Promise<string | null>,

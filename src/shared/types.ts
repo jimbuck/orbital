@@ -492,6 +492,7 @@ export const IPC = {
   terminalInput: 'orbital:terminalInput',
   terminalResize: 'orbital:terminalResize',
   terminalBuffer: 'orbital:terminalBuffer',
+  terminalAlive: 'orbital:terminalAlive',
   pasteClipboardImage: 'orbital:pasteClipboardImage',
   // git
   gitStatus: 'orbital:gitStatus',
@@ -614,6 +615,8 @@ export interface OrbitalApi {
   terminalResize(tabId: string, cols: number, rows: number): void
   /** Current scrollback buffer + sequence cut-point, for replay when a tab remounts. */
   terminalBuffer(tabId: string): Promise<TerminalBuffer>
+  /** Whether the tab still has a live PTY process — drives the close-tab confirm. */
+  terminalAlive(tabId: string): Promise<boolean>
   /** Read the system clipboard (Electron clipboard module) — used for terminal paste. */
   readClipboard(): string
   /** Write text to the system clipboard — used for terminal/Edit-menu copy. */

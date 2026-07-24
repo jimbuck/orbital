@@ -751,6 +751,7 @@ export function registerIpc(): void {
     runtime.terminals.resize(tabId, cols, rows)
   )
   h(IPC.terminalBuffer, (_e, tabId: string) => runtime.terminals.buffer(tabId))
+  h(IPC.terminalAlive, (_e, tabId: string) => runtime.terminals.isAlive(tabId))
   h(IPC.pasteClipboardImage, () => savePastedImage())
 
   // ---- git ----
