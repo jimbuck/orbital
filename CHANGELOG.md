@@ -2,6 +2,19 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.17.0](https://github.com/jimbuck/orbital/compare/v1.16.0...v1.17.0) (2026-07-24)
+
+
+### Bug Fixes
+
+* typing clears needs-attention on terminal tabs, not just agent tabs ([0854811](https://github.com/jimbuck/orbital/commit/0854811885b9c3266dfb3830c2f8b75618c6f21e))
+
+
+### Features
+
+* flash the taskbar button when an agent flips to needs-attention ([2f5d6e6](https://github.com/jimbuck/orbital/commit/2f5d6e6649e5db636469e1ae5637ce38aaa3aaa0))
+* gitignored files in the editor tree + always-editable files ([7715700](https://github.com/jimbuck/orbital/commit/7715700ae1c4b7aafb2af093cbe7d7b7b63dae73)), closes [#11](https://github.com/jimbuck/orbital/issues/11)
+
 # [1.16.0](https://github.com/jimbuck/orbital/compare/v1.15.0...v1.16.0) (2026-07-22)
 
 
