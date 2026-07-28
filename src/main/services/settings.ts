@@ -1,6 +1,7 @@
 import {
   DEFAULT_ENV_SYNC_PATTERNS,
-  SUPPORTED_AGENTS,
+  defaultAgentConfigs,
+  normalizeAgentConfigs,
   type GlobalSettings,
   type Settings,
   type WorkspaceSettings
@@ -12,7 +13,7 @@ import { requireWorkspaceId, workspaces } from '../db/repositories'
  * The settings facade. The renderer (and the rest of main) reads and writes one
  * flat {@link Settings} object; behind it the fields live in two places in the
  * global DB — workspace-scoped fields (env-sync patterns, periodic fetch,
- * enabled agents) on the active workspace's row, machine-global fields (theme,
+ * configured agents) on the active workspace's row, machine-global fields (theme,
  * alerts, shell, logging, Claude hooks) in the settings table, shared by every
  * workspace and instance.
  */
@@ -24,7 +25,7 @@ const DEFAULT_SETTINGS: Settings = {
   envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
   periodicFetch: true,
   debugLogging: false,
-  enabledAgents: SUPPORTED_AGENTS.map((a) => a.id),
+  agents: defaultAgentConfigs(),
   // Existing installs merge over this default, so they stay dark and keep the
   // current look; only an explicit change opts a user into light/system.
   theme: 'dark'
@@ -44,7 +45,7 @@ function splitWorkspace(s: Settings): WorkspaceSettings {
   return {
     envSyncPatterns: s.envSyncPatterns,
     periodicFetch: s.periodicFetch,
-    enabledAgents: s.enabledAgents
+    agents: s.agents
   }
 }
 
@@ -80,7 +81,16 @@ function writeGlobalSettings(s: GlobalSettings): void {
 
 /** The assembled settings: defaults ← global slice ← active workspace's slice. */
 export function getSettings(): Settings {
-  const merged = { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...workspaces.getSettings(requireWorkspaceId()) }
+  // A workspace row written before configured agents existed carries a legacy
+  // `enabledAgents` id array instead of `agents` — convert it (and scrub any
+  // malformed hand-edit) so the rest of the app only ever sees AgentConfig[].
+  const ws = workspaces.getSettings(requireWorkspaceId()) as Partial<WorkspaceSettings> & {
+    enabledAgents?: unknown
+  }
+  const agents = normalizeAgentConfigs(ws.agents, ws.enabledAgents)
+  delete ws.enabledAgents
+  const merged = { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...ws }
+  merged.agents = agents ?? DEFAULT_SETTINGS.agents
   // The top-level merge is shallow, so a stored alerts blob written before a
   // toggle existed would shadow that toggle's default with undefined — deep-merge
   // the alerts object so new alert settings arrive enabled on old installs.

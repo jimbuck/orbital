@@ -5,6 +5,7 @@ import { ipcMain, dialog, shell, app, BrowserWindow, webContents, type IpcMainIn
 import {
   IPC,
   ENV,
+  SUPPORTED_AGENTS,
   normalizeStatus,
   normalizeTaskStatus,
   isPtyTabType,
@@ -86,6 +87,8 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
   const project = repo.projects.get(worktree.projectId)
   if (!project) return
   const provider = getProvider(tab.config.agentProvider || project.defaultAgentProvider)
+  // The workspace's per-agent launch tweaks (profile dir, exec path, args, env).
+  const agentConfig = getSettings().agents.find((a) => a.provider === provider.id)
   try {
     const briefingPath = writeBriefing({
       project,
@@ -99,18 +102,28 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
       project,
       worktree,
       briefingPath,
-      execPath: project.agentExecPath
+      // A project-level path is the more specific override; the workspace
+      // agent's path fills in when the project doesn't set one.
+      execPath: project.agentExecPath || agentConfig?.execPath
     })
+    if (agentConfig?.args?.length) command.args.push(...agentConfig.args)
     // The tab may have been closed during the async executable lookup; don't spawn
     // a PTY nothing references (it could never be killed before app exit).
     if (!repo.tabs.get(tab.id)) {
       deleteBriefing(worktree.id, tab.id)
       return
     }
+    const envVar = SUPPORTED_AGENTS.find((a) => a.id === provider.id)?.configDirEnvVar
     runtime.terminals.prepare({
       tabId: tab.id,
       cwd: worktree.path,
-      env: terminalEnv(worktree, tab.id),
+      env: {
+        // Entry env first: the dedicated profile-dir field beats a hand-typed
+        // duplicate, and Orbital's control vars (ids, socket, PATH) stay authoritative.
+        ...agentConfig?.env,
+        ...(envVar && agentConfig?.configDir ? { [envVar]: agentConfig.configDir } : {}),
+        ...terminalEnv(worktree, tab.id)
+      },
       command
     })
   } catch (err) {

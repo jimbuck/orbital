@@ -2,7 +2,12 @@ import { dirname, basename } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { parse, stringify } from 'yaml'
-import { WORKSPACE_CONFIG_VERSION, type WorkspaceConfig, type WorkspaceProjectConfig } from '@shared/types'
+import {
+  WORKSPACE_CONFIG_VERSION,
+  normalizeAgentConfigs,
+  type WorkspaceConfig,
+  type WorkspaceProjectConfig
+} from '@shared/types'
 
 /**
  * The Export/Import Workspace YAML format. Workspaces live in the global DB —
@@ -61,9 +66,10 @@ export function normalize(raw: unknown): WorkspaceConfig {
       settings.envSyncPatterns = s.envSyncPatterns
     }
     if (typeof s.periodicFetch === 'boolean') settings.periodicFetch = s.periodicFetch
-    if (Array.isArray(s.enabledAgents) && s.enabledAgents.every((x) => typeof x === 'string')) {
-      settings.enabledAgents = s.enabledAgents
-    }
+    // Modern `agents` entries, or a legacy `enabledAgents` id array from an
+    // export written before agents were configurable.
+    const agents = normalizeAgentConfigs(s.agents, s.enabledAgents)
+    if (agents) settings.agents = agents
     if (Object.keys(settings).length === 0) settings = undefined
   }
 
