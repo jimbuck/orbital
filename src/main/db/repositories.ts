@@ -85,6 +85,11 @@ export function requireWorkspaceId(): string {
   return activeWorkspaceId
 }
 
+/** Non-throwing form, for callers that have a sane answer before boot resolution. */
+export function hasActiveWorkspace(): boolean {
+  return activeWorkspaceId !== null
+}
+
 function mapWorkspace(r: any): WorkspaceInfo {
   return { id: r.id, name: r.name, lastOpenedAt: r.last_opened_at, projectCount: r.project_count ?? 0 }
 }
@@ -322,6 +327,10 @@ export const worktrees = {
   },
   rename(wid: string, name: string): void {
     getDb().prepare('UPDATE worktrees SET name = ? WHERE id = ?').run(name, wid)
+  },
+  /** Link (or unlink) the task a Worktree was started from. */
+  setTaskId(wid: string, taskId: string | null): void {
+    getDb().prepare('UPDATE worktrees SET task_id = ? WHERE id = ?').run(taskId, wid)
   },
   updateStatus(wid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE worktrees SET status = ? WHERE id = ?').run(status, wid)

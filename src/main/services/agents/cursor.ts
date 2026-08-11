@@ -13,6 +13,10 @@ export const cursorProvider: AgentProvider = {
   displayName: 'Cursor',
   // Used later to auto-suggest a provider per project; defined now, unused for now.
   detectFiles: ['.cursor', '.cursorrules', 'AGENTS.md'],
+  // cursor-agent has no launch-time instructions flag and no profile-level rules
+  // file; the only channel is `.cursor/rules` INSIDE the repo, which Orbital will
+  // not write (zero git footprint). Cursor sessions learn the CLI from `orbital help`.
+  acceptsBriefingFile: false,
 
   async resolveCommand(ctx: AgentContext): Promise<ResolvedCommand> {
     const { file, prefixArgs } = await resolveExecutable(ctx.execPath, 'cursor-agent')

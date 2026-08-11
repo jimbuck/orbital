@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import { join, dirname, basename } from 'node:path'
 import { git } from './git'
 import { syncEnvFiles } from './env-sync'
+import { beginWorktreeCreate, endWorktreeCreate, normPath } from './worktree-scan'
 import { worktrees as worktreeRepo } from '../db/repositories'
 import { getSettings } from './settings'
 import type { Project, Worktree } from '@shared/types'
@@ -57,6 +58,32 @@ export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Pr
   const { project } = input
   const repoPath = project.repoPath
 
+  // Every path this call claims against worktree auto-discovery, released once
+  // the row exists (or the attempt fails). `git worktree add` announces itself in
+  // `.git/worktrees` as it starts, so without this the discovery watcher adopts
+  // the checkout mid-build and we end up with two rows for it.
+  const claimed: string[] = []
+  const addWorktree = async (opts: Parameters<typeof git.worktreeAdd>[1]): Promise<void> => {
+    beginWorktreeCreate(opts.worktreePath)
+    claimed.push(opts.worktreePath)
+    await git.worktreeAdd(repoPath, opts)
+  }
+
+  try {
+    return await buildWorktree(input, addWorktree)
+  } finally {
+    for (const path of claimed) endWorktreeCreate(path)
+  }
+}
+
+/** The create itself; {@link createLinkedWorktree} owns the adoption guard around it. */
+async function buildWorktree(
+  input: CreateLinkedWorktreeInput,
+  addWorktree: (opts: Parameters<typeof git.worktreeAdd>[1]) => Promise<void>
+): Promise<Worktree> {
+  const { project } = input
+  const repoPath = project.repoPath
+
   let branch: string
   let worktreePath: string
 
@@ -70,7 +97,7 @@ export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Pr
     worktreePath = uniqueWorktreePath(project, slugify(branch))
     if (isLocal || (await git.branchExists(repoPath, branch))) {
       try {
-        await git.worktreeAdd(repoPath, { branch, worktreePath, newBranch: false })
+        await addWorktree({ branch, worktreePath, newBranch: false })
       } catch (err) {
         // git refuses to check a branch out into two worktrees — say so plainly
         // instead of surfacing the raw fatal.
@@ -81,7 +108,7 @@ export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Pr
         throw err
       }
     } else {
-      await git.worktreeAdd(repoPath, { branch, worktreePath, baseRef: picked, newBranch: true, track: true })
+      await addWorktree({ branch, worktreePath, baseRef: picked, newBranch: true, track: true })
     }
   } else {
     // Slugify so a multi-word Worktree name (e.g. "Login flow") becomes a valid git
@@ -96,7 +123,7 @@ export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Pr
       // The branch already exists: attach a worktree to it (only possible when it
       // is not already checked out in another worktree).
       try {
-        await git.worktreeAdd(repoPath, { branch: baseSlug, worktreePath, newBranch: false })
+        await addWorktree({ branch: baseSlug, worktreePath, newBranch: false })
         attached = true
       } catch {
         // Already checked out elsewhere — fall through and fork a fresh branch.
@@ -113,18 +140,33 @@ export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Pr
         n++
       }
       worktreePath = uniqueWorktreePath(project, branch)
-      await git.worktreeAdd(repoPath, { branch, worktreePath, baseRef: input.baseRef, newBranch: true })
+      await addWorktree({ branch, worktreePath, baseRef: input.baseRef, newBranch: true })
     }
   }
 
-  const worktree = worktreeRepo.create({
-    projectId: project.id,
-    kind: 'linked',
-    name: input.name?.trim() || branch,
-    path: worktreePath,
-    branch,
-    taskId: input.taskId ?? null
-  })
+  const name = input.name?.trim() || branch
+  // Belt and braces on the adoption race: if a row for this checkout already
+  // exists — auto-discovery beat the guard, the guard was lost to a restart, or
+  // the directory was reused — take that row over instead of adding a second one
+  // for the same path (the duplicate the rail used to show).
+  const key = normPath(worktreePath)
+  const existing = worktreeRepo.list().find((w) => w.projectId === project.id && normPath(w.path) === key)
+  let worktree: Worktree
+  if (existing) {
+    // The adopted row is named after the directory; the caller's name wins.
+    if (existing.name !== name) worktreeRepo.rename(existing.id, name)
+    if (input.taskId) worktreeRepo.setTaskId(existing.id, input.taskId)
+    worktree = worktreeRepo.get(existing.id) ?? existing
+  } else {
+    worktree = worktreeRepo.create({
+      projectId: project.id,
+      kind: 'linked',
+      name,
+      path: worktreePath,
+      branch,
+      taskId: input.taskId ?? null
+    })
+  }
 
   // Small, fast files (env files + agent config dirs) sync BEFORE we return, so
   // they're present the moment the Flight opens. Best-effort: a worktree should

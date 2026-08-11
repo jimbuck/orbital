@@ -26,13 +26,15 @@ const USAGE = `orbital — control the running Orbital cockpit from inside a wor
 
 Usage:
   orbital status <idle|working|needs-attention|error|done>
+  orbital whoami
   orbital worktrees
-  orbital worktree new [--worktree <branch>] [name]
+  orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [name]
   orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
-  orbital task list [--all]
+  orbital task list [--all] [--status <status>] [--tag <tag>]
   orbital task show <number|id>
   orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
+  orbital task start <number|id> [--worktree <branch>] [--base <ref>] [name]
   orbital task done <number|id>
   orbital task delete <number|id>
   orbital server add <url|port>
@@ -40,12 +42,18 @@ Usage:
   orbital server list
   orbital help
 
+Options:
+  --json    print the raw JSON response instead of a table — use this when parsing
+
 Examples:
   orbital status needs-attention
+  orbital whoami --json
   orbital worktree new --worktree feature/login "Login flow"
+  orbital worktree new --existing-branch origin/pr-42
   orbital tab new browser http://localhost:5173
-  orbital task add "Write tests" --description "cover the parser"
-  orbital task list
+  orbital task add "Write tests" --description "cover the parser" --tags test
+  orbital task list --status todo
+  orbital task start 12
   orbital task done 12
   orbital server add 5173
   orbital server remove 5173
@@ -119,6 +127,31 @@ function request(cmd: ControlCommand, args: Record<string, unknown>): ControlReq
 
 const TAB_TYPES = ['terminal', 'browser', 'editor', 'agent'] as const
 
+/**
+ * `--json` swaps every printer for the raw response payload. It is stripped from
+ * argv before parsing: parseArgs would otherwise treat the token after a bare
+ * `--json` as its value and swallow a positional (`--json "Login flow"`).
+ */
+let jsonMode = false
+
+/**
+ * Shared by `worktree new` and `task start` — both land on `worktree-new`, which
+ * creates the checkout and (given a task) links and starts that task.
+ */
+function worktreeNewRequest(tokens: string[], taskId?: string): ControlRequest {
+  const { positionals, flags } = parseArgs(tokens)
+  const args: Record<string, unknown> = {}
+  if (flags.worktree) args.worktree = flags.worktree
+  if (flags['existing-branch']) args.existingBranch = flags['existing-branch']
+  if (flags.base) args.base = flags.base
+  // `task start <id>` names its task positionally; a stray `--task` must not
+  // quietly redirect the worktree to a different one.
+  const task = taskId ?? flags.task
+  if (task) args.task = task
+  if (positionals[0]) args.name = positionals[0]
+  return request('worktree-new', args)
+}
+
 /** Turn argv into a ControlRequest, or terminate the process on a usage error. */
 function buildRequest(argv: string[]): ControlRequest {
   const [cmd, ...rest] = argv
@@ -132,6 +165,9 @@ function buildRequest(argv: string[]): ControlRequest {
       return request('status', { status: token, firedAt: Date.now() })
     }
 
+    case 'whoami':
+      return request('whoami', {})
+
     // `flights` is a hidden backward-compat alias for `worktrees`.
     case 'worktrees':
     case 'flights':
@@ -141,11 +177,7 @@ function buildRequest(argv: string[]): ControlRequest {
     case 'worktree':
     case 'flight': {
       if (rest[0] !== 'new') usageError()
-      const { positionals, flags } = parseArgs(rest.slice(1))
-      const args: Record<string, unknown> = {}
-      if (flags.worktree) args.worktree = flags.worktree
-      if (positionals[0]) args.name = positionals[0]
-      return request('worktree-new', args)
+      return worktreeNewRequest(rest.slice(1))
     }
 
     case 'tab': {
@@ -171,7 +203,17 @@ function buildRequest(argv: string[]): ControlRequest {
         return request('task-add', args)
       }
       if (sub === 'list') {
-        return request('task-list', { all: 'all' in flags })
+        const args: Record<string, unknown> = { all: 'all' in flags }
+        if (flags.status) args.status = flags.status
+        if (flags.tag) args.tag = flags.tag
+        return request('task-list', args)
+      }
+      if (sub === 'start') {
+        const id = positionals[0]
+        if (!id) usageError()
+        // Everything after the task id is worktree options (`--worktree`, `--base`,
+        // an optional name) — the task itself supplies the default branch/name.
+        return worktreeNewRequest(rest.slice(2), id)
       }
       if (sub === 'update') {
         const id = positionals[0]
@@ -294,10 +336,31 @@ function printTasks(data: unknown): void {
   )
 }
 
+/** Key/value block: the shape `task show` and `whoami` both print. */
+function printFields(rows: [string, string][]): void {
+  for (const [key, value] of rows) process.stdout.write(`${key.padEnd(12)} ${value}\n`)
+}
+
+/** Where am I, and what does the cockpit think I'm doing? */
+function printWhoami(data: unknown): void {
+  const o = (data ?? {}) as Record<string, unknown>
+  const task = (o.task ?? null) as { seq?: number; title?: string; status?: string } | null
+  const servers = Array.isArray(o.servers) ? o.servers : []
+  printFields([
+    ['project', String(o.project ?? '')],
+    ['worktree', `${String(o.worktree ?? '')}${o.kind ? ` (${String(o.kind)})` : ''}`],
+    ['branch', String(o.branch ?? '')],
+    ['path', String(o.path ?? '')],
+    ['status', String(o.status ?? '')],
+    ['task', task ? `#${task.seq} ${task.title} (${task.status})` : '(none)'],
+    ['servers', servers.length ? servers.map(String).join(', ') : '(none)']
+  ])
+}
+
 /** Full detail block for `orbital task show`. */
 function printTaskDetail(data: unknown): void {
   const o = (data ?? {}) as Record<string, unknown>
-  const rows: [string, string][] = [
+  printFields([
     ['number', o.seq != null ? `#${o.seq}` : '(none)'],
     ['id', String(o.id ?? '')],
     ['status', String(o.status ?? '')],
@@ -305,8 +368,7 @@ function printTaskDetail(data: unknown): void {
     ['description', String(o.description ?? '') || '(none)'],
     ['tags', Array.isArray(o.tags) && o.tags.length > 0 ? o.tags.join(', ') : '(none)'],
     ['worktree', o.worktreeId ? String(o.worktreeId) : '(not linked)']
-  ]
-  for (const [key, value] of rows) process.stdout.write(`${key.padEnd(12)} ${value}\n`)
+  ])
 }
 
 function printServers(data: unknown): void {
@@ -327,7 +389,11 @@ function confirmation(req: ControlRequest, data: unknown): string {
     case 'worktree-new': {
       const name = d.name ?? req.args.name
       const branch = d.branch ?? req.args.worktree
-      return `worktree created${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}`
+      const task = (d.task ?? null) as { seq?: number } | null
+      return (
+        `worktree created${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}` +
+        (task ? ` — task #${task.seq} started here` : '')
+      )
     }
     case 'tab-new':
       return `opened ${String(req.args.type ?? '')} tab`
@@ -412,10 +478,22 @@ function handleResponse(req: ControlRequest, lineText: string): void {
   }
 
   if (!res.ok) {
+    // Keep --json honest on the failure path too: one parseable object on stderr,
+    // still exit 1 so plain shell checks keep working.
+    if (jsonMode) {
+      process.stderr.write(JSON.stringify({ ok: false, error: res.error || 'command failed' }) + '\n')
+      process.exit(1)
+    }
     fail(res.error || 'command failed')
   }
 
-  if (req.cmd === 'worktrees') {
+  if (jsonMode) {
+    // The payload verbatim, so callers parse the app's own shapes rather than
+    // a table this CLI happened to format.
+    process.stdout.write(JSON.stringify(res.data ?? null, null, 2) + '\n')
+  } else if (req.cmd === 'whoami') {
+    printWhoami(res.data)
+  } else if (req.cmd === 'worktrees') {
     printWorktrees(res.data)
   } else if (req.cmd === 'task-list') {
     printTasks(res.data)
@@ -493,7 +571,9 @@ function deliverHook(event: string, input: string, firedAt: number): void {
 
 /* ----------------------------------------------------------------- main ---- */
 
-const argv = process.argv.slice(2)
+const rawArgv = process.argv.slice(2)
+jsonMode = rawArgv.includes('--json')
+const argv = jsonMode ? rawArgv.filter((a) => a !== '--json') : rawArgv
 if (argv[0] === 'hook') {
   // Hooks are observational only and must never disturb Claude — handled apart
   // from the normal request/response path (no stdout, always exit 0).

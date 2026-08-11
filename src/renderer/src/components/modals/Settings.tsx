@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
-import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan, ThemeMode, AgentConfig } from '@shared/types'
+import type {
+  Settings as SettingsModel,
+  ClaudeHooksStatus,
+  ClaudeHooksPlan,
+  ClaudeSkillStatus,
+  ClaudeSkillPlan,
+  CodexInstructionsStatus,
+  CodexInstructionsPlan,
+  ThemeMode,
+  AgentConfig
+} from '@shared/types'
 import { SUPPORTED_AGENTS, defaultAgentConfigs, normalizeAgentConfigs, parseArgsString, formatArgsString } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
 
@@ -105,9 +115,82 @@ export default function Settings(): React.JSX.Element {
   const [hookBusy, setHookBusy] = useState(false)
   const [hookError, setHookError] = useState<string | null>(null)
 
+  // The opt-in `orbital` Agent Skill, installed into this workspace's Claude profile.
+  const [skill, setSkill] = useState<ClaudeSkillStatus | null>(null)
+  const [skillConfirm, setSkillConfirm] = useState<
+    { mode: 'install'; plan: ClaudeSkillPlan } | { mode: 'remove' } | null
+  >(null)
+  const [skillBusy, setSkillBusy] = useState(false)
+  const [skillError, setSkillError] = useState<string | null>(null)
+
+  // Codex's equivalent of the skill: a managed block in its profile AGENTS.md.
+  const [codex, setCodex] = useState<CodexInstructionsStatus | null>(null)
+  const [codexConfirm, setCodexConfirm] = useState<
+    { mode: 'install'; plan: CodexInstructionsPlan } | { mode: 'remove' } | null
+  >(null)
+  const [codexBusy, setCodexBusy] = useState(false)
+  const [codexError, setCodexError] = useState<string | null>(null)
+
   useEffect(() => {
     void window.orbital.claudeHooksStatus().then(setHooks).catch(() => undefined)
+    void window.orbital.claudeSkillStatus().then(setSkill).catch(() => undefined)
+    void window.orbital.codexInstructionsStatus().then(setCodex).catch(() => undefined)
   }, [])
+
+  const startCodexInstall = async (): Promise<void> => {
+    setCodexError(null)
+    try {
+      setCodexConfirm({ mode: 'install', plan: await window.orbital.codexInstructionsPlan() })
+    } catch (e) {
+      setCodexError(e instanceof Error ? e.message : 'Could not build the instructions.')
+    }
+  }
+  const confirmCodex = async (): Promise<void> => {
+    if (!codexConfirm) return
+    setCodexBusy(true)
+    setCodexError(null)
+    try {
+      const result =
+        codexConfirm.mode === 'install'
+          ? await window.orbital.installCodexInstructions()
+          : await window.orbital.removeCodexInstructions()
+      setCodex(result)
+      setCodexConfirm(null)
+    } catch (e) {
+      setCodexError(e instanceof Error ? e.message : 'Could not update the instructions.')
+    } finally {
+      setCodexBusy(false)
+    }
+  }
+
+  const startSkillInstall = async (): Promise<void> => {
+    setSkillError(null)
+    try {
+      const plan = await window.orbital.claudeSkillPlan()
+      setSkillConfirm({ mode: 'install', plan })
+    } catch (e) {
+      setSkillError(e instanceof Error ? e.message : 'Could not build the skill.')
+    }
+  }
+  const confirmSkill = async (): Promise<void> => {
+    if (!skillConfirm) return
+    setSkillBusy(true)
+    setSkillError(null)
+    try {
+      // install() refuses to overwrite a SKILL.md Orbital does not own, so this
+      // can reject — surface that rather than silently failing.
+      const result =
+        skillConfirm.mode === 'install'
+          ? await window.orbital.installClaudeSkill()
+          : await window.orbital.removeClaudeSkill()
+      setSkill(result)
+      setSkillConfirm(null)
+    } catch (e) {
+      setSkillError(e instanceof Error ? e.message : 'Could not update the skill.')
+    } finally {
+      setSkillBusy(false)
+    }
+  }
 
   const startInstall = async (): Promise<void> => {
     setHookError(null)
@@ -214,11 +297,13 @@ export default function Settings(): React.JSX.Element {
             args: parseArgsString(argsDrafts[a.provider] ?? formatArgsString(a.args ?? []))
           }))
         ) ?? []
-      // Preserve claudeHooksInstalled (managed by the hooks buttons, not this form).
+      // Preserve claudeHooksInstalled / claudeSkillInstalled (managed by their own
+      // buttons, not this form).
       await window.orbital.setSettings({
         defaultShell,
         alerts,
         claudeHooksInstalled: settings?.claudeHooksInstalled ?? false,
+        claudeSkillInstalled: settings?.claudeSkillInstalled ?? false,
         envSyncPatterns: patterns,
         periodicFetch,
         debugLogging,
@@ -535,7 +620,8 @@ export default function Settings(): React.JSX.Element {
               <span className="break-all font-mono text-text-2">
                 {hooks?.settingsPath ?? '~/.claude/settings.json'}
               </span>
-              , and leaves any hooks already there untouched.
+              , the profile this workspace launches Claude with, and leaves any hooks already
+              there untouched.
             </p>
           </div>
           <span
@@ -592,6 +678,150 @@ export default function Settings(): React.JSX.Element {
         )}
         {hookError && <div className="mt-2.5 text-[11px] text-red-2">{hookError}</div>}
       </div>
+
+      {/* The `orbital` Agent Skill (per-workspace Claude profile, opt-in) */}
+      <div className="mt-3 rounded-card border border-line-2 bg-bg/40 p-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-semibold text-text-2">The orbital skill for Claude</div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
+              Teach Claude the <span className="font-mono text-text-2">orbital</span> CLI — reporting
+              status, filing tasks, opening tabs — in sessions Orbital did not boot as an agent tab
+              (a <span className="font-mono text-text-2">claude</span> you start yourself). Agent tabs
+              are already briefed. Writes one file:{' '}
+              <span className="break-all font-mono text-text-2">
+                {skill?.skillPath ?? '~/.claude/skills/orbital/SKILL.md'}
+              </span>
+            </p>
+          </div>
+          <span
+            className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
+              skill?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
+            }`}
+          >
+            {skill?.installed ? 'Installed' : 'Not installed'}
+          </span>
+        </div>
+
+        {skillConfirm ? (
+          <div className="mt-3">
+            {skillConfirm.mode === 'install' ? (
+              <>
+                <div className="text-[11.5px] text-text-3">Review the skill before writing it:</div>
+                {/* Same fixed dark code block as the hooks preview, for the same reason. */}
+                <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#aab2c0]">
+                  {skillConfirm.plan.markdown}
+                </pre>
+              </>
+            ) : (
+              <div className="flex items-center gap-2 text-[11.5px] text-text-3">
+                <AlertTriangle size={13} strokeWidth={1.5} className="flex-none text-amber-2" />
+                Delete the skill Orbital installed? Nothing else in the profile is touched.
+              </div>
+            )}
+            <div className="mt-2.5 flex items-center justify-end gap-2">
+              <button type="button" className={ghostBtn} onClick={() => setSkillConfirm(null)} disabled={skillBusy}>
+                Cancel
+              </button>
+              <button type="button" className={primaryBtn} onClick={confirmSkill} disabled={skillBusy}>
+                {skillConfirm.mode === 'install' ? 'Confirm & write' : 'Remove skill'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3">
+            {skill?.installed ? (
+              <button type="button" className={ghostBtn} onClick={() => setSkillConfirm({ mode: 'remove' })}>
+                Remove the orbital skill
+              </button>
+            ) : (
+              <button type="button" className={ghostBtn} onClick={startSkillInstall} disabled={skill?.foreign}>
+                Install the orbital skill
+              </button>
+            )}
+            {skill?.foreign && (
+              <div className="mt-2 text-[11px] text-amber-2">
+                A skill named <span className="font-mono">orbital</span> already exists there and was not
+                written by Orbital — move or delete it first.
+              </div>
+            )}
+          </div>
+        )}
+        {skillError && <div className="mt-2.5 text-[11px] text-red-2">{skillError}</div>}
+      </div>
+
+      {/* Codex instructions — only relevant when this workspace runs Codex at all.
+          Gated on the SAVED agents, not the unsaved draft above: install/remove
+          write to disk immediately, so offering them for a chip the user might
+          still cancel would leave a block behind for an agent that was never
+          configured. An install that already exists stays reachable either way,
+          so dropping the chip can never strand it. */}
+      {((settings?.agents ?? []).some((a) => a.provider === 'codex') || codex?.installed) && (
+        <div className="mt-3 rounded-card border border-line-2 bg-bg/40 p-3.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[12.5px] font-semibold text-text-2">Orbital instructions for Codex</div>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
+                Codex takes no per-launch briefing, so it learns the{' '}
+                <span className="font-mono text-text-2">orbital</span> CLI from its own always-loaded
+                instructions. Orbital merges a short marked block into{' '}
+                <span className="break-all font-mono text-text-2">
+                  {codex?.path ?? '~/.codex/AGENTS.md'}
+                </span>
+                , leaving whatever else is in that file alone.
+              </p>
+            </div>
+            <span
+              className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
+                codex?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
+              }`}
+            >
+              {codex?.installed ? 'Installed' : 'Not installed'}
+            </span>
+          </div>
+
+          {codexConfirm ? (
+            <div className="mt-3">
+              {codexConfirm.mode === 'install' ? (
+                <>
+                  <div className="text-[11.5px] text-text-3">
+                    Every Codex session using this profile loads this. Review it before writing:
+                  </div>
+                  <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#aab2c0]">
+                    {codexConfirm.plan.markdown}
+                  </pre>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 text-[11.5px] text-text-3">
+                  <AlertTriangle size={13} strokeWidth={1.5} className="flex-none text-amber-2" />
+                  Remove Orbital&apos;s block from AGENTS.md? The rest of the file stays intact.
+                </div>
+              )}
+              <div className="mt-2.5 flex items-center justify-end gap-2">
+                <button type="button" className={ghostBtn} onClick={() => setCodexConfirm(null)} disabled={codexBusy}>
+                  Cancel
+                </button>
+                <button type="button" className={primaryBtn} onClick={confirmCodex} disabled={codexBusy}>
+                  {codexConfirm.mode === 'install' ? 'Confirm & write' : 'Remove block'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3">
+              {codex?.installed ? (
+                <button type="button" className={ghostBtn} onClick={() => setCodexConfirm({ mode: 'remove' })}>
+                  Remove the Codex instructions
+                </button>
+              ) : (
+                <button type="button" className={ghostBtn} onClick={startCodexInstall}>
+                  Install the Codex instructions
+                </button>
+              )}
+            </div>
+          )}
+          {codexError && <div className="mt-2.5 text-[11px] text-red-2">{codexError}</div>}
+        </div>
+      )}
 
       <div className="my-[18px] h-px bg-soft" />
 

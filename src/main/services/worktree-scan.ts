@@ -23,6 +23,31 @@ export function normPath(p: string): string {
   return process.platform === 'win32' ? abs.toLowerCase() : abs
 }
 
+/**
+ * Checkouts Orbital is in the middle of creating.
+ *
+ * `git worktree add` writes its `.git/worktrees` admin entry as it starts, long
+ * before it returns — so the watcher fires, and a reconcile would ADOPT the
+ * half-built checkout (naming the row after the directory) moments before
+ * createLinkedWorktree inserts the real row, leaving two rows for one checkout.
+ * Registered before the git command and released once the row exists; the caller
+ * feeds these to {@link planWorktreeSync} as skipPaths.
+ */
+const creating = new Set<string>()
+
+export function beginWorktreeCreate(path: string): void {
+  creating.add(normPath(path))
+}
+
+export function endWorktreeCreate(path: string): void {
+  creating.delete(normPath(path))
+}
+
+/** Snapshot of in-flight creations — read inside the caller's synchronous plan+apply. */
+export function pathsBeingCreated(): string[] {
+  return [...creating]
+}
+
 export interface WorktreeSyncPlan {
   /**
    * Create the project's `root` Worktree row on this branch. Set when the rows
@@ -43,8 +68,9 @@ export interface WorktreeSyncPlan {
  *
  * - The main checkout maps to the project's `root` row (never adopted/removed).
  * - Bare/prunable entries and directories that don't exist are not adoptable.
- * - `skipPaths` (other projects' repo roots) are never adopted here — a checkout
- *   that IS another project belongs to that project's rail entry.
+ * - `skipPaths` are never adopted here: other projects' repo roots (a checkout
+ *   that IS another project belongs to that project's rail entry) and checkouts
+ *   Orbital is mid-create on ({@link pathsBeingCreated}).
  * - A linked row survives only while git still lists its path AND the directory
  *   exists; otherwise it is removed (its tabs/layout go with it — UI state is
  *   keyed to a live checkout).

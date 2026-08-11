@@ -12,6 +12,7 @@ export const claudeProvider: AgentProvider = {
   displayName: 'Claude',
   // Used later to auto-suggest a provider per project; defined now, unused for now.
   detectFiles: ['CLAUDE.md', 'AGENTS.md'],
+  acceptsBriefingFile: true,
 
   async resolveCommand(ctx: AgentContext): Promise<ResolvedCommand> {
     const { file, prefixArgs } = await resolveExecutable(ctx.execPath, 'claude')

@@ -1,21 +1,28 @@
 /**
  * Opt-in Claude Code status hooks.
  *
- * Installs hooks into the USER-GLOBAL ~/.claude/settings.json (never a repo, never
- * a worktree) so the cockpit learns a worktree's status from Claude's own lifecycle
- * events at zero context cost. Because that file fires for EVERY Claude session on
- * the machine, each hook routes through `orbital hook <event>`, whose CLI guard
- * exits 0 immediately when ORBITAL_WORKTREE_ID is absent — so non-Orbital sessions
- * are unaffected.
+ * Installs hooks into the PROFILE-LEVEL settings.json (never a repo, never a
+ * worktree) so the cockpit learns a worktree's status from Claude's own lifecycle
+ * events at zero context cost. Because that file fires for every Claude session
+ * using the profile, each hook routes through `orbital hook <event>`, whose CLI
+ * guard exits 0 immediately when ORBITAL_WORKTREE_ID is absent — so non-Orbital
+ * sessions are unaffected.
+ *
+ * WHICH profile is the load-bearing detail: a workspace can point Claude at its
+ * own config directory (Settings → agents), which Orbital exports as
+ * CLAUDE_CONFIG_DIR when it spawns the agent. Hooks written anywhere else are
+ * read by nobody, so this targets the ACTIVE WORKSPACE's profile dir — see
+ * {@link agentProfileDir}. Installing per workspace is therefore
+ * expected: two workspaces on two profiles need two installs.
  *
  * All Orbital entries carry the HOOK_MARKER token, which makes merge idempotent and
  * uninstall surgical (only Orbital's entries are touched).
  */
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { homedir } from 'node:os'
 import type { ClaudeHooksPlan, ClaudeHooksStatus } from '@shared/types'
 import { hookShimPath } from './paths'
+import { agentProfileDir } from './profiles'
 
 /** Marker on every Orbital hook command; the basis for idempotent merge + clean uninstall. */
 const HOOK_MARKER = '--orbital-managed'
@@ -51,14 +58,8 @@ interface ClaudeSettings {
   [key: string]: unknown
 }
 
-/** Honor CLAUDE_CONFIG_DIR if set, else ~/.claude (USERPROFILE\.claude on Windows). */
-function claudeConfigDir(): string {
-  const override = process.env.CLAUDE_CONFIG_DIR?.trim()
-  return override || join(homedir(), '.claude')
-}
-
 export function settingsPath(): string {
-  return join(claudeConfigDir(), 'settings.json')
+  return join(agentProfileDir('claude'), 'settings.json')
 }
 
 /** The shell command Orbital registers for an event. Absolute shim path + marker. */

@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: Settings = {
   defaultShell: '',
   alerts: { indicator: true, sound: true, taskbarBadge: true, taskbarFlash: true },
   claudeHooksInstalled: false,
+  claudeSkillInstalled: false,
   envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
   periodicFetch: true,
   debugLogging: false,
@@ -36,6 +37,7 @@ function splitGlobal(s: Settings): GlobalSettings {
     defaultShell: s.defaultShell,
     alerts: s.alerts,
     claudeHooksInstalled: s.claudeHooksInstalled,
+    claudeSkillInstalled: s.claudeSkillInstalled,
     debugLogging: s.debugLogging,
     theme: s.theme
   }
@@ -65,7 +67,14 @@ function readGlobalSettings(): Partial<GlobalSettings> {
   }
   if (!blob || typeof blob !== 'object') return {}
   const out: Record<string, unknown> = {}
-  for (const key of ['defaultShell', 'alerts', 'claudeHooksInstalled', 'debugLogging', 'theme'] as const) {
+  for (const key of [
+    'defaultShell',
+    'alerts',
+    'claudeHooksInstalled',
+    'claudeSkillInstalled',
+    'debugLogging',
+    'theme'
+  ] as const) {
     if (blob[key] !== undefined) out[key] = blob[key]
   }
   return out as Partial<GlobalSettings>
