@@ -43,12 +43,49 @@ const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
 }
 
 /**
+ * True when focus sits in something the user is plainly typing into that ISN'T a
+ * terminal — a rename field, the editor's draft textarea, a modal input. xterm's
+ * own caret lives in a textarea too (`.xterm-helper-textarea`), and stealing
+ * focus from one terminal for the one the user just selected is exactly right,
+ * so that one doesn't count.
+ */
+function typingOutsideATerminal(): boolean {
+  const el = document.activeElement
+  if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement)) return false
+  return !el.classList.contains('xterm-helper-textarea')
+}
+
+/**
+ * At most one terminal may take focus per effect flush. A single tab opening or
+ * being selected is the only claimant, so it always wins — but a bulk mount (app
+ * boot, switching worktrees) brings up every visible pane at once, and without
+ * this the winner would be whichever pane's effects happened to run last. React
+ * runs sibling effects in tree order, so the first pane in the layout wins
+ * instead. The claimant is remembered by tab id so StrictMode's mount / unmount /
+ * remount pass can re-claim rather than lock itself out.
+ */
+let focusClaimant: string | null = null
+function claimFocus(tabId: string): boolean {
+  if (focusClaimant !== null && focusClaimant !== tabId) return false
+  focusClaimant = tabId
+  // Effects for a commit all flush within one task, so this releases the claim
+  // just after that flush — well before any later user-driven commit.
+  queueMicrotask(() => {
+    focusClaimant = null
+  })
+  return true
+}
+
+/**
  * A live terminal surface backed by xterm.js. The PTY itself lives in main —
  * this component only renders it. On mount it replays the existing scrollback
  * buffer, then streams live data; on unmount it tears down xterm WITHOUT
  * killing the PTY so the session survives tab switches and remounts.
+ *
+ * `active` is this tab's pane-visibility: an inactive PTY tab stays mounted but
+ * `display:none`. It also drives auto-focus (see the effect at the bottom).
  */
-export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
+export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   // Keep the latest paneId available to the (long-lived) web-links handler.
   const paneIdRef = useRef(tab.paneId)
@@ -243,6 +280,17 @@ export default function TerminalTab({ tab }: { tab: Tab }): JSX.Element {
   useEffect(() => {
     if (termRef.current) termRef.current.options.theme = XTERM_THEMES[theme]
   }, [theme])
+
+  // Auto-focus, so a terminal is typeable the moment it shows without a click
+  // into the body. Fires on mount (a freshly created tab renders active) and
+  // whenever this tab becomes its pane's active tab — selecting a tab is the
+  // user asking to use it. Declared after the mount effect above so the Terminal
+  // exists by now; React has already dropped the `hidden` class in this commit,
+  // so the helper textarea is focusable.
+  useEffect(() => {
+    if (!active || typingOutsideATerminal() || !claimFocus(tab.id)) return
+    termRef.current?.focus()
+  }, [active, tab.id])
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden bg-pane" />
 }

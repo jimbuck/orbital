@@ -4,11 +4,13 @@ import type { Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 // Mock the tab bodies: this test is about PaneView's mount/visibility decision,
-// not xterm/editor internals. The editor mock records its `active` prop.
+// not xterm/editor internals. Both mocks record their `active` prop.
 vi.mock('./TabStrip', () => ({ default: () => null }))
 vi.mock('./BrowserTab', () => ({ default: () => null }))
 vi.mock('./TerminalTab', () => ({
-  default: ({ tab }: { tab: { id: string } }) => <div data-testid={`term-${tab.id}`} />
+  default: ({ tab, active }: { tab: { id: string }; active: boolean }) => (
+    <div data-testid={`term-${tab.id}`} data-active={String(active)} />
+  )
 }))
 vi.mock('./EditorTab', () => ({
   default: ({ tab, active }: { tab: { id: string }; active: boolean }) => (
@@ -85,5 +87,18 @@ describe('PaneView editor tab mounting', () => {
     const after = screen.getByTestId('editor-E1')
     expect(after).toBe(before) // same node → the editor was not unmounted
     expect(after.getAttribute('data-active')).toBe('false')
+  })
+})
+
+describe('PaneView terminal tab mounting', () => {
+  afterEach(cleanup)
+
+  it("tells the terminal whether it is the pane's active tab, so it can take focus", () => {
+    seed('E1')
+    render(<PaneGroup />)
+    expect(screen.getByTestId('term-T1').getAttribute('data-active')).toBe('false')
+
+    act(() => seed('T1'))
+    expect(screen.getByTestId('term-T1').getAttribute('data-active')).toBe('true')
   })
 })

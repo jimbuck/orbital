@@ -187,11 +187,15 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
       <TabStrip pane={pane} worktree={worktree} />
       <div ref={bodyRef} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave} className="relative min-h-0 flex-1">
         {/* PTY-backed tabs (terminal + agent) stay mounted so their PTY survives switches. */}
-        {ptyTabs.map((t) => (
-          <div key={t.id} className={`absolute inset-0 ${activeTab && t.id === activeTab.id ? '' : 'hidden'}`}>
-            <TerminalTab tab={t} />
-          </div>
-        ))}
+        {ptyTabs.map((t) => {
+          const isActive = !!activeTab && t.id === activeTab.id
+          return (
+            <div key={t.id} className={`absolute inset-0 ${isActive ? '' : 'hidden'}`}>
+              {/* `active` also tells the terminal to take keyboard focus when shown. */}
+              <TerminalTab tab={t} active={isActive} />
+            </div>
+          )
+        })}
 
         {/* Editor tabs stay mounted so their in-memory state survives switches.
             Keyed by tab id: without it React reuses the instance across editor
