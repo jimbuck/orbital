@@ -74,12 +74,23 @@ export function defaultAgentConfigs(): AgentConfig[] {
   return SUPPORTED_AGENTS.map((a) => ({ provider: a.id }))
 }
 
+/** Whether an id names a provider Orbital can actually launch. */
+function isSupportedProvider(id: string): boolean {
+  return SUPPORTED_AGENTS.some((a) => a.id === id)
+}
+
 /**
  * Coerce a raw (hand-edited YAML or legacy DB) value into a clean
- * AgentConfig[]: entries need a provider string, duplicates keep the first,
- * and unknown-typed fields are dropped. Falls back to converting a legacy
- * `enabledAgents` id array; returns undefined when neither value is usable
- * (caller applies the default lineup).
+ * AgentConfig[]: entries need a provider Orbital supports, duplicates keep the
+ * first, and unknown-typed fields are dropped. Falls back to converting a
+ * legacy `enabledAgents` id array; returns undefined when neither value is
+ * usable (caller applies the default lineup).
+ *
+ * Unknown provider ids are dropped rather than passed through: the menus would
+ * offer them, but main resolves an unrecognized id to the Claude provider, so
+ * picking one would silently launch the wrong agent. An explicit empty list
+ * still means "no agents", but a non-empty list that scrubs down to nothing is
+ * treated as unusable so a bad hand-edit doesn't leave empty menus.
  */
 export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown): AgentConfig[] | undefined {
   if (Array.isArray(agents)) {
@@ -88,7 +99,7 @@ export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown):
     for (const item of agents) {
       const a = (item ?? {}) as Record<string, unknown>
       const provider = typeof a.provider === 'string' ? a.provider.trim() : ''
-      if (!provider || seen.has(provider)) continue
+      if (!provider || seen.has(provider) || !isSupportedProvider(provider)) continue
       seen.add(provider)
       const entry: AgentConfig = { provider }
       if (typeof a.configDir === 'string' && a.configDir.trim()) entry.configDir = a.configDir.trim()
@@ -105,10 +116,13 @@ export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown):
       }
       out.push(entry)
     }
-    return out
+    // Everything scrubbed out of a non-empty list means the stored value was
+    // junk, not a deliberate "no agents" — let the caller apply the default.
+    return out.length > 0 || agents.length === 0 ? out : undefined
   }
   if (Array.isArray(legacyEnabled) && legacyEnabled.every((x) => typeof x === 'string')) {
-    return [...new Set(legacyEnabled)].map((provider) => ({ provider }))
+    const ids = [...new Set(legacyEnabled)].filter(isSupportedProvider)
+    return ids.length > 0 || legacyEnabled.length === 0 ? ids.map((provider) => ({ provider })) : undefined
   }
   return undefined
 }
@@ -128,9 +142,19 @@ export function parseArgsString(input: string): string[] {
   return out
 }
 
-/** Inverse of {@link parseArgsString} for display: quote args containing spaces. */
+/**
+ * Inverse of {@link parseArgsString} for display: quote args containing spaces,
+ * picking the quote style the argument itself doesn't use so it reads back the
+ * same. An argument needing quotes that contains *both* styles can't be
+ * represented — the format has no escapes — and won't round-trip.
+ */
 export function formatArgsString(args: string[]): string {
-  return args.map((a) => (/\s/.test(a) || a === '' ? `"${a}"` : a)).join(' ')
+  return args
+    .map((a) => {
+      if (a !== '' && !/\s/.test(a)) return a
+      return a.includes('"') ? `'${a}'` : `"${a}"`
+    })
+    .join(' ')
 }
 
 /** Tab types that are backed by a live PTY and carry a TerminalStatus. */

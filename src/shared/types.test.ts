@@ -46,6 +46,18 @@ describe('normalizeAgentConfigs', () => {
   it('passes an explicit empty list through (no agents in the menus)', () => {
     expect(normalizeAgentConfigs([], ['claude'])).toEqual([])
   })
+
+  // An unrecognized id would still be offered in the menus, but main resolves
+  // it to the Claude provider — so it must never survive normalization.
+  it('drops providers Orbital does not support', () => {
+    expect(normalizeAgentConfigs([{ provider: 'claude' }, { provider: 'aider' }])).toEqual([{ provider: 'claude' }])
+    expect(normalizeAgentConfigs(undefined, ['claude', 'aider'])).toEqual([{ provider: 'claude' }])
+  })
+
+  it('treats a non-empty list that scrubs down to nothing as unusable', () => {
+    expect(normalizeAgentConfigs([{ provider: 'aider' }, { nope: true }])).toBeUndefined()
+    expect(normalizeAgentConfigs(undefined, ['aider'])).toBeUndefined()
+  })
 })
 
 describe('parseArgsString / formatArgsString', () => {
@@ -59,6 +71,13 @@ describe('parseArgsString / formatArgsString', () => {
   it('round-trips through formatArgsString', () => {
     const args = ['--path', 'C:\\My Dir\\x', '--verbose']
     expect(parseArgsString(formatArgsString(args))).toEqual(args)
+  })
+
+  it('switches to single quotes so a spaced arg containing a quote round-trips', () => {
+    expect(formatArgsString(['--msg', 'hello "world"'])).toBe('--msg \'hello "world"\'')
+    expect(parseArgsString(formatArgsString(['--msg', 'hello "world"']))).toEqual(['--msg', 'hello "world"'])
+    // No spaces means no quoting needed, so the quote character passes through.
+    expect(parseArgsString(formatArgsString(['a"b']))).toEqual(['a"b'])
   })
 })
 
