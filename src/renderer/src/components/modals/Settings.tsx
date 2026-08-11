@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
-import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan, ThemeMode } from '@shared/types'
-import { SUPPORTED_AGENTS } from '@shared/types'
+import type { Settings as SettingsModel, ClaudeHooksStatus, ClaudeHooksPlan, ThemeMode, AgentConfig } from '@shared/types'
+import { SUPPORTED_AGENTS, defaultAgentConfigs, normalizeAgentConfigs, parseArgsString, formatArgsString } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
 
 /** Common Windows shells offered in the default-shell picker. */
@@ -81,10 +81,14 @@ export default function Settings(): React.JSX.Element {
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
   // App theme; missing on installs predating this setting -> default dark (the original look).
   const [theme, setTheme] = useState<ThemeMode>(() => settings?.theme ?? 'dark')
-  // Global per-agent visibility. Existing installs lack the key -> default to all enabled.
-  const [enabledAgents, setEnabledAgents] = useState<string[]>(
-    () => settings?.enabledAgents ?? SUPPORTED_AGENTS.map((a) => a.id)
+  // Workspace-configured agents. Existing installs lack the key -> default lineup.
+  const [agents, setAgents] = useState<AgentConfig[]>(() => settings?.agents ?? defaultAgentConfigs())
+  // Extra-CLI-args fields edit as raw text per provider; parsed into argv on save.
+  const [argsDrafts, setArgsDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries((settings?.agents ?? []).map((a) => [a.provider, formatArgsString(a.args ?? [])]))
   )
+  // The in-progress "KEY=value" env-var input per provider card.
+  const [envDrafts, setEnvDrafts] = useState<Record<string, string>>({})
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -136,19 +140,47 @@ export default function Settings(): React.JSX.Element {
 
   const shellOptions = SHELL_OPTIONS.includes(defaultShell) ? SHELL_OPTIONS : [defaultShell, ...SHELL_OPTIONS]
 
-  // Flip an agent's visibility, but never allow emptying the set — there must
-  // always be at least one agent available in the new-tab menus.
-  const toggleAgent = (id: string, on: boolean): void => {
-    setEnabledAgents((cur) => {
-      if (!on && cur.length <= 1 && cur.includes(id)) return cur
-      return on ? [...new Set([...cur, id])] : cur.filter((a) => a !== id)
-    })
+  const updateAgent = (provider: string, patch: Partial<AgentConfig>): void =>
+    setAgents((cur) => cur.map((a) => (a.provider === provider ? { ...a, ...patch } : a)))
+
+  const addAgent = (provider: string): void =>
+    setAgents((cur) => (cur.some((a) => a.provider === provider) ? cur : [...cur, { provider }]))
+
+  // Never allow emptying the list — there must always be at least one agent
+  // available in the new-tab menus.
+  const removeAgent = (provider: string): void =>
+    setAgents((cur) => (cur.length <= 1 ? cur : cur.filter((a) => a.provider !== provider)))
+
+  // Commit a card's "KEY=value" env input into its entry's env map.
+  const commitEnvDraft = (provider: string): void => {
+    const draft = envDrafts[provider] ?? ''
+    const eq = draft.indexOf('=')
+    const key = (eq === -1 ? draft : draft.slice(0, eq)).trim()
+    const value = eq === -1 ? '' : draft.slice(eq + 1).trim()
+    setEnvDrafts((cur) => ({ ...cur, [provider]: '' }))
+    if (!key) return
+    setAgents((cur) =>
+      cur.map((a) => (a.provider === provider ? { ...a, env: { ...a.env, [key]: value } } : a))
+    )
   }
 
-  // The default-agent picker only offers enabled agents; if the project's
-  // current default was disabled, still show it so the select has a valid value.
+  const removeEnvVar = (provider: string, key: string): void =>
+    setAgents((cur) =>
+      cur.map((a) => {
+        if (a.provider !== provider || !a.env) return a
+        const env = { ...a.env }
+        delete env[key]
+        return { ...a, env }
+      })
+    )
+
+  /** Providers not yet configured — offered as "add" chips under the list. */
+  const addableAgents = SUPPORTED_AGENTS.filter((s) => !agents.some((a) => a.provider === s.id))
+
+  // The default-agent picker only offers configured agents; if the project's
+  // current default was removed, still show it so the select has a valid value.
   const agentOptions = SUPPORTED_AGENTS.filter(
-    (a) => enabledAgents.includes(a.id) || a.id === agentProvider
+    (a) => agents.some((c) => c.provider === a.id) || a.id === agentProvider
   )
 
   const removePattern = (p: string): void => setPatterns((cur) => cur.filter((x) => x !== p))
@@ -173,6 +205,15 @@ export default function Settings(): React.JSX.Element {
           agentExecPath: agentExecPath.trim()
         })
       }
+      // Fold each card's raw args text back into its entry, then scrub empty
+      // fields (blank configDir/execPath, empty args/env) via the normalizer.
+      const cleanedAgents =
+        normalizeAgentConfigs(
+          agents.map((a) => ({
+            ...a,
+            args: parseArgsString(argsDrafts[a.provider] ?? formatArgsString(a.args ?? []))
+          }))
+        ) ?? []
       // Preserve claudeHooksInstalled (managed by the hooks buttons, not this form).
       await window.orbital.setSettings({
         defaultShell,
@@ -181,7 +222,7 @@ export default function Settings(): React.JSX.Element {
         envSyncPatterns: patterns,
         periodicFetch,
         debugLogging,
-        enabledAgents,
+        agents: cleanedAgents,
         theme
       })
       closeModal()
@@ -339,20 +380,115 @@ export default function Settings(): React.JSX.Element {
       {/* Agent */}
       <div className={sectionLabel}>Agent</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
-        An agent tab boots the coding CLI straight into the Worktree&apos;s working directory. Hide agents you
-        don&apos;t use from the new-tab menus.
+        An agent tab boots the coding CLI straight into the Worktree&apos;s working directory. Agents
+        configured here appear in the new-tab menus; each can point at its own profile directory and
+        launch tweaks, per workspace.
       </p>
-      <div className="mt-2">
-        {SUPPORTED_AGENTS.map((agent) => (
-          <AlertRow
-            key={agent.id}
-            title={agent.label}
-            desc={`Show ${agent.label} in the new-tab menus`}
-            checked={enabledAgents.includes(agent.id)}
-            onChange={(v) => toggleAgent(agent.id, v)}
-          />
-        ))}
-      </div>
+      {agents.map((agent) => {
+        const meta = SUPPORTED_AGENTS.find((s) => s.id === agent.provider)
+        const label = meta?.label ?? agent.provider
+        return (
+          <div key={agent.provider} className="mt-2.5 rounded-card border border-line-2 bg-bg/40 p-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[12.5px] font-semibold text-text-2">{label}</div>
+              {agents.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${label}`}
+                  onClick={() => removeAgent(agent.provider)}
+                  className="rounded-sm text-dim opacity-70 hover:text-red-2 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+                >
+                  <X size={13} strokeWidth={1.5} />
+                </button>
+              )}
+            </div>
+
+            <label className={`${fieldLabel} mt-2.5 block`} htmlFor={`agent-config-dir-${agent.provider}`}>
+              Profile directory{' '}
+              <span className="font-normal text-faint">
+                · optional, sets {meta?.configDirEnvVar ?? 'the CLI’s config-dir variable'}
+              </span>
+            </label>
+            <input
+              id={`agent-config-dir-${agent.provider}`}
+              value={agent.configDir ?? ''}
+              onChange={(e) => updateAgent(agent.provider, { configDir: e.target.value })}
+              placeholder={meta ? `default profile (${meta.defaultConfigDir})` : 'default profile'}
+              spellCheck={false}
+              className={`mt-1.5 font-mono ${inputBase}`}
+            />
+
+            <label className={`${fieldLabel} mt-3 block`} htmlFor={`agent-exec-${agent.provider}`}>
+              Executable path <span className="font-normal text-faint">· optional, overrides PATH lookup</span>
+            </label>
+            <input
+              id={`agent-exec-${agent.provider}`}
+              value={agent.execPath ?? ''}
+              onChange={(e) => updateAgent(agent.provider, { execPath: e.target.value })}
+              placeholder="auto-detect via where / which"
+              spellCheck={false}
+              className={`mt-1.5 font-mono ${inputBase}`}
+            />
+
+            <label className={`${fieldLabel} mt-3 block`} htmlFor={`agent-args-${agent.provider}`}>
+              Extra CLI arguments <span className="font-normal text-faint">· optional, appended at launch</span>
+            </label>
+            <input
+              id={`agent-args-${agent.provider}`}
+              value={argsDrafts[agent.provider] ?? formatArgsString(agent.args ?? [])}
+              onChange={(e) => setArgsDrafts((cur) => ({ ...cur, [agent.provider]: e.target.value }))}
+              placeholder="--flag value"
+              spellCheck={false}
+              className={`mt-1.5 font-mono ${inputBase}`}
+            />
+
+            <div className={`${fieldLabel} mt-3`}>
+              Environment variables <span className="font-normal text-faint">· optional, set in the agent&apos;s terminal</span>
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-[7px]">
+              {Object.entries(agent.env ?? {}).map(([key, value]) => (
+                <span key={key} className={envChip}>
+                  {key}={value}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${key}`}
+                    onClick={() => removeEnvVar(agent.provider, key)}
+                    className="rounded-sm opacity-55 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+                  >
+                    <X size={11} strokeWidth={1.5} />
+                  </button>
+                </span>
+              ))}
+              <input
+                value={envDrafts[agent.provider] ?? ''}
+                onChange={(e) => setEnvDrafts((cur) => ({ ...cur, [agent.provider]: e.target.value }))}
+                onBlur={() => commitEnvDraft(agent.provider)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitEnvDraft(agent.provider)
+                }}
+                aria-label={`Add environment variable for ${label}`}
+                placeholder="KEY=value"
+                spellCheck={false}
+                className="w-[140px] rounded-[7px] border border-dashed border-line-2 bg-bg px-[11px] py-[5px] font-mono text-[11.5px] text-text-2 placeholder:text-faint focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+              />
+            </div>
+          </div>
+        )
+      })}
+      {addableAgents.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-[7px]">
+          {addableAgents.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => addAgent(a.id)}
+              className="inline-flex items-center gap-1 rounded-[7px] border border-dashed border-line-2 bg-bg px-[11px] py-[5px] text-[11.5px] text-faint hover:text-text-3 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+            >
+              <Plus size={12} strokeWidth={1.5} /> add {a.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-3 flex items-center justify-between gap-4">
         <span className="text-[12.5px] text-text-2">Default agent</span>
         <div className="relative">
@@ -376,7 +512,8 @@ export default function Settings(): React.JSX.Element {
         </div>
       </div>
       <label className={`${fieldLabel} mt-3.5 block`} htmlFor="agent-exec">
-        Executable path <span className="font-normal text-faint">· optional, overrides PATH lookup</span>
+        Executable path{' '}
+        <span className="font-normal text-faint">· optional, this project only — wins over the agent&apos;s own path</span>
       </label>
       <input
         id="agent-exec"

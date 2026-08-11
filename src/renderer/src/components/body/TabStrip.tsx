@@ -12,7 +12,7 @@ import {
   Columns2
 } from 'lucide-react'
 import type { Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
-import { SUPPORTED_AGENTS } from '@shared/types'
+import { defaultAgentConfigs } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
@@ -55,12 +55,9 @@ function TypeIcon({
 /** Display names for agent providers. */
 const AGENT_TITLES: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor' }
 
-/** Tab types offered in the add-tab popover, with their picker labels. */
+/** Non-agent tab types in the add-tab popover; the workspace's configured agents slot in after Terminal. */
 const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig }[] = [
   { type: 'terminal', label: 'Terminal' },
-  { type: 'agent', label: 'Claude', config: { agentProvider: 'claude' } },
-  { type: 'agent', label: 'Codex', config: { agentProvider: 'codex' } },
-  { type: 'agent', label: 'Cursor', config: { agentProvider: 'cursor' } },
   { type: 'browser', label: 'Browser' },
   { type: 'editor', label: 'Editor' }
 ]
@@ -108,12 +105,19 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   const defaultAgentProvider = useStore(
     (s) => s.projects.find((p) => p.id === worktree.projectId)?.defaultAgentProvider
   )
-  // Global per-agent visibility: hide agent tab types the user disabled in Settings.
-  // Undefined (existing installs) means all agents are enabled.
-  const enabledAgents = useStore((s) => s.settings?.enabledAgents) ?? SUPPORTED_AGENTS.map((a) => a.id)
-  const addOptions = ADD_OPTIONS.filter(
-    (o) => o.type !== 'agent' || enabledAgents.includes(o.config?.agentProvider ?? '')
-  )
+  // The workspace's configured agents (Settings → Agent) fill the popover's
+  // agent entries, in list order. Undefined (state not loaded yet) means the
+  // default lineup.
+  const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
+  const addOptions = [
+    ADD_OPTIONS[0],
+    ...agents.map((a) => ({
+      type: 'agent' as TabType,
+      label: AGENT_TITLES[a.provider] ?? a.provider,
+      config: { agentProvider: a.provider }
+    })),
+    ...ADD_OPTIONS.slice(1)
+  ]
 
   useEffect(() => {
     if (renamingId) renameRef.current?.select()

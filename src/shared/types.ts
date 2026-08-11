@@ -32,12 +32,130 @@ export type ThemeMode = 'system' | 'light' | 'dark'
  */
 export type TabType = 'terminal' | 'browser' | 'editor' | 'agent'
 
-/** Agent providers Orbital can launch, in menu order. Keep in sync with AGENT_PROVIDERS (main). */
-export const SUPPORTED_AGENTS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'cursor', label: 'Cursor' }
+/**
+ * Agent providers Orbital can launch, in menu order. Keep in sync with
+ * AGENT_PROVIDERS (main). `configDirEnvVar` is the env var the CLI reads its
+ * profile/config directory from; `defaultConfigDir` is where that profile
+ * lives when the var is unset (shown as a placeholder in Settings).
+ */
+export const SUPPORTED_AGENTS: ReadonlyArray<{
+  id: string
+  label: string
+  configDirEnvVar: string
+  defaultConfigDir: string
+}> = [
+  { id: 'claude', label: 'Claude', configDirEnvVar: 'CLAUDE_CONFIG_DIR', defaultConfigDir: '~/.claude' },
+  { id: 'codex', label: 'Codex', configDirEnvVar: 'CODEX_HOME', defaultConfigDir: '~/.codex' },
+  { id: 'cursor', label: 'Cursor', configDirEnvVar: 'CURSOR_CONFIG_DIR', defaultConfigDir: '~/.cursor' }
 ]
+
+/**
+ * Per-workspace configuration for one agent provider. Being listed in
+ * Settings.agents is what makes the provider available in the new-tab menus;
+ * the optional fields tailor how its CLI is launched in this workspace — e.g.
+ * a personal workspace can point Claude at a personal profile directory while
+ * a work workspace uses the work one.
+ */
+export interface AgentConfig {
+  /** Provider this entry configures (an id from SUPPORTED_AGENTS, e.g. 'claude'). */
+  provider: string
+  /** Profile/config directory, exported via the provider's configDirEnvVar at launch. */
+  configDir?: string
+  /** Explicit executable path, overriding PATH lookup (a project-level path still wins). */
+  execPath?: string
+  /** Extra CLI arguments appended to the launch command. */
+  args?: string[]
+  /** Extra environment variables set in the agent's terminal. */
+  env?: Record<string, string>
+}
+
+/** One untweaked entry per supported provider — the default agent lineup. */
+export function defaultAgentConfigs(): AgentConfig[] {
+  return SUPPORTED_AGENTS.map((a) => ({ provider: a.id }))
+}
+
+/** Whether an id names a provider Orbital can actually launch. */
+function isSupportedProvider(id: string): boolean {
+  return SUPPORTED_AGENTS.some((a) => a.id === id)
+}
+
+/**
+ * Coerce a raw (hand-edited YAML or legacy DB) value into a clean
+ * AgentConfig[]: entries need a provider Orbital supports, duplicates keep the
+ * first, and unknown-typed fields are dropped. Falls back to converting a
+ * legacy `enabledAgents` id array; returns undefined when neither value is
+ * usable (caller applies the default lineup).
+ *
+ * Unknown provider ids are dropped rather than passed through: the menus would
+ * offer them, but main resolves an unrecognized id to the Claude provider, so
+ * picking one would silently launch the wrong agent. An explicit empty list
+ * still means "no agents", but a non-empty list that scrubs down to nothing is
+ * treated as unusable so a bad hand-edit doesn't leave empty menus.
+ */
+export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown): AgentConfig[] | undefined {
+  if (Array.isArray(agents)) {
+    const seen = new Set<string>()
+    const out: AgentConfig[] = []
+    for (const item of agents) {
+      const a = (item ?? {}) as Record<string, unknown>
+      const provider = typeof a.provider === 'string' ? a.provider.trim() : ''
+      if (!provider || seen.has(provider) || !isSupportedProvider(provider)) continue
+      seen.add(provider)
+      const entry: AgentConfig = { provider }
+      if (typeof a.configDir === 'string' && a.configDir.trim()) entry.configDir = a.configDir.trim()
+      if (typeof a.execPath === 'string' && a.execPath.trim()) entry.execPath = a.execPath.trim()
+      if (Array.isArray(a.args) && a.args.length > 0 && a.args.every((x) => typeof x === 'string')) {
+        entry.args = a.args
+      }
+      if (a.env && typeof a.env === 'object' && !Array.isArray(a.env)) {
+        const env: Record<string, string> = {}
+        for (const [k, v] of Object.entries(a.env)) {
+          if (k && typeof v === 'string') env[k] = v
+        }
+        if (Object.keys(env).length > 0) entry.env = env
+      }
+      out.push(entry)
+    }
+    // Everything scrubbed out of a non-empty list means the stored value was
+    // junk, not a deliberate "no agents" — let the caller apply the default.
+    return out.length > 0 || agents.length === 0 ? out : undefined
+  }
+  if (Array.isArray(legacyEnabled) && legacyEnabled.every((x) => typeof x === 'string')) {
+    const ids = [...new Set(legacyEnabled)].filter(isSupportedProvider)
+    return ids.length > 0 || legacyEnabled.length === 0 ? ids.map((provider) => ({ provider })) : undefined
+  }
+  return undefined
+}
+
+/**
+ * Split a user-typed argument string into argv entries, honoring single/double
+ * quotes for arguments containing spaces (no escapes — this is a settings
+ * field, not a shell).
+ */
+export function parseArgsString(input: string): string[] {
+  const out: string[] = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(input)) !== null) {
+    out.push(m[1] ?? m[2] ?? m[3])
+  }
+  return out
+}
+
+/**
+ * Inverse of {@link parseArgsString} for display: quote args containing spaces,
+ * picking the quote style the argument itself doesn't use so it reads back the
+ * same. An argument needing quotes that contains *both* styles can't be
+ * represented — the format has no escapes — and won't round-trip.
+ */
+export function formatArgsString(args: string[]): string {
+  return args
+    .map((a) => {
+      if (a !== '' && !/\s/.test(a)) return a
+      return a.includes('"') ? `'${a}'` : `"${a}"`
+    })
+    .join(' ')
+}
 
 /** Tab types that are backed by a live PTY and carry a TerminalStatus. */
 export function isPtyTabType(type: TabType): boolean {
@@ -233,14 +351,14 @@ export interface Settings {
   periodicFetch: boolean
   /** Opt-in verbose file logging of CLI calls, UI actions, and errors, with rotation. Off by default. */
   debugLogging: boolean
-  /** Agent providers offered in the new-tab menus; hide the ones you don't use. */
-  enabledAgents: string[]
+  /** Configured agents: which providers the new-tab menus offer, plus per-workspace launch tweaks. */
+  agents: AgentConfig[]
   /** App color theme: 'system' follows the OS, else an explicit 'light'/'dark'. Defaults to 'dark'. */
   theme: ThemeMode
 }
 
 /** Settings that belong to a workspace (persisted in its YAML config file). */
-export const WORKSPACE_SETTING_KEYS = ['envSyncPatterns', 'periodicFetch', 'enabledAgents'] as const
+export const WORKSPACE_SETTING_KEYS = ['envSyncPatterns', 'periodicFetch', 'agents'] as const
 
 /** The workspace-scoped slice of {@link Settings}. */
 export type WorkspaceSettings = Pick<Settings, (typeof WORKSPACE_SETTING_KEYS)[number]>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
 import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
 import type { Worktree, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
-import { SUPPORTED_AGENTS } from '@shared/types'
+import { SUPPORTED_AGENTS, defaultAgentConfigs } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
 import { useStore, activeWorktree } from '@renderer/store'
 import TabStrip from './TabStrip'
@@ -126,15 +126,19 @@ function computeEdge(el: HTMLElement, clientX: number, clientY: number): DropEdg
   return 'bottom'
 }
 
-/** The kinds of tab an empty pane can open. */
+/** Non-agent openers an empty pane offers; the workspace's configured agents slot in after Terminal. */
 const OPENERS: { type: TabType; label: string; Icon: ComponentType<BrandIconProps>; config?: TabConfig }[] = [
   { type: 'terminal', label: 'Terminal', Icon: Terminal },
-  { type: 'agent', label: 'Claude', Icon: ClaudeIcon, config: { agentProvider: 'claude' } },
-  { type: 'agent', label: 'Codex', Icon: CodexIcon, config: { agentProvider: 'codex' } },
-  { type: 'agent', label: 'Cursor', Icon: CursorIcon, config: { agentProvider: 'cursor' } },
   { type: 'browser', label: 'Browser', Icon: Globe },
   { type: 'editor', label: 'Editor', Icon: FileText }
 ]
+
+/** Brand icon per agent provider (Claude's doubles as the unknown-provider fallback). */
+const AGENT_ICONS: Record<string, ComponentType<BrandIconProps>> = {
+  claude: ClaudeIcon,
+  codex: CodexIcon,
+  cursor: CursorIcon
+}
 
 const OVERLAY_POS: Record<DropEdge, string> = {
   center: 'inset-0',
@@ -155,12 +159,19 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
   // expansion, view mode, scroll); keep them mounted (hidden when inactive) so
   // that state survives switching away and back.
   const editorTabs = pane.tabs.filter((t) => t.type === 'editor')
-  // Global per-agent visibility: hide agent openers the user disabled in Settings.
-  // Undefined (existing installs) means all agents are enabled.
-  const enabledAgents = useStore((s) => s.settings?.enabledAgents) ?? SUPPORTED_AGENTS.map((a) => a.id)
-  const openers = OPENERS.filter(
-    (o) => o.type !== 'agent' || enabledAgents.includes(o.config?.agentProvider ?? '')
-  )
+  // The workspace's configured agents (Settings → Agent) fill the agent
+  // openers, in list order. Undefined (state not loaded yet) means the default lineup.
+  const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
+  const openers = [
+    OPENERS[0],
+    ...agents.map((a) => ({
+      type: 'agent' as TabType,
+      label: SUPPORTED_AGENTS.find((s) => s.id === a.provider)?.label ?? a.provider,
+      Icon: AGENT_ICONS[a.provider] ?? ClaudeIcon,
+      config: { agentProvider: a.provider }
+    })),
+    ...OPENERS.slice(1)
+  ]
 
   const onDragOver = (e: React.DragEvent): void => {
     if (!e.dataTransfer.types.includes(TAB_DND) || !bodyRef.current) return
