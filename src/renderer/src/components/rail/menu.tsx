@@ -75,12 +75,19 @@ export function MenuItem({
   )
 }
 
-/** In-menu confirm step for a destructive action: message (+ hint) and Confirm / Cancel. */
+/**
+ * In-menu confirm step for a destructive action: message (+ hint) and Confirm /
+ * Cancel. Pass `busy` while the confirmed action is running to lock both buttons
+ * (and swap the confirm label for `busyLabel` + a spinner) so a slow action
+ * can't be fired twice or cancelled halfway.
+ */
 export function MenuConfirm({
   message,
   hint,
   confirmLabel,
   danger = true,
+  busy = false,
+  busyLabel,
   onConfirm,
   onCancel
 }: {
@@ -88,6 +95,8 @@ export function MenuConfirm({
   hint?: string
   confirmLabel: string
   danger?: boolean
+  busy?: boolean
+  busyLabel?: string
   onConfirm: () => void
   onCancel: () => void
 }): JSX.Element {
@@ -98,15 +107,20 @@ export function MenuConfirm({
       <div className="mt-1.5 flex gap-1.5">
         <button
           type="button"
+          disabled={busy}
           onClick={onConfirm}
-          className="flex-1 rounded-md bg-red/15 px-2 py-1.5 text-[11.5px] font-semibold text-red-2 outline-none hover:bg-red/25 focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-red/15 px-2 py-1.5 text-[11.5px] font-semibold text-red-2 outline-none hover:bg-red/25 focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-red/15"
         >
-          {confirmLabel}
+          {busy && (
+            <span className="inline-block size-[10px] flex-none animate-spin rounded-full border-[1.5px] border-red-2 border-t-transparent" />
+          )}
+          {busy ? busyLabel || 'Working…' : confirmLabel}
         </button>
         <button
           type="button"
+          disabled={busy}
           onClick={onCancel}
-          className="flex-1 rounded-md bg-hover px-2 py-1.5 text-[11.5px] font-semibold text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="flex-1 rounded-md bg-hover px-2 py-1.5 text-[11.5px] font-semibold text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-hover"
         >
           Cancel
         </button>

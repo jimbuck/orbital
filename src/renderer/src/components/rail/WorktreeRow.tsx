@@ -25,6 +25,9 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
   const [draft, setDraft] = useState(worktree.name)
   const [del, setDel] = useState<DeleteMode>('none')
   const [error, setError] = useState<string | null>(null)
+  // Set while a remove is in flight — `git worktree remove` takes a few seconds,
+  // so the row shows a spinner and the confirm button locks.
+  const [removing, setRemoving] = useState<'closing' | 'deleting' | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -32,6 +35,8 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
   }, [renaming])
 
   const closeMenu = (): void => {
+    // Keep the menu up while a remove runs, so its result (or the force step) lands somewhere.
+    if (removing) return
     setMenu(null)
     setDel('none')
     setError(null)
@@ -72,11 +77,17 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
   }
 
   const remove = async (removeWorktree: boolean, force = false): Promise<void> => {
+    if (removing) return
+    setRemoving(removeWorktree ? 'deleting' : 'closing')
     try {
       await window.orbital.removeWorktree(worktree.id, { removeWorktree, force })
-      closeMenu()
+      setRemoving(null)
+      setMenu(null)
+      setDel('none')
+      setError(null)
     } catch (e) {
       // git refuses a dirty worktree without --force; offer a force step.
+      setRemoving(null)
       setError(e instanceof Error ? e.message : 'Failed to remove the Worktree.')
       setDel('force')
     }
@@ -100,7 +111,7 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
         } ${isDone ? 'opacity-60' : ''}`}
       >
         <span className="flex w-[11px] flex-none items-center justify-center">
-          {settingUp ? (
+          {settingUp || removing ? (
             <span className="inline-block size-[11px] rounded-full border-[1.6px] border-accent border-t-transparent animate-spin" />
           ) : (
             <StatusDot status={worktree.status} />
@@ -132,7 +143,14 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
           )}
         </span>
 
-        {!renaming && settingUp ? (
+        {!renaming && removing ? (
+          <span
+            className="flex-none whitespace-nowrap text-[9.5px] font-semibold text-red-2"
+            title={removing === 'deleting' ? 'Removing the worktree from disk…' : 'Closing the worktree…'}
+          >
+            {removing === 'deleting' ? 'deleting…' : 'closing…'}
+          </span>
+        ) : !renaming && settingUp ? (
           <span
             className="flex-none whitespace-nowrap text-[9.5px] font-semibold text-blue"
             title="Copying dependencies (node_modules) into the new worktree…"
@@ -153,7 +171,15 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
 
       {menu && (
         <ContextMenu pos={menu} width={200} onClose={closeMenu}>
-          {del === 'none' && (
+          {/* The Close path runs without a confirm step, so it gets its own busy line. */}
+          {del === 'none' && removing && (
+            <div className="flex items-center gap-2 px-2 py-2 text-[11.5px] font-semibold text-text-3">
+              <span className="inline-block size-[11px] flex-none animate-spin rounded-full border-[1.6px] border-accent border-t-transparent" />
+              Closing worktree…
+            </div>
+          )}
+
+          {del === 'none' && !removing && (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
               <MenuItem
@@ -198,6 +224,8 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
               message="Remove this Worktree and delete it?"
               confirmLabel="Delete"
               danger={false}
+              busy={removing !== null}
+              busyLabel="Deleting…"
               onConfirm={() => void remove(true)}
               onCancel={closeMenu}
             />
@@ -208,6 +236,8 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
               message={error || 'The worktree has uncommitted changes.'}
               hint="Force-removing discards them."
               confirmLabel="Force remove"
+              busy={removing !== null}
+              busyLabel="Removing…"
               onConfirm={() => void remove(true, true)}
               onCancel={closeMenu}
             />
