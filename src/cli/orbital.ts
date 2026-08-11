@@ -141,11 +141,13 @@ let jsonMode = false
 function worktreeNewRequest(tokens: string[], taskId?: string): ControlRequest {
   const { positionals, flags } = parseArgs(tokens)
   const args: Record<string, unknown> = {}
-  if (taskId) args.task = taskId
   if (flags.worktree) args.worktree = flags.worktree
   if (flags['existing-branch']) args.existingBranch = flags['existing-branch']
   if (flags.base) args.base = flags.base
-  if (flags.task) args.task = flags.task
+  // `task start <id>` names its task positionally; a stray `--task` must not
+  // quietly redirect the worktree to a different one.
+  const task = taskId ?? flags.task
+  if (task) args.task = task
   if (positionals[0]) args.name = positionals[0]
   return request('worktree-new', args)
 }

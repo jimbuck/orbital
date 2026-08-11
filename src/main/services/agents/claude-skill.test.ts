@@ -65,6 +65,18 @@ describe('install / remove', () => {
     expect(existsSync(dirname(skillPath()))).toBe(false)
   })
 
+  it('leaves supporting files in the skill directory alone when removing', () => {
+    install()
+    // A skill directory can hold scripts/references someone added alongside it;
+    // uninstalling Orbital's SKILL.md must not take those with it.
+    const extra = join(dirname(skillPath()), 'notes.md')
+    writeFileSync(extra, 'mine', 'utf8')
+
+    remove()
+    expect(existsSync(skillPath())).toBe(false)
+    expect(readFileSync(extra, 'utf8')).toBe('mine')
+  })
+
   it('refuses to overwrite a SKILL.md it did not write, and leaves it alone', () => {
     mkdirSync(dirname(skillPath()), { recursive: true })
     writeFileSync(skillPath(), '---\nname: orbital\n---\nmine, not yours\n', 'utf8')

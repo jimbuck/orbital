@@ -82,7 +82,7 @@ function briefingText({ project, worktree, providerName, hooksInstalled }: Brief
     'The `orbital` CLI is on your PATH — use it to work with the cockpit. Add `--json` to any',
     'command to get the raw payload instead of a table when you intend to parse it.',
     '- `orbital task add "<title>" [--description <text>] [--tags <a,b>]` — queue follow-up work you notice but should not tackle now.',
-    "- `orbital task list [--status <s>] [--tag <t>]` — see the project's open tasks (number, status, title); `--all` includes done ones.",
+    "- `orbital task list [--status <s>] [--tag <t>]` — the project's open tasks (number, status, title). Done tasks are hidden unless you pass `--all` or ask for a status explicitly.",
     '- `orbital task show <number>` — full detail for one task (e.g. `orbital task show 12`).',
     '- `orbital task update <number> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <number>` when it is finished; `orbital task delete <number>` to drop one.',
     '- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress.',

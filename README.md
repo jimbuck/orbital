@@ -86,9 +86,9 @@ pulses, a title-bar banner appears, and the Windows taskbar icon gets a badge
 Statuses update automatically two ways:
 
 1. **Claude Code hooks** — install them once per workspace from Settings (Orbital
-   shows you the exact JSON it will merge into the `settings.json` of the Claude
-   profile that workspace launches agents with — `~/.claude` unless you point it
-   elsewhere — before touching it, and can remove it just as cleanly). From then on every Claude session
+   shows you the exact JSON it will merge, and the `settings.json` it goes into:
+   the Claude profile that workspace launches agents with, else `CLAUDE_CONFIG_DIR`,
+   else `~/.claude`. It can remove it just as cleanly). From then on every Claude session
    launched inside Orbital reports itself: working while it uses tools, needs
    attention on permission/idle prompts, idle when it stops. Typing into a
    blocked agent clears the alert instantly. See

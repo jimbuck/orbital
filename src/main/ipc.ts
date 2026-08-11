@@ -379,16 +379,15 @@ const BLOCKING_NOTIFICATIONS = new Set([
 const RESOLVED_NOTIFICATIONS = new Set(['elicitation_complete', 'elicitation_response'])
 
 /**
- * Where a tab goes when the human types into it while it is blocked. Answering a
- * permission prompt or an elicitation dialog puts Claude straight back to work
- * (and a long approved tool emits no hook until it finishes); typing at an idle
- * prompt is just composing the next instruction, so that stays idle until the
- * UserPromptSubmit hook fires.
+ * Where a tab goes when the human types into it while it is blocked. Answering
+ * something Claude ASKED — a permission prompt, an elicitation dialog, a request
+ * for input — puts it straight back to work (and a long approved tool emits no
+ * hook until it finishes). The exception is an idle prompt: nobody asked
+ * anything, so typing there is just composing the next instruction and the tab
+ * stays idle until the UserPromptSubmit hook fires on send.
  */
 function statusAfterHumanInput(kind: string | undefined): TerminalStatus {
-  return kind === 'permission_prompt' || kind === 'elicitation_dialog' || kind === 'elicitation_url_dialog'
-    ? 'working'
-    : 'idle'
+  return kind && kind !== 'idle_prompt' && BLOCKING_NOTIFICATIONS.has(kind) ? 'working' : 'idle'
 }
 
 // Focus-in/out reports and mouse-tracking sequences a TUI subscribed to — sent

@@ -15,7 +15,7 @@
  * uninstall only ever deletes a file that carries it, so a hand-written skill of
  * the same name is left alone rather than clobbered.
  */
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, rmSync, rmdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { app } from 'electron'
 import type { ClaudeSkillPlan, ClaudeSkillStatus } from '@shared/types'
@@ -111,7 +111,7 @@ of expanding the scope of what you were asked to do.
 
 \`\`\`sh
 orbital task add "Write tests" --description "cover the parser" --tags test,parser
-orbital task list [--all] [--status <status>] [--tag <tag>]   # open tasks; --all includes done
+orbital task list [--all] [--status <status>] [--tag <tag>]   # open tasks (see below)
 orbital task show 12                                          # full detail for one task
 orbital task update 12 --status in-progress                   # progress it as you work
 orbital task done 12
@@ -120,7 +120,8 @@ orbital task delete 12
 
 Tasks are addressed by their number (\`12\` or \`#12\`, as shown in \`task list\`) or by
 a unique id prefix. Statuses: \`draft\`, \`todo\`, \`in-progress\`, \`ready-for-review\`,
-\`done\`.
+\`done\`. \`task list\` hides done tasks unless you pass \`--all\` or name a status
+yourself, so \`--status done\` works on its own.
 
 ## Worktrees
 
@@ -195,13 +196,19 @@ export function install(): ClaudeSkillStatus {
   return status()
 }
 
-/** Delete the skill directory — but only when the file in it is ours. */
+/** Delete the skill — but only the SKILL.md that is ours, never a whole tree. */
 export function remove(): ClaudeSkillStatus {
   const file = skillPath()
   if (existsSync(file) && isOrbitalSkill(file)) {
-    // Remove the whole `orbital/` skill dir: Claude Code treats the directory as
-    // the skill, and leaving an empty one behind shows up as a broken entry.
-    rmSync(dirname(file), { recursive: true, force: true })
+    rmSync(file, { force: true })
+    // Claude Code treats the directory as the skill, so an empty one left behind
+    // is a broken entry — but a skill dir can also hold supporting files someone
+    // added (scripts, references). Take the directory only if nothing is in it.
+    try {
+      rmdirSync(dirname(file))
+    } catch {
+      /* not empty (or already gone) — leave whatever else lives there */
+    }
   }
   return status()
 }

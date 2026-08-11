@@ -35,8 +35,9 @@ from the root checkout — `.env` and `.env.*` by default. Add patterns like
 ## Claude status hooks
 
 Installs Orbital's status hooks into the `settings.json` of the Claude profile
-this workspace launches agents with (`~/.claude` unless the Claude agent above
-sets a profile directory), so Claude sessions report status automatically:
+this workspace launches agents with — the profile directory set on the Claude
+agent above, else `CLAUDE_CONFIG_DIR`, else `~/.claude` — so Claude sessions
+report status automatically:
 
 - **Preview** the exact JSON before it's merged.
 - Install is idempotent; **Remove** strips exactly Orbital's entries.
@@ -52,8 +53,8 @@ Installs an [Agent Skill](https://code.claude.com/docs/en/skills) documenting th
 already) know how to report status, file tasks, and register dev servers:
 
 - **Preview** the exact `SKILL.md` before it's written.
-- It goes to `skills/orbital/SKILL.md` in the Claude profile directory this
-  workspace launches agents against, falling back to `~/.claude`.
+- It goes to `skills/orbital/SKILL.md` in the same profile the hooks use: this
+  workspace's Claude profile directory, else `CLAUDE_CONFIG_DIR`, else `~/.claude`.
 - Orbital won't overwrite a skill it doesn't own, and **Remove** deletes only
   its own.
 
