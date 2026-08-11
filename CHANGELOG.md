@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.20.1](https://github.com/jimbuck/orbital/compare/v1.20.0...v1.20.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* show progress while a worktree is being removed ([feb8b42](https://github.com/jimbuck/orbital/commit/feb8b42f44406aa7ee7b4ba27987a060aab5c760))
+
 # [1.20.0](https://github.com/jimbuck/orbital/compare/v1.19.0...v1.20.0) (2026-08-11)
 
 
