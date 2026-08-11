@@ -85,15 +85,23 @@ pulses, a title-bar banner appears, and the Windows taskbar icon gets a badge
 
 Statuses update automatically two ways:
 
-1. **Claude Code hooks** — install them once from Settings (Orbital shows you
-   the exact JSON it will merge into `~/.claude/settings.json` before touching
-   it, and can remove it just as cleanly). From then on every Claude session
+1. **Claude Code hooks** — install them once per workspace from Settings (Orbital
+   shows you the exact JSON it will merge into the `settings.json` of the Claude
+   profile that workspace launches agents with — `~/.claude` unless you point it
+   elsewhere — before touching it, and can remove it just as cleanly). From then on every Claude session
    launched inside Orbital reports itself: working while it uses tools, needs
    attention on permission/idle prompts, idle when it stops. Typing into a
    blocked agent clears the alert instantly. See
    [`docs/claude-code-hooks.md`](./docs/claude-code-hooks.md).
 2. **The `orbital` CLI** — any agent (or script) can set its own status
    explicitly; see below.
+
+Orbital can also teach an agent the CLI without you pasting anything: an
+**`orbital` Agent Skill** for Claude (so sessions you start by hand in a
+terminal — not just agent tabs, which are briefed automatically — know the CLI is
+there), and a short **instructions block** in Codex's `AGENTS.md`, since Codex
+takes no briefing file. Both are opt-in from Settings, previewed first, and
+removed cleanly.
 
 ### Tasks: capture work, launch it as a worktree
 - A lightweight per-project tracker: capture with one keystroke, edit titles
@@ -112,17 +120,24 @@ pipe — so agents can drive the cockpit:
 
 ```sh
 orbital status <idle|working|needs-attention|error|done>   # set this terminal's status
+orbital whoami                                             # project, worktree, branch, path, task, servers
 orbital worktrees                                          # list worktrees in this project
-orbital worktree new [--worktree <branch>] [name]          # spin up a new linked worktree
+orbital worktree new [--worktree <branch>] [--existing-branch <b>] [--base <ref>] [name]
 orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this worktree
-orbital task add "<title>" [--description <text>]          # capture a task
-orbital task list [--all]                                  # open tasks (id, status, title)
-orbital task update <id> --status <status>                 # progress a task (id prefix ok)
-orbital task done <id>                                     # shorthand for --status done
+orbital task add "<title>" [--description <text>] [--tags <a,b>]   # capture a task
+orbital task list [--all] [--status <s>] [--tag <t>]       # open tasks (number, status, title)
+orbital task show <number>                                 # full detail for one task
+orbital task update <number> --status <status>             # progress a task (id prefix ok)
+orbital task start <number>                                # worktree from a task, linked + started
+orbital task done <number>                                 # shorthand for --status done
+orbital task delete <number>                               # drop a task
 orbital server add <url|port>                              # register a live dev server
 orbital server remove <url|port>                           # deregister it
 orbital server list                                        # this worktree's live servers
 ```
+
+Every command takes `--json` for machine-readable output — see the
+[CLI reference](website/src/content/docs/reference/cli.md).
 
 When a worktree has registered dev servers, the title bar shows a green
 "N dev servers" pill and the add-tab menu lists each one — one click opens it

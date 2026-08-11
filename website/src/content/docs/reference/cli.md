@@ -8,6 +8,9 @@ running app over a local pipe. It's how agents (and you) drive the cockpit from
 inside a worktree. Outside an Orbital terminal the identity environment variables
 are absent and most commands will refuse to run.
 
+Add `--json` to any command to get the raw response payload instead of a
+formatted table — use it whenever something is going to parse the output.
+
 ## Status
 
 ```sh
@@ -16,6 +19,23 @@ orbital status <idle|working|needs-attention|error|done>
 
 Sets the calling terminal's status. `needs-attention` triggers the alert
 pipeline (rail badge, title-bar banner, taskbar badge, optional chime).
+
+```sh
+orbital whoami
+```
+
+Everything the cockpit knows about the calling terminal — project, worktree,
+branch, path, current status, linked task, and registered dev servers:
+
+```
+project      orbital
+worktree     Login flow (linked)
+branch       feature/login
+path         C:\Projects\.orbital-worktrees\orbital\feature-login
+status       working
+task         #12 Add checkout flow (in_progress)
+servers      http://localhost:5173/
+```
 
 ## Worktrees
 
@@ -26,14 +46,21 @@ orbital worktrees
 Lists the project's worktrees: status, name, branch, id.
 
 ```sh
-orbital worktree new [--worktree <branch>] [name]
+orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [name]
 ```
 
-Creates a linked worktree. The branch is slugified; an existing branch is
-attached to, otherwise a new one is forked. Env files sync automatically.
+Creates a linked worktree. The branch is slugified; an existing branch of that
+name is attached to, otherwise a new one is forked. Env files sync automatically.
+
+- `--existing-branch` checks out a branch that already exists instead of forking
+  a new one. A remote-only pick (`origin/pr-42`) gets a local tracking branch.
+- `--base` forks the new branch from a ref other than `HEAD`.
+- `--task` links a task to the new worktree and moves it to *in progress*.
 
 ```sh
 orbital worktree new --worktree feature/checkout "Checkout flow"
+orbital worktree new --existing-branch origin/pr-42
+orbital worktree new --worktree feature/x --base main
 ```
 
 ## Tabs
@@ -53,23 +80,31 @@ orbital tab new editor src/lib/cart.ts
 ## Tasks
 
 ```sh
-orbital task add "<title>" [--description <text>]
-orbital task list [--all]
-orbital task update <id> [--status <status>] [--title <text>] [--description <text>]
-orbital task done <id>
+orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
+orbital task list [--all] [--status <status>] [--tag <tag>]
+orbital task show <number|id>
+orbital task update <number|id> [--status <status>] [--title <text>] [--description <text>] [--tags <a,b,c>]
+orbital task start <number|id> [--worktree <branch>] [--base <ref>] [name]
+orbital task done <number|id>
+orbital task delete <number|id>
 ```
 
-- `task list` prints open tasks with short ids (`--all` includes done):
+- `task list` prints open tasks by number (`--all` includes done ones; an
+  explicit `--status` implies `--all`):
 
   ```
-  ID        STATUS       TITLE
-  f907b669  in_progress  Add checkout flow
-  cfff155f  todo         Fix cart badge count
+  ID   STATUS       TITLE                 TAGS       WORKTREE
+  #12  in_progress  Add checkout flow     ui,cart    linked
+  #13  todo         Fix cart badge count
   ```
 
-- `task update` / `task done` accept any **unique id prefix** — `f907` works.
+- Every command that takes a task accepts its **number** (`12` or `#12`) or a
+  **unique id prefix** — `f907` works.
 - Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or
   underscores both accepted).
+- `task start` is the scriptable form of the task board's play button: it creates
+  a worktree named after the task, links the two, and moves the task to
+  *in progress*.
 
 ## Dev servers
 
@@ -94,6 +129,8 @@ Orbital injects these into every worktree terminal:
 | `ORBITAL_WORKTREE_ID` | The worktree the terminal belongs to |
 | `ORBITAL_PROJECT_ID` | The worktree's project |
 | `ORBITAL_SOCKET` | The control pipe the CLI connects to |
+
+`ORBITAL_WORKTREE_ID` is the reliable "am I inside Orbital?" check.
 
 `orbital hook <event>` is used internally by the Claude Code hooks; it exits
 silently outside Orbital sessions and never blocks Claude.
