@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.20.0](https://github.com/jimbuck/orbital/compare/v1.19.0...v1.20.0) (2026-08-11)
+
+
+### Features
+
+* configurable agents with per-workspace profile directories ([#11](https://github.com/jimbuck/orbital/issues/11)) ([79bb3f1](https://github.com/jimbuck/orbital/commit/79bb3f1d9a4da476e5bf3cb01baff65b1e46a86e))
+
 # [1.19.0](https://github.com/jimbuck/orbital/compare/v1.18.0...v1.19.0) (2026-08-11)
 
 
