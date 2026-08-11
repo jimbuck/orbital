@@ -85,6 +85,11 @@ export function requireWorkspaceId(): string {
   return activeWorkspaceId
 }
 
+/** Non-throwing form, for callers that have a sane answer before boot resolution. */
+export function hasActiveWorkspace(): boolean {
+  return activeWorkspaceId !== null
+}
+
 function mapWorkspace(r: any): WorkspaceInfo {
   return { id: r.id, name: r.name, lastOpenedAt: r.last_opened_at, projectCount: r.project_count ?? 0 }
 }

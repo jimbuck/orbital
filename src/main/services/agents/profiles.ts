@@ -13,6 +13,7 @@
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { SUPPORTED_AGENTS } from '@shared/types'
+import { hasActiveWorkspace } from '../../db/repositories'
 import { getSettings } from '../settings'
 
 /** The machine default for a provider: its config-dir env var, else `~/<default>`. */
@@ -30,12 +31,11 @@ export function defaultProfileDir(providerId: string): string {
  * configured `configDir` when it sets one, else the machine default.
  */
 export function agentProfileDir(providerId: string): string {
-  try {
-    const configured = getSettings().agents.find((a) => a.provider === providerId)?.configDir?.trim()
-    if (configured) return configured
-  } catch {
-    // Settings need the DB and an active workspace; before that is up the
-    // machine default is the only sensible answer.
-  }
-  return defaultProfileDir(providerId)
+  // No active workspace yet (before boot resolution) is the ONE case with a sane
+  // fallback. A settings read that fails for any other reason must NOT be
+  // swallowed: quietly answering with the machine default would send an install
+  // to a profile the agent never reads — the exact bug this module exists to fix.
+  if (!hasActiveWorkspace()) return defaultProfileDir(providerId)
+  const configured = getSettings().agents.find((a) => a.provider === providerId)?.configDir?.trim()
+  return configured || defaultProfileDir(providerId)
 }

@@ -750,8 +750,13 @@ export default function Settings(): React.JSX.Element {
         {skillError && <div className="mt-2.5 text-[11px] text-red-2">{skillError}</div>}
       </div>
 
-      {/* Codex instructions — only relevant when this workspace runs Codex at all */}
-      {agents.some((a) => a.provider === 'codex') && (
+      {/* Codex instructions — only relevant when this workspace runs Codex at all.
+          Gated on the SAVED agents, not the unsaved draft above: install/remove
+          write to disk immediately, so offering them for a chip the user might
+          still cancel would leave a block behind for an agent that was never
+          configured. An install that already exists stays reachable either way,
+          so dropping the chip can never strand it. */}
+      {((settings?.agents ?? []).some((a) => a.provider === 'codex') || codex?.installed) && (
         <div className="mt-3 rounded-card border border-line-2 bg-bg/40 p-3.5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
