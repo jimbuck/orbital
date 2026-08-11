@@ -79,15 +79,18 @@ function briefingText({ project, worktree, providerName, hooksInstalled }: Brief
     `- Path: ${worktree.path}`,
     `- Branch: ${worktree.branch}`,
     '',
-    'The `orbital` CLI is on your PATH — use it to work with the cockpit:',
+    'The `orbital` CLI is on your PATH — use it to work with the cockpit. Add `--json` to any',
+    'command to get the raw payload instead of a table when you intend to parse it.',
     '- `orbital task add "<title>" [--description <text>] [--tags <a,b>]` — queue follow-up work you notice but should not tackle now.',
-    "- `orbital task list` — see the project's open tasks (number, status, title); `--all` includes done ones.",
+    "- `orbital task list [--status <s>] [--tag <t>]` — see the project's open tasks (number, status, title); `--all` includes done ones.",
     '- `orbital task show <number>` — full detail for one task (e.g. `orbital task show 12`).',
     '- `orbital task update <number> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <number>` when it is finished; `orbital task delete <number>` to drop one.',
+    '- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress.',
     "- `orbital worktrees` — list this project's worktrees.",
-    '- `orbital worktree new [--worktree <branch>] [name]` — open a new worktree, optionally on a fresh git branch.',
+    '- `orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [name]` — open a new worktree, on a fresh branch, an existing one, or forked from a given ref.',
     '- `orbital tab new <terminal|browser|editor|agent> [arg]` — open a tab in this worktree (browser arg = URL, editor arg = file path, agent arg = provider).',
-    '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click; `orbital server list` shows what is registered.'
+    '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click; `orbital server list` shows what is registered.',
+    '- `orbital whoami` — this worktree at a glance: project, branch, path, status, linked task, dev servers.'
   ]
   if (!hooksInstalled) {
     lines.push(

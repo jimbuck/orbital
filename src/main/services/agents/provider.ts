@@ -30,6 +30,14 @@ export interface AgentProvider {
   displayName: string
   /** Files that hint a project uses this provider (future auto-detection; unused for now). */
   detectFiles: string[]
+  /**
+   * Whether this CLI can be handed a per-launch briefing file. Only Claude takes
+   * one (`--append-system-prompt-file`); for the others Orbital would be writing
+   * a file nobody reads, so it doesn't generate one — they learn about the
+   * cockpit from profile-level instructions instead (see claude-skill.ts /
+   * codex-instructions.ts).
+   */
+  acceptsBriefingFile: boolean
   /** Resolve the executable + argv to spawn; throws a clear Error if unresolvable. */
   resolveCommand(ctx: AgentContext): Promise<ResolvedCommand>
 }

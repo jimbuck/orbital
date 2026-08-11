@@ -343,8 +343,14 @@ export interface Settings {
     /** Flash the taskbar button (FlashWindow) when a Worktree flips to needs-attention. */
     taskbarFlash: boolean
   }
-  /** Whether Orbital's Claude status hooks are installed in ~/.claude/settings.json. */
+  /**
+   * Mirror of the last hook install/remove, kept for display only. NOT
+   * authoritative: hooks live in a Claude profile dir that varies per workspace,
+   * so the source of truth is `claudeHooksStatus()`, which reads the file.
+   */
   claudeHooksInstalled: boolean
+  /** Same deal for the `orbital` skill — a mirror; `claudeSkillStatus()` is the truth. */
+  claudeSkillInstalled: boolean
   /** Wildcard list for env-file sync, applied to every project in the workspace (PRD §5). */
   envSyncPatterns: string[]
   /** Auto-run `git fetch` per project on an interval so ahead/behind stays current. */
@@ -508,6 +514,43 @@ export interface ClaudeHooksPlan {
   json: string
 }
 
+/**
+ * State of the opt-in `orbital` Agent Skill — a personal skill teaching Claude
+ * the `orbital` CLI, so sessions Orbital did NOT boot as agent tabs (a hand-run
+ * `claude` in a terminal tab) still know the cockpit is there.
+ */
+export interface ClaudeSkillStatus {
+  installed: boolean
+  /** Absolute path of the SKILL.md Orbital manages. */
+  skillPath: string
+  /** True when the file exists but was not written by Orbital (we never overwrite it). */
+  foreign: boolean
+}
+
+/** Preview of exactly what Orbital will write, for confirmation. */
+export interface ClaudeSkillPlan {
+  skillPath: string
+  /** The full SKILL.md Orbital would write. */
+  markdown: string
+}
+
+/**
+ * State of the opt-in Codex instructions — a managed block in the Codex
+ * profile's AGENTS.md, which is Codex's only always-loaded instructions file
+ * (it takes no per-launch briefing).
+ */
+export interface CodexInstructionsStatus {
+  installed: boolean
+  /** Absolute path of the AGENTS.md holding Orbital's block. */
+  path: string
+}
+
+/** Preview of the block Orbital would merge into that AGENTS.md. */
+export interface CodexInstructionsPlan {
+  path: string
+  markdown: string
+}
+
 /* ============================================================================
  * Events pushed from main -> renderer
  * ========================================================================== */
@@ -597,6 +640,14 @@ export const IPC = {
   claudeHooksPlan: 'orbital:claudeHooksPlan',
   installClaudeHooks: 'orbital:installClaudeHooks',
   removeClaudeHooks: 'orbital:removeClaudeHooks',
+  claudeSkillStatus: 'orbital:claudeSkillStatus',
+  claudeSkillPlan: 'orbital:claudeSkillPlan',
+  installClaudeSkill: 'orbital:installClaudeSkill',
+  removeClaudeSkill: 'orbital:removeClaudeSkill',
+  codexInstructionsStatus: 'orbital:codexInstructionsStatus',
+  codexInstructionsPlan: 'orbital:codexInstructionsPlan',
+  installCodexInstructions: 'orbital:installCodexInstructions',
+  removeCodexInstructions: 'orbital:removeCodexInstructions',
   createTab: 'orbital:createTab',
   closeTab: 'orbital:closeTab',
   renameTab: 'orbital:renameTab',
@@ -713,6 +764,22 @@ export interface OrbitalApi {
   installClaudeHooks(): Promise<ClaudeHooksStatus>
   /** Strip only Orbital's hook entries from ~/.claude/settings.json. */
   removeClaudeHooks(): Promise<ClaudeHooksStatus>
+  /** Whether Orbital's `orbital` skill is installed for this workspace's Claude profile. */
+  claudeSkillStatus(): Promise<ClaudeSkillStatus>
+  /** The exact SKILL.md Orbital would write (for the confirm dialog). */
+  claudeSkillPlan(): Promise<ClaudeSkillPlan>
+  /** Write the `orbital` skill into the Claude profile's skills directory. */
+  installClaudeSkill(): Promise<ClaudeSkillStatus>
+  /** Delete the skill Orbital wrote (never one it does not own). */
+  removeClaudeSkill(): Promise<ClaudeSkillStatus>
+  /** Whether Orbital's block is in this workspace's Codex AGENTS.md. */
+  codexInstructionsStatus(): Promise<CodexInstructionsStatus>
+  /** The exact block Orbital would merge in (for the confirm dialog). */
+  codexInstructionsPlan(): Promise<CodexInstructionsPlan>
+  /** Merge Orbital's block into the Codex profile's AGENTS.md (idempotent). */
+  installCodexInstructions(): Promise<CodexInstructionsStatus>
+  /** Strip only Orbital's block from that AGENTS.md. */
+  removeCodexInstructions(): Promise<CodexInstructionsStatus>
   createTab(worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig): Promise<Tab>
   closeTab(tabId: string): Promise<void>
   /** Set a tab's explicit title override; an empty title reverts to the derived one. */
@@ -826,6 +893,7 @@ export const ENV = {
 
 export type ControlCommand =
   | 'status'
+  | 'whoami'
   | 'worktrees'
   | 'worktree-new'
   | 'tab-new'

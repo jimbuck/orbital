@@ -14,6 +14,7 @@ import {
   type TabType,
   type TabConfig,
   type TerminalStatus,
+  type TaskStatus,
   type SplitDirection,
   type SplitWhere,
   type TaskPatch,
@@ -26,7 +27,7 @@ import {
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree } from './services/worktree'
-import { planWorktreeSync, WorktreesWatcher } from './services/worktree-scan'
+import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
 import { copyNodeModulesTree, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
@@ -34,6 +35,8 @@ import { getProvider } from './services/agents/provider'
 import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
 import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
+import * as claudeSkill from './services/agents/claude-skill'
+import * as codexInstructions from './services/agents/codex-instructions'
 import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
 import { activeControlPipePath, exportWorkspaceToFile, importWorkspaceFromFile } from './services/workspaces'
@@ -90,14 +93,20 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
   // The workspace's per-agent launch tweaks (profile dir, exec path, args, env).
   const agentConfig = getSettings().agents.find((a) => a.provider === provider.id)
   try {
-    const briefingPath = writeBriefing({
-      project,
-      worktree,
-      tabId: tab.id,
-      providerName: provider.id === 'claude' ? 'Claude Code' : provider.displayName,
-      // Read the live settings.json (the source of truth), not the cached DB mirror.
-      hooksInstalled: claudeHooks.status().installed
-    })
+    // Only providers that can be handed a briefing get one written — the rest
+    // would leave an unread file behind on every launch.
+    const briefingPath = provider.acceptsBriefingFile
+      ? writeBriefing({
+          project,
+          worktree,
+          tabId: tab.id,
+          providerName: provider.id === 'claude' ? 'Claude Code' : provider.displayName,
+          // The status hooks are CLAUDE's: another provider's session reports
+          // nothing on its own, so it always needs the self-report instructions.
+          // Read the live settings.json (the source of truth), not the DB mirror.
+          hooksInstalled: provider.id === 'claude' && claudeHooks.status().installed
+        })
+      : null
     const command = await provider.resolveCommand({
       project,
       worktree,
@@ -277,12 +286,19 @@ export async function reconcileProjectWorktrees(projectId: string): Promise<void
   } catch {
     return // repo dir missing or not a git repo — leave the stored rows alone
   }
+  // Everything from here to the end of the apply below is synchronous, so it sees
+  // one consistent picture: no create can slip in between the rows snapshot, the
+  // in-flight list, and the writes.
   const rows = repo.worktrees.list().filter((w) => w.projectId === projectId)
-  // A checkout that IS another project belongs to that project's rail entry.
-  const skip = repo.projects
-    .list()
-    .filter((p) => p.id !== projectId)
-    .map((p) => p.repoPath)
+  // A checkout that IS another project belongs to that project's rail entry; one
+  // Orbital is still creating gets its row from createLinkedWorktree, not here.
+  const skip = [
+    ...repo.projects
+      .list()
+      .filter((p) => p.id !== projectId)
+      .map((p) => p.repoPath),
+    ...pathsBeingCreated()
+  ]
   const plan = planWorktreeSync(project, rows, entries, skip)
   if (!plan.createRoot && plan.adopt.length === 0 && plan.remove.length === 0 && plan.branchUpdates.length === 0) {
     return
@@ -344,6 +360,36 @@ function acceptStatusEvent(terminalId: string, firedAt: unknown): boolean {
  * straight to work, while typing at an idle prompt is just composing.
  */
 const attentionKind = new Map<string, string>()
+
+/**
+ * Notification types that mean Claude is blocked on a human. Beyond the two
+ * prompt kinds, Claude raises elicitation dialogs (a question or a URL to visit)
+ * and agent-input requests — all of them a stopped agent waiting for a person,
+ * which is exactly what the rail badge and the chime exist to surface.
+ */
+const BLOCKING_NOTIFICATIONS = new Set([
+  'permission_prompt',
+  'idle_prompt',
+  'elicitation_dialog',
+  'elicitation_url_dialog',
+  'agent_needs_input'
+])
+
+/** Notification types that mean such a block just resolved and Claude carries on. */
+const RESOLVED_NOTIFICATIONS = new Set(['elicitation_complete', 'elicitation_response'])
+
+/**
+ * Where a tab goes when the human types into it while it is blocked. Answering a
+ * permission prompt or an elicitation dialog puts Claude straight back to work
+ * (and a long approved tool emits no hook until it finishes); typing at an idle
+ * prompt is just composing the next instruction, so that stays idle until the
+ * UserPromptSubmit hook fires.
+ */
+function statusAfterHumanInput(kind: string | undefined): TerminalStatus {
+  return kind === 'permission_prompt' || kind === 'elicitation_dialog' || kind === 'elicitation_url_dialog'
+    ? 'working'
+    : 'idle'
+}
 
 // Focus-in/out reports and mouse-tracking sequences a TUI subscribed to — sent
 // by merely clicking into or scrolling a terminal, so not a human response.
@@ -653,6 +699,28 @@ export function registerIpc(): void {
     return st
   })
 
+  // ---- the `orbital` Agent Skill (opt-in, this workspace's Claude profile) ----
+  h(IPC.claudeSkillStatus, () => claudeSkill.status())
+  h(IPC.claudeSkillPlan, () => claudeSkill.plan())
+  h(IPC.installClaudeSkill, () => {
+    const st = claudeSkill.install()
+    setSettings({ ...getSettings(), claudeSkillInstalled: st.installed })
+    broadcast()
+    return st
+  })
+  h(IPC.removeClaudeSkill, () => {
+    const st = claudeSkill.remove()
+    setSettings({ ...getSettings(), claudeSkillInstalled: st.installed })
+    broadcast()
+    return st
+  })
+
+  // ---- Codex instructions (opt-in, a managed block in the profile's AGENTS.md) ----
+  h(IPC.codexInstructionsStatus, () => codexInstructions.status())
+  h(IPC.codexInstructionsPlan, () => codexInstructions.plan())
+  h(IPC.installCodexInstructions, () => codexInstructions.install())
+  h(IPC.removeCodexInstructions, () => codexInstructions.remove())
+
   h(IPC.createTab, (_e, worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
     const tab = createTabInWorktree(worktreeId, paneId, type, config)
     broadcast()
@@ -741,18 +809,14 @@ export function registerIpc(): void {
     // If the human types into a PTY flagged needs-attention, they've responded —
     // so it is no longer blocked on a human. This covers agent tabs AND plain
     // terminal tabs (an agent launched by hand, or `orbital status`, flags those
-    // just the same). Where it goes depends on why it was blocked: answering a
-    // permission prompt puts Claude straight to work (and a long approved tool
-    // emits no hook until it finishes) → working; typing at an idle prompt is
-    // just composing the next instruction → idle, and the UserPromptSubmit hook
-    // flips it to working on actual submit. Uses INPUT only — never scrapes
-    // terminal output (req 7).
+    // just the same). Where it goes depends on why it was blocked — see
+    // statusAfterHumanInput. Uses INPUT only — never scrapes terminal output (req 7).
     const tab = repo.tabs.get(tabId)
     if (tab && isPtyTabType(tab.type) && tab.status === 'needs_attention' && isHumanKeystroke(data)) {
       // The human's response supersedes anything already in flight: hook events
       // fired before this moment must not overwrite the flip below.
       statusAppliedAt.set(tabId, Date.now())
-      const next = attentionKind.get(tabId) === 'permission_prompt' ? 'working' : 'idle'
+      const next = statusAfterHumanInput(attentionKind.get(tabId))
       attentionKind.delete(tabId)
       repo.tabs.updateStatus(tabId, next)
       repo.worktrees.recomputeStatus(tab.worktreeId)
@@ -919,7 +983,14 @@ function hookEventToStatus(event: string, payload: Record<string, unknown>): Ter
     case 'Notification': {
       // The load-bearing signal: Claude is blocked waiting on a human.
       const kind = String(payload.notification_type ?? '')
-      return kind === 'permission_prompt' || kind === 'idle_prompt' ? 'needs_attention' : null
+      if (BLOCKING_NOTIFICATIONS.has(kind)) return 'needs_attention'
+      // A dialog answered somewhere other than this terminal (a URL elicitation
+      // opened in the browser) produces no keystroke here, so without this the
+      // worktree would sit on needs-attention until the next tool call.
+      if (RESOLVED_NOTIFICATIONS.has(kind)) return 'working'
+      // Everything else — auth_success, agent_completed, types added in future
+      // Claude versions — says nothing about whether a human is needed.
+      return null
     }
     case 'UserPromptSubmit':
     case 'PreToolUse':
@@ -997,29 +1068,91 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         }
         return { ok: true, data: { status } }
       }
+      case 'whoami': {
+        // Self-inspection: an agent knows its ids from the env, but not what they
+        // mean. One call answers "where am I, and what does the cockpit think I'm doing".
+        if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
+        const worktree = repo.worktrees.get(req.worktreeId)
+        if (!worktree) return { ok: false, error: 'worktree not found' }
+        const project = repo.projects.get(worktree.projectId)
+        const tab = req.terminalId ? repo.tabs.get(req.terminalId) : undefined
+        const task = worktree.taskId ? repo.tasks.get(worktree.taskId) : undefined
+        return {
+          ok: true,
+          data: {
+            project: project?.name ?? '',
+            projectId: worktree.projectId,
+            repoPath: project?.repoPath ?? '',
+            worktree: worktree.name,
+            worktreeId: worktree.id,
+            kind: worktree.kind,
+            branch: worktree.branch,
+            path: worktree.path,
+            status: tab?.status ?? worktree.status,
+            terminalId: req.terminalId ?? '',
+            task: task ? { seq: task.seq, title: task.title, status: task.status } : null,
+            servers: runtime.devServersFor(worktree.id)
+          }
+        }
+      }
       case 'worktrees': {
         const pid = req.projectId
         const list = repo.worktrees
           .list()
           .filter((w) => !pid || w.projectId === pid)
-          .map((w) => ({ id: w.id, name: w.name, branch: w.branch, status: w.status, kind: w.kind }))
+          .map((w) => ({
+            id: w.id,
+            name: w.name,
+            branch: w.branch,
+            status: w.status,
+            kind: w.kind,
+            path: w.path
+          }))
         return { ok: true, data: list }
       }
       case 'worktree-new': {
         if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const project = repo.projects.get(req.projectId)
         if (!project) return { ok: false, error: 'project not found' }
-        const branch = String(req.args.worktree ?? req.args.name ?? `worktree-${Date.now()}`)
+        // A task number/id may come along, both to seed the branch name and to
+        // link the task — same as the cockpit's "start a worktree from a task".
+        let task: ReturnType<typeof repo.tasks.get> | undefined
+        if (req.args.task !== undefined) {
+          const resolved = resolveTask(req.projectId, String(req.args.task).trim())
+          if (!resolved.task) return { ok: false, error: resolved.error }
+          task = resolved.task
+        }
+        const existingBranch = req.args.existingBranch ? String(req.args.existingBranch) : undefined
+        const branch = String(req.args.worktree ?? req.args.name ?? task?.title ?? `worktree-${Date.now()}`)
         const worktree = await createLinkedWorktree({
           project,
           branch,
-          name: req.args.name ? String(req.args.name) : undefined
+          existingBranch,
+          name: req.args.name ? String(req.args.name) : task?.title,
+          baseRef: req.args.base ? String(req.args.base) : undefined,
+          taskId: task?.id ?? null
         })
+        // Link the task both ways and start it, matching the play-button flow.
+        if (task) {
+          repo.tasks.setWorktree(task.id, worktree.id)
+          if (task.status !== 'in_progress' && task.status !== 'done') {
+            repo.tasks.update(task.id, { status: 'in_progress' })
+          }
+        }
         runtime.gitWatcher.watch(worktree.path)
         runtime.ensureEnvWatcher(project.id)
         beginWorktreeSetup(worktree, project.repoPath)
         runtime.broadcastState()
-        return { ok: true, data: { id: worktree.id, name: worktree.name, branch: worktree.branch } }
+        return {
+          ok: true,
+          data: {
+            id: worktree.id,
+            name: worktree.name,
+            branch: worktree.branch,
+            path: worktree.path,
+            task: task ? { seq: task.seq, title: task.title } : null
+          }
+        }
       }
       case 'tab-new': {
         if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
@@ -1079,9 +1212,19 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
       case 'task-list': {
         if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
         const all = req.args.all === true || req.args.all === 'true'
+        // Explicit --status implies --all: asking for `done` and getting nothing
+        // because the default hides done tasks would just be confusing.
+        let wanted: TaskStatus | null = null
+        if (req.args.status !== undefined) {
+          wanted = normalizeTaskStatus(String(req.args.status))
+          if (!wanted) return { ok: false, error: `unknown task status '${req.args.status}'` }
+        }
+        const tag = req.args.tag !== undefined ? String(req.args.tag).trim().toLowerCase() : null
         const list = repo.tasks
           .list()
-          .filter((t) => t.projectId === req.projectId && (all || t.status !== 'done'))
+          .filter((t) => t.projectId === req.projectId && (all || wanted !== null || t.status !== 'done'))
+          .filter((t) => wanted === null || t.status === wanted)
+          .filter((t) => !tag || t.tags.some((x) => x.toLowerCase() === tag))
           .map((t) => ({
             id: t.id,
             seq: t.seq,
