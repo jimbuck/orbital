@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.21.0](https://github.com/jimbuck/orbital/compare/v1.20.1...v1.21.0) (2026-08-11)
+
+
+### Features
+
+* teach agents the orbital CLI, and fill the CLI's gaps ([#12](https://github.com/jimbuck/orbital/issues/12)) ([3561e5b](https://github.com/jimbuck/orbital/commit/3561e5b7a84aafd18a51872fafeca46f20347967))
+
 ## [1.20.1](https://github.com/jimbuck/orbital/compare/v1.20.0...v1.20.1) (2026-08-11)
 
 
