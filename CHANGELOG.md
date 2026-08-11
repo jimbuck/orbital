@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.19.0](https://github.com/jimbuck/orbital/compare/v1.18.0...v1.19.0) (2026-08-11)
+
+
+### Features
+
+* auto-focus a terminal tab when it opens or is selected ([1c9d4d7](https://github.com/jimbuck/orbital/commit/1c9d4d70433278ee6002ff5353b2caccbcdc7923))
+
 # [1.18.0](https://github.com/jimbuck/orbital/compare/v1.17.0...v1.18.0) (2026-07-24)
 
 

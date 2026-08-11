@@ -1,7 +1,7 @@
 {
   "name": "orbital",
   "productName": "Orbital",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Get work done from orbit — a native Windows cockpit for running many interactive coding-agent sessions side by side.",
   "main": "./out/main/index.js",
   "author": "Jim Buck",
