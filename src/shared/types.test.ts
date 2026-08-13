@@ -54,6 +54,20 @@ describe('normalizeAgentConfigs', () => {
     ])
   })
 
+  // findAgentConfig matches ids before providers, so an id spelling another
+  // provider would hijack every legacy reference meant for that provider.
+  it("re-mints an id that spells a different provider's name", () => {
+    const out = normalizeAgentConfigs([
+      { id: 'codex', name: 'Mine', provider: 'claude' },
+      { id: 'codex', name: 'Codex', provider: 'codex' }
+    ])
+    expect(out?.map((a) => [a.id, a.provider])).toEqual([
+      ['claude', 'claude'],
+      ['codex', 'codex']
+    ])
+    expect(findAgentConfig(out!, 'codex')?.provider).toBe('codex')
+  })
+
   it('leaves a name the user typed alone, and numbers around it', () => {
     const out = normalizeAgentConfigs([
       { provider: 'claude', name: 'Claude' },

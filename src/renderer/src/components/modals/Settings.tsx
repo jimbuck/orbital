@@ -378,10 +378,13 @@ export default function Settings(): React.JSX.Element {
   const [saving, setSaving] = useState(false)
 
   // Per-project agent config. A default stored before profiles had ids names a
-  // provider — resolve it to the profile it refers to.
-  const [agentId, setAgentId] = useState(
-    () => findAgentConfig(settings?.agents ?? defaultAgentConfigs(), project?.defaultAgentId)?.id ?? 'claude'
-  )
+  // provider — resolve it to the profile it refers to. The fallback is the first
+  // CONFIGURED profile, never a hard-coded id: a workspace that dropped Claude
+  // would otherwise show (and save) a default pointing at nothing.
+  const [agentId, setAgentId] = useState(() => {
+    const configured = settings?.agents ?? defaultAgentConfigs()
+    return findAgentConfig(configured, project?.defaultAgentId)?.id ?? configured[0]?.id ?? 'claude'
+  })
   const [agentExecPath, setAgentExecPath] = useState(() => project?.agentExecPath ?? '')
 
   const shellOptions = SHELL_OPTIONS.includes(defaultShell) ? SHELL_OPTIONS : [defaultShell, ...SHELL_OPTIONS]
@@ -407,15 +410,15 @@ export default function Settings(): React.JSX.Element {
     ])
 
   // Never allow emptying the list — there must always be at least one agent
-  // available in the new-tab menus.
-  const removeAgent = (id: string): void =>
-    setAgents((cur) => {
-      if (cur.length <= 1) return cur
-      const next = cur.filter((a) => a.id !== id)
-      // The project's default cannot point at a profile that no longer exists.
-      if (id === agentId) setAgentId(next[0].id)
-      return next
-    })
+  // available in the new-tab menus. Computed from the current list rather than
+  // inside a setAgents updater: those must stay pure (React may run them twice).
+  const removeAgent = (id: string): void => {
+    if (agents.length <= 1) return
+    const next = agents.filter((a) => a.id !== id)
+    setAgents(next)
+    // The project's default cannot point at a profile that no longer exists.
+    if (id === agentId) setAgentId(next[0].id)
+  }
 
   // Commit a card's "KEY=value" env input into its entry's env map.
   const commitEnvDraft = (id: string): void => {

@@ -174,8 +174,12 @@ export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown):
       if (!provider || !isSupportedProvider(provider)) continue
       const rawId = typeof a.id === 'string' ? a.id.trim() : ''
       // A duplicate id would make two profiles indistinguishable to every
-      // reference; mint a fresh one rather than dropping the profile.
-      const id = rawId && !taken.has(rawId) ? rawId : nextAgentId(provider, taken)
+      // reference; mint a fresh one rather than dropping the profile. An id that
+      // spells a DIFFERENT provider is re-minted too: findAgentConfig matches ids
+      // before providers, so a Claude profile called `codex` would swallow every
+      // legacy reference meant for the real Codex profile.
+      const usable = rawId && !taken.has(rawId) && !(isSupportedProvider(rawId) && rawId !== provider)
+      const id = usable ? rawId : nextAgentId(provider, taken)
       taken.add(id)
       // A minted name is numbered off the ones already used ("Claude", "Claude
       // 2"): two unnamed profiles of a provider would otherwise be
