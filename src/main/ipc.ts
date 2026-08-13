@@ -6,6 +6,7 @@ import {
   IPC,
   ENV,
   SUPPORTED_AGENTS,
+  findAgentConfig,
   normalizeStatus,
   normalizeTaskStatus,
   isPtyTabType,
@@ -32,6 +33,7 @@ import { copyNodeModulesTree, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
 import { getProvider } from './services/agents/provider'
+import { agentProfileDir, inspectProfileDir, resolveAgent } from './services/agents/profiles'
 import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
 import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
@@ -89,9 +91,14 @@ function spawnTerminal(worktree: Worktree, tab: Tab): void {
 async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
   const project = repo.projects.get(worktree.projectId)
   if (!project) return
-  const provider = getProvider(tab.config.agentProvider || project.defaultAgentProvider)
-  // The workspace's per-agent launch tweaks (profile dir, exec path, args, env).
-  const agentConfig = getSettings().agents.find((a) => a.provider === provider.id)
+  // The configured profile this tab launches (profile dir, exec path, args, env),
+  // falling back to the project's default. `agentProvider` is what tabs created
+  // before profiles had ids stored; findAgentConfig still resolves it.
+  const agentConfig = findAgentConfig(
+    getSettings().agents,
+    tab.config.agentId || tab.config.agentProvider || project.defaultAgentId
+  )
+  const provider = getProvider(agentConfig?.provider)
   try {
     // Only providers that can be handed a briefing get one written — the rest
     // would leave an unread file behind on every launch.
@@ -103,8 +110,10 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
           providerName: provider.id === 'claude' ? 'Claude Code' : provider.displayName,
           // The status hooks are CLAUDE's: another provider's session reports
           // nothing on its own, so it always needs the self-report instructions.
-          // Read the live settings.json (the source of truth), not the DB mirror.
-          hooksInstalled: provider.id === 'claude' && claudeHooks.status().installed
+          // Read the settings.json of THIS profile (the source of truth) — a
+          // sibling Claude profile's install says nothing about this one.
+          hooksInstalled:
+            provider.id === 'claude' && !!agentConfig && claudeHooks.status(agentConfig).installed
         })
       : null
     const command = await provider.resolveCommand({
@@ -130,7 +139,9 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
         // Entry env first: the dedicated profile-dir field beats a hand-typed
         // duplicate, and Orbital's control vars (ids, socket, PATH) stay authoritative.
         ...agentConfig?.env,
-        ...(envVar && agentConfig?.configDir ? { [envVar]: agentConfig.configDir } : {}),
+        // The EXPANDED directory, which is also what the installers write into —
+        // exporting the raw `~/…` would point the CLI at the worktree instead.
+        ...(envVar && agentConfig?.configDir ? { [envVar]: agentProfileDir(agentConfig) } : {}),
         ...terminalEnv(worktree, tab.id)
       },
       command
@@ -682,43 +693,27 @@ export function registerIpc(): void {
     broadcast()
   })
 
-  // ---- Claude status hooks (opt-in, machine-global ~/.claude/settings.json) ----
-  h(IPC.claudeHooksStatus, () => claudeHooks.status())
-  h(IPC.claudeHooksPlan, () => claudeHooks.plan())
-  h(IPC.installClaudeHooks, () => {
-    const st = claudeHooks.install()
-    setSettings({ ...getSettings(), claudeHooksInstalled: st.installed })
-    broadcast()
-    return st
-  })
-  h(IPC.removeClaudeHooks, () => {
-    const st = claudeHooks.remove()
-    setSettings({ ...getSettings(), claudeHooksInstalled: st.installed })
-    broadcast()
-    return st
-  })
+  h(IPC.inspectProfileDir, (_e, provider: string, configDir: string) => inspectProfileDir(provider, configDir))
 
-  // ---- the `orbital` Agent Skill (opt-in, this workspace's Claude profile) ----
-  h(IPC.claudeSkillStatus, () => claudeSkill.status())
-  h(IPC.claudeSkillPlan, () => claudeSkill.plan())
-  h(IPC.installClaudeSkill, () => {
-    const st = claudeSkill.install()
-    setSettings({ ...getSettings(), claudeSkillInstalled: st.installed })
-    broadcast()
-    return st
-  })
-  h(IPC.removeClaudeSkill, () => {
-    const st = claudeSkill.remove()
-    setSettings({ ...getSettings(), claudeSkillInstalled: st.installed })
-    broadcast()
-    return st
-  })
+  // ---- Claude status hooks (opt-in, per agent profile's settings.json) ----
+  // Every channel below names the agent profile it acts on: the files live in
+  // that profile's directory, so two Claude profiles are two independent installs.
+  h(IPC.claudeHooksStatus, (_e, agentId: string) => claudeHooks.status(resolveAgent(agentId)))
+  h(IPC.claudeHooksPlan, (_e, agentId: string) => claudeHooks.plan(resolveAgent(agentId)))
+  h(IPC.installClaudeHooks, (_e, agentId: string) => claudeHooks.install(resolveAgent(agentId)))
+  h(IPC.removeClaudeHooks, (_e, agentId: string) => claudeHooks.remove(resolveAgent(agentId)))
+
+  // ---- the `orbital` Agent Skill (opt-in, per Claude profile) ----
+  h(IPC.claudeSkillStatus, (_e, agentId: string) => claudeSkill.status(resolveAgent(agentId)))
+  h(IPC.claudeSkillPlan, (_e, agentId: string) => claudeSkill.plan(resolveAgent(agentId)))
+  h(IPC.installClaudeSkill, (_e, agentId: string) => claudeSkill.install(resolveAgent(agentId)))
+  h(IPC.removeClaudeSkill, (_e, agentId: string) => claudeSkill.remove(resolveAgent(agentId)))
 
   // ---- Codex instructions (opt-in, a managed block in the profile's AGENTS.md) ----
-  h(IPC.codexInstructionsStatus, () => codexInstructions.status())
-  h(IPC.codexInstructionsPlan, () => codexInstructions.plan())
-  h(IPC.installCodexInstructions, () => codexInstructions.install())
-  h(IPC.removeCodexInstructions, () => codexInstructions.remove())
+  h(IPC.codexInstructionsStatus, (_e, agentId: string) => codexInstructions.status(resolveAgent(agentId)))
+  h(IPC.codexInstructionsPlan, (_e, agentId: string) => codexInstructions.plan(resolveAgent(agentId)))
+  h(IPC.installCodexInstructions, (_e, agentId: string) => codexInstructions.install(resolveAgent(agentId)))
+  h(IPC.removeCodexInstructions, (_e, agentId: string) => codexInstructions.remove(resolveAgent(agentId)))
 
   h(IPC.createTab, (_e, worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
     const tab = createTabInWorktree(worktreeId, paneId, type, config)
@@ -1160,14 +1155,21 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           return { ok: false, error: `unknown tab type '${type}'` }
         }
         const arg = req.args.arg ? String(req.args.arg) : undefined
+        // For agents the argument names a configured profile — its id, its name
+        // (as typed in Settings, case-insensitively), or a provider id.
+        if (type === 'agent' && arg) {
+          const agents = getSettings().agents
+          const agent =
+            findAgentConfig(agents, arg) ?? agents.find((a) => a.name.toLowerCase() === arg.toLowerCase())
+          if (!agent) {
+            return { ok: false, error: `no agent '${arg}' is configured (try: ${agents.map((a) => a.name).join(', ')})` }
+          }
+          const tab = createTabInWorktree(req.worktreeId, null, type, { agentId: agent.id })
+          runtime.broadcastState()
+          return { ok: true, data: { id: tab.id, type: tab.type } }
+        }
         const config: TabConfig =
-          type === 'browser'
-            ? { url: arg }
-            : type === 'editor'
-              ? { filePath: arg }
-              : type === 'agent'
-                ? { agentProvider: arg }
-                : {}
+          type === 'browser' ? { url: arg } : type === 'editor' ? { filePath: arg } : {}
         const tab = createTabInWorktree(req.worktreeId, null, type, config)
         runtime.broadcastState()
         return { ok: true, data: { id: tab.id, type: tab.type } }

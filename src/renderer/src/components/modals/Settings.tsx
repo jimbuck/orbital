@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
-import type {
-  Settings as SettingsModel,
-  ClaudeHooksStatus,
-  ClaudeHooksPlan,
-  ClaudeSkillStatus,
-  ClaudeSkillPlan,
-  CodexInstructionsStatus,
-  CodexInstructionsPlan,
-  ThemeMode,
-  AgentConfig
+import type { Settings as SettingsModel, ThemeMode, AgentConfig, ProfileDirInfo } from '@shared/types'
+import {
+  SUPPORTED_AGENTS,
+  defaultAgentConfigs,
+  findAgentConfig,
+  formatArgsString,
+  nextAgentId,
+  nextAgentName,
+  normalizeAgentConfigs,
+  parseArgsString,
+  providerLabel
 } from '@shared/types'
-import { SUPPORTED_AGENTS, defaultAgentConfigs, normalizeAgentConfigs, parseArgsString, formatArgsString } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
 
 /** Common Windows shells offered in the default-shell picker. */
@@ -76,6 +76,280 @@ function AlertRow({
 const envChip =
   'inline-flex items-center gap-2 rounded-[7px] bg-accent/10 border border-accent/25 pl-[11px] pr-[9px] py-[5px] font-mono text-[11.5px] text-blue'
 
+/** Normalized view of one installable file, whichever kind it is. */
+interface InstallState {
+  installed: boolean
+  /** Absolute path of the file Orbital manages for this profile. */
+  path: string
+  /** Exists but was not written by Orbital — we refuse to overwrite it (skill only). */
+  foreign?: boolean
+}
+
+/**
+ * The three things Orbital can install into an agent profile's directory. Each
+ * call names the profile, so a workspace running two Claude profiles installs
+ * (and reports) them independently.
+ */
+const INSTALLABLES = {
+  hooks: {
+    title: 'Claude status hooks',
+    describe: (path: string) => (
+      <>
+        Let Worktrees report status from Claude&apos;s own lifecycle events — no agent self-reporting
+        needed. Writes only to <span className="break-all font-mono text-text-2">{path}</span>, and
+        leaves any hooks already there untouched.
+      </>
+    ),
+    installLabel: 'Set up Claude status hooks',
+    removeLabel: 'Remove Claude hooks',
+    confirmLabel: 'Confirm & write',
+    removeConfirmLabel: 'Remove hooks',
+    /* Hooks run shell commands with the user's permissions — the one preview that warns. */
+    warn: true,
+    previewIntro: 'Hooks run shell commands with your full permissions. Review before writing:',
+    removeIntro: "Remove Orbital's hook entries from settings.json? Other hooks stay intact.",
+    status: async (id: string): Promise<InstallState> => {
+      const s = await window.orbital.claudeHooksStatus(id)
+      return { installed: s.installed, path: s.settingsPath }
+    },
+    preview: async (id: string): Promise<string> => (await window.orbital.claudeHooksPlan(id)).json,
+    install: (id: string) => window.orbital.installClaudeHooks(id),
+    remove: (id: string) => window.orbital.removeClaudeHooks(id)
+  },
+  skill: {
+    title: 'The orbital skill for Claude',
+    describe: (path: string) => (
+      <>
+        Teach Claude the <span className="font-mono text-text-2">orbital</span> CLI — reporting status,
+        filing tasks, opening tabs — in sessions Orbital did not boot as an agent tab (a{' '}
+        <span className="font-mono text-text-2">claude</span> you start yourself with this profile).
+        Agent tabs are already briefed. Writes one file:{' '}
+        <span className="break-all font-mono text-text-2">{path}</span>
+      </>
+    ),
+    installLabel: 'Install the orbital skill',
+    removeLabel: 'Remove the orbital skill',
+    confirmLabel: 'Confirm & write',
+    removeConfirmLabel: 'Remove skill',
+    warn: false,
+    previewIntro: 'Review the skill before writing it:',
+    removeIntro: 'Delete the skill Orbital installed? Nothing else in the profile is touched.',
+    foreignNote: (
+      <>
+        A skill named <span className="font-mono">orbital</span> already exists there and was not
+        written by Orbital — move or delete it first.
+      </>
+    ),
+    status: async (id: string): Promise<InstallState> => {
+      const s = await window.orbital.claudeSkillStatus(id)
+      return { installed: s.installed, path: s.skillPath, foreign: s.foreign }
+    },
+    preview: async (id: string): Promise<string> => (await window.orbital.claudeSkillPlan(id)).markdown,
+    install: (id: string) => window.orbital.installClaudeSkill(id),
+    remove: (id: string) => window.orbital.removeClaudeSkill(id)
+  },
+  codex: {
+    title: 'Orbital instructions for Codex',
+    describe: (path: string) => (
+      <>
+        Codex takes no per-launch briefing, so it learns the{' '}
+        <span className="font-mono text-text-2">orbital</span> CLI from its own always-loaded
+        instructions. Orbital merges a short marked block into{' '}
+        <span className="break-all font-mono text-text-2">{path}</span>, leaving whatever else is in
+        that file alone.
+      </>
+    ),
+    installLabel: 'Install the Codex instructions',
+    removeLabel: 'Remove the Codex instructions',
+    confirmLabel: 'Confirm & write',
+    removeConfirmLabel: 'Remove block',
+    warn: false,
+    previewIntro: 'Every Codex session using this profile loads this. Review it before writing:',
+    removeIntro: "Remove Orbital's block from AGENTS.md? The rest of the file stays intact.",
+    status: async (id: string): Promise<InstallState> => {
+      const s = await window.orbital.codexInstructionsStatus(id)
+      return { installed: s.installed, path: s.path }
+    },
+    preview: async (id: string): Promise<string> => (await window.orbital.codexInstructionsPlan(id)).markdown,
+    install: (id: string) => window.orbital.installCodexInstructions(id),
+    remove: (id: string) => window.orbital.removeCodexInstructions(id)
+  }
+} as const
+
+type InstallKind = keyof typeof INSTALLABLES
+
+/** Which installs each provider offers, in card order. */
+const PROVIDER_INSTALLS: Record<string, InstallKind[]> = {
+  claude: ['hooks', 'skill'],
+  codex: ['codex']
+}
+
+/**
+ * What the typed profile directory really points at. Nothing expands `~` or
+ * `%VAR%` on the way to the agent (it is spawned without a shell), so Orbital
+ * expands them itself — and shows the result here, because a path that resolves
+ * somewhere unexpected looks exactly like "my profile was ignored": the agent
+ * launches into a brand-new profile and asks you to sign in again.
+ */
+function ProfileDirNote({ provider, configDir }: { provider: string; configDir: string }): React.JSX.Element | null {
+  const [info, setInfo] = useState<ProfileDirInfo | null>(null)
+  const typed = configDir.trim()
+
+  useEffect(() => {
+    let live = true
+    setInfo(null)
+    if (!typed) return
+    // Debounced: this runs on every keystroke in the field, and each call stats a disk path.
+    const timer = setTimeout(() => {
+      void window.orbital
+        .inspectProfileDir(provider, typed)
+        .then((r) => live && setInfo(r))
+        .catch(() => undefined)
+    }, 300)
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [provider, typed])
+
+  if (!info) return null
+  const expanded = info.path !== typed
+  if (info.exists && !expanded) return null // says nothing the field doesn't already
+  return (
+    <div className={`mt-1.5 text-[11px] ${info.exists ? 'text-dim' : 'text-amber-2'}`}>
+      {expanded && (
+        <span>
+          Resolves to <span className="break-all font-mono">{info.path}</span>
+          {info.exists ? '' : ' · '}
+        </span>
+      )}
+      {!info.exists && <span>no directory there yet — the agent would start a fresh profile</span>}
+    </div>
+  )
+}
+
+/**
+ * One install/remove panel for a profile — status badge, a preview the user must
+ * confirm, and the button. Everything it writes lands in that profile's own
+ * directory, so it always reads its state back from disk rather than trusting a
+ * stored flag.
+ */
+function InstallPanel({ agentId, kind }: { agentId: string; kind: InstallKind }): React.JSX.Element {
+  const spec = INSTALLABLES[kind]
+  const [state, setState] = useState<InstallState | null>(null)
+  const [confirm, setConfirm] = useState<{ mode: 'install'; preview: string } | { mode: 'remove' } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setConfirm(null)
+    void spec
+      .status(agentId)
+      .then((s) => live && setState(s))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [agentId, spec])
+
+  const startInstall = async (): Promise<void> => {
+    setError(null)
+    try {
+      setConfirm({ mode: 'install', preview: await spec.preview(agentId) })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not build the preview.')
+    }
+  }
+
+  const apply = async (): Promise<void> => {
+    if (!confirm) return
+    setBusy(true)
+    setError(null)
+    try {
+      // install() refuses to touch a file Orbital does not own (or cannot parse),
+      // so these can reject — surface that rather than silently failing.
+      if (confirm.mode === 'install') await spec.install(agentId)
+      else await spec.remove(agentId)
+      setState(await spec.status(agentId))
+      setConfirm(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update the files.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const foreignNote = 'foreignNote' in spec ? spec.foreignNote : null
+
+  return (
+    <div className="mt-3 rounded-card border border-line-2 bg-bg/40 p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold text-text-2">{spec.title}</div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
+            {spec.describe(state?.path ?? '…')}
+          </p>
+        </div>
+        <span
+          className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
+            state?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
+          }`}
+        >
+          {state?.installed ? 'Installed' : 'Not installed'}
+        </span>
+      </div>
+
+      {confirm ? (
+        <div className="mt-3">
+          {confirm.mode === 'install' ? (
+            <>
+              <div
+                className={`flex items-center gap-2 text-[11.5px] ${spec.warn ? 'text-amber-2' : 'text-text-3'}`}
+              >
+                {spec.warn && <AlertTriangle size={13} strokeWidth={1.5} className="flex-none" />}
+                {spec.previewIntro}
+              </div>
+              {/* Fixed dark code block: pin a light foreground (not a theme token) so
+                  the preview stays readable in light mode too. */}
+              <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#aab2c0]">
+                {confirm.preview}
+              </pre>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-[11.5px] text-text-3">
+              <AlertTriangle size={13} strokeWidth={1.5} className="flex-none text-amber-2" />
+              {spec.removeIntro}
+            </div>
+          )}
+          <div className="mt-2.5 flex items-center justify-end gap-2">
+            <button type="button" className={ghostBtn} onClick={() => setConfirm(null)} disabled={busy}>
+              Cancel
+            </button>
+            <button type="button" className={primaryBtn} onClick={apply} disabled={busy}>
+              {confirm.mode === 'install' ? spec.confirmLabel : spec.removeConfirmLabel}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3">
+          {state?.installed ? (
+            <button type="button" className={ghostBtn} onClick={() => setConfirm({ mode: 'remove' })}>
+              {spec.removeLabel}
+            </button>
+          ) : (
+            <button type="button" className={ghostBtn} onClick={startInstall} disabled={state?.foreign}>
+              {spec.installLabel}
+            </button>
+          )}
+          {state?.foreign && foreignNote && <div className="mt-2 text-[11px] text-amber-2">{foreignNote}</div>}
+        </div>
+      )}
+      {error && <div className="mt-2.5 text-[11px] text-red-2">{error}</div>}
+    </div>
+  )
+}
+
 export default function Settings(): React.JSX.Element {
   const project = useStore(activeProject)
   const settings = useStore((s) => s.settings)
@@ -91,180 +365,78 @@ export default function Settings(): React.JSX.Element {
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
   // App theme; missing on installs predating this setting -> default dark (the original look).
   const [theme, setTheme] = useState<ThemeMode>(() => settings?.theme ?? 'dark')
-  // Workspace-configured agents. Existing installs lack the key -> default lineup.
+  // The workspace's agent profiles. Existing installs lack the key -> default lineup.
   const [agents, setAgents] = useState<AgentConfig[]>(() => settings?.agents ?? defaultAgentConfigs())
-  // Extra-CLI-args fields edit as raw text per provider; parsed into argv on save.
+  // Extra-CLI-args fields edit as raw text per profile; parsed into argv on save.
   const [argsDrafts, setArgsDrafts] = useState<Record<string, string>>(() =>
-    Object.fromEntries((settings?.agents ?? []).map((a) => [a.provider, formatArgsString(a.args ?? [])]))
+    Object.fromEntries((settings?.agents ?? []).map((a) => [a.id, formatArgsString(a.args ?? [])]))
   )
-  // The in-progress "KEY=value" env-var input per provider card.
+  // The in-progress "KEY=value" env-var input per profile card.
   const [envDrafts, setEnvDrafts] = useState<Record<string, string>>({})
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Per-project agent config.
-  const [agentProvider, setAgentProvider] = useState(() => project?.defaultAgentProvider ?? 'claude')
+  // Per-project agent config. A default stored before profiles had ids names a
+  // provider — resolve it to the profile it refers to.
+  const [agentId, setAgentId] = useState(
+    () => findAgentConfig(settings?.agents ?? defaultAgentConfigs(), project?.defaultAgentId)?.id ?? 'claude'
+  )
   const [agentExecPath, setAgentExecPath] = useState(() => project?.agentExecPath ?? '')
-
-  // Machine-global Claude status hooks.
-  const [hooks, setHooks] = useState<ClaudeHooksStatus | null>(null)
-  const [hookConfirm, setHookConfirm] = useState<
-    { mode: 'install'; plan: ClaudeHooksPlan } | { mode: 'remove' } | null
-  >(null)
-  const [hookBusy, setHookBusy] = useState(false)
-  const [hookError, setHookError] = useState<string | null>(null)
-
-  // The opt-in `orbital` Agent Skill, installed into this workspace's Claude profile.
-  const [skill, setSkill] = useState<ClaudeSkillStatus | null>(null)
-  const [skillConfirm, setSkillConfirm] = useState<
-    { mode: 'install'; plan: ClaudeSkillPlan } | { mode: 'remove' } | null
-  >(null)
-  const [skillBusy, setSkillBusy] = useState(false)
-  const [skillError, setSkillError] = useState<string | null>(null)
-
-  // Codex's equivalent of the skill: a managed block in its profile AGENTS.md.
-  const [codex, setCodex] = useState<CodexInstructionsStatus | null>(null)
-  const [codexConfirm, setCodexConfirm] = useState<
-    { mode: 'install'; plan: CodexInstructionsPlan } | { mode: 'remove' } | null
-  >(null)
-  const [codexBusy, setCodexBusy] = useState(false)
-  const [codexError, setCodexError] = useState<string | null>(null)
-
-  useEffect(() => {
-    void window.orbital.claudeHooksStatus().then(setHooks).catch(() => undefined)
-    void window.orbital.claudeSkillStatus().then(setSkill).catch(() => undefined)
-    void window.orbital.codexInstructionsStatus().then(setCodex).catch(() => undefined)
-  }, [])
-
-  const startCodexInstall = async (): Promise<void> => {
-    setCodexError(null)
-    try {
-      setCodexConfirm({ mode: 'install', plan: await window.orbital.codexInstructionsPlan() })
-    } catch (e) {
-      setCodexError(e instanceof Error ? e.message : 'Could not build the instructions.')
-    }
-  }
-  const confirmCodex = async (): Promise<void> => {
-    if (!codexConfirm) return
-    setCodexBusy(true)
-    setCodexError(null)
-    try {
-      const result =
-        codexConfirm.mode === 'install'
-          ? await window.orbital.installCodexInstructions()
-          : await window.orbital.removeCodexInstructions()
-      setCodex(result)
-      setCodexConfirm(null)
-    } catch (e) {
-      setCodexError(e instanceof Error ? e.message : 'Could not update the instructions.')
-    } finally {
-      setCodexBusy(false)
-    }
-  }
-
-  const startSkillInstall = async (): Promise<void> => {
-    setSkillError(null)
-    try {
-      const plan = await window.orbital.claudeSkillPlan()
-      setSkillConfirm({ mode: 'install', plan })
-    } catch (e) {
-      setSkillError(e instanceof Error ? e.message : 'Could not build the skill.')
-    }
-  }
-  const confirmSkill = async (): Promise<void> => {
-    if (!skillConfirm) return
-    setSkillBusy(true)
-    setSkillError(null)
-    try {
-      // install() refuses to overwrite a SKILL.md Orbital does not own, so this
-      // can reject — surface that rather than silently failing.
-      const result =
-        skillConfirm.mode === 'install'
-          ? await window.orbital.installClaudeSkill()
-          : await window.orbital.removeClaudeSkill()
-      setSkill(result)
-      setSkillConfirm(null)
-    } catch (e) {
-      setSkillError(e instanceof Error ? e.message : 'Could not update the skill.')
-    } finally {
-      setSkillBusy(false)
-    }
-  }
-
-  const startInstall = async (): Promise<void> => {
-    setHookError(null)
-    try {
-      const plan = await window.orbital.claudeHooksPlan()
-      setHookConfirm({ mode: 'install', plan })
-    } catch (e) {
-      setHookError(e instanceof Error ? e.message : 'Could not read Claude settings.')
-    }
-  }
-  const confirmHooks = async (): Promise<void> => {
-    if (!hookConfirm) return
-    setHookBusy(true)
-    setHookError(null)
-    try {
-      // install() refuses to overwrite a settings.json that exists but won't parse,
-      // so this can reject — surface that rather than silently failing.
-      const result =
-        hookConfirm.mode === 'install'
-          ? await window.orbital.installClaudeHooks()
-          : await window.orbital.removeClaudeHooks()
-      setHooks(result)
-      setHookConfirm(null)
-    } catch (e) {
-      setHookError(e instanceof Error ? e.message : 'Could not update Claude hooks.')
-    } finally {
-      setHookBusy(false)
-    }
-  }
 
   const shellOptions = SHELL_OPTIONS.includes(defaultShell) ? SHELL_OPTIONS : [defaultShell, ...SHELL_OPTIONS]
 
-  const updateAgent = (provider: string, patch: Partial<AgentConfig>): void =>
-    setAgents((cur) => cur.map((a) => (a.provider === provider ? { ...a, ...patch } : a)))
+  const updateAgent = (id: string, patch: Partial<AgentConfig>): void =>
+    setAgents((cur) => cur.map((a) => (a.id === id ? { ...a, ...patch } : a)))
 
+  /** Add a profile for `provider`, named and keyed so it collides with nothing. */
   const addAgent = (provider: string): void =>
-    setAgents((cur) => (cur.some((a) => a.provider === provider) ? cur : [...cur, { provider }]))
+    setAgents((cur) => [
+      ...cur,
+      {
+        id: nextAgentId(
+          provider,
+          cur.map((a) => a.id)
+        ),
+        name: nextAgentName(
+          provider,
+          cur.map((a) => a.name)
+        ),
+        provider
+      }
+    ])
 
   // Never allow emptying the list — there must always be at least one agent
   // available in the new-tab menus.
-  const removeAgent = (provider: string): void =>
-    setAgents((cur) => (cur.length <= 1 ? cur : cur.filter((a) => a.provider !== provider)))
+  const removeAgent = (id: string): void =>
+    setAgents((cur) => {
+      if (cur.length <= 1) return cur
+      const next = cur.filter((a) => a.id !== id)
+      // The project's default cannot point at a profile that no longer exists.
+      if (id === agentId) setAgentId(next[0].id)
+      return next
+    })
 
   // Commit a card's "KEY=value" env input into its entry's env map.
-  const commitEnvDraft = (provider: string): void => {
-    const draft = envDrafts[provider] ?? ''
+  const commitEnvDraft = (id: string): void => {
+    const draft = envDrafts[id] ?? ''
     const eq = draft.indexOf('=')
     const key = (eq === -1 ? draft : draft.slice(0, eq)).trim()
     const value = eq === -1 ? '' : draft.slice(eq + 1).trim()
-    setEnvDrafts((cur) => ({ ...cur, [provider]: '' }))
+    setEnvDrafts((cur) => ({ ...cur, [id]: '' }))
     if (!key) return
-    setAgents((cur) =>
-      cur.map((a) => (a.provider === provider ? { ...a, env: { ...a.env, [key]: value } } : a))
-    )
+    setAgents((cur) => cur.map((a) => (a.id === id ? { ...a, env: { ...a.env, [key]: value } } : a)))
   }
 
-  const removeEnvVar = (provider: string, key: string): void =>
+  const removeEnvVar = (id: string, key: string): void =>
     setAgents((cur) =>
       cur.map((a) => {
-        if (a.provider !== provider || !a.env) return a
+        if (a.id !== id || !a.env) return a
         const env = { ...a.env }
         delete env[key]
         return { ...a, env }
       })
     )
-
-  /** Providers not yet configured — offered as "add" chips under the list. */
-  const addableAgents = SUPPORTED_AGENTS.filter((s) => !agents.some((a) => a.provider === s.id))
-
-  // The default-agent picker only offers configured agents; if the project's
-  // current default was removed, still show it so the select has a valid value.
-  const agentOptions = SUPPORTED_AGENTS.filter(
-    (a) => agents.some((c) => c.provider === a.id) || a.id === agentProvider
-  )
 
   const removePattern = (p: string): void => setPatterns((cur) => cur.filter((x) => x !== p))
 
@@ -284,26 +456,23 @@ export default function Settings(): React.JSX.Element {
       }
       if (project) {
         await window.orbital.setProjectAgent(project.id, {
-          defaultAgentProvider: agentProvider,
+          defaultAgentId: agentId,
           agentExecPath: agentExecPath.trim()
         })
       }
       // Fold each card's raw args text back into its entry, then scrub empty
-      // fields (blank configDir/execPath, empty args/env) via the normalizer.
+      // fields (blank configDir/execPath, empty args/env) via the normalizer,
+      // which also fills a blank name back in.
       const cleanedAgents =
         normalizeAgentConfigs(
           agents.map((a) => ({
             ...a,
-            args: parseArgsString(argsDrafts[a.provider] ?? formatArgsString(a.args ?? []))
+            args: parseArgsString(argsDrafts[a.id] ?? formatArgsString(a.args ?? []))
           }))
         ) ?? []
-      // Preserve claudeHooksInstalled / claudeSkillInstalled (managed by their own
-      // buttons, not this form).
       await window.orbital.setSettings({
         defaultShell,
         alerts,
-        claudeHooksInstalled: settings?.claudeHooksInstalled ?? false,
-        claudeSkillInstalled: settings?.claudeSkillInstalled ?? false,
         envSyncPatterns: patterns,
         periodicFetch,
         debugLogging,
@@ -462,66 +631,99 @@ export default function Settings(): React.JSX.Element {
 
       <div className="my-[18px] h-px bg-soft" />
 
-      {/* Agent */}
-      <div className={sectionLabel}>Agent</div>
+      {/* Agents */}
+      <div className={sectionLabel}>Agents</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
-        An agent tab boots the coding CLI straight into the Worktree&apos;s working directory. Agents
-        configured here appear in the new-tab menus; each can point at its own profile directory and
-        launch tweaks, per workspace.
+        An agent tab boots the coding CLI straight into the Worktree&apos;s working directory. Each
+        profile below appears in the new-tab menus and launches with its own config directory and
+        tweaks — add several of the same agent to keep, say, a personal and a work Claude side by side.
       </p>
       {agents.map((agent) => {
         const meta = SUPPORTED_AGENTS.find((s) => s.id === agent.provider)
-        const label = meta?.label ?? agent.provider
+        // The install panels write to disk immediately, so they act on the SAVED
+        // profile: offering them for an unsaved card (or one whose directory the
+        // user just retyped) would write into a directory this agent never reads.
+        const saved = (settings?.agents ?? []).find((a) => a.id === agent.id)
+        const dirty =
+          !saved || saved.provider !== agent.provider || (saved.configDir ?? '') !== (agent.configDir ?? '')
+        const installs = PROVIDER_INSTALLS[agent.provider] ?? []
         return (
-          <div key={agent.provider} className="mt-2.5 rounded-card border border-line-2 bg-bg/40 p-3.5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[12.5px] font-semibold text-text-2">{label}</div>
+          <div key={agent.id} className="mt-2.5 rounded-card border border-line-2 bg-bg/40 p-3.5">
+            <div className="flex items-center gap-2">
+              <input
+                value={agent.name}
+                onChange={(e) => updateAgent(agent.id, { name: e.target.value })}
+                aria-label="Profile name"
+                placeholder={providerLabel(agent.provider)}
+                spellCheck={false}
+                className="min-w-0 flex-1 rounded-btn border border-line-2 bg-bg px-2.5 py-[6px] text-[12.5px] font-semibold text-text-2 placeholder:font-normal placeholder:text-faint focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+              />
+              <div className="relative flex-none">
+                <select
+                  value={agent.provider}
+                  onChange={(e) => updateAgent(agent.id, { provider: e.target.value })}
+                  aria-label={`CLI for ${agent.name}`}
+                  className="appearance-none rounded-btn border border-line-2 bg-bg py-[6px] pl-2.5 pr-8 text-[12px] text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+                >
+                  {SUPPORTED_AGENTS.map((s) => (
+                    <option key={s.id} value={s.id} className="bg-panel text-text-2">
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={13}
+                  strokeWidth={1.5}
+                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-faint"
+                />
+              </div>
               {agents.length > 1 && (
                 <button
                   type="button"
-                  aria-label={`Remove ${label}`}
-                  onClick={() => removeAgent(agent.provider)}
-                  className="rounded-sm text-dim opacity-70 hover:text-red-2 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+                  aria-label={`Remove ${agent.name}`}
+                  onClick={() => removeAgent(agent.id)}
+                  className="flex-none rounded-sm text-dim opacity-70 hover:text-red-2 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
                 >
                   <X size={13} strokeWidth={1.5} />
                 </button>
               )}
             </div>
 
-            <label className={`${fieldLabel} mt-2.5 block`} htmlFor={`agent-config-dir-${agent.provider}`}>
+            <label className={`${fieldLabel} mt-2.5 block`} htmlFor={`agent-config-dir-${agent.id}`}>
               Profile directory{' '}
               <span className="font-normal text-faint">
                 · optional, sets {meta?.configDirEnvVar ?? 'the CLI’s config-dir variable'}
               </span>
             </label>
             <input
-              id={`agent-config-dir-${agent.provider}`}
+              id={`agent-config-dir-${agent.id}`}
               value={agent.configDir ?? ''}
-              onChange={(e) => updateAgent(agent.provider, { configDir: e.target.value })}
+              onChange={(e) => updateAgent(agent.id, { configDir: e.target.value })}
               placeholder={meta ? `default profile (${meta.defaultConfigDir})` : 'default profile'}
               spellCheck={false}
               className={`mt-1.5 font-mono ${inputBase}`}
             />
+            <ProfileDirNote provider={agent.provider} configDir={agent.configDir ?? ''} />
 
-            <label className={`${fieldLabel} mt-3 block`} htmlFor={`agent-exec-${agent.provider}`}>
+            <label className={`${fieldLabel} mt-3 block`} htmlFor={`agent-exec-${agent.id}`}>
               Executable path <span className="font-normal text-faint">· optional, overrides PATH lookup</span>
             </label>
             <input
-              id={`agent-exec-${agent.provider}`}
+              id={`agent-exec-${agent.id}`}
               value={agent.execPath ?? ''}
-              onChange={(e) => updateAgent(agent.provider, { execPath: e.target.value })}
+              onChange={(e) => updateAgent(agent.id, { execPath: e.target.value })}
               placeholder="auto-detect via where / which"
               spellCheck={false}
               className={`mt-1.5 font-mono ${inputBase}`}
             />
 
-            <label className={`${fieldLabel} mt-3 block`} htmlFor={`agent-args-${agent.provider}`}>
+            <label className={`${fieldLabel} mt-3 block`} htmlFor={`agent-args-${agent.id}`}>
               Extra CLI arguments <span className="font-normal text-faint">· optional, appended at launch</span>
             </label>
             <input
-              id={`agent-args-${agent.provider}`}
-              value={argsDrafts[agent.provider] ?? formatArgsString(agent.args ?? [])}
-              onChange={(e) => setArgsDrafts((cur) => ({ ...cur, [agent.provider]: e.target.value }))}
+              id={`agent-args-${agent.id}`}
+              value={argsDrafts[agent.id] ?? formatArgsString(agent.args ?? [])}
+              onChange={(e) => setArgsDrafts((cur) => ({ ...cur, [agent.id]: e.target.value }))}
               placeholder="--flag value"
               spellCheck={false}
               className={`mt-1.5 font-mono ${inputBase}`}
@@ -537,7 +739,7 @@ export default function Settings(): React.JSX.Element {
                   <button
                     type="button"
                     aria-label={`Remove ${key}`}
-                    onClick={() => removeEnvVar(agent.provider, key)}
+                    onClick={() => removeEnvVar(agent.id, key)}
                     className="rounded-sm opacity-55 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
                   >
                     <X size={11} strokeWidth={1.5} />
@@ -545,47 +747,57 @@ export default function Settings(): React.JSX.Element {
                 </span>
               ))}
               <input
-                value={envDrafts[agent.provider] ?? ''}
-                onChange={(e) => setEnvDrafts((cur) => ({ ...cur, [agent.provider]: e.target.value }))}
-                onBlur={() => commitEnvDraft(agent.provider)}
+                value={envDrafts[agent.id] ?? ''}
+                onChange={(e) => setEnvDrafts((cur) => ({ ...cur, [agent.id]: e.target.value }))}
+                onBlur={() => commitEnvDraft(agent.id)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') commitEnvDraft(agent.provider)
+                  if (e.key === 'Enter') commitEnvDraft(agent.id)
                 }}
-                aria-label={`Add environment variable for ${label}`}
+                aria-label={`Add environment variable for ${agent.name}`}
                 placeholder="KEY=value"
                 spellCheck={false}
                 className="w-[140px] rounded-[7px] border border-dashed border-line-2 bg-bg px-[11px] py-[5px] font-mono text-[11.5px] text-text-2 placeholder:text-faint focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
               />
             </div>
+
+            {/* What Orbital can install into THIS profile's directory. */}
+            {installs.length > 0 &&
+              (dirty ? (
+                <div className="mt-3 rounded-card border border-dashed border-line-2 p-3 text-[11.5px] text-dim">
+                  Save changes to set up Orbital&apos;s {providerLabel(agent.provider)} files for this profile.
+                </div>
+              ) : (
+                installs.map((kind) => <InstallPanel key={kind} agentId={agent.id} kind={kind} />)
+              ))}
           </div>
         )
       })}
-      {addableAgents.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-[7px]">
-          {addableAgents.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => addAgent(a.id)}
-              className="inline-flex items-center gap-1 rounded-[7px] border border-dashed border-line-2 bg-bg px-[11px] py-[5px] text-[11.5px] text-faint hover:text-text-3 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
-            >
-              <Plus size={12} strokeWidth={1.5} /> add {a.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="mt-2.5 flex flex-wrap gap-[7px]">
+        {SUPPORTED_AGENTS.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => addAgent(a.id)}
+            className="inline-flex items-center gap-1 rounded-[7px] border border-dashed border-line-2 bg-bg px-[11px] py-[5px] text-[11.5px] text-faint hover:text-text-3 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+          >
+            <Plus size={12} strokeWidth={1.5} /> add {a.label}
+          </button>
+        ))}
+      </div>
       <div className="mt-3 flex items-center justify-between gap-4">
-        <span className="text-[12.5px] text-text-2">Default agent</span>
+        <span className="text-[12.5px] text-text-2">
+          Default agent <span className="text-faint">· this project</span>
+        </span>
         <div className="relative">
           <select
-            value={agentProvider}
-            onChange={(e) => setAgentProvider(e.target.value)}
-            aria-label="Default agent provider"
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            aria-label="Default agent"
             className="appearance-none rounded-btn border border-line-2 bg-bg py-[7px] pl-3 pr-9 text-[12px] text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
           >
-            {agentOptions.map((a) => (
+            {agents.map((a) => (
               <option key={a.id} value={a.id} className="bg-panel text-text-2">
-                {a.label}
+                {a.name}
               </option>
             ))}
           </select>
@@ -608,220 +820,6 @@ export default function Settings(): React.JSX.Element {
         spellCheck={false}
         className={`mt-1.5 font-mono ${inputBase}`}
       />
-
-      {/* Claude status hooks (machine-global, opt-in) */}
-      <div className="mt-4 rounded-card border border-line-2 bg-bg/40 p-3.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[12.5px] font-semibold text-text-2">Claude status hooks</div>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
-              Let Worktrees report status from Claude&apos;s own lifecycle events — no agent
-              self-reporting needed. Writes only to{' '}
-              <span className="break-all font-mono text-text-2">
-                {hooks?.settingsPath ?? '~/.claude/settings.json'}
-              </span>
-              , the profile this workspace launches Claude with, and leaves any hooks already
-              there untouched.
-            </p>
-          </div>
-          <span
-            className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
-              hooks?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
-            }`}
-          >
-            {hooks?.installed ? 'Installed' : 'Not installed'}
-          </span>
-        </div>
-
-        {hookConfirm ? (
-          <div className="mt-3">
-            {hookConfirm.mode === 'install' ? (
-              <>
-                <div className="flex items-center gap-2 text-[11.5px] text-amber-2">
-                  <AlertTriangle size={13} strokeWidth={1.5} className="flex-none" />
-                  Hooks run shell commands with your full permissions. Review before writing:
-                </div>
-                {/* Fixed dark code block: pin a light foreground (not a theme token) so
-                    the JSON stays readable in light mode too. */}
-                <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed text-[#aab2c0]">
-
-                  {hookConfirm.plan.json}
-                </pre>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 text-[11.5px] text-text-3">
-                <AlertTriangle size={13} strokeWidth={1.5} className="flex-none text-amber-2" />
-                Remove Orbital&apos;s hook entries from settings.json? Other hooks stay intact.
-              </div>
-            )}
-            <div className="mt-2.5 flex items-center justify-end gap-2">
-              <button type="button" className={ghostBtn} onClick={() => setHookConfirm(null)} disabled={hookBusy}>
-                Cancel
-              </button>
-              <button type="button" className={primaryBtn} onClick={confirmHooks} disabled={hookBusy}>
-                {hookConfirm.mode === 'install' ? 'Confirm & write' : 'Remove hooks'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-3">
-            {hooks?.installed ? (
-              <button type="button" className={ghostBtn} onClick={() => setHookConfirm({ mode: 'remove' })}>
-                Remove Claude hooks
-              </button>
-            ) : (
-              <button type="button" className={ghostBtn} onClick={startInstall}>
-                Set up Claude status hooks
-              </button>
-            )}
-          </div>
-        )}
-        {hookError && <div className="mt-2.5 text-[11px] text-red-2">{hookError}</div>}
-      </div>
-
-      {/* The `orbital` Agent Skill (per-workspace Claude profile, opt-in) */}
-      <div className="mt-3 rounded-card border border-line-2 bg-bg/40 p-3.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[12.5px] font-semibold text-text-2">The orbital skill for Claude</div>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
-              Teach Claude the <span className="font-mono text-text-2">orbital</span> CLI — reporting
-              status, filing tasks, opening tabs — in sessions Orbital did not boot as an agent tab
-              (a <span className="font-mono text-text-2">claude</span> you start yourself). Agent tabs
-              are already briefed. Writes one file:{' '}
-              <span className="break-all font-mono text-text-2">
-                {skill?.skillPath ?? '~/.claude/skills/orbital/SKILL.md'}
-              </span>
-            </p>
-          </div>
-          <span
-            className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
-              skill?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
-            }`}
-          >
-            {skill?.installed ? 'Installed' : 'Not installed'}
-          </span>
-        </div>
-
-        {skillConfirm ? (
-          <div className="mt-3">
-            {skillConfirm.mode === 'install' ? (
-              <>
-                <div className="text-[11.5px] text-text-3">Review the skill before writing it:</div>
-                {/* Same fixed dark code block as the hooks preview, for the same reason. */}
-                <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#aab2c0]">
-                  {skillConfirm.plan.markdown}
-                </pre>
-              </>
-            ) : (
-              <div className="flex items-center gap-2 text-[11.5px] text-text-3">
-                <AlertTriangle size={13} strokeWidth={1.5} className="flex-none text-amber-2" />
-                Delete the skill Orbital installed? Nothing else in the profile is touched.
-              </div>
-            )}
-            <div className="mt-2.5 flex items-center justify-end gap-2">
-              <button type="button" className={ghostBtn} onClick={() => setSkillConfirm(null)} disabled={skillBusy}>
-                Cancel
-              </button>
-              <button type="button" className={primaryBtn} onClick={confirmSkill} disabled={skillBusy}>
-                {skillConfirm.mode === 'install' ? 'Confirm & write' : 'Remove skill'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-3">
-            {skill?.installed ? (
-              <button type="button" className={ghostBtn} onClick={() => setSkillConfirm({ mode: 'remove' })}>
-                Remove the orbital skill
-              </button>
-            ) : (
-              <button type="button" className={ghostBtn} onClick={startSkillInstall} disabled={skill?.foreign}>
-                Install the orbital skill
-              </button>
-            )}
-            {skill?.foreign && (
-              <div className="mt-2 text-[11px] text-amber-2">
-                A skill named <span className="font-mono">orbital</span> already exists there and was not
-                written by Orbital — move or delete it first.
-              </div>
-            )}
-          </div>
-        )}
-        {skillError && <div className="mt-2.5 text-[11px] text-red-2">{skillError}</div>}
-      </div>
-
-      {/* Codex instructions — only relevant when this workspace runs Codex at all.
-          Gated on the SAVED agents, not the unsaved draft above: install/remove
-          write to disk immediately, so offering them for a chip the user might
-          still cancel would leave a block behind for an agent that was never
-          configured. An install that already exists stays reachable either way,
-          so dropping the chip can never strand it. */}
-      {((settings?.agents ?? []).some((a) => a.provider === 'codex') || codex?.installed) && (
-        <div className="mt-3 rounded-card border border-line-2 bg-bg/40 p-3.5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[12.5px] font-semibold text-text-2">Orbital instructions for Codex</div>
-              <p className="mt-1 text-[11.5px] leading-relaxed text-text-3 text-pretty">
-                Codex takes no per-launch briefing, so it learns the{' '}
-                <span className="font-mono text-text-2">orbital</span> CLI from its own always-loaded
-                instructions. Orbital merges a short marked block into{' '}
-                <span className="break-all font-mono text-text-2">
-                  {codex?.path ?? '~/.codex/AGENTS.md'}
-                </span>
-                , leaving whatever else is in that file alone.
-              </p>
-            </div>
-            <span
-              className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
-                codex?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
-              }`}
-            >
-              {codex?.installed ? 'Installed' : 'Not installed'}
-            </span>
-          </div>
-
-          {codexConfirm ? (
-            <div className="mt-3">
-              {codexConfirm.mode === 'install' ? (
-                <>
-                  <div className="text-[11.5px] text-text-3">
-                    Every Codex session using this profile loads this. Review it before writing:
-                  </div>
-                  <pre className="mt-2 max-h-44 overflow-auto rounded-btn border border-line-2 bg-[#0a0d12] p-2.5 font-mono text-[10.5px] leading-relaxed whitespace-pre-wrap text-[#aab2c0]">
-                    {codexConfirm.plan.markdown}
-                  </pre>
-                </>
-              ) : (
-                <div className="flex items-center gap-2 text-[11.5px] text-text-3">
-                  <AlertTriangle size={13} strokeWidth={1.5} className="flex-none text-amber-2" />
-                  Remove Orbital&apos;s block from AGENTS.md? The rest of the file stays intact.
-                </div>
-              )}
-              <div className="mt-2.5 flex items-center justify-end gap-2">
-                <button type="button" className={ghostBtn} onClick={() => setCodexConfirm(null)} disabled={codexBusy}>
-                  Cancel
-                </button>
-                <button type="button" className={primaryBtn} onClick={confirmCodex} disabled={codexBusy}>
-                  {codexConfirm.mode === 'install' ? 'Confirm & write' : 'Remove block'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-3">
-              {codex?.installed ? (
-                <button type="button" className={ghostBtn} onClick={() => setCodexConfirm({ mode: 'remove' })}>
-                  Remove the Codex instructions
-                </button>
-              ) : (
-                <button type="button" className={ghostBtn} onClick={startCodexInstall}>
-                  Install the Codex instructions
-                </button>
-              )}
-            </div>
-          )}
-          {codexError && <div className="mt-2.5 text-[11px] text-red-2">{codexError}</div>}
-        </div>
-      )}
 
       <div className="my-[18px] h-px bg-soft" />
 

@@ -65,8 +65,11 @@ at launch; Codex support is planned.** The full product spec lives in
 ### Tabs: terminals, agents, browser, editor
 - **Terminal** — a real PTY running your preferred shell, with WebGL rendering,
   clickable links, and proper multi-line paste (bracketed paste for TUIs).
-- **Agent** — boots straight into your coding agent (per-project provider and
-  executable path are configurable). If an agent exits, its tab cleans itself up.
+- **Agent** — boots straight into your coding agent. Each workspace configures
+  its own named agent profiles (Settings → Agents) — several of the same CLI is
+  fine, so a personal and a work Claude, each with its own profile directory,
+  args and env, sit side by side in the new-tab menu. If an agent exits, its tab
+  cleans itself up.
 - **Browser** — plain-click a URL in any terminal and it opens as an in-app
   preview tab next to your agent; Ctrl+click sends it to your system browser.
 - **Editor** — a file tree with git-status badges, syntax-highlighted viewing,
@@ -85,10 +88,11 @@ pulses, a title-bar banner appears, and the Windows taskbar icon gets a badge
 
 Statuses update automatically two ways:
 
-1. **Claude Code hooks** — install them once per workspace from Settings (Orbital
-   shows you the exact JSON it will merge, and the `settings.json` it goes into:
-   the Claude profile that workspace launches agents with, else `CLAUDE_CONFIG_DIR`,
-   else `~/.claude`. It can remove it just as cleanly). From then on every Claude session
+1. **Claude Code hooks** — install them from Settings on the card of the Claude
+   profile you want them for (Orbital shows you the exact JSON it will merge, and
+   the `settings.json` it goes into: that profile's directory, else
+   `CLAUDE_CONFIG_DIR`, else `~/.claude`. It can remove it just as cleanly — and a
+   second Claude profile gets its own install). From then on every Claude session
    launched inside Orbital reports itself: working while it uses tools, needs
    attention on permission/idle prompts, idle when it stops. Typing into a
    blocked agent clears the alert instantly. See

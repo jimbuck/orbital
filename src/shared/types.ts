@@ -28,7 +28,7 @@ export type ThemeMode = 'system' | 'light' | 'dark'
 
 /**
  * The kinds of tab a Worktree pane can host (PRD §6). `agent` is a PTY-backed tab
- * (like `terminal`) that boots straight into a coding agent — see TabConfig.agentProvider.
+ * (like `terminal`) that boots straight into a coding agent — see TabConfig.agentId.
  */
 export type TabType = 'terminal' | 'browser' | 'editor' | 'agent'
 
@@ -50,14 +50,23 @@ export const SUPPORTED_AGENTS: ReadonlyArray<{
 ]
 
 /**
- * Per-workspace configuration for one agent provider. Being listed in
- * Settings.agents is what makes the provider available in the new-tab menus;
- * the optional fields tailor how its CLI is launched in this workspace — e.g.
- * a personal workspace can point Claude at a personal profile directory while
- * a work workspace uses the work one.
+ * One named agent profile in a workspace. Being listed in Settings.agents is
+ * what makes the profile available in the new-tab menus; the optional fields
+ * tailor how its CLI is launched — e.g. a personal workspace can point Claude
+ * at a personal profile directory while a work workspace uses the work one.
+ *
+ * A workspace may hold SEVERAL profiles of the same provider ("Claude
+ * (personal)" and "Claude (work)"), which is why entries are keyed by their own
+ * `id` rather than by provider. That id is what tabs and project defaults
+ * reference, and what the hook/skill/instruction installers act on — those
+ * write into THIS profile's directory, so two profiles need two installs.
  */
 export interface AgentConfig {
-  /** Provider this entry configures (an id from SUPPORTED_AGENTS, e.g. 'claude'). */
+  /** Stable key for this profile (e.g. 'claude', 'claude-2'); referenced by tabs and projects. */
+  id: string
+  /** User-facing label shown in the menus, tab titles, and Settings. */
+  name: string
+  /** Provider that launches it (an id from SUPPORTED_AGENTS, e.g. 'claude'). */
   provider: string
   /** Profile/config directory, exported via the provider's configDirEnvVar at launch. */
   configDir?: string
@@ -69,9 +78,14 @@ export interface AgentConfig {
   env?: Record<string, string>
 }
 
-/** One untweaked entry per supported provider — the default agent lineup. */
+/**
+ * One untweaked profile per supported provider — the default agent lineup.
+ * Their ids deliberately EQUAL the provider ids, so references stored before
+ * profiles were named (a tab's `agentProvider`, a project's default) keep
+ * resolving to the same agent.
+ */
 export function defaultAgentConfigs(): AgentConfig[] {
-  return SUPPORTED_AGENTS.map((a) => ({ provider: a.id }))
+  return SUPPORTED_AGENTS.map((a) => ({ id: a.id, name: a.label, provider: a.id }))
 }
 
 /** Whether an id names a provider Orbital can actually launch. */
@@ -79,12 +93,54 @@ function isSupportedProvider(id: string): boolean {
   return SUPPORTED_AGENTS.some((a) => a.id === id)
 }
 
+/** Display label for a provider id, falling back to the id itself. */
+export function providerLabel(providerId: string): string {
+  return SUPPORTED_AGENTS.find((a) => a.id === providerId)?.label ?? providerId
+}
+
+/**
+ * The profile a stored reference points at: its `id` first, else the first
+ * profile of a provider by that name. The second pass is what keeps references
+ * written before profiles had ids (tabs carrying `agentProvider: 'claude'`, a
+ * project defaulting to `'codex'`) pointing at the right agent.
+ */
+export function findAgentConfig(agents: AgentConfig[], ref: string | undefined): AgentConfig | undefined {
+  if (!ref) return undefined
+  return agents.find((a) => a.id === ref) ?? agents.find((a) => a.provider === ref)
+}
+
+/**
+ * Mint an id for a profile that has none (or whose id collides): the provider
+ * id, then `-2`, `-3`, … so the FIRST profile of a provider keeps the bare
+ * provider id and stays reachable by legacy references.
+ */
+export function nextAgentId(provider: string, taken: Iterable<string>): string {
+  const used = new Set(taken)
+  if (!used.has(provider)) return provider
+  for (let n = 2; ; n++) {
+    const candidate = `${provider}-${n}`
+    if (!used.has(candidate)) return candidate
+  }
+}
+
+/** The same, for the user-facing name: "Claude", then "Claude 2", "Claude 3", … */
+export function nextAgentName(provider: string, taken: Iterable<string>): string {
+  const used = new Set(taken)
+  const base = providerLabel(provider)
+  if (!used.has(base)) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base} ${n}`
+    if (!used.has(candidate)) return candidate
+  }
+}
+
 /**
  * Coerce a raw (hand-edited YAML or legacy DB) value into a clean
- * AgentConfig[]: entries need a provider Orbital supports, duplicates keep the
- * first, and unknown-typed fields are dropped. Falls back to converting a
- * legacy `enabledAgents` id array; returns undefined when neither value is
- * usable (caller applies the default lineup).
+ * AgentConfig[]: entries need a provider Orbital supports, ids are minted when
+ * missing or duplicated, names default to the provider label, and
+ * unknown-typed fields are dropped. Falls back to converting a legacy
+ * `enabledAgents` id array; returns undefined when neither value is usable
+ * (caller applies the default lineup).
  *
  * Unknown provider ids are dropped rather than passed through: the menus would
  * offer them, but main resolves an unrecognized id to the Claude provider, so
@@ -94,14 +150,19 @@ function isSupportedProvider(id: string): boolean {
  */
 export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown): AgentConfig[] | undefined {
   if (Array.isArray(agents)) {
-    const seen = new Set<string>()
+    const taken = new Set<string>()
     const out: AgentConfig[] = []
     for (const item of agents) {
       const a = (item ?? {}) as Record<string, unknown>
       const provider = typeof a.provider === 'string' ? a.provider.trim() : ''
-      if (!provider || seen.has(provider) || !isSupportedProvider(provider)) continue
-      seen.add(provider)
-      const entry: AgentConfig = { provider }
+      if (!provider || !isSupportedProvider(provider)) continue
+      const rawId = typeof a.id === 'string' ? a.id.trim() : ''
+      // A duplicate id would make two profiles indistinguishable to every
+      // reference; mint a fresh one rather than dropping the profile.
+      const id = rawId && !taken.has(rawId) ? rawId : nextAgentId(provider, taken)
+      taken.add(id)
+      const name = typeof a.name === 'string' && a.name.trim() ? a.name.trim() : providerLabel(provider)
+      const entry: AgentConfig = { id, name, provider }
       if (typeof a.configDir === 'string' && a.configDir.trim()) entry.configDir = a.configDir.trim()
       if (typeof a.execPath === 'string' && a.execPath.trim()) entry.execPath = a.execPath.trim()
       if (Array.isArray(a.args) && a.args.length > 0 && a.args.every((x) => typeof x === 'string')) {
@@ -122,7 +183,9 @@ export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown):
   }
   if (Array.isArray(legacyEnabled) && legacyEnabled.every((x) => typeof x === 'string')) {
     const ids = [...new Set(legacyEnabled)].filter(isSupportedProvider)
-    return ids.length > 0 || legacyEnabled.length === 0 ? ids.map((provider) => ({ provider })) : undefined
+    return ids.length > 0 || legacyEnabled.length === 0
+      ? ids.map((provider) => ({ id: provider, name: providerLabel(provider), provider }))
+      : undefined
   }
   return undefined
 }
@@ -232,8 +295,8 @@ export interface Project {
   id: string
   name: string
   repoPath: string
-  /** Provider an `agent` tab launches by default in this project (default 'claude'). */
-  defaultAgentProvider: string
+  /** Agent profile an `agent` tab launches by default in this project (default 'claude'). */
+  defaultAgentId: string
   /** Optional explicit path to the agent executable, overriding PATH lookup. */
   agentExecPath?: string
   addedAt: number
@@ -271,7 +334,13 @@ export interface TabConfig {
   filePath?: string
   /** editor: open `filePath` as a diff of its staged (index) version, not the worktree. */
   diffStaged?: boolean
-  /** agent: which provider this tab launches (e.g. 'claude'); defaults to the project's. */
+  /** agent: which configured profile this tab launches; defaults to the project's. */
+  agentId?: string
+  /**
+   * agent, LEGACY: the provider id tabs stored before profiles were named.
+   * Written by no current code — read only so old tabs still resolve (see
+   * {@link findAgentConfig}).
+   */
   agentProvider?: string
   /** display title override. */
   title?: string
@@ -343,21 +412,13 @@ export interface Settings {
     /** Flash the taskbar button (FlashWindow) when a Worktree flips to needs-attention. */
     taskbarFlash: boolean
   }
-  /**
-   * Mirror of the last hook install/remove, kept for display only. NOT
-   * authoritative: hooks live in a Claude profile dir that varies per workspace,
-   * so the source of truth is `claudeHooksStatus()`, which reads the file.
-   */
-  claudeHooksInstalled: boolean
-  /** Same deal for the `orbital` skill — a mirror; `claudeSkillStatus()` is the truth. */
-  claudeSkillInstalled: boolean
   /** Wildcard list for env-file sync, applied to every project in the workspace (PRD §5). */
   envSyncPatterns: string[]
   /** Auto-run `git fetch` per project on an interval so ahead/behind stays current. */
   periodicFetch: boolean
   /** Opt-in verbose file logging of CLI calls, UI actions, and errors, with rotation. Off by default. */
   debugLogging: boolean
-  /** Configured agents: which providers the new-tab menus offer, plus per-workspace launch tweaks. */
+  /** Configured agent profiles: what the new-tab menus offer, plus each one's launch tweaks. */
   agents: AgentConfig[]
   /** App color theme: 'system' follows the OS, else an explicit 'light'/'dark'. Defaults to 'dark'. */
   theme: ThemeMode
@@ -496,8 +557,16 @@ export interface TaskPatch {
 
 /** Per-project agent settings update. */
 export interface ProjectAgentPatch {
-  defaultAgentProvider?: string
+  defaultAgentId?: string
   agentExecPath?: string
+}
+
+/** Where a typed profile-directory value actually points, and whether it is there. */
+export interface ProfileDirInfo {
+  /** The expanded absolute path the agent (and its installs) will use. */
+  path: string
+  /** False when no directory is there yet — the agent would start a fresh profile. */
+  exists: boolean
 }
 
 /** State of Orbital's opt-in Claude status hooks. */
@@ -636,6 +705,7 @@ export const IPC = {
   clearWorktreeStatus: 'orbital:clearWorktreeStatus',
   listBranches: 'orbital:listBranches',
   setProjectAgent: 'orbital:setProjectAgent',
+  inspectProfileDir: 'orbital:inspectProfileDir',
   claudeHooksStatus: 'orbital:claudeHooksStatus',
   claudeHooksPlan: 'orbital:claudeHooksPlan',
   installClaudeHooks: 'orbital:installClaudeHooks',
@@ -754,32 +824,41 @@ export interface OrbitalApi {
   clearWorktreeStatus(worktreeId: string): Promise<void>
   /** Branches of a project's repo + what HEAD points at (for the New Worktree base-ref picker). */
   listBranches(projectId: string): Promise<BranchInfo>
-  /** Update a project's default agent provider / explicit executable path. */
+  /** Update a project's default agent profile / explicit executable path. */
   setProjectAgent(projectId: string, patch: ProjectAgentPatch): Promise<void>
-  /** Whether Orbital's Claude status hooks are installed, and where. */
-  claudeHooksStatus(): Promise<ClaudeHooksStatus>
+  /**
+   * What a typed profile directory resolves to (`~`/`%VAR%` expanded) and
+   * whether it is there yet — so Settings can show the real path before a
+   * launch quietly starts a fresh profile somewhere else. A blank `configDir`
+   * answers with the provider's machine default.
+   */
+  inspectProfileDir(provider: string, configDir: string): Promise<ProfileDirInfo>
+  /* Hooks / skill / instructions are installed INTO an agent profile's own
+     directory, so every call names the profile (an AgentConfig id) it acts on. */
+  /** Whether Orbital's Claude status hooks are installed for this profile, and where. */
+  claudeHooksStatus(agentId: string): Promise<ClaudeHooksStatus>
   /** The exact JSON Orbital would merge into settings.json (for the confirm dialog). */
-  claudeHooksPlan(): Promise<ClaudeHooksPlan>
-  /** Merge Orbital's hook entries into ~/.claude/settings.json (idempotent). */
-  installClaudeHooks(): Promise<ClaudeHooksStatus>
-  /** Strip only Orbital's hook entries from ~/.claude/settings.json. */
-  removeClaudeHooks(): Promise<ClaudeHooksStatus>
-  /** Whether Orbital's `orbital` skill is installed for this workspace's Claude profile. */
-  claudeSkillStatus(): Promise<ClaudeSkillStatus>
+  claudeHooksPlan(agentId: string): Promise<ClaudeHooksPlan>
+  /** Merge Orbital's hook entries into the profile's settings.json (idempotent). */
+  installClaudeHooks(agentId: string): Promise<ClaudeHooksStatus>
+  /** Strip only Orbital's hook entries from the profile's settings.json. */
+  removeClaudeHooks(agentId: string): Promise<ClaudeHooksStatus>
+  /** Whether Orbital's `orbital` skill is installed for this Claude profile. */
+  claudeSkillStatus(agentId: string): Promise<ClaudeSkillStatus>
   /** The exact SKILL.md Orbital would write (for the confirm dialog). */
-  claudeSkillPlan(): Promise<ClaudeSkillPlan>
+  claudeSkillPlan(agentId: string): Promise<ClaudeSkillPlan>
   /** Write the `orbital` skill into the Claude profile's skills directory. */
-  installClaudeSkill(): Promise<ClaudeSkillStatus>
+  installClaudeSkill(agentId: string): Promise<ClaudeSkillStatus>
   /** Delete the skill Orbital wrote (never one it does not own). */
-  removeClaudeSkill(): Promise<ClaudeSkillStatus>
-  /** Whether Orbital's block is in this workspace's Codex AGENTS.md. */
-  codexInstructionsStatus(): Promise<CodexInstructionsStatus>
+  removeClaudeSkill(agentId: string): Promise<ClaudeSkillStatus>
+  /** Whether Orbital's block is in this Codex profile's AGENTS.md. */
+  codexInstructionsStatus(agentId: string): Promise<CodexInstructionsStatus>
   /** The exact block Orbital would merge in (for the confirm dialog). */
-  codexInstructionsPlan(): Promise<CodexInstructionsPlan>
+  codexInstructionsPlan(agentId: string): Promise<CodexInstructionsPlan>
   /** Merge Orbital's block into the Codex profile's AGENTS.md (idempotent). */
-  installCodexInstructions(): Promise<CodexInstructionsStatus>
+  installCodexInstructions(agentId: string): Promise<CodexInstructionsStatus>
   /** Strip only Orbital's block from that AGENTS.md. */
-  removeCodexInstructions(): Promise<CodexInstructionsStatus>
+  removeCodexInstructions(agentId: string): Promise<CodexInstructionsStatus>
   createTab(worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig): Promise<Tab>
   closeTab(tabId: string): Promise<void>
   /** Set a tab's explicit title override; an empty title reverts to the derived one. */
@@ -958,8 +1037,8 @@ export interface WorkspaceProjectConfig {
   name: string
   /** Absolute path to the git repo. */
   path: string
-  /** Provider an `agent` tab launches by default (default 'claude'). */
-  agentProvider?: string
+  /** Agent profile an `agent` tab launches by default (default 'claude'). */
+  agentId?: string
   /** Optional explicit agent executable path, overriding PATH lookup. */
   agentExecPath?: string
 }

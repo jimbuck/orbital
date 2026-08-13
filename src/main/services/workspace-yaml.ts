@@ -52,7 +52,10 @@ export function normalize(raw: unknown): WorkspaceConfig {
       name: typeof p.name === 'string' && p.name ? p.name : (path.split(/[\\/]/).filter(Boolean).pop() ?? path),
       path
     }
-    if (typeof p.agentProvider === 'string' && p.agentProvider) entry.agentProvider = p.agentProvider
+    // `agentProvider` is what exports written before agent profiles were named
+    // called this field; its provider-id value still resolves to a profile.
+    const agentId = typeof p.agentId === 'string' && p.agentId ? p.agentId : p.agentProvider
+    if (typeof agentId === 'string' && agentId) entry.agentId = agentId
     if (typeof p.agentExecPath === 'string' && p.agentExecPath) entry.agentExecPath = p.agentExecPath
     projects.push(entry)
   }

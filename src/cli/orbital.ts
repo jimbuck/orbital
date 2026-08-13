@@ -51,6 +51,7 @@ Examples:
   orbital worktree new --worktree feature/login "Login flow"
   orbital worktree new --existing-branch origin/pr-42
   orbital tab new browser http://localhost:5173
+  orbital tab new agent "Claude (work)"
   orbital task add "Write tests" --description "cover the parser" --tags test
   orbital task list --status todo
   orbital task start 12

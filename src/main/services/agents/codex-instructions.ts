@@ -11,6 +11,9 @@
  * rather than the file: install rewrites just that block (idempotent), uninstall
  * removes just that block, and anything the user wrote around it is untouched.
  *
+ * Which AGENTS.md depends on the Codex profile this acts on (Settings →
+ * agents): two Codex profiles are two files, and so two installs.
+ *
  * Unlike the Claude skill, this text is loaded into EVERY Codex session using
  * the profile, so it is deliberately short — a pointer to `orbital help` and the
  * few commands worth doing unprompted, guarded by the ORBITAL_WORKTREE_ID check
@@ -18,15 +21,15 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, renameSync, rmSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import type { CodexInstructionsPlan, CodexInstructionsStatus } from '@shared/types'
+import type { AgentConfig, CodexInstructionsPlan, CodexInstructionsStatus } from '@shared/types'
 import { agentProfileDir } from './profiles'
 
 const BEGIN = '<!-- orbital:begin managed-by: orbital -->'
 const END = '<!-- orbital:end -->'
 
-/** `<codex-home>/AGENTS.md` for the active workspace's Codex profile. */
-export function instructionsPath(): string {
-  return join(agentProfileDir('codex'), 'AGENTS.md')
+/** `<codex-home>/AGENTS.md` for a given Codex profile. */
+export function instructionsPath(agent: AgentConfig): string {
+  return join(agentProfileDir(agent), 'AGENTS.md')
 }
 
 /** The managed block, markers included. */
@@ -54,14 +57,14 @@ ${END}`
 }
 
 /** What Orbital would write, shown to the user before anything touches disk. */
-export function plan(): CodexInstructionsPlan {
-  return { path: instructionsPath(), markdown: instructionsBlock() }
+export function plan(agent: AgentConfig): CodexInstructionsPlan {
+  return { path: instructionsPath(agent), markdown: instructionsBlock() }
 }
 
 /** The file's current content, or '' when it does not exist yet. */
-function read(): string {
+function read(agent: AgentConfig): string {
   try {
-    return readFileSync(instructionsPath(), 'utf8')
+    return readFileSync(instructionsPath(agent), 'utf8')
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return ''
     throw err // permission / IO error — surface it rather than overwriting blindly
@@ -69,8 +72,8 @@ function read(): string {
 }
 
 /** Write atomically so a crash can never leave the user's AGENTS.md half-written. */
-function write(content: string): void {
-  const file = instructionsPath()
+function write(agent: AgentConfig, content: string): void {
+  const file = instructionsPath(agent)
   mkdirSync(dirname(file), { recursive: true })
   const tmp = `${file}.orbital-${process.pid}.tmp`
   writeFileSync(tmp, content, 'utf8')
@@ -89,26 +92,26 @@ function withoutBlock(content: string): string {
 }
 
 /** Add or refresh Orbital's block, preserving everything the user wrote. */
-export function install(): CodexInstructionsStatus {
-  const rest = withoutBlock(read())
-  write(rest ? `${rest}\n\n${instructionsBlock()}\n` : `${instructionsBlock()}\n`)
-  return status()
+export function install(agent: AgentConfig): CodexInstructionsStatus {
+  const rest = withoutBlock(read(agent))
+  write(agent, rest ? `${rest}\n\n${instructionsBlock()}\n` : `${instructionsBlock()}\n`)
+  return status(agent)
 }
 
 /** Strip Orbital's block; delete the file only if nothing else was in it. */
-export function remove(): CodexInstructionsStatus {
-  const current = read()
+export function remove(agent: AgentConfig): CodexInstructionsStatus {
+  const current = read(agent)
   if (current.includes(BEGIN)) {
     const rest = withoutBlock(current)
-    if (rest) write(`${rest}\n`)
-    else rmSync(instructionsPath(), { force: true })
+    if (rest) write(agent, `${rest}\n`)
+    else rmSync(instructionsPath(agent), { force: true })
   }
-  return status()
+  return status(agent)
 }
 
 /** Read-only source-of-truth check; never throws. */
-export function status(): CodexInstructionsStatus {
-  const path = instructionsPath()
+export function status(agent: AgentConfig): CodexInstructionsStatus {
+  const path = instructionsPath(agent)
   try {
     return { installed: existsSync(path) && readFileSync(path, 'utf8').includes(BEGIN), path }
   } catch {

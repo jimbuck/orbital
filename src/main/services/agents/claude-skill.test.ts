@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { parse } from 'yaml'
+import type { AgentConfig } from '@shared/types'
 
 /** The Claude profile dir under test; swapped per test to a fresh temp dir. */
 let configDir = ''
@@ -10,13 +11,17 @@ let configDir = ''
 vi.mock('electron', () => ({ app: { getVersion: () => '9.9.9' } }))
 vi.mock('./profiles', () => ({
   defaultProfileDir: () => configDir,
-  agentProfileDir: () => configDir
+  agentProfileDir: (a: AgentConfig) => a.configDir ?? configDir
 }))
 
 import { install, remove, skillMarkdown, skillPath, status } from './claude-skill'
 
+/** The profile under test. */
+let agent: AgentConfig
+
 beforeEach(() => {
   configDir = mkdtempSync(join(tmpdir(), 'orbital-skill-'))
+  agent = { id: 'claude', name: 'Claude', provider: 'claude', configDir }
 })
 afterEach(() => {
   rmSync(configDir, { recursive: true, force: true })
@@ -49,42 +54,58 @@ describe('the generated SKILL.md', () => {
 
 describe('install / remove', () => {
   it('writes the skill where Claude looks for a personal skill, and reports it installed', () => {
-    expect(status()).toMatchObject({ installed: false, foreign: false })
-    const result = install()
+    expect(status(agent)).toMatchObject({ installed: false, foreign: false })
+    const result = install(agent)
     expect(result.installed).toBe(true)
-    expect(skillPath()).toBe(join(configDir, 'skills', 'orbital', 'SKILL.md'))
-    expect(readFileSync(skillPath(), 'utf8')).toBe(skillMarkdown())
+    expect(skillPath(agent)).toBe(join(configDir, 'skills', 'orbital', 'SKILL.md'))
+    expect(readFileSync(skillPath(agent), 'utf8')).toBe(skillMarkdown())
   })
 
   it('is idempotent, and remove takes the whole skill directory with it', () => {
-    install()
-    install()
-    expect(status().installed).toBe(true)
-    remove()
-    expect(status().installed).toBe(false)
-    expect(existsSync(dirname(skillPath()))).toBe(false)
+    install(agent)
+    install(agent)
+    expect(status(agent).installed).toBe(true)
+    remove(agent)
+    expect(status(agent).installed).toBe(false)
+    expect(existsSync(dirname(skillPath(agent)))).toBe(false)
   })
 
   it('leaves supporting files in the skill directory alone when removing', () => {
-    install()
+    install(agent)
     // A skill directory can hold scripts/references someone added alongside it;
     // uninstalling Orbital's SKILL.md must not take those with it.
-    const extra = join(dirname(skillPath()), 'notes.md')
+    const extra = join(dirname(skillPath(agent)), 'notes.md')
     writeFileSync(extra, 'mine', 'utf8')
 
-    remove()
-    expect(existsSync(skillPath())).toBe(false)
+    remove(agent)
+    expect(existsSync(skillPath(agent))).toBe(false)
     expect(readFileSync(extra, 'utf8')).toBe('mine')
   })
 
-  it('refuses to overwrite a SKILL.md it did not write, and leaves it alone', () => {
-    mkdirSync(dirname(skillPath()), { recursive: true })
-    writeFileSync(skillPath(), '---\nname: orbital\n---\nmine, not yours\n', 'utf8')
+  it('installs into the profile it is given, leaving a sibling profile alone', () => {
+    const other: AgentConfig = {
+      id: 'claude-2',
+      name: 'Claude (personal)',
+      provider: 'claude',
+      configDir: mkdtempSync(join(tmpdir(), 'orbital-skill-2-'))
+    }
+    install(agent)
 
-    expect(status()).toMatchObject({ installed: false, foreign: true })
-    expect(() => install()).toThrow(/not written by Orbital/)
+    expect(status(agent).installed).toBe(true)
+    expect(status(other).installed).toBe(false)
+    expect(existsSync(skillPath(other))).toBe(false)
+
+    rmSync(other.configDir!, { recursive: true, force: true })
+  })
+
+  it('refuses to overwrite a SKILL.md it did not write, and leaves it alone', () => {
+    mkdirSync(dirname(skillPath(agent)), { recursive: true })
+    writeFileSync(skillPath(agent), '---\nname: orbital\n---\nmine, not yours\n', 'utf8')
+
+    expect(status(agent)).toMatchObject({ installed: false, foreign: true })
+    expect(() => install(agent)).toThrow(/not written by Orbital/)
     // Both the failed install and a remove must leave the user's file untouched.
-    remove()
-    expect(readFileSync(skillPath(), 'utf8')).toContain('mine, not yours')
+    remove(agent)
+    expect(readFileSync(skillPath(agent), 'utf8')).toContain('mine, not yours')
   })
 })

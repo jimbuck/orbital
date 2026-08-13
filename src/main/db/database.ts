@@ -48,6 +48,9 @@ function migrate(d: Database.Database): void {
   // IF NOT EXISTS below (which would otherwise create empty new-named tables
   // alongside the populated legacy ones).
   renameLegacySchema(d)
+  // Before any CREATE/ADD COLUMN below can introduce the new name alongside the
+  // old one (which would strand the stored value in a column nothing reads).
+  renameAgentColumn(d)
 
   d.exec(`
     CREATE TABLE IF NOT EXISTS workspaces (
@@ -64,7 +67,7 @@ function migrate(d: Database.Database): void {
       name                   TEXT NOT NULL,
       repo_path              TEXT NOT NULL,
       env_sync_patterns      TEXT NOT NULL DEFAULT '[]',
-      default_agent_provider TEXT NOT NULL DEFAULT 'claude',
+      default_agent_id       TEXT NOT NULL DEFAULT 'claude',
       agent_exec_path        TEXT NOT NULL DEFAULT '',
       added_at               INTEGER NOT NULL
     );
@@ -127,7 +130,7 @@ function migrate(d: Database.Database): void {
 
   // Migrations for databases created before a column existed.
   addColumnIfMissing(d, 'worktrees', 'layout', "TEXT NOT NULL DEFAULT ''")
-  addColumnIfMissing(d, 'projects', 'default_agent_provider', "TEXT NOT NULL DEFAULT 'claude'")
+  addColumnIfMissing(d, 'projects', 'default_agent_id', "TEXT NOT NULL DEFAULT 'claude'")
   addColumnIfMissing(d, 'projects', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
   addColumnIfMissing(d, 'tasks', 'seq', 'INTEGER')
@@ -202,14 +205,14 @@ function scopeProjectsToWorkspaces(d: Database.Database, defaultWorkspaceId: str
         name                   TEXT NOT NULL,
         repo_path              TEXT NOT NULL,
         env_sync_patterns      TEXT NOT NULL DEFAULT '[]',
-        default_agent_provider TEXT NOT NULL DEFAULT 'claude',
+        default_agent_id       TEXT NOT NULL DEFAULT 'claude',
         agent_exec_path        TEXT NOT NULL DEFAULT '',
         added_at               INTEGER NOT NULL
       );
     `)
     d.prepare(
-      `INSERT INTO projects_new (id, workspace_id, name, repo_path, env_sync_patterns, default_agent_provider, agent_exec_path, added_at)
-       SELECT id, ?, name, repo_path, env_sync_patterns, default_agent_provider, agent_exec_path, added_at FROM projects`
+      `INSERT INTO projects_new (id, workspace_id, name, repo_path, env_sync_patterns, default_agent_id, agent_exec_path, added_at)
+       SELECT id, ?, name, repo_path, env_sync_patterns, default_agent_id, agent_exec_path, added_at FROM projects`
     ).run(defaultWorkspaceId)
     d.exec(`
       DROP TABLE projects;
@@ -261,6 +264,20 @@ function renameLegacySchema(d: Database.Database): void {
     d.exec("UPDATE worktrees SET kind = 'linked' WHERE kind = 'worktree'")
   })
   tx()
+}
+
+/**
+ * A project's default agent used to name a PROVIDER (`default_agent_provider`);
+ * it now names one of the workspace's configured agent profiles. Rename the
+ * column in place — the stored provider ids still resolve, since the default
+ * lineup gives each provider a profile of the same id (see findAgentConfig).
+ * Idempotent: no-op once the column is already renamed (or the table is new).
+ */
+function renameAgentColumn(d: Database.Database): void {
+  if (!tableExists(d, 'projects')) return
+  const cols = (d.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map((r) => r.name)
+  if (!cols.includes('default_agent_provider') || cols.includes('default_agent_id')) return
+  d.exec('ALTER TABLE projects RENAME COLUMN default_agent_provider TO default_agent_id')
 }
 
 /**

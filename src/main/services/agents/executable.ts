@@ -8,6 +8,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { extname } from 'node:path'
+import { expandUserPath } from './user-path'
 
 export interface ExeResolution {
   /** Executable to hand node-pty. */
@@ -53,7 +54,9 @@ function pickBest(matches: string[]): string {
  * command. Throws an Error with actionable text when nothing is found.
  */
 export async function resolveExecutable(override: string | undefined, name: string): Promise<ExeResolution> {
-  let exe = override?.trim() ?? ''
+  // Same expansion as the profile directory: a `~/bin/claude` typed here would
+  // otherwise be looked for relative to the worktree.
+  let exe = expandUserPath(override ?? '')
   if (exe) {
     if (!existsSync(exe)) {
       throw new Error(`Configured ${name} path not found: ${exe}`)

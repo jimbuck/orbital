@@ -17,6 +17,7 @@ import {
   type RemoveWorktreeOptions,
   type TaskPatch,
   type ProjectAgentPatch,
+  type ProfileDirInfo,
   type ClaudeHooksStatus,
   type ClaudeHooksPlan,
   type ClaudeSkillStatus,
@@ -79,21 +80,30 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.listBranches, projectId) as Promise<BranchInfo>,
   setProjectAgent: (projectId: string, patch: ProjectAgentPatch) =>
     ipcRenderer.invoke(IPC.setProjectAgent, projectId, patch) as Promise<void>,
-  claudeHooksStatus: () => ipcRenderer.invoke(IPC.claudeHooksStatus) as Promise<ClaudeHooksStatus>,
-  claudeHooksPlan: () => ipcRenderer.invoke(IPC.claudeHooksPlan) as Promise<ClaudeHooksPlan>,
-  installClaudeHooks: () => ipcRenderer.invoke(IPC.installClaudeHooks) as Promise<ClaudeHooksStatus>,
-  removeClaudeHooks: () => ipcRenderer.invoke(IPC.removeClaudeHooks) as Promise<ClaudeHooksStatus>,
-  claudeSkillStatus: () => ipcRenderer.invoke(IPC.claudeSkillStatus) as Promise<ClaudeSkillStatus>,
-  claudeSkillPlan: () => ipcRenderer.invoke(IPC.claudeSkillPlan) as Promise<ClaudeSkillPlan>,
-  installClaudeSkill: () => ipcRenderer.invoke(IPC.installClaudeSkill) as Promise<ClaudeSkillStatus>,
-  removeClaudeSkill: () => ipcRenderer.invoke(IPC.removeClaudeSkill) as Promise<ClaudeSkillStatus>,
-  codexInstructionsStatus: () =>
-    ipcRenderer.invoke(IPC.codexInstructionsStatus) as Promise<CodexInstructionsStatus>,
-  codexInstructionsPlan: () => ipcRenderer.invoke(IPC.codexInstructionsPlan) as Promise<CodexInstructionsPlan>,
-  installCodexInstructions: () =>
-    ipcRenderer.invoke(IPC.installCodexInstructions) as Promise<CodexInstructionsStatus>,
-  removeCodexInstructions: () =>
-    ipcRenderer.invoke(IPC.removeCodexInstructions) as Promise<CodexInstructionsStatus>,
+  inspectProfileDir: (provider: string, configDir: string) =>
+    ipcRenderer.invoke(IPC.inspectProfileDir, provider, configDir) as Promise<ProfileDirInfo>,
+  claudeHooksStatus: (agentId: string) =>
+    ipcRenderer.invoke(IPC.claudeHooksStatus, agentId) as Promise<ClaudeHooksStatus>,
+  claudeHooksPlan: (agentId: string) => ipcRenderer.invoke(IPC.claudeHooksPlan, agentId) as Promise<ClaudeHooksPlan>,
+  installClaudeHooks: (agentId: string) =>
+    ipcRenderer.invoke(IPC.installClaudeHooks, agentId) as Promise<ClaudeHooksStatus>,
+  removeClaudeHooks: (agentId: string) =>
+    ipcRenderer.invoke(IPC.removeClaudeHooks, agentId) as Promise<ClaudeHooksStatus>,
+  claudeSkillStatus: (agentId: string) =>
+    ipcRenderer.invoke(IPC.claudeSkillStatus, agentId) as Promise<ClaudeSkillStatus>,
+  claudeSkillPlan: (agentId: string) => ipcRenderer.invoke(IPC.claudeSkillPlan, agentId) as Promise<ClaudeSkillPlan>,
+  installClaudeSkill: (agentId: string) =>
+    ipcRenderer.invoke(IPC.installClaudeSkill, agentId) as Promise<ClaudeSkillStatus>,
+  removeClaudeSkill: (agentId: string) =>
+    ipcRenderer.invoke(IPC.removeClaudeSkill, agentId) as Promise<ClaudeSkillStatus>,
+  codexInstructionsStatus: (agentId: string) =>
+    ipcRenderer.invoke(IPC.codexInstructionsStatus, agentId) as Promise<CodexInstructionsStatus>,
+  codexInstructionsPlan: (agentId: string) =>
+    ipcRenderer.invoke(IPC.codexInstructionsPlan, agentId) as Promise<CodexInstructionsPlan>,
+  installCodexInstructions: (agentId: string) =>
+    ipcRenderer.invoke(IPC.installCodexInstructions, agentId) as Promise<CodexInstructionsStatus>,
+  removeCodexInstructions: (agentId: string) =>
+    ipcRenderer.invoke(IPC.removeCodexInstructions, agentId) as Promise<CodexInstructionsStatus>,
   createTab: (worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig) =>
     ipcRenderer.invoke(IPC.createTab, worktreeId, paneId, type, config) as Promise<Tab>,
   closeTab: (tabId: string) => ipcRenderer.invoke(IPC.closeTab, tabId) as Promise<void>,
