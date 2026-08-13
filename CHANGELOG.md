@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.22.0](https://github.com/jimbuck/orbital/compare/v1.21.0...v1.22.0) (2026-08-13)
+
+
+### Features
+
+* named agent profiles, each owning its own hook installs ([#13](https://github.com/jimbuck/orbital/issues/13)) ([052730c](https://github.com/jimbuck/orbital/commit/052730c7823d05300d66a8a111b92cacd1584e90))
+
 # [1.21.0](https://github.com/jimbuck/orbital/compare/v1.20.1...v1.21.0) (2026-08-11)
 
 
