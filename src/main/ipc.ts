@@ -7,6 +7,7 @@ import {
   ENV,
   SUPPORTED_AGENTS,
   findAgentConfig,
+  resolveAgentRef,
   normalizeStatus,
   normalizeTaskStatus,
   isPtyTabType,
@@ -91,12 +92,15 @@ function spawnTerminal(worktree: Worktree, tab: Tab): void {
 async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
   const project = repo.projects.get(worktree.projectId)
   if (!project) return
-  // The configured profile this tab launches (profile dir, exec path, args, env),
-  // falling back to the project's default. `agentProvider` is what tabs created
-  // before profiles had ids stored; findAgentConfig still resolves it.
-  const agentConfig = findAgentConfig(
+  // The configured profile this tab launches (profile dir, exec path, args, env).
+  // Each reference is tried in turn, so a tab whose profile was deleted falls
+  // back to the project's default rather than to a bare provider. `agentProvider`
+  // is what tabs created before profiles had ids stored.
+  const agentConfig = resolveAgentRef(
     getSettings().agents,
-    tab.config.agentId || tab.config.agentProvider || project.defaultAgentId
+    tab.config.agentId,
+    tab.config.agentProvider,
+    project.defaultAgentId
   )
   const provider = getProvider(agentConfig?.provider)
   try {

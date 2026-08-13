@@ -7,6 +7,7 @@ import {
   nextAgentName,
   normalizeAgentConfigs,
   parseArgsString,
+  resolveAgentRef,
   type AgentConfig
 } from './types'
 
@@ -45,10 +46,21 @@ describe('normalizeAgentConfigs', () => {
     ])
     // Several profiles of one provider are the point; the FIRST keeps the bare
     // provider id so references stored before profiles existed still resolve.
+    // Minted names are numbered too — two identical ones would be
+    // indistinguishable in the menus and to `orbital tab new agent <name>`.
     expect(out).toEqual([
       { id: 'claude', name: 'Claude', provider: 'claude', configDir: '/personal' },
-      { id: 'claude-2', name: 'Claude', provider: 'claude', configDir: '/work' }
+      { id: 'claude-2', name: 'Claude 2', provider: 'claude', configDir: '/work' }
     ])
+  })
+
+  it('leaves a name the user typed alone, and numbers around it', () => {
+    const out = normalizeAgentConfigs([
+      { provider: 'claude', name: 'Claude' },
+      { provider: 'claude' },
+      { provider: 'claude', name: 'Claude' } // a deliberate duplicate stays as typed
+    ])
+    expect(out?.map((a) => a.name)).toEqual(['Claude', 'Claude 2', 'Claude'])
   })
 
   it('re-mints an id two profiles claim, so every reference stays unambiguous', () => {
@@ -155,6 +167,29 @@ describe('findAgentConfig', () => {
   it('resolves nothing for an unknown or absent reference', () => {
     expect(findAgentConfig(agents, 'gone')).toBeUndefined()
     expect(findAgentConfig(agents, undefined)).toBeUndefined()
+  })
+})
+
+describe('resolveAgentRef', () => {
+  const agents: AgentConfig[] = [
+    { id: 'claude', name: 'Claude (personal)', provider: 'claude' },
+    { id: 'codex', name: 'Codex', provider: 'codex' }
+  ]
+
+  it('takes the first reference that resolves', () => {
+    expect(resolveAgentRef(agents, 'codex', 'claude')?.id).toBe('codex')
+  })
+
+  // A tab pointing at a deleted profile must fall through to the project's
+  // default, not launch a bare provider with none of the workspace's config.
+  it('skips a reference to a profile that no longer exists', () => {
+    expect(resolveAgentRef(agents, 'claude-2', undefined, 'codex')?.id).toBe('codex')
+    expect(resolveAgentRef(agents, undefined, 'gone', 'claude')?.id).toBe('claude')
+  })
+
+  it('resolves nothing when no reference matches', () => {
+    expect(resolveAgentRef(agents, 'gone', undefined, 'also-gone')).toBeUndefined()
+    expect(resolveAgentRef([], 'claude')).toBeUndefined()
   })
 })
 

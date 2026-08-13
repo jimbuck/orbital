@@ -110,6 +110,21 @@ export function findAgentConfig(agents: AgentConfig[], ref: string | undefined):
 }
 
 /**
+ * The first of several references that still resolves — a tab's own profile,
+ * then its legacy provider id, then the project's default. A reference to a
+ * profile that has since been deleted must not stop the fallback: without this
+ * the tab would launch the hard-coded default provider with none of the
+ * workspace's configuration behind it.
+ */
+export function resolveAgentRef(agents: AgentConfig[], ...refs: (string | undefined)[]): AgentConfig | undefined {
+  for (const ref of refs) {
+    const hit = findAgentConfig(agents, ref)
+    if (hit) return hit
+  }
+  return undefined
+}
+
+/**
  * Mint an id for a profile that has none (or whose id collides): the provider
  * id, then `-2`, `-3`, … so the FIRST profile of a provider keeps the bare
  * provider id and stays reachable by legacy references.
@@ -151,6 +166,7 @@ export function nextAgentName(provider: string, taken: Iterable<string>): string
 export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown): AgentConfig[] | undefined {
   if (Array.isArray(agents)) {
     const taken = new Set<string>()
+    const takenNames = new Set<string>()
     const out: AgentConfig[] = []
     for (const item of agents) {
       const a = (item ?? {}) as Record<string, unknown>
@@ -161,7 +177,13 @@ export function normalizeAgentConfigs(agents: unknown, legacyEnabled?: unknown):
       // reference; mint a fresh one rather than dropping the profile.
       const id = rawId && !taken.has(rawId) ? rawId : nextAgentId(provider, taken)
       taken.add(id)
-      const name = typeof a.name === 'string' && a.name.trim() ? a.name.trim() : providerLabel(provider)
+      // A minted name is numbered off the ones already used ("Claude", "Claude
+      // 2"): two unnamed profiles of a provider would otherwise be
+      // indistinguishable in the menus and to `orbital tab new agent <name>`.
+      // A name the user typed is left as they typed it, duplicate or not.
+      const name =
+        typeof a.name === 'string' && a.name.trim() ? a.name.trim() : nextAgentName(provider, takenNames)
+      takenNames.add(name)
       const entry: AgentConfig = { id, name, provider }
       if (typeof a.configDir === 'string' && a.configDir.trim()) entry.configDir = a.configDir.trim()
       if (typeof a.execPath === 'string' && a.execPath.trim()) entry.execPath = a.execPath.trim()

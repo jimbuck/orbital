@@ -232,7 +232,8 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
             <div className="flex items-center gap-2">
               {openers.map(({ type, label, Icon, config }) => (
                 <button
-                  key={label}
+                  // Profile names are free text and may repeat; the id does not.
+                  key={config?.agentId ?? type}
                   onClick={() => window.orbital.createTab(worktree.id, pane.id, type, config)}
                   className="flex w-[84px] flex-col items-center gap-2 rounded-btn border border-line-2 bg-hover px-3 py-3.5 text-text-2 outline-none transition-colors hover:border-line-strong hover:bg-panel-2 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60"
                 >

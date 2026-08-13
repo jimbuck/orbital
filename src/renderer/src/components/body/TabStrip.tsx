@@ -12,7 +12,7 @@ import {
   Columns2
 } from 'lucide-react'
 import type { AgentConfig, Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
-import { defaultAgentConfigs, findAgentConfig, providerLabel } from '@shared/types'
+import { defaultAgentConfigs, providerLabel, resolveAgentRef } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
@@ -64,7 +64,9 @@ const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig; provider?
  * default. Undefined when that profile is no longer configured.
  */
 function tabAgent(tab: Tab, agents: AgentConfig[], defaultAgentId?: string): AgentConfig | undefined {
-  return findAgentConfig(agents, tab.config.agentId || tab.config.agentProvider || defaultAgentId)
+  // Same order main launches by (see spawnAgent), so the chip never names an
+  // agent other than the one running in it.
+  return resolveAgentRef(agents, tab.config.agentId, tab.config.agentProvider, defaultAgentId)
 }
 
 /** Display title: explicit override, else something derived from the config. */
@@ -294,7 +296,8 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             >
               {addOptions.map(({ type, label, config, provider }) => (
                 <button
-                  key={label}
+                  // Profile names are free text and may repeat; the id does not.
+                  key={config?.agentId ?? type}
                   role="menuitem"
                   onClick={() => addTab(type, config)}
                   className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium text-text-2 hover:bg-hover ${FOCUS}`}
