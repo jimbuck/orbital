@@ -6,9 +6,9 @@
  * providers that accept a system-prompt file. A `claude` the user runs by hand in
  * a terminal tab — the other documented way to run an agent — learns nothing.
  *
- * This installs a personal Agent Skill into the Claude profile directory THIS
- * WORKSPACE launches agents against, so any Claude session in an Orbital terminal
- * can pick it up. Skills load lazily (only the one-line description sits in the
+ * This installs a personal Agent Skill into the directory of the Claude profile
+ * it is handed (Settings → agents), so any Claude session Orbital launches with
+ * that profile can pick it up. Skills load lazily (only the one-line description sits in the
  * listing until Claude decides it is relevant), so this costs nothing until used.
  *
  * Every file Orbital writes carries SKILL_MARKER in its frontmatter metadata:
@@ -18,7 +18,7 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync, rmdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { app } from 'electron'
-import type { ClaudeSkillPlan, ClaudeSkillStatus } from '@shared/types'
+import type { AgentConfig, ClaudeSkillPlan, ClaudeSkillStatus } from '@shared/types'
 import { agentProfileDir } from './profiles'
 
 /** Directory name under `<claude-config>/skills/`; also the `/orbital` command name. */
@@ -27,9 +27,9 @@ const SKILL_DIR_NAME = 'orbital'
 /** Frontmatter line stamped on every file Orbital writes — the basis for a safe uninstall. */
 const SKILL_MARKER = 'managed-by: orbital'
 
-/** `<claude-config>/skills/orbital/SKILL.md` for the active workspace's profile. */
-export function skillPath(): string {
-  return join(agentProfileDir('claude'), 'skills', SKILL_DIR_NAME, 'SKILL.md')
+/** `<claude-config>/skills/orbital/SKILL.md` for a given Claude profile. */
+export function skillPath(agent: AgentConfig): string {
+  return join(agentProfileDir(agent), 'skills', SKILL_DIR_NAME, 'SKILL.md')
 }
 
 /** App version stamped into the skill, so a stale copy is identifiable on disk. */
@@ -143,7 +143,7 @@ links the task to it, and moves the task to \`in-progress\`.
 orbital tab new terminal
 orbital tab new browser http://localhost:5173   # in-app browser tab
 orbital tab new editor src/lib/cart.ts          # open a file in the cockpit's editor
-orbital tab new agent claude                    # boot another agent in this worktree
+orbital tab new agent claude                    # boot another agent (by its configured name) here
 \`\`\`
 
 When you start or stop a long-running dev server, tell the cockpit — the human
@@ -165,8 +165,8 @@ orbital server list
 }
 
 /** What Orbital would write, shown to the user before anything touches disk. */
-export function plan(): ClaudeSkillPlan {
-  return { skillPath: skillPath(), markdown: skillMarkdown() }
+export function plan(agent: AgentConfig): ClaudeSkillPlan {
+  return { skillPath: skillPath(agent), markdown: skillMarkdown() }
 }
 
 /** Whether the file at `file` is one Orbital wrote (carries the marker). */
@@ -183,8 +183,8 @@ function isOrbitalSkill(file: string): boolean {
  * the user (or another tool) owns that file, and a personal skill overrides a
  * project one, so silently replacing it could change how their sessions behave.
  */
-export function install(): ClaudeSkillStatus {
-  const file = skillPath()
+export function install(agent: AgentConfig): ClaudeSkillStatus {
+  const file = skillPath(agent)
   if (existsSync(file) && !isOrbitalSkill(file)) {
     throw new Error(
       `${file} already exists and was not written by Orbital. Move or delete it first — ` +
@@ -193,12 +193,12 @@ export function install(): ClaudeSkillStatus {
   }
   mkdirSync(dirname(file), { recursive: true })
   writeFileSync(file, skillMarkdown(), 'utf8')
-  return status()
+  return status(agent)
 }
 
 /** Delete the skill — but only the SKILL.md that is ours, never a whole tree. */
-export function remove(): ClaudeSkillStatus {
-  const file = skillPath()
+export function remove(agent: AgentConfig): ClaudeSkillStatus {
+  const file = skillPath(agent)
   if (existsSync(file) && isOrbitalSkill(file)) {
     rmSync(file, { force: true })
     // Claude Code treats the directory as the skill, so an empty one left behind
@@ -210,12 +210,12 @@ export function remove(): ClaudeSkillStatus {
       /* not empty (or already gone) — leave whatever else lives there */
     }
   }
-  return status()
+  return status(agent)
 }
 
 /** Read-only source-of-truth check; never throws. */
-export function status(): ClaudeSkillStatus {
-  const file = skillPath()
+export function status(agent: AgentConfig): ClaudeSkillStatus {
+  const file = skillPath(agent)
   const exists = existsSync(file)
   const ours = exists && isOrbitalSkill(file)
   return { installed: ours, skillPath: file, foreign: exists && !ours }

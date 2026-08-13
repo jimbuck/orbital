@@ -148,7 +148,7 @@ export function exportWorkspaceToFile(workspaceId: string, file: string): void {
     settings: Object.keys(settings).length > 0 ? settings : undefined,
     projects: projects.list(workspaceId).map((p) => {
       const entry: WorkspaceConfig['projects'][number] = { id: p.id, name: p.name, path: p.repoPath }
-      if (p.defaultAgentProvider && p.defaultAgentProvider !== 'claude') entry.agentProvider = p.defaultAgentProvider
+      if (p.defaultAgentId && p.defaultAgentId !== 'claude') entry.agentId = p.defaultAgentId
       if (p.agentExecPath) entry.agentExecPath = p.agentExecPath
       return entry
     })
@@ -178,7 +178,7 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
       now
     )
     const insert = db.prepare(
-      `INSERT INTO projects (id, workspace_id, name, repo_path, default_agent_provider, agent_exec_path, added_at)
+      `INSERT INTO projects (id, workspace_id, name, repo_path, default_agent_id, agent_exec_path, added_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     let seq = now
@@ -188,7 +188,7 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
         workspaceId,
         p.name,
         p.path,
-        p.agentProvider || 'claude',
+        p.agentId || 'claude',
         p.agentExecPath ?? '',
         seq++
       )

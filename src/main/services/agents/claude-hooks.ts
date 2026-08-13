@@ -8,19 +8,19 @@
  * guard exits 0 immediately when ORBITAL_WORKTREE_ID is absent — so non-Orbital
  * sessions are unaffected.
  *
- * WHICH profile is the load-bearing detail: a workspace can point Claude at its
- * own config directory (Settings → agents), which Orbital exports as
- * CLAUDE_CONFIG_DIR when it spawns the agent. Hooks written anywhere else are
- * read by nobody, so this targets the ACTIVE WORKSPACE's profile dir — see
- * {@link agentProfileDir}. Installing per workspace is therefore
- * expected: two workspaces on two profiles need two installs.
+ * WHICH profile is the load-bearing detail: every configured agent profile
+ * (Settings → agents) can point Claude at its own config directory, which
+ * Orbital exports as CLAUDE_CONFIG_DIR when it spawns that profile. Hooks
+ * written anywhere else are read by nobody, so each function here acts on the
+ * profile it is handed — see {@link agentProfileDir}. Installing per profile is
+ * therefore expected: two Claude profiles need two installs.
  *
  * All Orbital entries carry the HOOK_MARKER token, which makes merge idempotent and
  * uninstall surgical (only Orbital's entries are touched).
  */
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import type { ClaudeHooksPlan, ClaudeHooksStatus } from '@shared/types'
+import type { AgentConfig, ClaudeHooksPlan, ClaudeHooksStatus } from '@shared/types'
 import { hookShimPath } from './paths'
 import { agentProfileDir } from './profiles'
 
@@ -58,8 +58,8 @@ interface ClaudeSettings {
   [key: string]: unknown
 }
 
-export function settingsPath(): string {
-  return join(agentProfileDir('claude'), 'settings.json')
+export function settingsPath(agent: AgentConfig): string {
+  return join(agentProfileDir(agent), 'settings.json')
 }
 
 /** The shell command Orbital registers for an event. Absolute shim path + marker. */
@@ -91,10 +91,10 @@ function isOrbitalGroup(group: unknown): boolean {
  * (which is shared with Claude Code) just because a read raced a write or the
  * file was hand-corrupted.
  */
-function readSettings(): ClaudeSettings {
+function readSettings(agent: AgentConfig): ClaudeSettings {
   let raw: string
   try {
-    raw = readFileSync(settingsPath(), 'utf8')
+    raw = readFileSync(settingsPath(agent), 'utf8')
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
     throw err // permission / IO error — surface it, never silently overwrite
@@ -105,15 +105,15 @@ function readSettings(): ClaudeSettings {
     return parsed && typeof parsed === 'object' ? (parsed as ClaudeSettings) : {}
   } catch {
     throw new Error(
-      `${settingsPath()} exists but is not valid JSON. Fix or remove it before changing ` +
+      `${settingsPath(agent)} exists but is not valid JSON. Fix or remove it before changing ` +
         'Orbital hooks — Orbital will not overwrite it.'
     )
   }
 }
 
 /** Write atomically (temp + rename) so a crash/race can never leave a half-written file. */
-function writeSettings(data: ClaudeSettings): void {
-  const file = settingsPath()
+function writeSettings(agent: AgentConfig, data: ClaudeSettings): void {
+  const file = settingsPath(agent)
   mkdirSync(dirname(file), { recursive: true })
   const tmp = `${file}.orbital-${process.pid}.tmp`
   writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
@@ -121,15 +121,15 @@ function writeSettings(data: ClaudeSettings): void {
 }
 
 /** Just the hooks object Orbital would add — shown to the user for confirmation. */
-export function plan(): ClaudeHooksPlan {
+export function plan(agent: AgentConfig): ClaudeHooksPlan {
   const hooks: HooksMap = {}
   for (const event of HOOK_EVENTS) hooks[event] = [orbitalGroup(event)]
-  return { settingsPath: settingsPath(), json: JSON.stringify({ hooks }, null, 2) }
+  return { settingsPath: settingsPath(agent), json: JSON.stringify({ hooks }, null, 2) }
 }
 
 /** Merge Orbital's hooks in non-destructively and idempotently. */
-export function install(): ClaudeHooksStatus {
-  const settings = readSettings()
+export function install(agent: AgentConfig): ClaudeHooksStatus {
+  const settings = readSettings(agent)
   const hooks: HooksMap = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {}
   for (const event of HOOK_EVENTS) {
     const groups = Array.isArray(hooks[event]) ? hooks[event] : []
@@ -140,13 +140,13 @@ export function install(): ClaudeHooksStatus {
     hooks[event] = cleaned
   }
   settings.hooks = hooks
-  writeSettings(settings)
-  return status()
+  writeSettings(agent, settings)
+  return status(agent)
 }
 
 /** Strip ONLY Orbital's hook entries; leave all other hooks intact. */
-export function remove(): ClaudeHooksStatus {
-  const settings = readSettings()
+export function remove(agent: AgentConfig): ClaudeHooksStatus {
+  const settings = readSettings(agent)
   const hooks = settings.hooks
   if (hooks && typeof hooks === 'object') {
     for (const event of Object.keys(hooks)) {
@@ -157,9 +157,9 @@ export function remove(): ClaudeHooksStatus {
       else delete hooks[event]
     }
     if (Object.keys(hooks).length === 0) delete settings.hooks
-    writeSettings(settings)
+    writeSettings(agent, settings)
   }
-  return status()
+  return status(agent)
 }
 
 /**
@@ -167,15 +167,15 @@ export function remove(): ClaudeHooksStatus {
  * Read-only, so it never throws — an unreadable/corrupt file just reports
  * not-installed (we cannot confirm our hooks are there).
  */
-export function status(): ClaudeHooksStatus {
+export function status(agent: AgentConfig): ClaudeHooksStatus {
   try {
-    const hooks = readSettings().hooks
+    const hooks = readSettings(agent).hooks
     const installed =
       !!hooks &&
       typeof hooks === 'object' &&
       Object.values(hooks).some((groups) => Array.isArray(groups) && groups.some(isOrbitalGroup))
-    return { installed, settingsPath: settingsPath() }
+    return { installed, settingsPath: settingsPath(agent) }
   } catch {
-    return { installed: false, settingsPath: settingsPath() }
+    return { installed: false, settingsPath: settingsPath(agent) }
   }
 }

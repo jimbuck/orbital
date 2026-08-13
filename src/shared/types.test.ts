@@ -1,40 +1,106 @@
 import { describe, expect, it } from 'vitest'
-import { defaultAgentConfigs, formatArgsString, normalizeAgentConfigs, parseArgsString } from './types'
+import {
+  defaultAgentConfigs,
+  findAgentConfig,
+  formatArgsString,
+  nextAgentId,
+  nextAgentName,
+  normalizeAgentConfigs,
+  parseArgsString,
+  resolveAgentRef,
+  type AgentConfig
+} from './types'
 
 describe('normalizeAgentConfigs', () => {
   it('keeps well-formed entries and their optional fields', () => {
     const out = normalizeAgentConfigs([
-      { provider: 'claude', configDir: 'C:\\profiles\\personal', args: ['--verbose'], env: { FOO: 'bar' } },
-      { provider: 'codex', execPath: 'C:\\bin\\codex.exe' }
+      {
+        id: 'claude',
+        name: 'Claude (personal)',
+        provider: 'claude',
+        configDir: 'C:\\profiles\\personal',
+        args: ['--verbose'],
+        env: { FOO: 'bar' }
+      },
+      { id: 'codex', name: 'Codex', provider: 'codex', execPath: 'C:\\bin\\codex.exe' }
     ])
     expect(out).toEqual([
-      { provider: 'claude', configDir: 'C:\\profiles\\personal', args: ['--verbose'], env: { FOO: 'bar' } },
-      { provider: 'codex', execPath: 'C:\\bin\\codex.exe' }
+      {
+        id: 'claude',
+        name: 'Claude (personal)',
+        provider: 'claude',
+        configDir: 'C:\\profiles\\personal',
+        args: ['--verbose'],
+        env: { FOO: 'bar' }
+      },
+      { id: 'codex', name: 'Codex', provider: 'codex', execPath: 'C:\\bin\\codex.exe' }
     ])
   })
 
-  it('drops entries without a provider and keeps the first of a duplicate', () => {
+  it('drops entries without a provider, and mints ids/names for those missing them', () => {
     const out = normalizeAgentConfigs([
       { provider: '' },
       { configDir: '/x' },
-      { provider: 'claude', configDir: '/first' },
-      { provider: 'claude', configDir: '/second' }
+      { provider: 'claude', configDir: '/personal' },
+      { provider: 'claude', configDir: '/work' }
     ])
-    expect(out).toEqual([{ provider: 'claude', configDir: '/first' }])
+    // Several profiles of one provider are the point; the FIRST keeps the bare
+    // provider id so references stored before profiles existed still resolve.
+    // Minted names are numbered too — two identical ones would be
+    // indistinguishable in the menus and to `orbital tab new agent <name>`.
+    expect(out).toEqual([
+      { id: 'claude', name: 'Claude', provider: 'claude', configDir: '/personal' },
+      { id: 'claude-2', name: 'Claude 2', provider: 'claude', configDir: '/work' }
+    ])
+  })
+
+  // findAgentConfig matches ids before providers, so an id spelling another
+  // provider would hijack every legacy reference meant for that provider.
+  it("re-mints an id that spells a different provider's name", () => {
+    const out = normalizeAgentConfigs([
+      { id: 'codex', name: 'Mine', provider: 'claude' },
+      { id: 'codex', name: 'Codex', provider: 'codex' }
+    ])
+    expect(out?.map((a) => [a.id, a.provider])).toEqual([
+      ['claude', 'claude'],
+      ['codex', 'codex']
+    ])
+    expect(findAgentConfig(out!, 'codex')?.provider).toBe('codex')
+  })
+
+  it('leaves a name the user typed alone, and numbers around it', () => {
+    const out = normalizeAgentConfigs([
+      { provider: 'claude', name: 'Claude' },
+      { provider: 'claude' },
+      { provider: 'claude', name: 'Claude' } // a deliberate duplicate stays as typed
+    ])
+    expect(out?.map((a) => a.name)).toEqual(['Claude', 'Claude 2', 'Claude'])
+  })
+
+  it('re-mints an id two profiles claim, so every reference stays unambiguous', () => {
+    const out = normalizeAgentConfigs([
+      { id: 'claude', name: 'Work', provider: 'claude' },
+      { id: 'claude', name: 'Personal', provider: 'claude' }
+    ])
+    expect(out?.map((a) => a.id)).toEqual(['claude', 'claude-2'])
+    expect(out?.map((a) => a.name)).toEqual(['Work', 'Personal'])
   })
 
   it('scrubs blank and mistyped optional fields', () => {
     const out = normalizeAgentConfigs([
       { provider: 'claude', configDir: '  ', execPath: '', args: [], env: {} },
-      { provider: 'codex', args: ['ok', 42], env: { GOOD: 'v', BAD: 7 } }
+      { provider: 'codex', name: '  ', args: ['ok', 42], env: { GOOD: 'v', BAD: 7 } }
     ])
-    expect(out).toEqual([{ provider: 'claude' }, { provider: 'codex', env: { GOOD: 'v' } }])
+    expect(out).toEqual([
+      { id: 'claude', name: 'Claude', provider: 'claude' },
+      { id: 'codex', name: 'Codex', provider: 'codex', env: { GOOD: 'v' } }
+    ])
   })
 
   it('converts a legacy enabledAgents id array', () => {
     expect(normalizeAgentConfigs(undefined, ['claude', 'cursor', 'claude'])).toEqual([
-      { provider: 'claude' },
-      { provider: 'cursor' }
+      { id: 'claude', name: 'Claude', provider: 'claude' },
+      { id: 'cursor', name: 'Cursor', provider: 'cursor' }
     ])
   })
 
@@ -50,8 +116,12 @@ describe('normalizeAgentConfigs', () => {
   // An unrecognized id would still be offered in the menus, but main resolves
   // it to the Claude provider — so it must never survive normalization.
   it('drops providers Orbital does not support', () => {
-    expect(normalizeAgentConfigs([{ provider: 'claude' }, { provider: 'aider' }])).toEqual([{ provider: 'claude' }])
-    expect(normalizeAgentConfigs(undefined, ['claude', 'aider'])).toEqual([{ provider: 'claude' }])
+    expect(normalizeAgentConfigs([{ provider: 'claude' }, { provider: 'aider' }])).toEqual([
+      { id: 'claude', name: 'Claude', provider: 'claude' }
+    ])
+    expect(normalizeAgentConfigs(undefined, ['claude', 'aider'])).toEqual([
+      { id: 'claude', name: 'Claude', provider: 'claude' }
+    ])
   })
 
   it('treats a non-empty list that scrubs down to nothing as unusable', () => {
@@ -82,7 +152,70 @@ describe('parseArgsString / formatArgsString', () => {
 })
 
 describe('defaultAgentConfigs', () => {
-  it('lists every supported provider untweaked', () => {
-    expect(defaultAgentConfigs()).toEqual([{ provider: 'claude' }, { provider: 'codex' }, { provider: 'cursor' }])
+  it('lists every supported provider untweaked, keyed by the provider id', () => {
+    expect(defaultAgentConfigs()).toEqual([
+      { id: 'claude', name: 'Claude', provider: 'claude' },
+      { id: 'codex', name: 'Codex', provider: 'codex' },
+      { id: 'cursor', name: 'Cursor', provider: 'cursor' }
+    ])
+  })
+})
+
+describe('findAgentConfig', () => {
+  const agents: AgentConfig[] = [
+    { id: 'claude', name: 'Claude (personal)', provider: 'claude' },
+    { id: 'claude-2', name: 'Claude (work)', provider: 'claude' },
+    { id: 'codex', name: 'Codex', provider: 'codex' }
+  ]
+
+  it('matches by profile id', () => {
+    expect(findAgentConfig(agents, 'claude-2')?.name).toBe('Claude (work)')
+  })
+
+  // Tabs and project defaults stored before profiles had ids hold a provider id.
+  it('falls back to the first profile of a provider, so legacy references resolve', () => {
+    expect(findAgentConfig(agents, 'codex')?.id).toBe('codex')
+    expect(findAgentConfig([{ id: 'personal', name: 'Personal', provider: 'claude' }], 'claude')?.id).toBe('personal')
+  })
+
+  it('resolves nothing for an unknown or absent reference', () => {
+    expect(findAgentConfig(agents, 'gone')).toBeUndefined()
+    expect(findAgentConfig(agents, undefined)).toBeUndefined()
+  })
+})
+
+describe('resolveAgentRef', () => {
+  const agents: AgentConfig[] = [
+    { id: 'claude', name: 'Claude (personal)', provider: 'claude' },
+    { id: 'codex', name: 'Codex', provider: 'codex' }
+  ]
+
+  it('takes the first reference that resolves', () => {
+    expect(resolveAgentRef(agents, 'codex', 'claude')?.id).toBe('codex')
+  })
+
+  // A tab pointing at a deleted profile must fall through to the project's
+  // default, not launch a bare provider with none of the workspace's config.
+  it('skips a reference to a profile that no longer exists', () => {
+    expect(resolveAgentRef(agents, 'claude-2', undefined, 'codex')?.id).toBe('codex')
+    expect(resolveAgentRef(agents, undefined, 'gone', 'claude')?.id).toBe('claude')
+  })
+
+  it('resolves nothing when no reference matches', () => {
+    expect(resolveAgentRef(agents, 'gone', undefined, 'also-gone')).toBeUndefined()
+    expect(resolveAgentRef([], 'claude')).toBeUndefined()
+  })
+})
+
+describe('nextAgentId / nextAgentName', () => {
+  it('hands the first profile the bare provider id and suffixes the rest', () => {
+    expect(nextAgentId('claude', [])).toBe('claude')
+    expect(nextAgentId('claude', ['claude'])).toBe('claude-2')
+    expect(nextAgentId('claude', ['claude', 'claude-2'])).toBe('claude-3')
+  })
+
+  it('numbers repeat names off the provider label', () => {
+    expect(nextAgentName('claude', [])).toBe('Claude')
+    expect(nextAgentName('claude', ['Claude'])).toBe('Claude 2')
   })
 })

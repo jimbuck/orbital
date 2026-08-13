@@ -11,8 +11,8 @@ import {
   SplitSquareVertical,
   Columns2
 } from 'lucide-react'
-import type { Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
-import { defaultAgentConfigs } from '@shared/types'
+import type { AgentConfig, Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
+import { defaultAgentConfigs, providerLabel, resolveAgentRef } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
@@ -52,18 +52,25 @@ function TypeIcon({
   return <Terminal {...props} />
 }
 
-/** Display names for agent providers. */
-const AGENT_TITLES: Record<string, string> = { claude: 'Claude', codex: 'Codex', cursor: 'Cursor' }
-
-/** Non-agent tab types in the add-tab popover; the workspace's configured agents slot in after Terminal. */
-const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig }[] = [
+/** Non-agent tab types in the add-tab popover; the workspace's agent profiles slot in after Terminal. */
+const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig; provider?: string }[] = [
   { type: 'terminal', label: 'Terminal' },
   { type: 'browser', label: 'Browser' },
   { type: 'editor', label: 'Editor' }
 ]
 
+/**
+ * The agent profile a tab launches: the one it names, else the project's
+ * default. Undefined when that profile is no longer configured.
+ */
+function tabAgent(tab: Tab, agents: AgentConfig[], defaultAgentId?: string): AgentConfig | undefined {
+  // Same order main launches by (see spawnAgent), so the chip never names an
+  // agent other than the one running in it.
+  return resolveAgentRef(agents, tab.config.agentId, tab.config.agentProvider, defaultAgentId)
+}
+
 /** Display title: explicit override, else something derived from the config. */
-function tabTitle(tab: Tab, defaultAgentProvider?: string): string {
+function tabTitle(tab: Tab, agent?: AgentConfig): string {
   if (tab.config.title) return tab.config.title
   if (tab.type === 'editor') {
     const p = tab.config.filePath
@@ -79,8 +86,8 @@ function tabTitle(tab: Tab, defaultAgentProvider?: string): string {
     }
   }
   if (tab.type === 'agent') {
-    const provider = tab.config.agentProvider || defaultAgentProvider || 'claude'
-    return AGENT_TITLES[provider] ?? provider
+    // A profile that has since been removed leaves only its reference to show.
+    return agent?.name ?? providerLabel(tab.config.agentId || tab.config.agentProvider || 'claude')
   }
   return 'terminal'
 }
@@ -102,19 +109,18 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   const renameRef = useRef<HTMLInputElement>(null)
   const onlyPane = worktree.panes.length <= 1
   const servers = useStore((s) => s.devServers[worktree.id]) ?? []
-  const defaultAgentProvider = useStore(
-    (s) => s.projects.find((p) => p.id === worktree.projectId)?.defaultAgentProvider
-  )
-  // The workspace's configured agents (Settings → Agent) fill the popover's
-  // agent entries, in list order. Undefined (state not loaded yet) means the
-  // default lineup.
+  const defaultAgentId = useStore((s) => s.projects.find((p) => p.id === worktree.projectId)?.defaultAgentId)
+  // The workspace's agent profiles (Settings → Agents) fill the popover's agent
+  // entries, in list order. Undefined (state not loaded yet) means the default
+  // lineup.
   const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
   const addOptions = [
     ADD_OPTIONS[0],
     ...agents.map((a) => ({
       type: 'agent' as TabType,
-      label: AGENT_TITLES[a.provider] ?? a.provider,
-      config: { agentProvider: a.provider }
+      label: a.name,
+      config: { agentId: a.id },
+      provider: a.provider
     })),
     ...ADD_OPTIONS.slice(1)
   ]
@@ -135,14 +141,15 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   }
 
   const startRename = (tab: Tab): void => {
-    setDraft(tabTitle(tab, defaultAgentProvider))
+    setDraft(tabTitle(tab, tabAgent(tab, agents, defaultAgentId)))
     setRenamingId(tab.id)
     setTabMenu(null)
   }
   const commitRename = (tab: Tab): void => {
     const title = draft.trim()
     setRenamingId(null)
-    if (title && title !== tabTitle(tab, defaultAgentProvider)) void window.orbital.renameTab(tab.id, title)
+    if (title && title !== tabTitle(tab, tabAgent(tab, agents, defaultAgentId)))
+      void window.orbital.renameTab(tab.id, title)
   }
 
   /**
@@ -228,11 +235,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             {showDot && tab.status ? (
               <StatusDot status={tab.status} />
             ) : (
-              <TypeIcon
-                type={tab.type}
-                provider={tab.config.agentProvider || defaultAgentProvider}
-                className="text-text-3"
-              />
+              <TypeIcon type={tab.type} provider={tabAgent(tab, agents, defaultAgentId)?.provider} className="text-text-3" />
             )}
             {renamingId === tab.id ? (
               <input
@@ -256,7 +259,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
               <span
                 className={`text-xs ${isActive ? 'font-semibold' : 'font-medium'} ${tab.type === 'editor' ? 'font-mono' : ''}`}
               >
-                {tabTitle(tab, defaultAgentProvider)}
+                {tabTitle(tab, tabAgent(tab, agents, defaultAgentId))}
               </span>
             )}
             <button
@@ -291,14 +294,15 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
               role="menu"
               className="absolute left-0 top-8 z-[41] w-40 rounded-card border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
             >
-              {addOptions.map(({ type, label, config }) => (
+              {addOptions.map(({ type, label, config, provider }) => (
                 <button
-                  key={label}
+                  // Profile names are free text and may repeat; the id does not.
+                  key={config?.agentId ?? type}
                   role="menuitem"
                   onClick={() => addTab(type, config)}
                   className={`flex w-full items-center gap-2.5 rounded-chip px-2.5 py-1.5 text-left text-xs font-medium text-text-2 hover:bg-hover ${FOCUS}`}
                 >
-                  <TypeIcon type={type} provider={config?.agentProvider} className="text-muted" />
+                  <TypeIcon type={type} provider={provider} className="text-muted" />
                   {label}
                 </button>
               ))}
@@ -436,7 +440,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
           <MenuConfirm
             message={
               closeConfirm.tabs.length === 1
-                ? `Close “${tabTitle(closeConfirm.tabs[0], defaultAgentProvider)}”? ${
+                ? `Close “${tabTitle(closeConfirm.tabs[0], tabAgent(closeConfirm.tabs[0], agents, defaultAgentId))}”? ${
                     closeConfirm.tabs[0].type === 'agent'
                       ? 'Its agent session is still running.'
                       : 'Its process is still running.'

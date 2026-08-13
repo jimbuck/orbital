@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
 import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
 import type { Worktree, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
-import { SUPPORTED_AGENTS, defaultAgentConfigs } from '@shared/types'
+import { defaultAgentConfigs } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
 import { useStore, activeWorktree } from '@renderer/store'
 import TabStrip from './TabStrip'
@@ -159,16 +159,16 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
   // expansion, view mode, scroll); keep them mounted (hidden when inactive) so
   // that state survives switching away and back.
   const editorTabs = pane.tabs.filter((t) => t.type === 'editor')
-  // The workspace's configured agents (Settings → Agent) fill the agent
-  // openers, in list order. Undefined (state not loaded yet) means the default lineup.
+  // The workspace's agent profiles (Settings → Agents) fill the agent openers,
+  // in list order. Undefined (state not loaded yet) means the default lineup.
   const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
   const openers = [
     OPENERS[0],
     ...agents.map((a) => ({
       type: 'agent' as TabType,
-      label: SUPPORTED_AGENTS.find((s) => s.id === a.provider)?.label ?? a.provider,
+      label: a.name,
       Icon: AGENT_ICONS[a.provider] ?? ClaudeIcon,
-      config: { agentProvider: a.provider }
+      config: { agentId: a.id }
     })),
     ...OPENERS.slice(1)
   ]
@@ -232,7 +232,8 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
             <div className="flex items-center gap-2">
               {openers.map(({ type, label, Icon, config }) => (
                 <button
-                  key={label}
+                  // Profile names are free text and may repeat; the id does not.
+                  key={config?.agentId ?? type}
                   onClick={() => window.orbital.createTab(worktree.id, pane.id, type, config)}
                   className="flex w-[84px] flex-col items-center gap-2 rounded-btn border border-line-2 bg-hover px-3 py-3.5 text-text-2 outline-none transition-colors hover:border-line-strong hover:bg-panel-2 hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60"
                 >

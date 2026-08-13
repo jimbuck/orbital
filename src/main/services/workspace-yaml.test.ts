@@ -15,8 +15,15 @@ describe('workspace-yaml normalize — agent settings', () => {
       projects: []
     })
     expect(cfg.settings?.agents).toEqual([
-      { provider: 'claude', configDir: 'C:\\profiles\\work', args: ['--verbose'], env: { A: '1' } },
-      { provider: 'codex' }
+      {
+        id: 'claude',
+        name: 'Claude',
+        provider: 'claude',
+        configDir: 'C:\\profiles\\work',
+        args: ['--verbose'],
+        env: { A: '1' }
+      },
+      { id: 'codex', name: 'Codex', provider: 'codex' }
     ])
   })
 
@@ -27,7 +34,10 @@ describe('workspace-yaml normalize — agent settings', () => {
       settings: { enabledAgents: ['claude', 'cursor'] },
       projects: []
     })
-    expect(cfg.settings?.agents).toEqual([{ provider: 'claude' }, { provider: 'cursor' }])
+    expect(cfg.settings?.agents).toEqual([
+      { id: 'claude', name: 'Claude', provider: 'claude' },
+      { id: 'cursor', name: 'Cursor', provider: 'cursor' }
+    ])
   })
 
   it('drops an unusable agents value entirely', () => {

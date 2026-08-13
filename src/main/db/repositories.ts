@@ -31,7 +31,7 @@ function mapProject(r: any): Project {
     id: r.id,
     name: r.name,
     repoPath: r.repo_path,
-    defaultAgentProvider: r.default_agent_provider || 'claude',
+    defaultAgentId: r.default_agent_id || 'claude',
     agentExecPath: r.agent_exec_path || undefined,
     addedAt: r.added_at
   }
@@ -196,12 +196,12 @@ export const projects = {
   rename(pid: string, name: string): void {
     getDb().prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, pid)
   },
-  updateAgent(pid: string, patch: { defaultAgentProvider?: string; agentExecPath?: string }): void {
+  updateAgent(pid: string, patch: { defaultAgentId?: string; agentExecPath?: string }): void {
     const cur = projects.get(pid)
     if (!cur) return
     getDb()
-      .prepare('UPDATE projects SET default_agent_provider = ?, agent_exec_path = ? WHERE id = ?')
-      .run(patch.defaultAgentProvider ?? cur.defaultAgentProvider, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
+      .prepare('UPDATE projects SET default_agent_id = ?, agent_exec_path = ? WHERE id = ?')
+      .run(patch.defaultAgentId ?? cur.defaultAgentId, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
   }
 }
 

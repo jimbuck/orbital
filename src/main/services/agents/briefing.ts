@@ -88,7 +88,7 @@ function briefingText({ project, worktree, providerName, hooksInstalled }: Brief
     '- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress.',
     "- `orbital worktrees` — list this project's worktrees.",
     '- `orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [name]` — open a new worktree, on a fresh branch, an existing one, or forked from a given ref.',
-    '- `orbital tab new <terminal|browser|editor|agent> [arg]` — open a tab in this worktree (browser arg = URL, editor arg = file path, agent arg = provider).',
+    '- `orbital tab new <terminal|browser|editor|agent> [arg]` — open a tab in this worktree (browser arg = URL, editor arg = file path, agent arg = the name of a configured agent).',
     '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click; `orbital server list` shows what is registered.',
     '- `orbital whoami` — this worktree at a glance: project, branch, path, status, linked task, dev servers.'
   ]

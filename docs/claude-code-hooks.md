@@ -7,16 +7,17 @@ touching anything else in your config:
 
 | | What it does | Where it lands |
 |---|---|---|
-| **Claude status hooks** | Worktrees report status from Claude's own lifecycle events | `settings.json` in the workspace's Claude profile dir |
+| **Claude status hooks** | Worktrees report status from Claude's own lifecycle events | `settings.json` in that Claude profile's dir |
 | **The `orbital` skill** | Teaches Claude the `orbital` CLI in sessions Orbital didn't boot | `skills/orbital/SKILL.md` in the same dir |
-| **Codex instructions** | Teaches Codex the same, since it takes no briefing | a marked block in `AGENTS.md` in the workspace's Codex profile dir |
+| **Codex instructions** | Teaches Codex the same, since it takes no briefing | a marked block in `AGENTS.md` in that Codex profile's dir |
 
-Each targets the profile directory **this workspace launches that agent against**
-(Settings → agents → *provider* → profile directory), falling back to the
+All three belong to **one agent profile**, and they are offered on that profile's
+card (Settings → Agents), not once for the app. Each lands in the directory that
+profile launches with (its *profile directory* field), falling back to the
 provider's own env var (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and then `~/.claude` /
-`~/.codex`. That is the only directory the agent will read: a workspace pointing
-an agent at its own profile needs its own install, and the Settings badges report
-the state of that profile, not the machine default.
+`~/.codex`. That is the only directory those sessions read, so a workspace running
+two Claude profiles — a personal one and a work one — installs into each
+separately, and each card's badge reports the state of its own profile.
 
 ## Claude status hooks
 

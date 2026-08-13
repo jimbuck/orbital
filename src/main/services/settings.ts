@@ -13,16 +13,14 @@ import { requireWorkspaceId, workspaces } from '../db/repositories'
  * The settings facade. The renderer (and the rest of main) reads and writes one
  * flat {@link Settings} object; behind it the fields live in two places in the
  * global DB — workspace-scoped fields (env-sync patterns, periodic fetch,
- * configured agents) on the active workspace's row, machine-global fields (theme,
- * alerts, shell, logging, Claude hooks) in the settings table, shared by every
+ * configured agent profiles) on the active workspace's row, machine-global fields
+ * (theme, alerts, shell, logging) in the settings table, shared by every
  * workspace and instance.
  */
 
 const DEFAULT_SETTINGS: Settings = {
   defaultShell: '',
   alerts: { indicator: true, sound: true, taskbarBadge: true, taskbarFlash: true },
-  claudeHooksInstalled: false,
-  claudeSkillInstalled: false,
   envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
   periodicFetch: true,
   debugLogging: false,
@@ -36,8 +34,6 @@ function splitGlobal(s: Settings): GlobalSettings {
   return {
     defaultShell: s.defaultShell,
     alerts: s.alerts,
-    claudeHooksInstalled: s.claudeHooksInstalled,
-    claudeSkillInstalled: s.claudeSkillInstalled,
     debugLogging: s.debugLogging,
     theme: s.theme
   }
@@ -67,14 +63,10 @@ function readGlobalSettings(): Partial<GlobalSettings> {
   }
   if (!blob || typeof blob !== 'object') return {}
   const out: Record<string, unknown> = {}
-  for (const key of [
-    'defaultShell',
-    'alerts',
-    'claudeHooksInstalled',
-    'claudeSkillInstalled',
-    'debugLogging',
-    'theme'
-  ] as const) {
+  // Blobs written before installs became per-agent-profile also carry
+  // claudeHooksInstalled / claudeSkillInstalled; picking only current keys drops
+  // them (the installed state is read from each profile's files, not mirrored).
+  for (const key of ['defaultShell', 'alerts', 'debugLogging', 'theme'] as const) {
     if (blob[key] !== undefined) out[key] = blob[key]
   }
   return out as Partial<GlobalSettings>
