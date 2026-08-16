@@ -7,6 +7,7 @@ import type { Tab } from '@shared/types'
 import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { registerTerminal } from '@renderer/lib/editActions'
+import { decodeOsc52, terminalCopyIntent } from '@renderer/lib/terminalClipboard'
 
 /** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
 const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
@@ -165,8 +166,9 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     })
 
     // Copy the current selection to the system clipboard, then clear it (so the
-    // next right-click pastes rather than re-copying). Terminals are read-only
-    // output, so copy never mutates the buffer.
+    // next right-click pastes rather than re-copying, and so a following Ctrl+C
+    // is an interrupt again rather than a second identical copy). Terminals are
+    // read-only output, so copy never mutates the buffer.
     const copySelection = (): void => {
       const sel = term.getSelection()
       if (sel) {
@@ -206,13 +208,36 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     }
     container.addEventListener('paste', suppressNativePaste, true)
 
-    // Keyboard paste: Ctrl/Cmd+V and the terminal-standard Ctrl+Shift+V.
+    // Keyboard copy/paste. Paste is Ctrl/Cmd+V (and the terminal-standard
+    // Ctrl+Shift+V, which lands here too). Copy is delegated to
+    // terminalCopyIntent() because Ctrl+C is overloaded — see that function for
+    // why a selection-less Ctrl+C must fall through to xterm and become SIGINT.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
         e.preventDefault()
         pasteClipboard()
         return false // paste ourselves (above) and stop xterm sending a literal 'v'
       }
+      if (terminalCopyIntent(e, term.hasSelection()) === 'copy') {
+        e.preventDefault()
+        copySelection()
+        return false // never let a copy shortcut also reach the PTY as ^C
+      }
+      return true
+    })
+
+    // OSC 52 (`ESC ] 52 ; <targets> ; <base64> BEL`) is how a TUI running in the
+    // terminal — Claude Code, vim, tmux — asks the terminal to put text on the
+    // SYSTEM clipboard, which is the only clipboard the program itself cannot
+    // reach. xterm.js parses the sequence but ships no handler for it, so
+    // unhandled it is silently discarded and the user's copy just never arrives.
+    // Decoding lives in decodeOsc52(), which returns null for anything we should
+    // not write (read requests, malformed base64, oversized payloads).
+    const osc52Disposable = term.parser.registerOscHandler(52, (data) => {
+      const text = decodeOsc52(data)
+      if (text !== null) window.orbital.writeClipboard(text)
+      // Handled either way: there is no fallback handler that could do better,
+      // and reporting it unhandled would only re-run the same dead end.
       return true
     })
 
@@ -264,6 +289,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       unregisterEdit()
       resizeObserver.disconnect()
       inputDisposable.dispose()
+      osc52Disposable.dispose()
       try {
         webgl?.dispose()
       } catch {
