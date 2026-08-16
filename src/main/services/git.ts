@@ -12,8 +12,17 @@ import { promisify } from 'node:util'
 import { EventEmitter } from 'node:events'
 import { readFileSync, statSync, watch } from 'node:fs'
 import type { FSWatcher } from 'node:fs'
-import { readFile as fsReadFile, writeFile as fsWriteFile, mkdir, readdir } from 'node:fs/promises'
-import { join, dirname, resolve } from 'node:path'
+import {
+  readFile as fsReadFile,
+  writeFile as fsWriteFile,
+  open as fsOpen,
+  rename as fsRename,
+  stat as fsStat,
+  mkdir,
+  readdir
+} from 'node:fs/promises'
+import { join, dirname, resolve, relative, isAbsolute, sep } from 'node:path'
+import { shell } from 'electron'
 import ignore from 'ignore'
 import type {
   GitStatus,
@@ -406,6 +415,171 @@ async function diff(repoPath: string, path: string, staged: boolean): Promise<Fi
 }
 
 /* ----------------------------------------------------------------------------
+ * Path containment
+ *
+ * Everything below this line acts on a path the RENDERER supplied, and several
+ * of the operations create, rename or bin real files. A relative path from the
+ * file tree is data, not a promise: a compromised renderer (or a bug that lets
+ * repo content reach one of these calls) must not be able to walk out of the
+ * checkout and rewrite the user's home directory. `resolveInRepo` is the single
+ * gate every mutating operation goes through.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Anything the OS would read as "ignore where you are, start from a root":
+ * a leading separator (POSIX absolute, or a UNC share when doubled) or a
+ * Windows drive prefix. The drive case is the subtle one — `C:foo` is drive-
+ * RELATIVE, so `isAbsolute` says false and `resolve` would graft it under the
+ * repo, while Windows itself would resolve it against that drive's current
+ * directory. Rejecting the whole shape up front avoids reasoning about which
+ * platform's rules the incoming string was written for.
+ */
+const ROOTED = /^(?:[a-zA-Z]:|[\\/])/
+
+/**
+ * Resolve a checkout-relative path against `repoPath`, throwing if the result
+ * lands outside the checkout. Returns the absolute path.
+ *
+ * Containment is decided by `relative()`, deliberately NOT by a string prefix
+ * test: `C:\repo-evil` starts with `C:\repo` yet is a different tree entirely.
+ * `relative()` also folds case on Windows, so `c:\repo\src` is correctly seen
+ * as inside `C:\Repo` — a case-sensitive prefix test would reject it.
+ *
+ * An empty `relPath` resolves to the checkout root itself, which callers that
+ * must not operate on the root (delete) reject separately.
+ */
+export function resolveInRepo(repoPath: string, relPath: string): string {
+  if (ROOTED.test(relPath)) {
+    throw new Error(`"${relPath}" is not a path inside the Worktree`)
+  }
+  const root = resolve(repoPath)
+  const full = resolve(root, relPath)
+  const rel = relative(root, full)
+  // `..` alone, `../…`, or an absolute answer (a different drive) all mean the
+  // resolved path is not under the root.
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`"${relPath}" escapes the Worktree`)
+  }
+  return full
+}
+
+/**
+ * Reject anything that isn't a single path segment. The renderer's New File /
+ * New Folder / Rename fields collect a NAME, so a separator in one would
+ * silently turn into a path — `resolveInRepo` would happily accept `a/b/c`
+ * because it stays inside the repo, which is exactly the confusion we don't
+ * want in a rename box. Control characters are refused because they produce
+ * names the user can neither see nor select afterwards.
+ */
+// eslint-disable-next-line no-control-regex
+const BAD_NAME = /[\\/\u0000-\u001f]/
+
+export function checkEntryName(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) throw new Error('Enter a name')
+  if (BAD_NAME.test(trimmed)) throw new Error('A name cannot contain path separators')
+  if (trimmed === '.' || trimmed === '..') throw new Error(`"${trimmed}" is not a valid name`)
+  return trimmed
+}
+
+/** Join a checkout-relative directory and a child name (`''` parent = repo root). */
+function childOf(parentRel: string, name: string): string {
+  return parentRel ? `${parentRel}/${name}` : name
+}
+
+/** Last path separator, whichever flavour the caller's string happens to use. */
+function lastSep(p: string): number {
+  return Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+}
+
+async function pathExists(full: string): Promise<boolean> {
+  try {
+    await fsStat(full)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Create an empty file `name` inside `parentRel`; returns its checkout-relative
+ * path. Opening with 'wx' is what makes this safe against clobbering — an
+ * existing file fails with EEXIST instead of being truncated to nothing.
+ */
+async function createFile(repoPath: string, parentRel: string, name: string): Promise<string> {
+  const relPath = childOf(parentRel, checkEntryName(name))
+  const full = resolveInRepo(repoPath, relPath)
+  await mkdir(dirname(full), { recursive: true })
+  try {
+    const handle = await fsOpen(full, 'wx')
+    await handle.close()
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`"${relPath}" already exists`)
+    }
+    throw err
+  }
+  return relPath
+}
+
+/**
+ * Create directory `name` inside `parentRel`; returns its checkout-relative
+ * path. The parent chain is created recursively but the leaf is not, so an
+ * existing directory reports a collision rather than silently succeeding.
+ */
+async function createDirectory(repoPath: string, parentRel: string, name: string): Promise<string> {
+  const relPath = childOf(parentRel, checkEntryName(name))
+  const full = resolveInRepo(repoPath, relPath)
+  await mkdir(dirname(full), { recursive: true })
+  try {
+    await mkdir(full)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`"${relPath}" already exists`)
+    }
+    throw err
+  }
+  return relPath
+}
+
+/**
+ * Rename a file or directory in place (same parent), returning its new
+ * checkout-relative path. Both ends are containment-checked: the source
+ * because the renderer chose it, the target because it is derived from a
+ * user-typed name.
+ */
+async function renamePath(repoPath: string, relPath: string, newName: string): Promise<string> {
+  const name = checkEntryName(newName)
+  const from = resolveInRepo(repoPath, relPath)
+  const cut = lastSep(relPath)
+  const target = cut === -1 ? name : `${relPath.slice(0, cut)}/${name}`
+  const to = resolveInRepo(repoPath, target)
+  if (to === from) return relPath // nothing typed but the existing name
+
+  // A case-only rename (Foo.ts -> foo.ts) targets the SAME file on a
+  // case-insensitive filesystem, so the collision check below would refuse a
+  // perfectly legal rename; let the OS arbitrate that one.
+  const sameFile = process.platform === 'win32' ? to.toLowerCase() === from.toLowerCase() : false
+  if (!sameFile && (await pathExists(to))) throw new Error(`"${target}" already exists`)
+
+  await fsRename(from, to)
+  return target
+}
+
+/**
+ * Send a file or directory to the OS recycle bin / trash. Recoverable by
+ * design — an editor tree is a place people misclick, and `unlink` there would
+ * be an unrecoverable data loss with no undo anywhere in the app.
+ */
+async function trashPath(repoPath: string, relPath: string): Promise<void> {
+  const full = resolveInRepo(repoPath, relPath)
+  if (full === resolve(repoPath)) throw new Error('The Worktree root cannot be deleted here')
+  if (!(await pathExists(full))) throw new Error(`"${relPath}" no longer exists`)
+  // Rejects with the OS error when the item can't be binned (e.g. a locked file).
+  await shell.trashItem(full)
+}
+
+/* ----------------------------------------------------------------------------
  * File tree & file I/O
  * -------------------------------------------------------------------------- */
 
@@ -658,6 +832,11 @@ export const git = {
   readFile,
   readFileBase64,
   writeFile,
+  resolveInRepo,
+  createFile,
+  createDirectory,
+  renamePath,
+  trashPath,
   worktreeAdd,
   worktreeRemove,
   worktreePrune,

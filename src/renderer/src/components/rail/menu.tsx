@@ -1,9 +1,11 @@
-import type { JSX, ReactNode } from 'react'
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
 
 /**
- * Shared right-click context-menu primitives (rail WorktreeRow/Project rows and
- * task cards): a dismiss overlay + positioned surface, a menu row, and a
- * destructive-action confirm block that swaps in place of the menu items.
+ * Shared right-click context-menu primitives (rail WorktreeRow/Project rows,
+ * task cards and the editor file tree): a dismiss overlay + positioned surface,
+ * a menu row, a destructive-action confirm block, and a single-line text prompt
+ * — the latter two swap in place of the menu items rather than opening a
+ * separate dialog, so a right-click never spawns a second surface to aim at.
  */
 
 export type MenuPos = { x: number; y: number }
@@ -115,6 +117,97 @@ export function MenuConfirm({
             <span className="inline-block size-[10px] flex-none animate-spin rounded-full border-[1.5px] border-red-2 border-t-transparent" />
           )}
           {busy ? busyLabel || 'Working…' : confirmLabel}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="flex-1 rounded-md bg-hover px-2 py-1.5 text-[11.5px] font-semibold text-text-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-hover"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * In-menu single-line prompt (New File…, Rename…): a labelled text field that
+ * swaps in place of the menu items, mirroring {@link MenuConfirm}. It exists
+ * because the alternatives are both worse — `window.prompt` is a blocking
+ * native dialog Electron renders inconsistently, and a real modal pulls focus
+ * away from the row the user just aimed at.
+ *
+ * `error` is rendered under the field and the prompt STAYS OPEN when it is set,
+ * so a rejected name (already exists, contains a separator) can be corrected in
+ * place instead of forcing the user to re-open the menu and retype.
+ */
+export function MenuPrompt({
+  label,
+  initial = '',
+  placeholder,
+  confirmLabel,
+  busy = false,
+  error,
+  onSubmit,
+  onCancel
+}: {
+  label: string
+  initial?: string
+  placeholder?: string
+  confirmLabel: string
+  busy?: boolean
+  error?: string | null
+  onSubmit: (value: string) => void
+  onCancel: () => void
+}): JSX.Element {
+  const [value, setValue] = useState(initial)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // The menu opens at the pointer with nothing else focused, so the field takes
+  // focus itself; selecting the seed text makes Rename a type-over.
+  useEffect(() => {
+    inputRef.current?.select()
+  }, [])
+
+  const submit = (): void => {
+    if (busy) return
+    onSubmit(value)
+  }
+
+  return (
+    <div className="p-1">
+      <div className="px-1 pb-1 text-[11.5px] font-semibold text-text-2">{label}</div>
+      <input
+        ref={inputRef}
+        value={value}
+        placeholder={placeholder}
+        disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            submit()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+          }
+        }}
+        aria-label={label}
+        className="allow-select w-full rounded border border-line-strong bg-bg px-1.5 py-1 font-mono text-[11.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+      />
+      {error && <div className="px-1 pt-1 text-[11px] leading-snug text-red-2">{error}</div>}
+      <div className="mt-1.5 flex gap-1.5">
+        <button
+          type="button"
+          disabled={busy || value.trim() === ''}
+          onClick={submit}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-accent/15 px-2 py-1.5 text-[11.5px] font-semibold text-blue outline-none hover:bg-accent/25 focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-accent/15"
+        >
+          {busy && (
+            <span className="inline-block size-[10px] flex-none animate-spin rounded-full border-[1.5px] border-blue border-t-transparent" />
+          )}
+          {confirmLabel}
         </button>
         <button
           type="button"

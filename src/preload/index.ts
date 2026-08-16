@@ -162,6 +162,16 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.readFileBase64, worktreeId, path) as Promise<string>,
   writeFile: (worktreeId: string, path: string, content: string) =>
     ipcRenderer.invoke(IPC.writeFile, worktreeId, path, content) as Promise<void>,
+  createFile: (worktreeId: string, parentDir: string, name: string) =>
+    ipcRenderer.invoke(IPC.createFile, worktreeId, parentDir, name) as Promise<string>,
+  createDirectory: (worktreeId: string, parentDir: string, name: string) =>
+    ipcRenderer.invoke(IPC.createDirectory, worktreeId, parentDir, name) as Promise<string>,
+  renamePath: (worktreeId: string, path: string, newName: string) =>
+    ipcRenderer.invoke(IPC.renamePath, worktreeId, path, newName) as Promise<string>,
+  trashPath: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.trashPath, worktreeId, path) as Promise<void>,
+  resolvePath: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.resolvePath, worktreeId, path) as Promise<string>,
 
   // tasks
   createTask: (projectId: string, title: string, description?: string, tags?: string[]) =>
@@ -175,6 +185,7 @@ const api: OrbitalApi = {
   registerBrowserView: (webContentsId: number, worktreeId: string, paneId: string) =>
     ipcRenderer.invoke(IPC.registerBrowserView, webContentsId, worktreeId, paneId) as Promise<void>,
   openPath: (path: string) => ipcRenderer.invoke(IPC.openPath, path) as Promise<void>,
+  revealPath: (path: string) => ipcRenderer.invoke(IPC.revealPath, path) as Promise<void>,
   openInTerminal: (path: string) => ipcRenderer.invoke(IPC.openInTerminal, path) as Promise<void>,
   openLogFolder: () => ipcRenderer.invoke(IPC.openLogFolder) as Promise<void>,
   windowMinimize: () => ipcRenderer.send(IPC.windowMinimize),

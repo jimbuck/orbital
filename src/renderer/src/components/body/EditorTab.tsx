@@ -6,6 +6,8 @@ import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { useFileTree } from '@renderer/lib/fileTree'
+import { clampMenuPos, type MenuPos } from '../rail/menu'
+import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
 
 /** Shiki bundled theme id for each resolved app theme. */
 function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
@@ -426,6 +428,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   const [imageData, setImageData] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  const [menu, setMenu] = useState<{ node: FileNode; pos: MenuPos } | null>(null)
   const reqRef = useRef(0)
 
   // Directories containing at least one changed file get a dot in the tree.
@@ -472,6 +475,51 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     setImageData(null)
     setLoading(false)
   }, [])
+
+  const openMenu = useCallback((e: React.MouseEvent, node: FileNode): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    // The height passed to the clamp is the tallest variant (a changed file,
+    // which adds the git block); over-estimating only biases the menu upward,
+    // whereas under-estimating would let the bottom items fall off-screen.
+    setMenu({ node, pos: clampMenuPos(e, FILE_MENU_WIDTH, 340) })
+  }, [])
+
+  /**
+   * A file operation from the tree's context menu landed. Refetch immediately
+   * rather than waiting on the filesystem watcher — its broadcast is debounced,
+   * and a tree that lags a click the user just made reads as a failure.
+   * The open file then has to be kept pointed at something that still exists.
+   */
+  const onFileMutated = useCallback(
+    (m: FileMutation): void => {
+      setLazyChildren({})
+      refetchTree()
+      if (m.kind === 'created') {
+        // Reveal what was just made: expand the directory it landed in, and
+        // open a new file straight away (that's why you made it).
+        const slash = m.path.lastIndexOf('/')
+        if (slash !== -1) setExpanded((e) => ({ ...e, [m.path.slice(0, slash)]: true }))
+        if (m.type === 'file') {
+          openFile({ name: m.path.slice(slash + 1), path: m.path, type: 'file' })
+        }
+      } else if (m.kind === 'renamed') {
+        // Follow the open file to its new path — including the case where an
+        // ANCESTOR directory was what got renamed.
+        setSelected((s) => {
+          if (!s) return s
+          if (s.path === m.from) return { ...s, path: m.to }
+          if (s.path.startsWith(`${m.from}/`)) return { ...s, path: m.to + s.path.slice(m.from.length) }
+          return s
+        })
+      } else {
+        // Deleted. Keeping a binned file open in an editable buffer would invite
+        // saving it back into existence, so close it.
+        setSelected((s) => (s && (s.path === m.path || s.path.startsWith(`${m.path}/`)) ? null : s))
+      }
+    },
+    [refetchTree, openFile]
+  )
 
   // Fetch whatever the current mode needs and doesn't have yet.
   useEffect(() => {
@@ -598,11 +646,22 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 changedDirs={changedDirs}
                 lazyChildren={lazyChildren}
                 loadDir={loadDir}
+                onContextMenu={openMenu}
               />
             ))
           )}
         </div>
       </div>
+
+      {menu && worktreeId && (
+        <FileContextMenu
+          worktreeId={worktreeId}
+          node={menu.node}
+          pos={menu.pos}
+          onClose={() => setMenu(null)}
+          onMutated={onFileMutated}
+        />
+      )}
 
       {/* Content */}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -706,7 +765,8 @@ function TreeNode({
   selectedPath,
   changedDirs,
   lazyChildren,
-  loadDir
+  loadDir,
+  onContextMenu
 }: {
   node: FileNode
   depth: number
@@ -717,6 +777,8 @@ function TreeNode({
   changedDirs: Set<string>
   lazyChildren: Record<string, FileNode[]>
   loadDir: (path: string) => void
+  /** Right-click on this row — opens the file operations menu for its node. */
+  onContextMenu: (e: React.MouseEvent, node: FileNode) => void
 }): JSX.Element {
   const pad = { paddingLeft: depth * 12 + 8 }
   const open = node.type === 'dir' && !!expanded[node.path]
@@ -735,6 +797,7 @@ function TreeNode({
       <>
         <button
           onClick={() => toggle(node.path)}
+          onContextMenu={(e) => onContextMenu(e, node)}
           style={pad}
           className={`flex w-full items-center gap-1.5 py-1 pr-2 text-left text-[12px] text-text-3 hover:bg-hover ${dim} ${FOCUS}`}
         >
@@ -763,6 +826,7 @@ function TreeNode({
             changedDirs={changedDirs}
             lazyChildren={lazyChildren}
             loadDir={loadDir}
+            onContextMenu={onContextMenu}
           />
         ))}
       </>
@@ -774,6 +838,7 @@ function TreeNode({
   return (
     <button
       onClick={() => onSelect(node)}
+      onContextMenu={(e) => onContextMenu(e, node)}
       style={pad}
       className={`flex w-full items-center gap-2 py-1 pr-2 text-left text-[12px] hover:bg-hover ${
         isSelected ? 'bg-accent/10 text-text' : 'text-text-3'
