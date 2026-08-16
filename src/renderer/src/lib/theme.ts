@@ -8,6 +8,16 @@ export type ResolvedTheme = 'light' | 'dark'
 /** The three modes offered by every theme control, in the order they are shown. */
 export const THEME_MODES: readonly ThemeMode[] = ['system', 'light', 'dark']
 
+/**
+ * Display label for a mode. Shared so the View menu and the Settings modal name
+ * the same option identically — the modal used to lean on a `capitalize` class
+ * over the raw value, which would diverge the moment a mode needs a label that
+ * isn't just its value with a capital letter.
+ */
+export function themeModeLabel(mode: ThemeMode): string {
+  return mode === 'system' ? 'System' : mode === 'light' ? 'Light' : 'Dark'
+}
+
 /** Media query used to resolve the 'system' theme against the OS preference. */
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 

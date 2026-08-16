@@ -4,6 +4,14 @@ import { Check, ChevronDown, FolderGit2 } from 'lucide-react'
 import { useStore, activeProject, tasksForProject } from '@renderer/store'
 import type { Project, Task, BranchInfo } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
+import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
+
+/** Where the Worktree's branch comes from. Hoisted so the options array is a
+ *  stable reference rather than a fresh one on every keystroke in this form. */
+const BRANCH_SOURCES: readonly SegmentedOption<'new' | 'existing'>[] = [
+  { value: 'new', label: 'Create new branch' },
+  { value: 'existing', label: 'Open existing branch' }
+]
 
 /** modalData payload for the New Worktree modal. */
 interface NewWorktreeData {
@@ -204,27 +212,18 @@ export default function NewWorktree(): React.JSX.Element {
         className={`mt-1.5 ${inputBase}`}
       />
 
-      {/* Two-way branch source; mirrors the Settings theme segmented control. */}
-      <div className="mt-4 flex items-center rounded-[7px] border border-line-2 bg-bg p-[2px]">
-        {(
-          [
-            ['new', 'Create new branch'],
-            ['existing', 'Open existing branch']
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setMode(value)}
-            aria-pressed={mode === value}
-            className={`flex-1 rounded-[5px] px-2.5 py-[3px] text-[11px] font-semibold ${
-              mode === value ? 'bg-accent/15 text-blue' : 'text-muted hover:text-text-2'
-            } focus-visible:ring-2 focus-visible:ring-accent/60 outline-none`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Two-way branch source. Shares SegmentedControl with the Settings theme
+          picker: this is the same one-of-N choice, so it gets the same radio
+          semantics and the same keyboard contract. It used to be hand-rolled
+          `aria-pressed` toggles that only claimed to mirror that control. */}
+      <SegmentedControl
+        label="Branch source"
+        options={BRANCH_SOURCES}
+        value={mode}
+        onChange={setMode}
+        fill
+        className="mt-4"
+      />
 
       {mode === 'new' ? (
         <>

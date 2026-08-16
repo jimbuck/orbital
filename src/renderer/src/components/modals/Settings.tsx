@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
 import type { Settings as SettingsModel, AgentConfig, ProfileDirInfo } from '@shared/types'
-import { setThemeMode, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { setThemeMode, themeModeLabel, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { SegmentedControl } from '../SegmentedControl'
 import {
   SUPPORTED_AGENTS,
   defaultAgentConfigs,
@@ -579,26 +580,18 @@ export default function Settings(): React.JSX.Element {
       <div className="mt-2.5 flex items-center justify-between gap-4">
         <span className="text-[12.5px] text-text-2">Theme</span>
         {/* 3-way segmented control. Unlike the other fields here it applies (and
-            persists) on click rather than on Save, because the View menu offers
-            the same three options and does the same — one shared write path in
-            lib/theme.ts keeps the two controls from ever disagreeing, and a theme
-            picker you have to Save to see is a poor preview. */}
-        <div role="radiogroup" aria-label="Theme" className="flex items-center rounded-[7px] border border-line-2 bg-bg p-[2px]">
-          {THEME_MODES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              onClick={() => setThemeMode(mode)}
-              aria-checked={theme === mode}
-              className={`rounded-[5px] px-2.5 py-[3px] text-[11px] font-semibold capitalize ${
-                theme === mode ? 'bg-accent/15 text-blue' : 'text-muted hover:text-text-2'
-              } focus-visible:ring-2 focus-visible:ring-accent/60 outline-none`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
+            persists) on selection rather than on Save, because the View menu
+            offers the same three options and does the same — one shared write
+            path in lib/theme.ts keeps the two controls from ever disagreeing,
+            and a theme picker you have to Save to see is a poor preview. That
+            also makes arrow-key selection-follows-focus the right pattern here:
+            every arrow press is a real, instantly visible preview. */}
+        <SegmentedControl
+          label="Theme"
+          options={THEME_MODES.map((mode) => ({ value: mode, label: themeModeLabel(mode) }))}
+          value={theme}
+          onChange={setThemeMode}
+        />
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

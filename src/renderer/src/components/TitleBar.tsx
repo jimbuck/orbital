@@ -3,7 +3,7 @@ import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, useResolvedTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { setThemeMode, themeModeLabel, useResolvedTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
 
 interface MenuItem {
   label: string
@@ -106,7 +106,7 @@ export default function TitleBar(): JSX.Element {
         // Applies (and persists) on click through the same path the Settings
         // modal uses, so the two controls always agree.
         ...THEME_MODES.map<MenuItem>((mode) => ({
-          label: mode === 'system' ? 'System' : mode === 'light' ? 'Light' : 'Dark',
+          label: themeModeLabel(mode),
           checked: themeMode === mode,
           hint: mode === 'system' ? resolvedTheme : undefined,
           onClick: () => setThemeMode(mode)
