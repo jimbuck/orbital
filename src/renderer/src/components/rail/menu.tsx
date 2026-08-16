@@ -82,6 +82,13 @@ export function MenuItem({
  * Cancel. Pass `busy` while the confirmed action is running to lock both buttons
  * (and swap the confirm label for `busyLabel` + a spinner) so a slow action
  * can't be fired twice or cancelled halfway.
+ *
+ * `error` is rendered under the hint exactly as {@link MenuPrompt} renders its
+ * own, and for the same reason — the confirm STAYS OPEN when the action fails.
+ * Without it a failed delete is invisible: the file is locked, or was removed
+ * externally, or permission was denied, and the panel just sits there unchanged
+ * while the user wonders whether anything happened. For the app's only
+ * destructive file action, silence is the one unacceptable answer.
  */
 export function MenuConfirm({
   message,
@@ -90,6 +97,7 @@ export function MenuConfirm({
   danger = true,
   busy = false,
   busyLabel,
+  error,
   onConfirm,
   onCancel
 }: {
@@ -99,6 +107,7 @@ export function MenuConfirm({
   danger?: boolean
   busy?: boolean
   busyLabel?: string
+  error?: string | null
   onConfirm: () => void
   onCancel: () => void
 }): JSX.Element {
@@ -106,6 +115,9 @@ export function MenuConfirm({
     <div className="p-1">
       <div className={`px-1 py-1 text-[11.5px] leading-snug ${danger ? 'text-red-2' : 'text-text-3'}`}>{message}</div>
       {hint && <div className="px-1 pb-1 text-[11px] text-dim">{hint}</div>}
+      {/* Same markup as MenuPrompt's error, and selectable for the same reason:
+          a raw OS failure is something the user wants to copy verbatim. */}
+      {error && <div className="allow-select px-1 pt-1 text-[11px] leading-snug text-red-2">{error}</div>}
       <div className="mt-1.5 flex gap-1.5">
         <button
           type="button"
@@ -196,7 +208,7 @@ export function MenuPrompt({
         aria-label={label}
         className="allow-select w-full rounded border border-line-strong bg-bg px-1.5 py-1 font-mono text-[11.5px] text-text outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
       />
-      {error && <div className="px-1 pt-1 text-[11px] leading-snug text-red-2">{error}</div>}
+      {error && <div className="allow-select px-1 pt-1 text-[11px] leading-snug text-red-2">{error}</div>}
       <div className="mt-1.5 flex gap-1.5">
         <button
           type="button"

@@ -178,6 +178,7 @@ export default function FileContextMenu({
           confirmLabel="Delete"
           busy={busy}
           busyLabel="Deleting…"
+          error={error}
           onConfirm={trash}
           onCancel={back}
         />
@@ -192,6 +193,7 @@ export default function FileContextMenu({
           confirmLabel="Discard"
           busy={busy}
           busyLabel="Discarding…"
+          error={error}
           onConfirm={() => void run(() => window.orbital.gitDiscard(worktreeId, node.path))}
           onCancel={back}
         />

@@ -118,6 +118,32 @@ describe('delete', () => {
     expect(closed).toBe(1)
   })
 
+  it('keeps the confirm open and shows why when the bin fails', async () => {
+    // The failure that must never be silent. `shell.trashItem` rejects for
+    // entirely ordinary reasons on Windows — the file is locked by another
+    // process, it was deleted externally since the menu opened, a directory
+    // holds a locked child, permission is denied — and before this the panel
+    // simply sat there unchanged, leaving "did that work?" unanswerable for the
+    // app's only destructive file action.
+    bridge.trashPath.mockRejectedValueOnce(
+      new Error(`Error invoking remote method 'orbital:trashPath': Error: Failed to parse path`)
+    )
+    show(file)
+    fireEvent.click(screen.getByText('Delete')) // menu item -> confirm step
+    fireEvent.click(screen.getByText('Delete')) // confirm button
+
+    await waitFor(() => expect(screen.getByText('Failed to parse path')).toBeTruthy())
+    // Still on the confirm, still open, and nothing reported as deleted — the
+    // file is genuinely still on disk.
+    expect(screen.getByText('Delete "a.ts"?')).toBeTruthy()
+    expect(mutations).toEqual([])
+    expect(closed).toBe(0)
+    // Both buttons are usable again, so the user can retry or back out.
+    const confirm = screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('returns to the item list when the confirm is cancelled', () => {
     show(file)
     fireEvent.click(screen.getByText('Delete'))
@@ -202,5 +228,15 @@ describe('OS and git hand-offs', () => {
 
     fireEvent.click(screen.getByText('Discard'))
     await waitFor(() => expect(bridge.gitDiscard).toHaveBeenCalledWith('w1', 'src/a.ts'))
+  })
+
+  it('shows why a discard failed rather than appearing to have worked', async () => {
+    bridge.gitDiscard.mockRejectedValueOnce(new Error('index.lock exists'))
+    show(changed)
+    fireEvent.click(screen.getByText('Discard Changes…'))
+    fireEvent.click(screen.getByText('Discard'))
+
+    await waitFor(() => expect(screen.getByText('index.lock exists')).toBeTruthy())
+    expect(closed).toBe(0)
   })
 })

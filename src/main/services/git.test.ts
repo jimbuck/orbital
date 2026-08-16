@@ -131,6 +131,50 @@ describe('checkEntryName', () => {
     expect(() => checkEntryName('.')).toThrow(/not a valid name/)
     expect(() => checkEntryName('..')).toThrow(/not a valid name/)
   })
+
+  /* The Windows-shaped rules are asserted WITHOUT `skipIf(!onWindows)` on
+   * purpose, because the implementation isn't platform-gated: a name created
+   * from Linux ends up in a repository someone else clones on Windows, where
+   * these shapes cannot be checked out at all. */
+
+  it('rejects DOS device names, extension or not', () => {
+    for (const name of ['CON', 'con', 'NUL', 'aux', 'PRN', 'COM1', 'lpt9', 'CON.txt', 'con.txt.bak']) {
+      expect(() => checkEntryName(name)).toThrow(/reserved device name/)
+    }
+  })
+
+  it('leaves names that merely start like a device name alone', () => {
+    // Only the exact stems are reserved; `console.ts` is an ordinary file and
+    // an over-eager prefix test would be maddening in a JS repo.
+    expect(checkEntryName('console.ts')).toBe('console.ts')
+    expect(checkEntryName('com10')).toBe('com10')
+    expect(checkEntryName('lpt0.ts')).toBe('lpt0.ts')
+    expect(checkEntryName('connection')).toBe('connection')
+  })
+
+  it('rejects a colon, which would attach a hidden stream to an existing file', () => {
+    expect(() => checkEntryName('taken.ts:evil')).toThrow(/cannot contain any of/)
+  })
+
+  it('rejects the other characters Win32 refuses in a name', () => {
+    for (const name of ['a<b', 'a>b', 'a|b', 'a?b', 'a*b', 'a"b']) {
+      expect(() => checkEntryName(name)).toThrow(/cannot contain any of/)
+    }
+  })
+
+  it('rejects a trailing dot, which creates a file nothing can address', () => {
+    // `weird.ts.` is a SECOND, literal file beside `weird.ts` that Explorer,
+    // git and `shell.trashItem` all fail to open.
+    expect(() => checkEntryName('weird.ts.')).toThrow(/cannot end with/)
+    expect(() => checkEntryName('folder.')).toThrow(/cannot end with/)
+  })
+
+  it('still accepts a leading dot and a trailing space', () => {
+    // A dotfile is normal; a trailing space is simply trimmed off, as it is for
+    // every other name typed into the field.
+    expect(checkEntryName('.gitignore')).toBe('.gitignore')
+    expect(checkEntryName('weird.ts ')).toBe('weird.ts')
+  })
 })
 
 /* ---- Mutating operations ------------------------------------------------- */
@@ -170,6 +214,15 @@ describe('git.createFile', () => {
 
   it('refuses a name that is really a path', async () => {
     await expect(git.createFile(repo, 'src', '../../escape.txt')).rejects.toThrow(/path separators/)
+  })
+
+  it('refuses a name Windows cannot represent, without touching the disk', async () => {
+    // Observed live before the guard existed: `existing.ts:evil` succeeded and
+    // attached a hidden NTFS alternate data stream to the tracked file — the
+    // returned path was auto-opened in the editor and never listed in the tree.
+    await expect(git.createFile(repo, 'src', 'existing.ts:evil')).rejects.toThrow(/cannot contain any of/)
+    await expect(git.createFile(repo, 'src', 'CON')).rejects.toThrow(/reserved device name/)
+    expect(readdirSync(join(repo, 'src'))).toEqual(['existing.ts'])
   })
 
   it('refuses a parent directory outside the checkout', async () => {

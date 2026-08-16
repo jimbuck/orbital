@@ -482,11 +482,59 @@ export function resolveInRepo(repoPath: string, relPath: string): string {
 // eslint-disable-next-line no-control-regex
 const BAD_NAME = /[\\/\u0000-\u001f]/
 
+/**
+ * Characters Win32 refuses in a file name. `:` is the dangerous one and the
+ * reason this is a check rather than a nicety: on NTFS `taken.ts:evil` doesn't
+ * create a file at all, it attaches a hidden ALTERNATE DATA STREAM to the
+ * existing `taken.ts`. The call reports success and hands back a path the
+ * editor then opens, but the tree never lists it and nothing the user can see
+ * accounts for the bytes.
+ */
+const WINDOWS_BAD_CHARS = /[<>:"|?*]/
+
+/**
+ * DOS device names, which Win32 still resolves ahead of the filesystem — with
+ * or without an extension, so `CON.txt` and `CON.txt.bak` are as reserved as
+ * `CON`. A file created under one of these is a one-way trip: Explorer, git and
+ * `shell.trashItem` (which throws "Failed to parse path") all fail to address
+ * it, so the user cannot delete what a single typo just made.
+ */
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i
+
+/**
+ * Validate one entry name from a New File / New Folder / Rename field.
+ *
+ * The Windows-specific rules below are enforced on EVERY platform, deliberately.
+ * They are not a property of the machine running Orbital, they are a property
+ * of the repository: a `CON.ts` or a `weird.ts.` committed from Linux cannot be
+ * checked out on Windows at all, and the collaborator meets it as a broken
+ * clone rather than as a name they can rename. Gating on `process.platform`
+ * would let one half of a shared team create names the other half cannot use,
+ * which is the worse failure. None of this is a containment concern —
+ * `resolveInRepo` owns that — these are names that produce files the user, and
+ * this app, cannot subsequently manage.
+ */
 export function checkEntryName(name: string): string {
   const trimmed = name.trim()
   if (!trimmed) throw new Error('Enter a name')
   if (BAD_NAME.test(trimmed)) throw new Error('A name cannot contain path separators')
   if (trimmed === '.' || trimmed === '..') throw new Error(`"${trimmed}" is not a valid name`)
+  if (WINDOWS_BAD_CHARS.test(trimmed)) {
+    throw new Error('A name cannot contain any of < > : " | ? *')
+  }
+  if (WINDOWS_RESERVED.test(trimmed)) {
+    // Name the stem, not the whole string: for `CON.txt` the extension is fine
+    // and only the part before it has to change.
+    const stem = trimmed.split('.')[0]
+    throw new Error(`"${stem}" is a reserved device name on Windows — pick another name`)
+  }
+  // The trailing-space half is belt-and-braces, since `trim()` has already
+  // removed one, but a trailing DOT survives trimming and is the shape seen in
+  // the wild: `weird.ts.` is created as a second, literal file beside
+  // `weird.ts` that then cannot be opened, renamed or binned by anything.
+  if (/[. ]$/.test(trimmed)) {
+    throw new Error('A name cannot end with a "." or a space')
+  }
   return trimmed
 }
 
