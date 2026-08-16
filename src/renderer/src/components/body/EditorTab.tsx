@@ -265,7 +265,7 @@ function mdCss(theme: ResolvedTheme): string {
  * written. That happens outside the frame, on parsed DOM, and adds no sandbox
  * permissions — the frame stays script-free.
  */
-function Preview({
+export function Preview({
   kind,
   source,
   path,
@@ -286,31 +286,60 @@ function Preview({
   // async, so a slow render of the previous file must never land on top of a
   // newer one after a fast file switch or another keystroke.
   const reqRef = useRef(0)
+  // Identifies the *document* currently in the frame — see the staleness note in
+  // the effect below. Null while nothing trustworthy is on screen.
+  const shownRef = useRef<string | null>(null)
 
   useEffect(() => {
     const id = ++reqRef.current
+    // Identity of the thing being previewed: a file (or worktree) switch changes
+    // it, a keystroke or a theme flip does not.
+    const docId = JSON.stringify([worktreeId ?? '', kind, path])
+    const show = (html: string): void => {
+      if (reqRef.current !== id) return
+      shownRef.current = docId
+      setDoc(html)
+    }
+
     if (kind !== 'markdown') {
-      setDoc(source)
+      show(source)
       return
     }
     const body = marked.parse(source, { async: false }) as string
     const wrap = (b: string): string =>
       `<!doctype html><meta charset="utf-8"><style>${mdCss(theme)}</style><body>${b}</body>`
     if (!worktreeId) {
-      setDoc(wrap(body))
+      show(wrap(body))
       return
     }
-    // Local images become data: URLs before the frame is written, so the
+
+    // Local images become data: URLs *before* the frame is written, so the
     // preview never flashes broken images and is only rebuilt once. Cached
     // images resolve in a microtask, which keeps typing and theme flips smooth.
+    //
+    // That still leaves a window (first render of a file, cold cache, slow IPC)
+    // in which the frame holds the previous render. Whether that is acceptable
+    // depends entirely on *what changed*, which is what shownRef tracks:
+    //
+    //  - A different file (or worktree) is now selected. What's on screen is
+    //    another document entirely, and showing it under this file's header is
+    //    simply false — blank the frame and let the new render fill it.
+    //  - The same file re-rendered after a keystroke or a theme flip. The last
+    //    good render is still an honest picture of that file, only a beat
+    //    behind, so holding it is the correct behaviour. Blanking here would
+    //    strobe the preview on every keypress — a far worse regression than the
+    //    momentary lag it would "fix".
+    if (shownRef.current !== docId) {
+      shownRef.current = null
+      setDoc('')
+    }
+
     void resolveMarkdownImages(body, { worktreeId, mdPath: path })
-      .then((resolved) => {
-        if (reqRef.current === id) setDoc(wrap(resolved))
-      })
+      .then((resolved) => show(wrap(resolved)))
       .catch(() => {
         // Resolution as a whole failed (it shouldn't — individual images already
         // degrade on their own). Show the unresolved markdown rather than nothing.
-        if (reqRef.current === id) setDoc(wrap(body))
+        show(wrap(body))
       })
   }, [kind, source, theme, path, worktreeId])
 

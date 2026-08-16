@@ -11,15 +11,18 @@
  * The fix is to inline the bytes: every `<img>` whose `src` is a *local* path is
  * resolved to a repo-relative path, read through the same `readFileBase64`
  * bridge the image viewer already uses, and rewritten to a `data:` URL. Remote
- * (`http(s):`, protocol-relative) and already-inline (`data:`) sources are left
- * exactly as the author wrote them.
+ * (`http(s):`, protocol-relative, UNC) and already-inline (`data:`) sources are
+ * left exactly as the author wrote them.
  *
  * Two properties this module is deliberately careful about:
  *
- *  - **Containment.** A resolved path is normalised segment by segment and any
- *    `../` that would climb above the worktree root rejects the image outright
- *    rather than reading it. Percent-encoded separators (`%2F`, `%5C`) are
- *    decoded *before* normalisation so they can't smuggle a traversal past it.
+ *  - **Containment.** *Both* halves of the join — the markdown file's own
+ *    directory and the `src` — are normalised segment by segment, and any `../`
+ *    that would climb above the worktree root rejects the image outright rather
+ *    than reading it. Percent-encoded separators (`%2F`, `%5C`) are decoded
+ *    *before* normalisation so they can't smuggle a traversal past it. This
+ *    matters because `readFileBase64` in the main process is a plain
+ *    `join(repoRoot, relPath)` with no containment check of its own.
  *  - **No HTML injection.** Rewriting happens on a parsed DOM (`DOMParser` +
  *    `setAttribute`), never by string surgery on the HTML. Re-serialising via
  *    `innerHTML` escapes attribute values for us, so a crafted file name can't
@@ -66,8 +69,25 @@ export function previewImageMime(path: string): string | null {
 
 /* ---- Path resolution ----------------------------------------------------- */
 
-/** Anything with a `scheme:` prefix (http:, data:, mailto:, and `C:/…`) is not ours. */
+/**
+ * Anything with a `scheme:` prefix is not ours: `http:`, `data:`, `mailto:`, and
+ * — because a single letter is a legal scheme as far as this pattern cares — a
+ * Windows drive-absolute path in either slash flavour (`C:/foo.png`, `C:\foo.png`).
+ * Rejecting drive letters here is deliberate: `join(repoRoot, 'C:/foo.png')` is
+ * not a path anyone meant to write, so it must never reach the bridge.
+ */
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * Two leading separators, in any mix of slashes: a protocol-relative URL
+ * (`//cdn/x.png`) or a Windows UNC share (`\\server\share\x.png`). Both name a
+ * *remote host*, not a location in the worktree. Left to the segment walker they
+ * would collapse to the innocuous-looking `server/share/x.png` and trigger a
+ * pointless read — or, worse, silently render an unrelated repo file that
+ * happens to sit at that path. Neither is what the author wrote, so both are
+ * rejected outright and the `src` is left exactly as-is.
+ */
+const REMOTE_ROOT = /^[/\\]{2}/
 
 /**
  * Resolve an `<img src>` from a markdown file to a repo-relative path, or null
@@ -78,14 +98,15 @@ const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i
  * worktree root. The result uses forward slashes and contains no `.`/`..`
  * segments, so it can be handed straight to the readFile bridge.
  *
- * Returns null for: empty sources, anything with a URL scheme, protocol-relative
- * `//host/x.png`, and any path that climbs out of the worktree.
+ * Returns null for: empty sources, anything with a URL scheme (including
+ * drive-absolute paths), protocol-relative and UNC roots, any path that climbs
+ * out of the worktree, and any `mdPath` that isn't itself a contained
+ * repo-relative path.
  */
 export function resolveMarkdownAssetPath(mdPath: string, src: string): string | null {
   const raw = src.trim()
   if (!raw) return null
-  // Protocol-relative (`//cdn/x.png`) is a *remote* URL, not a rooted path.
-  if (raw.startsWith('//')) return null
+  if (REMOTE_ROOT.test(raw)) return null
   if (HAS_SCHEME.test(raw)) return null
 
   // Strip a query string / fragment the way a URL would. Cache-busting suffixes
@@ -99,21 +120,47 @@ export function resolveMarkdownAssetPath(mdPath: string, src: string): string | 
   // file's own directory. Backslashes are normalised early so a Windows-style
   // `images\foo.png` resolves the same way it would on disk.
   const rooted = pathPart.startsWith('/') || pathPart.startsWith('\\')
-  const baseDir = rooted ? '' : mdPath.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
 
-  const stack: string[] = baseDir ? baseDir.split('/').filter(Boolean) : []
-  for (const part of splitSegments(pathPart)) {
+  const stack: string[] = []
+  if (!rooted) {
+    // The markdown file's directory is the base every relative source resolves
+    // against, so it has to satisfy the same containment rule as the source
+    // itself — it can't be assumed canonical just because the app usually passes
+    // a clean tree path. Seeding `stack` with raw segments would let a caller
+    // supplying `../guide.md` produce `../logo.png`, or `docs/../../guide.md`
+    // produce `docs/../../logo.png`: paths that escape the worktree while never
+    // touching the `..` branch below, because the `..` is already *inside* the
+    // stack rather than arriving from the source. Normalising the directory
+    // first makes the guard cover both halves of the join. (The main process
+    // does a bare `join(repoRoot, relPath)` with no containment check of its
+    // own, so this function is the only thing standing between a preview and an
+    // arbitrary-file read.)
+    if (REMOTE_ROOT.test(mdPath) || HAS_SCHEME.test(mdPath)) return null
+    const mdDir = mdPath.replace(/\\/g, '/').split('/').slice(0, -1)
+    if (!applySegments(stack, mdDir)) return null
+  }
+
+  if (!applySegments(stack, splitSegments(pathPart))) return null
+  return stack.length > 0 ? stack.join('/') : null
+}
+
+/**
+ * Fold `segments` onto `stack`, collapsing `.` and `..` as a path join would.
+ * Returns false — and leaves `stack` in whatever state it reached — when a `..`
+ * would climb above the worktree root. Escaping is a hard reject, not a clamp:
+ * silently reading `../../../secrets.png` would be exactly the bug to avoid.
+ */
+function applySegments(stack: string[], segments: readonly string[]): boolean {
+  for (const part of segments) {
     if (part === '' || part === '.') continue
     if (part === '..') {
-      // Escaping the worktree root is a hard reject, not a clamp: silently
-      // reading `../../../secrets.png` would be exactly the bug to avoid.
-      if (stack.length === 0) return null
+      if (stack.length === 0) return false
       stack.pop()
       continue
     }
     stack.push(part)
   }
-  return stack.length > 0 ? stack.join('/') : null
+  return true
 }
 
 /**

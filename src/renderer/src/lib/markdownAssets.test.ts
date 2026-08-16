@@ -57,11 +57,38 @@ describe('resolveMarkdownAssetPath', () => {
     expect(resolveMarkdownAssetPath('a/b.md', '..%5C..%5Csecrets.png')).toBeNull()
   })
 
+  it('normalises the markdown file directory before joining', () => {
+    // The md path is the base for every relative source, so a non-canonical one
+    // must not survive into the result: `..` there escapes just as surely as a
+    // `..` in the source, and it never reaches the source-side guard because
+    // it's already sitting in the stack.
+    expect(resolveMarkdownAssetPath('../guide.md', 'logo.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('docs/../../guide.md', 'logo.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('a/../../b/guide.md', 'x.png')).toBeNull()
+    // A md path that wanders but stays inside still resolves, canonicalised.
+    expect(resolveMarkdownAssetPath('docs/../guide.md', 'logo.png')).toBe('logo.png')
+    expect(resolveMarkdownAssetPath('./docs/guide.md', 'logo.png')).toBe('docs/logo.png')
+    expect(resolveMarkdownAssetPath('a/b/../c/guide.md', './logo.png')).toBe('a/c/logo.png')
+    // The md directory and the source are normalised as one join, so a `..` in
+    // the source can still walk back through a `.` in the directory.
+    expect(resolveMarkdownAssetPath('a/./b/guide.md', '../logo.png')).toBe('a/logo.png')
+  })
+
+  it('rejects a markdown path that is remote or drive-absolute', () => {
+    expect(resolveMarkdownAssetPath('\\\\server\\share\\guide.md', 'logo.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('//host/guide.md', 'logo.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('C:\\repo\\guide.md', 'logo.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('C:/repo/guide.md', 'logo.png')).toBeNull()
+  })
+
   it('resolves leading-slash paths against the worktree root', () => {
     expect(resolveMarkdownAssetPath('docs/deep/guide.md', '/assets/logo.png')).toBe('assets/logo.png')
     expect(resolveMarkdownAssetPath('docs/guide.md', '/logo.png')).toBe('logo.png')
     // Rooted paths can't climb out either.
     expect(resolveMarkdownAssetPath('docs/guide.md', '/../logo.png')).toBeNull()
+    // A rooted source never consults the markdown directory, so an odd md path
+    // is irrelevant rather than fatal.
+    expect(resolveMarkdownAssetPath('../guide.md', '/logo.png')).toBe('logo.png')
   })
 
   it('decodes percent-encoded segments', () => {
@@ -79,6 +106,23 @@ describe('resolveMarkdownAssetPath', () => {
     expect(resolveMarkdownAssetPath('README.md', '//host/x.png')).toBeNull()
     expect(resolveMarkdownAssetPath('README.md', 'file:///c:/x.png')).toBeNull()
     expect(resolveMarkdownAssetPath('README.md', 'C:/x.png')).toBeNull()
+  })
+
+  it('rejects UNC shares and drive-absolute paths', () => {
+    // A UNC share names a remote host. Without this it would fold down to
+    // `server/share/img.png` and either waste an IPC read or — worse — render an
+    // unrelated repo file that happens to live at that path.
+    expect(resolveMarkdownAssetPath('README.md', '\\\\server\\share\\img.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('docs/guide.md', '\\\\server\\share\\img.png')).toBeNull()
+    // Mixed separators are the same thing as far as Windows is concerned.
+    expect(resolveMarkdownAssetPath('README.md', '//server/share/img.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('README.md', '/\\server/share/img.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('README.md', '\\/server/share/img.png')).toBeNull()
+    // Drive-absolute paths are already caught as a `scheme:` — in both flavours.
+    expect(resolveMarkdownAssetPath('README.md', 'C:\\foo\\bar.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('README.md', 'c:/foo/bar.png')).toBeNull()
+    // A single leading separator is still the worktree root, not a share.
+    expect(resolveMarkdownAssetPath('README.md', '\\assets\\logo.png')).toBe('assets/logo.png')
   })
 
   it('returns null for empty or contentless sources', () => {
@@ -171,6 +215,28 @@ describe('resolveMarkdownImages', () => {
       '../../escape.png',
       'notes.txt'
     ])
+    expect(b.reads).toEqual([]) // nothing was read from disk
+  })
+
+  it('reads nothing for UNC, drive-absolute or traversing md paths', async () => {
+    const b = makeBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    const html = [
+      '<img src="\\\\server\\share\\img.png">',
+      '<img src="C:\\secrets\\img.png">',
+      '<img src="//host/share/img.png">'
+    ].join('')
+    const out = await resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'docs/guide.md' })
+    expect(srcs(out)).toEqual(['\\\\server\\share\\img.png', 'C:\\secrets\\img.png', '//host/share/img.png'])
+
+    // Same for a perfectly ordinary source under a non-canonical md path.
+    const out2 = await resolveMarkdownImages('<img src="logo.png">', {
+      worktreeId: 'w1',
+      mdPath: '../guide.md'
+    })
+    expect(srcs(out2)).toEqual(['logo.png'])
+
     expect(b.reads).toEqual([]) // nothing was read from disk
   })
 
