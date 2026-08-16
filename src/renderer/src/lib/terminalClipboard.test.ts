@@ -28,12 +28,22 @@ describe('terminalCopyIntent', () => {
     expect(terminalCopyIntent(key({ ctrlKey: true }), false)).toBe('passthrough')
   })
 
-  it('copies on Ctrl+Shift+C even with no selection, rather than leaking ^C', () => {
-    expect(terminalCopyIntent(key({ ctrlKey: true, shiftKey: true }), false)).toBe('copy')
+  it('copies on Ctrl+Shift+C when there is a selection', () => {
+    expect(terminalCopyIntent(key({ ctrlKey: true, shiftKey: true }), true)).toBe('copy')
   })
 
-  it('copies on Cmd+C regardless of selection (macOS accelerator, never SIGINT)', () => {
-    expect(terminalCopyIntent(key({ metaKey: true }), false)).toBe('copy')
+  it('passes Ctrl+Shift+C through with no selection, rather than swallowing the key', () => {
+    // xterm maps it to 0x03 as well, so this stays an interrupt instead of
+    // becoming a shortcut that visibly does nothing.
+    expect(terminalCopyIntent(key({ ctrlKey: true, shiftKey: true }), false)).toBe('passthrough')
+  })
+
+  it('copies on Meta+C with a selection, on every platform (no macOS guard)', () => {
+    expect(terminalCopyIntent(key({ metaKey: true }), true)).toBe('copy')
+  })
+
+  it('passes Meta+C through with no selection', () => {
+    expect(terminalCopyIntent(key({ metaKey: true }), false)).toBe('passthrough')
   })
 
   it('ignores Alt+Ctrl+C, which TUIs bind themselves', () => {

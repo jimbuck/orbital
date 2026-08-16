@@ -80,10 +80,36 @@ async function nextFlush(): Promise<void> {
 }
 
 const writeClipboard = vi.fn()
+/** The system clipboard's text half — empty by default, so paste falls to the image path. */
+const readClipboard = vi.fn((): string => '')
+/** The image half: resolves to a scratch PNG path, or null when there is no image either. */
+const pasteClipboardImage = vi.fn((): Promise<string | null> => Promise.resolve(null))
+
+/** Mount one terminal and hand back the fake xterm behind it. */
+function mountTerminal(): (typeof terminals)[number] {
+  render(<TerminalTab tab={makeTab('T1')} active />)
+  return terminals[0]
+}
+
+/** Feed a key event to the handler TerminalTab attached; returns xterm's verdict. */
+function press(
+  term: (typeof terminals)[number],
+  init: KeyboardEventInit
+): { handled: boolean; event: KeyboardEvent } {
+  // cancelable, like a real keydown — otherwise preventDefault() is a no-op
+  // and `defaultPrevented` could never tell us whether we suppressed the key.
+  const event = new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true, ...init })
+  const handled = term.keyHandler!(event)
+  return { handled, event }
+}
 
 beforeEach(() => {
   terminals.length = 0
   writeClipboard.mockClear()
+  // mockReset (not mockClear) so a test's mockReturnValue does not leak into the
+  // next one — vi.fn(impl) restores that impl on reset.
+  readClipboard.mockReset()
+  pasteClipboardImage.mockReset()
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -105,8 +131,8 @@ beforeEach(() => {
     openExternal: () => {},
     createTab: () => {},
     writeClipboard,
-    readClipboard: () => '',
-    pasteClipboardImage: () => Promise.resolve(null)
+    readClipboard,
+    pasteClipboardImage
   })
 })
 
@@ -158,24 +184,6 @@ describe('TerminalTab auto-focus', () => {
 })
 
 describe('TerminalTab copy', () => {
-  /** Mount one terminal and hand back the fake xterm behind it. */
-  function mountTerminal(): (typeof terminals)[number] {
-    render(<TerminalTab tab={makeTab('T1')} active />)
-    return terminals[0]
-  }
-
-  /** Feed a key event to the handler TerminalTab attached; returns xterm's verdict. */
-  function press(
-    term: (typeof terminals)[number],
-    init: KeyboardEventInit
-  ): { handled: boolean; event: KeyboardEvent } {
-    // cancelable, like a real keydown — otherwise preventDefault() is a no-op
-    // and `defaultPrevented` could never tell us whether we suppressed the key.
-    const event = new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true, ...init })
-    const handled = term.keyHandler!(event)
-    return { handled, event }
-  }
-
   it('copies the selection on Ctrl+C and keeps the key from reaching the PTY', () => {
     const term = mountTerminal()
     term.selection = 'selected output'
@@ -210,12 +218,105 @@ describe('TerminalTab copy', () => {
     expect(handled).toBe(false)
   })
 
-  it('copies on Cmd+C for macOS', () => {
+  it('lets Ctrl+Shift+C through when nothing is selected, so it still interrupts', () => {
+    // Swallowing it would leave a user with a runaway process and nothing
+    // selected pressing a key that does absolutely nothing.
+    const term = mountTerminal()
+
+    const { handled, event } = press(term, { ctrlKey: true, shiftKey: true })
+
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(handled).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('copies on Meta+C with a selection, the macOS accelerator', () => {
+    // Not platform-guarded — off macOS this combination simply never arrives
+    // with a selection to copy. See terminalCopyIntent for why.
     const term = mountTerminal()
     term.selection = 'selected output'
 
     expect(press(term, { metaKey: true }).handled).toBe(false)
     expect(writeClipboard).toHaveBeenCalledWith('selected output')
+  })
+
+  it('interrupts on the second Ctrl+C, because the copy cleared the selection', () => {
+    // The whole point of the feature: copy, then immediately kill the process
+    // with the same key, without having to reach for the mouse in between.
+    const term = mountTerminal()
+    term.selection = 'selected output'
+
+    expect(press(term, { ctrlKey: true }).handled).toBe(false)
+    expect(writeClipboard).toHaveBeenCalledWith('selected output')
+
+    const second = press(term, { ctrlKey: true })
+
+    expect(second.handled).toBe(true)
+    expect(second.event.defaultPrevented).toBe(false)
+    expect(writeClipboard).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves ordinary keys alone so they reach the PTY', () => {
+    const term = mountTerminal()
+    term.selection = 'selected output'
+
+    // Ctrl+D (EOF) and a bare arrow key: neither is ours, both must pass.
+    expect(press(term, { ctrlKey: true, code: 'KeyD' }).handled).toBe(true)
+    expect(press(term, { code: 'ArrowUp' }).handled).toBe(true)
+    expect(term.paste).not.toHaveBeenCalled()
+    expect(writeClipboard).not.toHaveBeenCalled()
+  })
+})
+
+describe('TerminalTab paste', () => {
+  it('pastes clipboard text on Ctrl+V and keeps the key from reaching the PTY', () => {
+    const term = mountTerminal()
+    readClipboard.mockReturnValue('pasted text')
+
+    const { handled, event } = press(term, { ctrlKey: true, code: 'KeyV' })
+
+    // Via term.paste so bracketed-paste mode is honoured; suppressed so xterm
+    // does not also send a literal 'v' after us.
+    expect(term.paste).toHaveBeenCalledWith('pasted text')
+    expect(handled).toBe(false)
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('pastes on Ctrl+Shift+V, the terminal-standard binding', () => {
+    const term = mountTerminal()
+    readClipboard.mockReturnValue('pasted text')
+
+    expect(press(term, { ctrlKey: true, shiftKey: true, code: 'KeyV' }).handled).toBe(false)
+    expect(term.paste).toHaveBeenCalledWith('pasted text')
+  })
+
+  it('pastes a saved image path when the clipboard holds a screenshot and no text', async () => {
+    const term = mountTerminal()
+    pasteClipboardImage.mockResolvedValue('C:/scratch/shot.png')
+
+    press(term, { ctrlKey: true, code: 'KeyV' })
+    await nextFlush()
+
+    expect(term.paste).toHaveBeenCalledWith('C:/scratch/shot.png')
+  })
+
+  it('quotes an image path with spaces, so an agent CLI reads it as one argument', async () => {
+    const term = mountTerminal()
+    pasteClipboardImage.mockResolvedValue('C:/my scratch/shot.png')
+
+    press(term, { ctrlKey: true, code: 'KeyV' })
+    await nextFlush()
+
+    expect(term.paste).toHaveBeenCalledWith('"C:/my scratch/shot.png"')
+  })
+
+  it('pastes nothing when the clipboard holds neither text nor an image', async () => {
+    const term = mountTerminal()
+
+    press(term, { ctrlKey: true, code: 'KeyV' })
+    await nextFlush()
+
+    expect(term.paste).not.toHaveBeenCalled()
   })
 })
 

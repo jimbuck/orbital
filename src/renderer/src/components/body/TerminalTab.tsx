@@ -211,7 +211,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     // Keyboard copy/paste. Paste is Ctrl/Cmd+V (and the terminal-standard
     // Ctrl+Shift+V, which lands here too). Copy is delegated to
     // terminalCopyIntent() because Ctrl+C is overloaded — see that function for
-    // why a selection-less Ctrl+C must fall through to xterm and become SIGINT.
+    // why a copy shortcut pressed with no selection must fall through to xterm
+    // (bare Ctrl+C and Ctrl+Shift+C both become the interrupt there).
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
         e.preventDefault()

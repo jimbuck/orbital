@@ -14,35 +14,42 @@
 
 /** What the custom key handler should do with a keydown. */
 export type TerminalCopyIntent =
-  /** Copy the selection (if any) and swallow the key. */
+  /** There is a selection and the user asked for it — copy it and swallow the key. */
   | 'copy'
-  /** Not a copy shortcut — let xterm handle it (Ctrl+C then means SIGINT). */
+  /** Nothing for us to do — let xterm handle it (Ctrl+C then means SIGINT). */
   | 'passthrough'
 
 /**
  * Decide whether a key event is asking to copy the terminal selection.
  *
- * The load-bearing rule is the bare Ctrl+C one: it copies ONLY when there is a
- * selection, and otherwise passes through so the interrupt still reaches a
- * runaway process. Since our copy path clears the selection afterwards, a user
- * who copies and then needs to interrupt just presses Ctrl+C a second time.
+ * The contract is a single rule: a copy shortcut only wins when there is
+ * actually something to copy. `Ctrl+C`, `Ctrl+Shift+C` and `Meta+C` all copy
+ * with a selection, and all pass through without one — because swallowing a key
+ * we have no use for is strictly worse than letting the terminal have it. For
+ * bare Ctrl+C that passthrough is load-bearing (it is the interrupt for a
+ * runaway process), and for Ctrl+Shift+C it matters nearly as much: xterm's own
+ * key mapping turns it into 0x03 too, so keeping it means a user who reaches for
+ * the "safe" copy binding with nothing selected still interrupts, rather than
+ * pressing a key that visibly does nothing. Meta+C off macOS maps to nothing at
+ * all, so passing it through is simply a no-op.
  *
- * Ctrl+Shift+C is the terminal-standard, unambiguous copy binding — it never
- * carried SIGINT, so it copies unconditionally (and is swallowed either way,
- * rather than leaking a stray 0x03 to the PTY on an empty selection).
+ * Since the copy path clears the selection afterwards, copy-then-interrupt is
+ * just pressing the same combination twice.
  *
- * Cmd+C is matched the same way the existing Ctrl/Cmd+V paste handler matches
- * its key, so macOS gets the platform-native accelerator; Meta+C has never been
- * an interrupt on any platform, so it copies unconditionally too.
+ * Meta+C is matched on every platform rather than behind a macOS guard, which is
+ * deliberate: it mirrors how the neighbouring Ctrl/Cmd+V paste handler matches
+ * its key, and the worst it can do off macOS is copy a selection the user
+ * already made with Super+C — a combination the OS mostly swallows itself, and
+ * which xterm would otherwise turn into nothing at all. A renderer-side platform
+ * sniff would be more fragile than the behaviour it protects.
  *
  * `e.code` (not `e.key`) is used so the binding is keyboard-layout independent,
  * matching the Ctrl+V handling. Alt+Ctrl+C is left alone — TUIs bind it.
  */
 export function terminalCopyIntent(e: KeyboardEvent, hasSelection: boolean): TerminalCopyIntent {
   if (e.type !== 'keydown' || e.code !== 'KeyC' || e.altKey) return 'passthrough'
-  if (e.metaKey) return 'copy'
-  if (!e.ctrlKey) return 'passthrough'
-  return e.shiftKey || hasSelection ? 'copy' : 'passthrough'
+  if (!e.ctrlKey && !e.metaKey) return 'passthrough'
+  return hasSelection ? 'copy' : 'passthrough'
 }
 
 /**
