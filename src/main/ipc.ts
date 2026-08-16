@@ -893,8 +893,12 @@ export function registerIpc(): void {
     broadcast()
   })
   // The four mutating file operations behind the editor tree's context menu.
-  // Each resolves its renderer-supplied path through git.resolveInRepo, so a
-  // path that escapes the checkout is rejected before anything touches disk.
+  // Each resolves its renderer-supplied path through the git service's
+  // containment gate — lexically, and then against the real filesystem so a
+  // symlinked directory can't lead one out of the checkout — so an escaping
+  // path is rejected before anything touches disk. The read-only resolvePath
+  // below stops at the lexical check; it hands back a string and writes
+  // nothing.
   h(IPC.createFile, async (_e, worktreeId: string, parentDir: string, name: string) => {
     const path = await git.createFile(worktreeRepoPath(worktreeId), parentDir, name)
     broadcast()

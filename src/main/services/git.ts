@@ -11,17 +11,18 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { EventEmitter } from 'node:events'
 import { readFileSync, statSync, watch } from 'node:fs'
-import type { FSWatcher } from 'node:fs'
+import type { BigIntStats, FSWatcher } from 'node:fs'
 import {
   readFile as fsReadFile,
   writeFile as fsWriteFile,
   open as fsOpen,
   rename as fsRename,
   stat as fsStat,
+  realpath as fsRealpath,
   mkdir,
   readdir
 } from 'node:fs/promises'
-import { join, dirname, resolve, relative, isAbsolute, sep } from 'node:path'
+import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'node:path'
 import { shell } from 'electron'
 import ignore from 'ignore'
 import type {
@@ -440,6 +441,13 @@ const ROOTED = /^(?:[a-zA-Z]:|[\\/])/
  * Resolve a checkout-relative path against `repoPath`, throwing if the result
  * lands outside the checkout. Returns the absolute path.
  *
+ * This is the LEXICAL half of the gate — it reasons about the string only, and
+ * so cannot see a symlinked directory that points out of the tree. Mutating
+ * callers pair it with `resolveInRepoReal` below, which resolves the path's
+ * ancestors on disk. Read-only callers (`resolvePath`, backing Copy Path and
+ * the OS hand-offs) stop here: they touch nothing, and a syscall per menu click
+ * to decide whether a path may be *shown* to the user buys nothing.
+ *
  * Containment is decided by `relative()`, deliberately NOT by a string prefix
  * test: `C:\repo-evil` starts with `C:\repo` yet is a different tree entirely.
  * `relative()` also folds case on Windows, so `c:\repo\src` is correctly seen
@@ -492,13 +500,105 @@ function lastSep(p: string): number {
   return Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
 }
 
-async function pathExists(full: string): Promise<boolean> {
+/** The errno codes that genuinely mean "there is nothing at this path". */
+function isNotFound(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code
+  // ENOTDIR is the same answer arrived at differently: a path component turned
+  // out to be a file, so the entry below it cannot exist either.
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/**
+ * `stat` the entry at `full`, or `null` if there is nothing there.
+ *
+ * Catching not-found NARROWLY is the point. Treating any stat failure as
+ * "nothing there" turns an EACCES/EPERM/EIO/ELOOP — "I could not tell" — into a
+ * confident wrong answer. In `trashPath` that reads back to the user as "no
+ * longer exists" for a file still sitting in the tree in front of them; in a
+ * collision guard it is worse, because "nothing is in the way" is exactly the
+ * licence to write over a file we could not see. Anything that isn't not-found
+ * propagates and gets reported as itself.
+ *
+ * Stats are taken with `bigint` so the inode is exact; `renamePath` compares
+ * ids to tell a re-spelling from a collision.
+ */
+async function statOrNull(full: string): Promise<BigIntStats | null> {
   try {
-    await fsStat(full)
-    return true
-  } catch {
-    return false
+    return await fsStat(full, { bigint: true })
+  } catch (err) {
+    if (isNotFound(err)) return null
+    throw err
   }
+}
+
+/** Does something exist at `full`? See `statOrNull` for the error handling. */
+async function pathExists(full: string): Promise<boolean> {
+  return (await statOrNull(full)) !== null
+}
+
+/**
+ * `realpath` of `full`'s PARENT chain, tolerating a target (or intermediate
+ * directories) that doesn't exist yet — the normal case for New File / New
+ * Folder / a rename's destination. Walks up until a real directory is found and
+ * re-appends the not-yet-existing segments.
+ */
+async function realParentOf(full: string): Promise<string> {
+  let dir = dirname(full)
+  const missing: string[] = []
+  for (;;) {
+    try {
+      return join(await fsRealpath(dir), ...missing)
+    } catch (err) {
+      if (!isNotFound(err)) throw err
+      const parent = dirname(dir)
+      // Reached the filesystem root without finding anything real; there are no
+      // links left that could redirect us, so the lexical answer is the answer.
+      if (parent === dir) return join(dir, ...missing)
+      missing.unshift(basename(dir))
+      dir = parent
+    }
+  }
+}
+
+/**
+ * The containment gate for every operation that WRITES: lexical containment
+ * first, then the same question asked of the real filesystem. Returns the
+ * absolute (lexical) path, so callers still act through the path the user sees.
+ *
+ * Why the extra syscall. `resolveInRepo` compares strings, so `link/secret.txt`
+ * passes it while `link` is a symlink or Windows junction pointing anywhere at
+ * all. Git stores symlinks, so a repo the user merely *cloned* can carry one —
+ * this is a checkout the app writes into, not input we vouched for.
+ *
+ * Two details keep it from rejecting legitimate paths:
+ *
+ *  - The repo root is resolved the SAME way as the target. Orbital's own
+ *    worktrees live under `.orbital-worktrees`, and a checkout can sit behind a
+ *    junction or a symlinked home; comparing a resolved target against an
+ *    unresolved root would reject every path in such a checkout.
+ *  - Only the ANCESTORS are resolved — the final segment is left alone. A
+ *    symlink is itself a directory entry, and renaming or binning one is an
+ *    ordinary in-repo edit that affects the link, not its target. Resolving the
+ *    leaf too would refuse to let anyone tidy up a symlink they can see.
+ *
+ * What this deliberately still refuses: writing THROUGH a link that leaves the
+ * checkout — including a pnpm-style `node_modules` entry linked to a global
+ * store. Those files really are outside the worktree, and an editor tree that
+ * silently edits the shared store on a misclick is the failure worth having.
+ */
+async function resolveInRepoReal(repoPath: string, relPath: string): Promise<string> {
+  const full = resolveInRepo(repoPath, relPath)
+  const root = resolve(repoPath)
+  // The checkout root is trivially inside itself and has no ancestor worth
+  // resolving. Callers that must not act on the root reject it by name.
+  if (full === root) return full
+  const realRoot = await fsRealpath(root)
+  const real = join(await realParentOf(full), basename(full))
+  const rel = relative(realRoot, real)
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error(`"${relPath}" resolves outside the Worktree through a link`)
+  }
+  return full
 }
 
 /**
@@ -508,7 +608,7 @@ async function pathExists(full: string): Promise<boolean> {
  */
 async function createFile(repoPath: string, parentRel: string, name: string): Promise<string> {
   const relPath = childOf(parentRel, checkEntryName(name))
-  const full = resolveInRepo(repoPath, relPath)
+  const full = await resolveInRepoReal(repoPath, relPath)
   await mkdir(dirname(full), { recursive: true })
   try {
     const handle = await fsOpen(full, 'wx')
@@ -529,7 +629,7 @@ async function createFile(repoPath: string, parentRel: string, name: string): Pr
  */
 async function createDirectory(repoPath: string, parentRel: string, name: string): Promise<string> {
   const relPath = childOf(parentRel, checkEntryName(name))
-  const full = resolveInRepo(repoPath, relPath)
+  const full = await resolveInRepoReal(repoPath, relPath)
   await mkdir(dirname(full), { recursive: true })
   try {
     await mkdir(full)
@@ -550,17 +650,34 @@ async function createDirectory(repoPath: string, parentRel: string, name: string
  */
 async function renamePath(repoPath: string, relPath: string, newName: string): Promise<string> {
   const name = checkEntryName(newName)
-  const from = resolveInRepo(repoPath, relPath)
+  const from = await resolveInRepoReal(repoPath, relPath)
   const cut = lastSep(relPath)
   const target = cut === -1 ? name : `${relPath.slice(0, cut)}/${name}`
-  const to = resolveInRepo(repoPath, target)
+  const to = await resolveInRepoReal(repoPath, target)
   if (to === from) return relPath // nothing typed but the existing name
 
-  // A case-only rename (Foo.ts -> foo.ts) targets the SAME file on a
-  // case-insensitive filesystem, so the collision check below would refuse a
-  // perfectly legal rename; let the OS arbitrate that one.
-  const sameFile = process.platform === 'win32' ? to.toLowerCase() === from.toLowerCase() : false
-  if (!sameFile && (await pathExists(to))) throw new Error(`"${target}" already exists`)
+  // Something is already at the destination — but "something" may be the very
+  // file being renamed. `Foo.ts` -> `foo.ts` is one entry under two spellings
+  // on a case-insensitive filesystem, and on macOS the same is true of two
+  // Unicode normalisations of one name. Refusing those as collisions would
+  // block a perfectly legal rename.
+  //
+  // Rather than guess from `process.platform` (the previous gate said Windows
+  // only, which was wrong for the default macOS filesystem and for the
+  // case-insensitive mounts that exist on Linux too), ask the filesystem which
+  // entry each name denotes. Matching device + inode means one entry, whatever
+  // the platform's rules happen to be — so `rename` is a re-spelling, not a
+  // clobber, and we hand it to the OS.
+  const dest = await statOrNull(to)
+  if (dest !== null) {
+    const src = await fsStat(from, { bigint: true })
+    // 64-bit ids, so read them as BigInt: NTFS file ids overflow a JS number,
+    // and a rounded id could collide two distinct files into "same entry" —
+    // the one mistake here that loses data. A filesystem that reports no inode
+    // at all (0n, e.g. some network shares) gets the safe answer: a collision.
+    const sameEntry = src.ino !== 0n && src.ino === dest.ino && src.dev === dest.dev
+    if (!sameEntry) throw new Error(`"${target}" already exists`)
+  }
 
   await fsRename(from, to)
   return target
@@ -572,7 +689,7 @@ async function renamePath(repoPath: string, relPath: string, newName: string): P
  * be an unrecoverable data loss with no undo anywhere in the app.
  */
 async function trashPath(repoPath: string, relPath: string): Promise<void> {
-  const full = resolveInRepo(repoPath, relPath)
+  const full = await resolveInRepoReal(repoPath, relPath)
   if (full === resolve(repoPath)) throw new Error('The Worktree root cannot be deleted here')
   if (!(await pathExists(full))) throw new Error(`"${relPath}" no longer exists`)
   // Rejects with the OS error when the item can't be binned (e.g. a locked file).

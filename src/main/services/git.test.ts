@@ -1,15 +1,56 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-// git.ts reaches Electron's shell for `trashItem` (the delete path); nothing in
-// these tests bins anything, but the import has to resolve.
-vi.mock('electron', () => ({ shell: { trashItem: vi.fn() } }))
+// `vi.mock` is hoisted above every import, so the spy it installs has to be
+// hoisted with it.
+const hoisted = vi.hoisted(() => ({ trashItem: vi.fn(async (): Promise<void> => {}) }))
+const trashItem = hoisted.trashItem
+
+// git.ts reaches Electron's shell for `trashItem` (the delete path).
+vi.mock('electron', () => ({ shell: { trashItem: hoisted.trashItem } }))
 
 import { checkEntryName, git, resolveInRepo } from './git'
 
 const onWindows = process.platform === 'win32'
+
+/**
+ * A link to a directory. On Windows a real symlink needs elevation but a
+ * JUNCTION does not, and Node resolves both through `realpath` — which is the
+ * behaviour under test, so a junction stands in perfectly.
+ */
+function linkDir(target: string, linkPath: string): void {
+  symlinkSync(target, linkPath, onWindows ? 'junction' : 'dir')
+}
+
+/**
+ * A pair of links pointing at each other, so `stat` on either fails with ELOOP
+ * while the entry itself plainly exists. Returns the path to the first.
+ *
+ * This is how the "not every stat failure means not-found" tests get a REAL
+ * errno instead of a mocked one. Faking it at the module level isn't available
+ * here — vitest applies a `node:fs/promises` mock to the test file's own import
+ * but not to git.ts's — and a genuine EACCES needs ACL surgery on Windows or a
+ * non-root runner on POSIX. A link cycle is portable, needs no elevation, and
+ * is the honest article.
+ */
+function linkCycle(dir: string, name: string): string {
+  const a = join(dir, name)
+  const b = join(dir, `${name}-partner`)
+  linkDir(b, a)
+  linkDir(a, b)
+  return a
+}
 
 /* ---- Path containment ----------------------------------------------------
  *
@@ -95,14 +136,20 @@ describe('checkEntryName', () => {
 /* ---- Mutating operations ------------------------------------------------- */
 
 let repo = ''
+let outside = ''
 
 beforeEach(() => {
   repo = mkdtempSync(join(tmpdir(), 'orbital-git-'))
   mkdirSync(join(repo, 'src'), { recursive: true })
   writeFileSync(join(repo, 'src', 'existing.ts'), 'export const a = 1\n')
+  // A separate tree standing in for "anywhere that isn't the checkout".
+  outside = mkdtempSync(join(tmpdir(), 'orbital-outside-'))
+  writeFileSync(join(outside, 'secret.txt'), 'do not touch\n')
 })
 afterEach(() => {
+  trashItem.mockClear()
   rmSync(repo, { recursive: true, force: true })
+  rmSync(outside, { recursive: true, force: true })
 })
 
 describe('git.createFile', () => {
@@ -161,5 +208,129 @@ describe('git.renamePath', () => {
 
   it('refuses a source path outside the checkout', async () => {
     await expect(git.renamePath(repo, '../outside.ts', 'inside.ts')).rejects.toThrow(/escapes/)
+  })
+
+  it('allows a case-only rename instead of calling it a collision', async () => {
+    // On a case-insensitive filesystem (Windows, default macOS) `case.ts` and
+    // `Case.ts` are ONE entry, so the destination "already exists" — as itself.
+    // The device+inode comparison sees that; the old `platform === 'win32'`
+    // gate did not, and wrongly refused this on macOS. On a case-SENSITIVE
+    // filesystem the destination simply doesn't exist, so this passes there too
+    // and the assertions below hold either way.
+    writeFileSync(join(repo, 'src', 'Case.ts'), 'body')
+    expect(await git.renamePath(repo, 'src/Case.ts', 'case.ts')).toBe('src/case.ts')
+
+    const names = readdirSync(join(repo, 'src'))
+    expect(names).toContain('case.ts')
+    expect(names).not.toContain('Case.ts')
+    expect(readFileSync(join(repo, 'src', 'case.ts'), 'utf8')).toBe('body')
+  })
+
+  it('surfaces a non-not-found stat error instead of skipping the collision guard', async () => {
+    // The regression that matters. Something IS at `src/taken`, but `stat` can
+    // only answer ELOOP. Treating any failure as "nothing there" would optimise
+    // "I could not tell" into "nothing is in the way" and rename over it.
+    linkCycle(join(repo, 'src'), 'taken')
+
+    await expect(git.renamePath(repo, 'src/existing.ts', 'taken')).rejects.toThrow(/ELOOP/)
+    expect(existsSync(join(repo, 'src', 'existing.ts'))).toBe(true)
+  })
+})
+
+describe('git.trashPath', () => {
+  it('bins an entry inside the checkout', async () => {
+    await git.trashPath(repo, 'src/existing.ts')
+    expect(trashItem).toHaveBeenCalledWith(join(repo, 'src', 'existing.ts'))
+  })
+
+  it('refuses to bin the checkout root', async () => {
+    await expect(git.trashPath(repo, '')).rejects.toThrow(/root cannot be deleted/)
+    expect(trashItem).not.toHaveBeenCalled()
+  })
+
+  it('reports a non-not-found stat error as itself, not as "no longer exists"', async () => {
+    // An entry `stat` cannot resolve is a problem the user can act on. Calling
+    // it "no longer exists" sends them looking for the wrong thing — and the
+    // entry is still sitting there in the tree, contradicting the message.
+    linkCycle(repo, 'knot')
+
+    const err = await git.trashPath(repo, 'knot').catch((e: Error) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toMatch(/ELOOP/)
+    expect((err as Error).message).not.toMatch(/no longer exists/)
+    expect(trashItem).not.toHaveBeenCalled()
+  })
+
+  it('still reports a genuinely missing entry as gone', async () => {
+    await expect(git.trashPath(repo, 'src/never-was.ts')).rejects.toThrow(/no longer exists/)
+    expect(trashItem).not.toHaveBeenCalled()
+  })
+})
+
+/* ---- Symlink containment -------------------------------------------------
+ *
+ * `resolveInRepo` is lexical, so `link/x.txt` satisfies it however far out of
+ * the checkout `link` points. The mutating operations therefore re-ask the
+ * question of the real filesystem. These tests cover both directions: the
+ * escape is refused, and the several legitimate shapes are NOT.
+ * ------------------------------------------------------------------------- */
+
+describe('real-path containment', () => {
+  it('refuses to create through a link that leaves the checkout', async () => {
+    linkDir(outside, join(repo, 'escape'))
+    await expect(git.createFile(repo, 'escape', 'planted.txt')).rejects.toThrow(/resolves outside/)
+    expect(existsSync(join(outside, 'planted.txt'))).toBe(false)
+  })
+
+  it('refuses to create a directory through such a link', async () => {
+    linkDir(outside, join(repo, 'escape'))
+    await expect(git.createDirectory(repo, 'escape', 'planted')).rejects.toThrow(/resolves outside/)
+    expect(existsSync(join(outside, 'planted'))).toBe(false)
+  })
+
+  it('refuses to rename a file that lives outside via a link', async () => {
+    linkDir(outside, join(repo, 'escape'))
+    await expect(git.renamePath(repo, 'escape/secret.txt', 'mine.txt')).rejects.toThrow(
+      /resolves outside/
+    )
+    expect(existsSync(join(outside, 'secret.txt'))).toBe(true)
+  })
+
+  it('refuses to bin a file that lives outside via a link', async () => {
+    linkDir(outside, join(repo, 'escape'))
+    await expect(git.trashPath(repo, 'escape/secret.txt')).rejects.toThrow(/resolves outside/)
+    expect(trashItem).not.toHaveBeenCalled()
+  })
+
+  it('allows a link that stays inside the checkout', async () => {
+    // Repos legitimately contain links. One pointing at a sibling directory in
+    // the same checkout is still the checkout, and must not be collateral.
+    mkdirSync(join(repo, 'real'))
+    linkDir(join(repo, 'real'), join(repo, 'src', 'linked'))
+    expect(await git.createFile(repo, 'src/linked', 'ok.txt')).toBe('src/linked/ok.txt')
+    expect(existsSync(join(repo, 'real', 'ok.txt'))).toBe(true)
+  })
+
+  it('allows operations on a checkout reached through a link', async () => {
+    // Orbital's own worktrees live under `.orbital-worktrees`, and a checkout
+    // path can sit behind a junction or a symlinked home. The root is resolved
+    // the same way the target is, so this must not read as an escape.
+    const linkedRoot = join(outside, 'checkout-link')
+    linkDir(repo, linkedRoot)
+    expect(await git.createFile(linkedRoot, 'src', 'via-link.ts')).toBe('src/via-link.ts')
+    expect(existsSync(join(repo, 'src', 'via-link.ts'))).toBe(true)
+  })
+
+  it('lets a link entry itself be renamed and binned', async () => {
+    // Only the ANCESTORS are resolved: a symlink is a directory entry like any
+    // other, and renaming or binning one edits the link, not its target.
+    linkDir(outside, join(repo, 'escape'))
+    expect(await git.renamePath(repo, 'escape', 'renamed-link')).toBe('renamed-link')
+    expect(existsSync(join(repo, 'renamed-link'))).toBe(true)
+
+    await git.trashPath(repo, 'renamed-link')
+    expect(trashItem).toHaveBeenCalledWith(join(repo, 'renamed-link'))
+    // The link's target is untouched by either operation.
+    expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('do not touch\n')
   })
 })
