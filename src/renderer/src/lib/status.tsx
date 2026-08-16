@@ -101,7 +101,7 @@ export function taskChipClass(s: TaskStatus): string {
     case 'done':
       return 'text-green-2 bg-green/15'
     default:
-      return 'text-muted bg-white/[0.03]'
+      return 'text-muted bg-hover'
   }
 }
 
