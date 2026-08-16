@@ -636,7 +636,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                     <button
                       onClick={() => void save()}
                       disabled={!dirty}
-                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-on-accent hover:brightness-110 disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
+                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-on-accent hover:bg-accent-hover transition-colors disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
                     >
                       <Save size={13} strokeWidth={1.5} />
                       Save

@@ -14,9 +14,10 @@ import TitleBar from './TitleBar'
 const setSettings = vi.fn(async (s: Settings) => s)
 
 /**
- * jsdom's matchMedia always reports matches: false, which would pin the 'system'
- * theme to light forever. This stub lets a test say "the OS is in dark mode", so
- * the resolution useResolvedTheme performs is actually observable.
+ * jsdom's matchMedia always reports matches: false, which would pin the OS
+ * preference to light forever. This stub lets a test say "the OS is in dark
+ * mode", so what useSystemTheme reads — and the hint built from it — is actually
+ * observable, including when it disagrees with the pinned mode.
  */
 function stubSystemDark(dark: boolean): void {
   vi.stubGlobal('matchMedia', (query: string) => ({
@@ -60,7 +61,7 @@ function openViewMenu(): HTMLElement {
   return screen.getByRole('menu')
 }
 
-/** One theme row by its leading label ('System' also carries a resolved-theme hint). */
+/** One theme row by its leading label ('System' also carries an OS-preference hint). */
 function themeItem(menu: HTMLElement, label: 'System' | 'Light' | 'Dark'): HTMLElement {
   return within(menu).getByRole('menuitemradio', { name: new RegExp(`^${label}`) })
 }
@@ -101,7 +102,7 @@ describe('TitleBar View menu — theme', () => {
     expect(themeItem(menu, 'Light').getAttribute('aria-checked')).toBe('false')
   })
 
-  it('annotates System with what it currently resolves to', () => {
+  it('annotates System with the OS preference', () => {
     stubSystemDark(true)
     seed('system')
     render(<TitleBar />)
@@ -112,6 +113,27 @@ describe('TitleBar View menu — theme', () => {
     seed('system')
     render(<TitleBar />)
     expect(themeItem(openViewMenu(), 'System').textContent).toContain('light')
+  })
+
+  it('keeps the System hint on the OS preference when a mode is pinned', () => {
+    // The case the hint exists for, and the one seeding only 'system' can never
+    // catch: with a mode pinned, "what the app is showing" and "what the OS
+    // wants" disagree, and the hint must report the OS. A hint sourced from the
+    // applied theme reads back the user's own pin — telling someone on a light
+    // OS who pinned Dark that switching to System means dark, which is exactly
+    // backwards, and wrong precisely when they are asking.
+    stubSystemDark(false)
+    seed('dark')
+    render(<TitleBar />)
+    const hinted = themeItem(openViewMenu(), 'System').textContent
+    expect(hinted).toContain('light')
+    expect(hinted).not.toContain('dark')
+
+    cleanup()
+    stubSystemDark(true)
+    seed('light')
+    render(<TitleBar />)
+    expect(themeItem(openViewMenu(), 'System').textContent).toContain('dark')
   })
 
   it('persists the picked mode through the settings bridge, leaving the rest intact', () => {

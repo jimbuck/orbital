@@ -58,29 +58,44 @@ export function setThemeMode(mode: ThemeMode): void {
 }
 
 /**
- * Resolve the persisted theme setting to a concrete 'light'|'dark'.
+ * The OS's own colour preference, tracked live via matchMedia.
  *
- * When the mode is 'system' it tracks the OS preference live via matchMedia, so
- * toggling the OS theme re-themes the app without a reload.
+ * Deliberately independent of the persisted mode: this is what the OS wants,
+ * not what Orbital is currently showing. A control that needs to say "System
+ * would mean dark right now" has to keep asking the OS even while the user has
+ * pinned Light — that annotation exists precisely for the user deciding whether
+ * to un-pin, so gating the subscription on `mode === 'system'` would make it
+ * report the pinned theme back at them and answer the wrong question.
  */
-export function useResolvedTheme(): ResolvedTheme {
-  const mode = useThemeMode()
-
-  // Seed from the current OS preference; only consulted while mode === 'system'.
+export function useSystemTheme(): ResolvedTheme {
   const [systemDark, setSystemDark] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(DARK_QUERY).matches
   )
 
   useEffect(() => {
-    if (mode !== 'system') return
     const mq = window.matchMedia(DARK_QUERY)
     const onChange = (e: MediaQueryListEvent): void => setSystemDark(e.matches)
-    // Sync once on subscribe in case the preference changed while not tracking.
+    // Sync once on subscribe in case the preference changed between the initial
+    // render and this effect running.
     setSystemDark(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
-  }, [mode])
+  }, [])
 
-  if (mode === 'system') return systemDark ? 'dark' : 'light'
-  return mode
+  return systemDark ? 'dark' : 'light'
+}
+
+/**
+ * Resolve the persisted theme setting to a concrete 'light'|'dark' — i.e. the
+ * theme actually applied to the DOM.
+ *
+ * When the mode is 'system' this tracks the OS preference live, so toggling the
+ * OS theme re-themes the app without a reload; a pinned mode simply wins.
+ * Layered over useSystemTheme so there is exactly one matchMedia subscription
+ * concept in the app, and no second place for its listener cleanup to be wrong.
+ */
+export function useResolvedTheme(): ResolvedTheme {
+  const mode = useThemeMode()
+  const systemTheme = useSystemTheme()
+  return mode === 'system' ? systemTheme : mode
 }

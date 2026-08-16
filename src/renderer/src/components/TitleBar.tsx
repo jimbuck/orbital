@@ -3,7 +3,7 @@ import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, themeModeLabel, useResolvedTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
 
 interface MenuItem {
   label: string
@@ -16,7 +16,7 @@ interface MenuItem {
    * no gutter, so the ordinary commands keep their existing look.
    */
   checked?: boolean
-  /** Dimmed trailing text — used to show what 'System' currently resolves to. */
+  /** Dimmed trailing text — used to show the OS preference 'System' would follow. */
   hint?: string
   /** A non-interactive group caption (e.g. "Theme") rather than a command. */
   heading?: boolean
@@ -47,10 +47,13 @@ export default function TitleBar(): JSX.Element {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [devMenu, setDevMenu] = useState(false)
 
-  // The picked mode drives the check mark; the resolved theme only annotates
-  // 'System', so the menu shows which way "follow the OS" is currently leaning.
+  // The picked mode drives the check mark. The 'System' row's hint is the OS
+  // preference itself — NOT the theme currently applied — because the question
+  // that row answers is "what would I get if I switched to System?". Someone on
+  // a light OS who has pinned Dark is exactly who opens this menu to decide, and
+  // echoing their pinned theme back would tell them the opposite of the truth.
   const themeMode = useThemeMode()
-  const resolvedTheme = useResolvedTheme()
+  const systemTheme = useSystemTheme()
 
   const activeWorktreeId = useStore((s) => s.activeWorktreeId)
   const servers = useStore((s) => (s.activeWorktreeId ? s.devServers[s.activeWorktreeId] : undefined)) ?? []
@@ -108,7 +111,7 @@ export default function TitleBar(): JSX.Element {
         ...THEME_MODES.map<MenuItem>((mode) => ({
           label: themeModeLabel(mode),
           checked: themeMode === mode,
-          hint: mode === 'system' ? resolvedTheme : undefined,
+          hint: mode === 'system' ? systemTheme : undefined,
           onClick: () => setThemeMode(mode)
         }))
       ]
