@@ -57,6 +57,26 @@ describe('resolveMarkdownAssetPath', () => {
     expect(resolveMarkdownAssetPath('a/b.md', '..%5C..%5Csecrets.png')).toBeNull()
   })
 
+  it('applies the remote-root and scheme guards after decoding too', () => {
+    // Checked against the raw text these guards are trivially bypassable: the
+    // escape survives them and *then* decodes, collapsing to a path the author
+    // never wrote (`docs/host/x.png`, `docs/C:/x.png`).
+    expect(resolveMarkdownAssetPath('docs/guide.md', '%2F%2Fhost/x.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('docs/guide.md', '/%2Fhost/x.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('docs/guide.md', '%5C%5Cserver%5Cshare%5Cx.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('docs/guide.md', '%43%3A%2Fx.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('docs/guide.md', '%68ttp%3A//x.test/a.png')).toBeNull()
+    // A single decoded separator is still just the worktree root.
+    expect(resolveMarkdownAssetPath('docs/guide.md', '%2Fassets/logo.png')).toBe('assets/logo.png')
+  })
+
+  it('decodes the markdown path with the same normaliser as the source', () => {
+    expect(resolveMarkdownAssetPath('docs%2Fdeep/guide.md', 'a.png')).toBe('docs/deep/a.png')
+    expect(resolveMarkdownAssetPath('docs/..%2F..%2Fguide.md', 'a.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('%2F%2Fhost/guide.md', 'a.png')).toBeNull()
+    expect(resolveMarkdownAssetPath('%43%3A%2Frepo%2Fguide.md', 'a.png')).toBeNull()
+  })
+
   it('normalises the markdown file directory before joining', () => {
     // The md path is the base for every relative source, so a non-canonical one
     // must not survive into the result: `..` there escapes just as surely as a
@@ -317,5 +337,108 @@ describe('resolveMarkdownImages', () => {
     })
     expect(out).toBe('<h1>Hi</h1><p>No pictures.</p>')
     expect(b.reads).toEqual([])
+  })
+
+  it('returns image-free html byte-for-byte, including leading head-ish markup', async () => {
+    const b = makeBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    // A document parser hoists all of this out of <body> (or above <html>), so
+    // serialising the body alone dropped it — on every preview, images or not.
+    const html =
+      '<!-- omit in toc -->\n<style>p{color:red}</style>\n<meta name="a" content="b">\n<h1>T</h1>'
+    expect(await resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'guide.md' })).toBe(html)
+    expect(b.reads).toEqual([])
+  })
+
+  it('keeps leading head-ish markup in a document that does have images', async () => {
+    const b = makeBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    const out = await resolveMarkdownImages(
+      '<!-- omit in toc --><style>p{color:red}</style><p><img src="./a.png"></p>',
+      { worktreeId: 'w1', mdPath: 'docs/guide.md' }
+    )
+
+    expect(out).toContain('<!-- omit in toc -->')
+    expect(out).toContain('<style>p{color:red}</style>')
+    expect(srcs(out)).toEqual([`data:image/png;base64,${b64('docs/a.png')}`])
+  })
+
+  it('never emits a script into the preview frame', async () => {
+    const b = makeBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    // The frame is sandboxed without allow-scripts so this is inert either way,
+    // but the rewrite must not become the thing that reintroduces it.
+    const withImage = await resolveMarkdownImages('<script>alert(1)</script><p><img src="./a.png"></p>', {
+      worktreeId: 'w1',
+      mdPath: 'docs/guide.md'
+    })
+    expect(withImage).not.toContain('<script')
+    expect(withImage).toContain('data:image/png;base64,')
+
+    const withoutImage = await resolveMarkdownImages('<script>alert(1)</script><p>x</p>', {
+      worktreeId: 'w1',
+      mdPath: 'docs/guide.md'
+    })
+    expect(withoutImage).toBe('<p>x</p>')
+  })
+
+  it('inlines srcset candidates on both <img> and <source>', async () => {
+    const b = makeBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    // The GitHub dark/light-logo idiom: the browser prefers the <source>, so
+    // rewriting only the <img> fallback still renders a broken image.
+    const html =
+      '<picture><source srcset="./logo-dark.webp">' +
+      '<img src="./logo.png" srcset="./logo.png 1x, ./logo@2x.png 2x" alt="l"></picture>'
+    const out = await resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'docs/guide.md' })
+
+    const doc = new DOMParser().parseFromString(out, 'text/html')
+    expect(doc.querySelector('source')?.getAttribute('srcset')).toBe(
+      `data:image/webp;base64,${b64('docs/logo-dark.webp')}`
+    )
+    expect(doc.querySelector('img')?.getAttribute('srcset')).toBe(
+      `data:image/png;base64,${b64('docs/logo.png')} 1x, data:image/png;base64,${b64('docs/logo@2x.png')} 2x`
+    )
+    expect(srcs(out)).toEqual([`data:image/png;base64,${b64('docs/logo.png')}`])
+    // The <img> src and its 1x candidate are the same file: one read.
+    expect(b.reads).toEqual(['w1:docs/logo.png', 'w1:docs/logo-dark.webp', 'w1:docs/logo@2x.png'])
+  })
+
+  it('leaves srcset candidates it cannot resolve exactly as written', async () => {
+    const b = makeBridge((p) => p === 'docs/gone.png')
+    __setMarkdownAssetBridge(b.bridge)
+
+    const html =
+      '<img srcset="https://x.test/a.png 1x,\n  ./b.png 2x,\n  ../../escape.png 3x,\n  ./gone.png 4x">'
+    const out = await resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'docs/guide.md' })
+
+    const doc = new DOMParser().parseFromString(out, 'text/html')
+    expect(doc.querySelector('img')?.getAttribute('srcset')).toBe(
+      'https://x.test/a.png 1x,\n  ' +
+        `data:image/png;base64,${b64('docs/b.png')} 2x,\n  ` +
+        '../../escape.png 3x,\n  ' +
+        './gone.png 4x'
+    )
+  })
+
+  it('does not split a srcset candidate on a comma inside its url', async () => {
+    const b = makeBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    // Per the HTML rules a candidate's URL is a run of non-whitespace, so the
+    // commas inside a data: URL are part of it — which is also why inlining as
+    // data: URLs is safe here.
+    const html = '<img srcset="data:image/png;base64,AAAA 1x, ./b.png 2x">'
+    const out = await resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'docs/guide.md' })
+
+    const doc = new DOMParser().parseFromString(out, 'text/html')
+    expect(doc.querySelector('img')?.getAttribute('srcset')).toBe(
+      `data:image/png;base64,AAAA 1x, data:image/png;base64,${b64('docs/b.png')} 2x`
+    )
+    expect(b.reads).toEqual(['w1:docs/b.png'])
   })
 })

@@ -36,6 +36,37 @@ function makeDeferredBridge(): {
   }
 }
 
+/**
+ * The same idea, but settleable *per path*. `makeDeferredBridge` releases every
+ * pending read at once, which can only ever produce in-order resolutions — so it
+ * cannot express the race the request-id guard exists for: a slow read for the
+ * previously selected file landing *after* a newer file has already rendered.
+ */
+function makePerPathBridge(): {
+  bridge: { readFileBase64: (worktreeId: string, path: string) => Promise<string> }
+  settle: (path: string) => Promise<void>
+} {
+  const pending = new Map<string, (() => void)[]>()
+  return {
+    bridge: {
+      readFileBase64: (_worktreeId: string, path: string): Promise<string> =>
+        new Promise<string>((resolve) => {
+          const waiting = pending.get(path) ?? []
+          waiting.push(() => resolve(Buffer.from(path).toString('base64')))
+          pending.set(path, waiting)
+        })
+    },
+    settle: async (path: string): Promise<void> => {
+      const jobs = pending.get(path) ?? []
+      pending.delete(path)
+      await act(async () => {
+        for (const job of jobs) job()
+        await new Promise((r) => setTimeout(r, 0))
+      })
+    }
+  }
+}
+
 const b64 = (s: string): string => Buffer.from(s).toString('base64')
 
 /** Whatever document the preview iframe is currently holding. */
@@ -128,6 +159,30 @@ describe('Preview markdown staleness', () => {
 
     await d.settle()
     expect(frameDoc(container)).toContain('typing')
+  })
+
+  it('drops a resolve that lands after a newer file was selected', async () => {
+    const d = makePerPathBridge()
+    __setMarkdownAssetBridge(d.bridge)
+
+    const { container, rerender } = render(
+      <Preview kind="markdown" source="![a](a.png)" path="one.md" worktreeId="w1" onLink={noop} />
+    )
+
+    // one.md's image is still being read when the user clicks two.md.
+    rerender(
+      <Preview kind="markdown" source="![b](b.png)" path="two.md" worktreeId="w1" onLink={noop} />
+    )
+    await d.settle('b.png')
+    expect(frameDoc(container)).toContain(`data:image/png;base64,${b64('b.png')}`)
+
+    // one.md's read finally comes back — for a render that is a whole file out
+    // of date. Without the request-id guard its `setDoc` wins purely by
+    // arriving last, replacing two.md's preview with one.md's content under
+    // two.md's header.
+    await d.settle('a.png')
+    expect(frameDoc(container)).toContain(`data:image/png;base64,${b64('b.png')}`)
+    expect(frameDoc(container)).not.toContain(b64('a.png'))
   })
 
   it('renders non-markdown sources synchronously', () => {
