@@ -794,6 +794,8 @@ export const IPC = {
   openPath: 'orbital:openPath',
   revealPath: 'orbital:revealPath',
   openInTerminal: 'orbital:openInTerminal',
+  openProjectPath: 'orbital:openProjectPath',
+  openProjectInTerminal: 'orbital:openProjectInTerminal',
   openLogFolder: 'orbital:openLogFolder',
   // window
   windowMinimize: 'orbital:windowMinimize',
@@ -1028,6 +1030,30 @@ export interface OrbitalApi {
    * link caveat as `openPath` — the path is the new shell's working directory.
    */
   openInTerminal(worktreeId: string, path: string): Promise<void>
+  /**
+   * Open a PROJECT's repo directory in the OS file manager.
+   *
+   * The rail's project header offers this, and it cannot go through
+   * `openPath(worktreeId, '')`: a project only has a root Worktree row once
+   * `reconcileProjectWorktrees` has listed its checkouts, and that returns
+   * empty-handed for a path that is not a git repo — permanently, not just
+   * until the first scan. "Open the folder and see why" is exactly what the
+   * user wants in that state, so the action has to be reachable without a
+   * Worktree.
+   *
+   * There is no `path` parameter, and that is the point: the only thing the
+   * renderer names is a project id, and main derives the directory from its own
+   * stored `repoPath`. Nothing renderer-supplied reaches the OS, so there is no
+   * path to contain — as opposed to re-admitting an absolute path over the
+   * bridge, which is the hole the `(worktreeId, path)` shape closed.
+   */
+  openProjectPath(projectId: string): Promise<void>
+  /**
+   * Open an external terminal window at a PROJECT's repo directory. Same
+   * project-id-only contract, and the same reason for existing, as
+   * `openProjectPath`.
+   */
+  openProjectInTerminal(projectId: string): Promise<void>
   /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */
   openLogFolder(): Promise<void>
   windowMinimize(): void

@@ -556,13 +556,21 @@ describe('real-path containment', () => {
     expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('do not touch\n')
   })
 
-  it('hands the OS hand-offs a path that a link can still lead out of', async () => {
-    // `openPath` / `revealPath` / `openInTerminal` resolve with `resolveInRepo`
-    // and give the answer straight to the OS, so this is the literal string
-    // Explorer or the shell would receive. The API docs make that a stated
-    // negative — these three contain the SPELLING, not the destination — and a
-    // stated negative deserves a test: if a future change adds real-path
-    // resolution here, this fails and the docs get corrected with it.
+  it('resolves a linked entry to a path whose real target is outside the repo', () => {
+    // What this pins is `resolveInRepo` itself: given a link that leaves the
+    // checkout, it returns the lexical path unchanged, and that path's REAL
+    // target is outside. That is the stated negative in the API docs for
+    // `openPath` / `revealPath` / `openInTerminal` — those three contain the
+    // SPELLING, not the destination — and it is worth a test because the
+    // property is deliberate rather than accidental.
+    //
+    // Be precise about what it does NOT pin. The hand-offs live in
+    // `main/ipc.ts`, which no test imports (it pulls in electron, the sqlite
+    // repo and node-pty), so nothing here observes their wiring: swapping
+    // `worktreePath` to a real-path gate would leave this test green. Read it
+    // as "the gate those three call behaves this way", not as a regression
+    // guard on the call sites. Covering those properly needs a test that can
+    // load `ipc.ts`, which is a bigger change than this file.
     linkDir(outside, join(repo, 'escape'))
     const handedToTheOs = resolveInRepo(repo, 'escape/secret.txt')
     expect(handedToTheOs).toBe(join(repo, 'escape', 'secret.txt'))

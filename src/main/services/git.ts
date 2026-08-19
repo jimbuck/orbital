@@ -422,11 +422,22 @@ async function diff(repoPath: string, path: string, staged: boolean): Promise<Fi
  * of the operations create, rename or bin real files. A relative path from the
  * file tree is data, not a promise: a compromised renderer (or a bug that lets
  * repo content reach one of these calls) must not be able to walk out of the
- * checkout and rewrite the user's home directory. `resolveInRepo` is the single
- * gate every renderer-supplied path goes through — the mutating operations
- * defined here, the read/write pair further down, and the OS hand-offs in
- * `ipc.ts` (open / reveal / open-in-terminal), which resolve through it rather
- * than being handed an absolute path to trust.
+ * checkout and rewrite the user's home directory. `resolveInRepo` is the gate
+ * for the file operations — the mutating ones defined here, the read/write pair
+ * further down, and, in `ipc.ts`, `resolvePath` plus the OS hand-offs (open /
+ * reveal / open-in-terminal), which resolve through it rather than being handed
+ * an absolute path to trust.
+ *
+ * It is NOT every renderer-supplied path in this file. `gitStage`, `gitUnstage`,
+ * `gitDiscard` and `gitDiff` also take a path the renderer chose and never call
+ * it; they hand it to `git` as a pathspec after `--` instead and lean on git's
+ * own containment, which is a different rule with a different shape. Git refuses
+ * a pathspec that resolves outside the repo — relative or absolute, "is outside
+ * repository" — but it happily accepts an ABSOLUTE path that lands inside, which
+ * `resolveInRepo` would reject outright. So these four are contained, just not
+ * to the same spelling rule as everything below. The one hole is `diff
+ * --no-index`, which bypasses pathspec checking entirely and does read outside;
+ * it predates this gate and is tracked separately.
  * -------------------------------------------------------------------------- */
 
 /**
@@ -868,8 +879,9 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
  * `writeFile` uses `resolveInRepoReal`, the same gate as every other mutating
  * operation: writing THROUGH a symlink that leaves the checkout edits a file
  * that is not in the checkout, and a link is a directory entry a merely-cloned
- * repo can carry. Editing a pnpm-linked `node_modules` package in place —
- * silently patching the machine-wide store from the editor tree — is the
+ * repo can carry. Saving into a globally linked dependency — one put there by
+ * `npm link` / `pnpm link --global`, so the editor tree is really showing the
+ * package's own source directory somewhere else on the machine — is the
  * concrete failure this refuses, and it is refused consistently with
  * createFile / createDirectory / renamePath / trashPath.
  *
@@ -891,10 +903,16 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
  *    arriving at readFileBase64, a CLI argument arriving at readFile — and
  *    neither of those involves a link at all.
  *  - What it would cost in correctness. `listDir` exists to expand IGNORED
- *    directories, i.e. `node_modules` — where pnpm and npm both hand out
- *    symlinks into a store outside the checkout. Real-path containment would
- *    turn "expand node_modules" and "open the file I can see in the tree" into
- *    errors, for a read the user explicitly asked for.
+ *    directories, i.e. `node_modules`, and some of what lives there is a link
+ *    out of the checkout: an `npm link` / `pnpm link --global` package, a yarn
+ *    `link:` or `portal:` dependency, or a workspace whose root sits ABOVE the
+ *    checkout. A plain install is NOT one of those — pnpm's default hoisted
+ *    layout has no symlinks under `node_modules`, `node-linker=isolated` links
+ *    only back into `node_modules/.pnpm`, and the global store is reached by
+ *    HARDLINK, which `realpath` does not follow. So the cost is narrower than
+ *    "every node_modules", but it is still real, and it lands as an error on a
+ *    read the user explicitly asked for: "expand node_modules" or "open the
+ *    file I can see in the tree" failing on a linked dependency.
  *
  * Reading through a link is the smaller exposure; writing through one is the
  * one that changes state outside the checkout. The split follows that.

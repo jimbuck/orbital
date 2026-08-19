@@ -415,6 +415,37 @@ function isHumanKeystroke(data: string): boolean {
   return data.replace(TERMINAL_REPORTS, '').length > 0
 }
 
+/**
+ * Open the platform's external terminal application with `dir` as its working
+ * directory, detached so it outlives Orbital.
+ *
+ * Shared by the Worktree-scoped and project-scoped hand-offs so the Windows
+ * "Windows Terminal, else a PowerShell window" fallback is written once —
+ * `wt` is absent on stock Windows Server and on machines where the user
+ * removed it, and the two entry points must degrade identically.
+ *
+ * `dir` is always a path MAIN derived (from a stored Worktree or project), so
+ * whatever containment applies has already been applied by the caller.
+ */
+function spawnExternalTerminal(dir: string): void {
+  if (process.platform === 'win32') {
+    const wt = spawn('wt', ['-d', dir], { detached: true, stdio: 'ignore' })
+    wt.on('error', () => {
+      const ps = spawn('cmd.exe', ['/c', 'start', 'powershell.exe', '-NoExit'], {
+        cwd: dir,
+        detached: true,
+        stdio: 'ignore'
+      })
+      ps.unref()
+    })
+    wt.unref()
+  } else if (process.platform === 'darwin') {
+    spawn('open', ['-a', 'Terminal', dir], { detached: true, stdio: 'ignore' }).unref()
+  } else {
+    spawn('x-terminal-emulator', [], { cwd: dir, detached: true, stdio: 'ignore' }).unref()
+  }
+}
+
 /* ---- registration ------------------------------------------------------ */
 
 export function registerIpc(): void {
@@ -984,11 +1015,19 @@ export function registerIpc(): void {
    *    linked directory would be refused. A leaf-resolving variant would close
    *    that, at the cost below, and it exists nowhere else in the codebase.
    *  - The cost is a false rejection of exactly what the user clicked. These
-   *    three act on an entry the tree is showing: a junction-backed folder
-   *    sitting in the checkout, or any file inside a pnpm-linked `node_modules`
-   *    package, which is precisely where "Reveal in File Explorer" earns its
-   *    keep. Refusing to reveal a file the tree just drew is a bug the user
-   *    meets; the escape is one they have to be attacked with.
+   *    three act on an entry the tree is showing, and some of those entries are
+   *    links out of the checkout by design: a junction-backed folder someone
+   *    dropped in the working copy, a package pulled in by `npm link` /
+   *    `pnpm link --global`, a yarn `link:`/`portal:` dependency, or a monorepo
+   *    workspace rooted ABOVE the checkout. (Not, note, an ordinary install:
+   *    pnpm's default hoisted layout leaves no symlinks under `node_modules` at
+   *    all, and even `node-linker=isolated` points its links back INTO the
+   *    checkout, at `node_modules/.pnpm/…`. Its link to the global store is a
+   *    HARDLINK, which `realpath` does not follow — so real-path containment
+   *    would not have rejected a plain `pnpm install` tree. The escaping cases
+   *    are real but narrower than "every node_modules".) Refusing to reveal a
+   *    file the tree just drew is still a bug the user meets; the escape is one
+   *    they have to be attacked with.
    *  - And it would not buy the guarantee it looks like it buys. Containment
    *    here is least-authority scoping — main never takes an absolute path from
    *    the renderer on faith — not an exploit barrier, because there isn't one
@@ -1003,8 +1042,10 @@ export function registerIpc(): void {
    * checkout main already knows about, `..` and absolute paths are refused with
    * a message, and every caller is an explicit click on a visible entry.
    *
-   * An empty `path` means the checkout root, which is what the rail's "Open in
-   * Explorer" / "Open in External Terminal" want.
+   * An empty `path` means the checkout root, which is what a Worktree row's
+   * "Open in Explorer" / "Open in External Terminal" want. A PROJECT header's
+   * two equivalents do not come through here at all — see the project-scoped
+   * pair below, which need no Worktree to exist.
    */
   const worktreePath = (worktreeId: string, path: string): string =>
     git.resolveInRepo(worktreeRepoPath(worktreeId), path)
@@ -1030,25 +1071,45 @@ export function registerIpc(): void {
     await shell.openPath(logger.dir)
   })
   h(IPC.openInTerminal, (_e, worktreeId: string, path: string) => {
-    const p = worktreePath(worktreeId, path)
-    if (process.platform === 'win32') {
-      // Prefer Windows Terminal; fall back to a new PowerShell window if wt is missing.
-      const wt = spawn('wt', ['-d', p], { detached: true, stdio: 'ignore' })
-      wt.on('error', () => {
-        const ps = spawn('cmd.exe', ['/c', 'start', 'powershell.exe', '-NoExit'], {
-          cwd: p,
-          detached: true,
-          stdio: 'ignore'
-        })
-        ps.unref()
-      })
-      wt.unref()
-    } else if (process.platform === 'darwin') {
-      spawn('open', ['-a', 'Terminal', p], { detached: true, stdio: 'ignore' }).unref()
-    } else {
-      spawn('x-terminal-emulator', [], { cwd: p, detached: true, stdio: 'ignore' }).unref()
-    }
+    spawnExternalTerminal(worktreePath(worktreeId, path))
   })
+
+  /* ---- Project-scoped hand-offs -------------------------------------------
+   *
+   * The rail's project header offers "Open in Explorer" and "Open in External
+   * Terminal" too, and those cannot route through the pair above. Both of those
+   * need a Worktree id, and a project does not always have one: the root row is
+   * created by `reconcileProjectWorktrees`, which returns without touching the
+   * stored rows when `git worktree list` fails — a directory that was never a
+   * repo, or is no longer readable. That is a PERMANENT state, not a gap before
+   * the first scan, and it is precisely the state in which a user reaches for
+   * "open the folder and let me look at why".
+   *
+   * So these two take a project id and NOTHING else. The directory comes from
+   * `project.repoPath`, which main stored when the user picked the folder — the
+   * same provenance as `worktreeRepoPath`'s `w.path`, and equally not something
+   * the renderer can influence. With no renderer-supplied path in the call
+   * there is nothing to contain, which is why `resolveInRepo` is absent here
+   * rather than skipped: it would be gating a string main wrote itself. The
+   * alternative — letting the renderer pass the absolute path it can see in the
+   * rail — is the exact shape this PR removed, and is not coming back.
+   */
+  const projectRepoPath = (projectId: string): string => {
+    const p = repo.projects.get(projectId)
+    if (!p) throw new Error(`project ${projectId} not found`)
+    return p.repoPath
+  }
+
+  h(IPC.openProjectPath, async (_e, projectId: string) => {
+    // Same resolve-with-a-message quirk as `IPC.openPath` above; rethrowing is
+    // what puts "the folder is gone" in front of a user whose repo moved.
+    const err = await shell.openPath(projectRepoPath(projectId))
+    if (err) throw new Error(err)
+  })
+  h(IPC.openProjectInTerminal, (_e, projectId: string) => {
+    spawnExternalTerminal(projectRepoPath(projectId))
+  })
+
   ipcMain.on(IPC.windowMinimize, () => runtime.window?.minimize())
   ipcMain.on(IPC.windowMaximize, () => {
     const w = runtime.window

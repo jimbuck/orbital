@@ -23,9 +23,13 @@
  *  - **Containment.** *Both* halves of the join — the markdown file's own
  *    directory and the source URL — are percent-decoded and then normalised
  *    segment by segment, and any `../` that would climb above the worktree root
- *    rejects the image outright rather than reading it. This matters because
- *    `readFileBase64` in the main process is a plain `join(repoRoot, relPath)`
- *    with no containment check of its own.
+ *    rejects the image outright rather than reading it. Main checks containment
+ *    as well — `readFileBase64` resolves through the git service's lexical gate,
+ *    which refuses `..` and rooted paths — so this is not the last line of
+ *    defence. It is the layer that decides WHAT gets asked for: it turns the
+ *    author's URL into the repo-relative path main is then handed, and a
+ *    rejection here means a broken-image placeholder rather than a round trip
+ *    that comes back as an error.
  *  - **Decode first, then check.** Every structural guard (remote root, URL
  *    scheme, `..`) runs on the *decoded* path, because an escape otherwise walks
  *    straight past it: `%2F%2Fhost/x.png` used to survive the protocol-relative
@@ -152,14 +156,17 @@ export function resolveMarkdownAssetPath(mdPath: string, src: string): string | 
     // produce `docs/../../logo.png`: paths that escape the worktree while never
     // touching the `..` branch below, because the `..` is already *inside* the
     // stack rather than arriving from the source. Normalising the directory
-    // first makes the guard cover both halves of the join. (The main process
-    // does a bare `join(repoRoot, relPath)` with no containment check of its
-    // own, so this function is the only thing standing between a preview and an
-    // arbitrary-file read.) The md path goes through the *same* decode as the
-    // source rather than a bare backslash swap, so "one normaliser for both
-    // halves" is literally true — it's unreachable in practice (the path comes
-    // from the app's own file tree) but a guard that only half-applies is a
-    // guard nobody can reason about.
+    // first makes the guard cover both halves of the join. (Main is no longer
+    // taking this on trust — `readFileBase64` resolves through its own lexical
+    // containment gate, so an escape that slipped past here would be refused
+    // there too. Normalising both halves is what keeps the two layers agreeing:
+    // this function's contract is "a repo-relative path or nothing", and
+    // emitting a `../` that main then rejects would break that contract while
+    // hiding the reason behind an IPC error.) The md path goes through the
+    // *same* decode as the source rather than a bare backslash swap, so "one
+    // normaliser for both halves" is literally true — it's unreachable in
+    // practice (the path comes from the app's own file tree) but a guard that
+    // only half-applies is a guard nobody can reason about.
     const mdDecoded = decodePath(mdPath)
     if (REMOTE_ROOT.test(mdDecoded) || HAS_SCHEME.test(mdDecoded)) return null
     if (!applySegments(stack, splitSegments(mdDecoded).slice(0, -1))) return null

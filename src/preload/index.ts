@@ -190,6 +190,10 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.revealPath, worktreeId, path) as Promise<void>,
   openInTerminal: (worktreeId: string, path: string) =>
     ipcRenderer.invoke(IPC.openInTerminal, worktreeId, path) as Promise<void>,
+  openProjectPath: (projectId: string) =>
+    ipcRenderer.invoke(IPC.openProjectPath, projectId) as Promise<void>,
+  openProjectInTerminal: (projectId: string) =>
+    ipcRenderer.invoke(IPC.openProjectInTerminal, projectId) as Promise<void>,
   openLogFolder: () => ipcRenderer.invoke(IPC.openLogFolder) as Promise<void>,
   windowMinimize: () => ipcRenderer.send(IPC.windowMinimize),
   windowMaximize: () => ipcRenderer.send(IPC.windowMaximize),
