@@ -238,6 +238,12 @@ interface CacheEntry {
   /** In-flight or settled load. Null resolves mean "couldn't read it". */
   value: Promise<string | null>
   loadedAt: number
+  /**
+   * Bytes this entry is charged against {@link cacheBytes}. Zero until the read
+   * settles (the size isn't knowable before then) and zero forever for a failed
+   * read, which retains nothing but a null.
+   */
+  bytes: number
 }
 
 /**
@@ -251,33 +257,137 @@ interface CacheEntry {
  * while guaranteeing an image edited on disk shows up within seconds instead of
  * until the app restarts. Failures are cached too, so a markdown file pointing
  * at a missing image doesn't fire an IPC call per keystroke.
+ *
+ * Eviction is LRU over a *byte* budget — see {@link cacheMaxBytes} and
+ * {@link touch} for why both halves of that sentence had to change.
  */
 const cache = new Map<string, CacheEntry>()
+
+/** Sum of every live entry's `bytes`, kept in step by {@link drop} and {@link charge}. */
+let cacheBytes = 0
 
 /** Roughly how long a decoded image stays good for. */
 let cacheTtlMs = 30_000
 
-/** Cap on cached images — base64 blobs are large, so the map can't grow forever. */
-const CACHE_MAX = 64
+/**
+ * Memory budget for cached images.
+ *
+ * Counting entries (the old `CACHE_MAX = 64`) budgets the wrong thing: 64 README
+ * icons are a rounding error, while 64 full-page screenshots are several hundred
+ * megabytes of base64 pinned in the renderer heap for the whole TTL. What an
+ * entry actually retains is one ASCII `data:` string, and V8 stores those one
+ * byte per character, so the string's length is a close enough stand-in for its
+ * cost — closer than the decoded image size, which is what the *iframe* holds,
+ * not us.
+ *
+ * 64 MiB is chosen against what the preview already costs: to display an
+ * image-heavy document the `srcDoc` itself holds an inlined copy of every image
+ * on screen, so a cache of the same order as one such document never more than
+ * roughly doubles the memory that document was always going to need. In practice
+ * it also means the case the cache exists for — a README with a handful of
+ * screenshots, a few MiB inlined — never evicts mid-session, while the
+ * pathological case is bounded by a number instead of by nothing.
+ */
+const DEFAULT_MAX_BYTES = 64 * 1024 * 1024
+let cacheMaxBytes = DEFAULT_MAX_BYTES
+
+/**
+ * Secondary ceiling on entry *count*. A byte budget alone cannot bound the map:
+ * a failed read is cached deliberately (so a missing image doesn't fire an IPC
+ * call per keystroke) and costs zero bytes, so a document referencing thousands
+ * of broken paths would grow the map without ever tripping the byte check. This
+ * is a backstop, not the policy — it sits far above any real document, so
+ * ordinary use is governed by {@link cacheMaxBytes}.
+ */
+const DEFAULT_MAX_ENTRIES = 512
+let cacheMaxEntries = DEFAULT_MAX_ENTRIES
+
+/** Remove an entry, if present, keeping the byte total honest. */
+function drop(key: string): void {
+  const entry = cache.get(key)
+  if (!entry) return
+  cacheBytes -= entry.bytes
+  cache.delete(key)
+}
+
+/**
+ * Attribute a settled read's size to its entry — but only while that entry is
+ * still the live one for its key. A read that resolves after its entry expired,
+ * was evicted, or was replaced by a fresher read must not add bytes the map no
+ * longer holds; without the identity check every such straggler would leak into
+ * `cacheBytes` and start evicting live entries to pay for memory nobody holds.
+ */
+function charge(key: string, entry: CacheEntry, bytes: number): void {
+  if (cache.get(key) !== entry) return
+  entry.bytes = bytes
+  cacheBytes += bytes
+  evict()
+}
+
+/**
+ * Evict least-recently-used entries until both budgets are satisfied.
+ *
+ * The loop stops at `cache.size > 1` rather than `> 0`: an image that is on its
+ * own bigger than the entire budget would otherwise evict itself the instant it
+ * settled, so the preview would re-read it over IPC on every keystroke — exactly
+ * the cost this cache exists to prevent, at its worst on the file where it hurts
+ * most. Keeping the newest entry overshoots the budget by at most one image,
+ * which is memory the visible `srcDoc` is holding anyway.
+ */
+function evict(): void {
+  while (cache.size > 1 && (cacheBytes > cacheMaxBytes || cache.size > cacheMaxEntries)) {
+    const oldest = cache.keys().next()
+    if (oldest.done) break
+    drop(oldest.value)
+  }
+}
+
+/**
+ * Move a key to the back of the Map's insertion order — the recently-used end.
+ *
+ * `Map.set` on a key that is *already present* updates the value in place and
+ * leaves the key where it first landed. So an entry read (or re-read) on every
+ * keystroke stayed pinned at the front and was the first thing evicted:
+ * precisely backwards. Delete-then-set is the only way to reorder a Map, and it
+ * is what turns eviction from FIFO into LRU.
+ */
+function touch(key: string, entry: CacheEntry): void {
+  cache.delete(key)
+  cache.set(key, entry)
+}
 
 function cachedDataUrl(worktreeId: string, path: string, mime: string): Promise<string | null> {
   const key = `${worktreeId}\u0000${path}`
   const now = Date.now()
   const hit = cache.get(key)
-  if (hit && now - hit.loadedAt < cacheTtlMs) return hit.value
+  if (hit && now - hit.loadedAt < cacheTtlMs) {
+    touch(key, hit)
+    return hit.value
+  }
+
+  // A stale entry is dropped rather than overwritten: `drop` is what hands its
+  // bytes back to the budget, and the plain `set` below is then a genuine
+  // insertion, landing the refreshed entry at the recently-used end.
+  drop(key)
 
   const value = bridge()
     .readFileBase64(worktreeId, path)
     .then((b64) => `data:${mime};base64,${b64}`)
     .catch(() => null)
-  cache.set(key, { value, loadedAt: now })
-  // Oldest-inserted eviction (Map preserves insertion order) — good enough for a
-  // preview, and a re-read of an evicted image is a single cheap IPC call.
-  while (cache.size > CACHE_MAX) {
-    const oldest = cache.keys().next()
-    if (oldest.done) break
-    cache.delete(oldest.value)
-  }
+  const entry: CacheEntry = { value, loadedAt: now, bytes: 0 }
+  cache.set(key, entry)
+
+  // Size is only knowable once the read lands, so the charge is a SECOND
+  // continuation on the same promise, attached after the entry exists — that
+  // way neither the entry nor the read has to be back-patched into the other.
+  // It is a side branch: `value` is what every caller already holds, so nothing
+  // here can change what they see. A failed read charges nothing (it retains a
+  // null) but still occupies an entry — see cacheMaxEntries.
+  void value.then((url) => {
+    if (url !== null) charge(key, entry, url.length)
+  })
+
+  evict()
   return value
 }
 
@@ -448,7 +558,18 @@ export function __setMarkdownAssetCacheTtl(ms: number): void {
   cacheTtlMs = ms
 }
 
+/**
+ * Shrink the cache budgets so eviction is observable (tests) — proving the byte
+ * policy for real would otherwise mean allocating 64 MiB of base64. Pass null to
+ * restore the shipping values.
+ */
+export function __setMarkdownAssetCacheLimits(limits: { maxBytes?: number; maxEntries?: number } | null): void {
+  cacheMaxBytes = limits?.maxBytes ?? DEFAULT_MAX_BYTES
+  cacheMaxEntries = limits?.maxEntries ?? DEFAULT_MAX_ENTRIES
+}
+
 /** Drop every cached image (tests). */
 export function __resetMarkdownAssetCache(): void {
   cache.clear()
+  cacheBytes = 0
 }
