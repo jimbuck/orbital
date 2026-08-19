@@ -4,10 +4,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Tab } from '@shared/types'
-import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { registerTerminal } from '@renderer/lib/editActions'
-import { decodeOsc52, terminalCopyIntent } from '@renderer/lib/terminalClipboard'
+import { decodeOsc52 } from '@renderer/lib/terminalClipboard'
 
 /** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
 const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
@@ -88,9 +87,16 @@ function claimFocus(tabId: string): boolean {
  */
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
-  // Keep the latest paneId available to the (long-lived) web-links handler.
+  // Keep the latest pane AND worktree available to the (long-lived) web-links
+  // handler. The worktree has to come from the tab rather than from the store's
+  // active one: the pane id beside it is this tab's own, so pairing it with a
+  // different worktree's id asks main to open a browser tab in a pane that
+  // worktree does not own. Same class of bug as the editor tab's preview reads,
+  // and the same one-line fix — a tab's worktree never changes.
   const paneIdRef = useRef(tab.paneId)
   paneIdRef.current = tab.paneId
+  const worktreeIdRef = useRef(tab.worktreeId)
+  worktreeIdRef.current = tab.worktreeId
 
   const theme = useResolvedTheme()
   // The terminal is created in a mount-only effect, so read the initial palette
@@ -123,8 +129,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         if (event.ctrlKey || event.metaKey) {
           void window.orbital.openExternal(uri)
         } else {
-          const w = activeWorktree(useStore.getState())
-          if (w) void window.orbital.createTab(w.id, paneIdRef.current, 'browser', { url: uri })
+          void window.orbital.createTab(worktreeIdRef.current, paneIdRef.current, 'browser', { url: uri })
         }
       })
     )
@@ -165,10 +170,10 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       live = true
     })
 
-    // Copy the current selection to the system clipboard, then clear it (so the
-    // next right-click pastes rather than re-copying, and so a following Ctrl+C
-    // is an interrupt again rather than a second identical copy). Terminals are
-    // read-only output, so copy never mutates the buffer.
+    // Copy the current selection to the system clipboard, then clear it, so a
+    // following Ctrl+C is an interrupt again rather than a second identical copy
+    // — that is what makes copy-then-kill two presses of the same key. Terminals
+    // are read-only output, so copy never mutates the buffer.
     const copySelection = (): void => {
       const sel = term.getSelection()
       if (sel) {
@@ -209,20 +214,36 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     container.addEventListener('paste', suppressNativePaste, true)
 
     // Keyboard copy/paste. Paste is Ctrl/Cmd+V (and the terminal-standard
-    // Ctrl+Shift+V, which lands here too). Copy is delegated to
-    // terminalCopyIntent() because Ctrl+C is overloaded — see that function for
-    // why a copy shortcut pressed with no selection must fall through to xterm
-    // (bare Ctrl+C and Ctrl+Shift+C both become the interrupt there).
+    // Ctrl+Shift+V, which lands here too). Copy is Ctrl+C alone, and only with a
+    // selection: Ctrl+C is overloaded — the OS-wide copy accelerator AND the only
+    // way to interrupt a running process — so with nothing selected it must fall
+    // through to xterm as SIGINT. copySelection() clears the selection, so
+    // copy-then-interrupt is just Ctrl+C twice. Ctrl+Shift+C and Cmd+C are
+    // deliberately NOT bound, and the honest consequence is that both chords are
+    // now INERT in the terminal — they neither copy nor interrupt. xterm only
+    // turns Ctrl+letter into a C0 control code on the branch guarded by
+    // `ctrlKey && !shiftKey && !altKey && !metaKey`; with Shift (or Meta) held it
+    // falls through to a branch that special-cases only `_` and `@`, leaves `key`
+    // undefined and sends nothing. So bare Ctrl+C is the one chord that emits
+    // 0x03. That is the price of a single copy binding, and it is xterm's
+    // behaviour rather than anything this handler could change without re-adding
+    // a binding. Cmd+C stays unbound because Orbital is a Windows cockpit.
+    // `e.code` (not `e.key`) keeps both bindings layout-independent; Alt+Ctrl+C is
+    // left alone because TUIs bind it. The `e.type === 'keydown'` guards are
+    // load-bearing, not decorative: xterm hands the custom handler its keyup and
+    // keypress events too, so an unguarded branch would fire two or three times
+    // per keypress.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
         e.preventDefault()
         pasteClipboard()
         return false // paste ourselves (above) and stop xterm sending a literal 'v'
       }
-      if (terminalCopyIntent(e, term.hasSelection()) === 'copy') {
+      const copyChord = e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyC'
+      if (e.type === 'keydown' && copyChord && term.hasSelection()) {
         e.preventDefault()
         copySelection()
-        return false // never let a copy shortcut also reach the PTY as ^C
+        return false // never let a copy also reach the PTY as ^C
       }
       return true
     })
@@ -242,15 +263,15 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       return true
     })
 
-    // Mouse copy/paste (PuTTY model): right-click with a selection copies it
-    // (then clears it), otherwise right-click pastes. hasSelection() is read once,
-    // up front, so exactly one of copy/paste runs — and with the native paste
-    // suppressed above, a copy can no longer be raced by a stray second paste.
-    // Suppresses the browser's default context menu.
+    // Mouse paste (PuTTY model): right-click ALWAYS pastes, and suppresses the
+    // browser's default context menu. It used to copy whenever a selection was
+    // live, which made sense while right-click was the ONLY way to copy at all.
+    // Now that Ctrl+C copies, that branch only bites: a right-click meant as a
+    // paste silently copies instead whenever a stray selection happens to be
+    // active, quietly overwriting the clipboard. One button, one meaning.
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault()
-      if (term.hasSelection()) copySelection()
-      else pasteClipboard()
+      pasteClipboard()
     }
     container.addEventListener('contextmenu', onContextMenu)
 

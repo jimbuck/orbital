@@ -2,6 +2,21 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.24.1](https://github.com/jimbuck/orbital/compare/v1.24.0...v1.24.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* bind editor tabs to their own worktree and budget the preview cache by size ([#21](https://github.com/jimbuck/orbital/issues/21)) ([c9e50ef](https://github.com/jimbuck/orbital/commit/c9e50efb04d4045083c385f9551cf18376c5e8b2))
+* write only changed settings keys so concurrent windows stop clobbering each other ([#20](https://github.com/jimbuck/orbital/issues/20)) ([1f18650](https://github.com/jimbuck/orbital/commit/1f1865066a093fc2bd4c9c9aee61a933b5af5c53)), closes [#40](https://github.com/jimbuck/orbital/issues/40) [#39](https://github.com/jimbuck/orbital/issues/39)
+
+# [1.24.0](https://github.com/jimbuck/orbital/compare/v1.23.0...v1.24.0) (2026-08-19)
+
+
+### Features
+
+* right-click file operations in the editor tree ([#17](https://github.com/jimbuck/orbital/issues/17)) ([5e17ea4](https://github.com/jimbuck/orbital/commit/5e17ea45b22a8787d5b7adb26dfbcd22d117198a))
+
 # [1.23.0](https://github.com/jimbuck/orbital/compare/v1.22.1...v1.23.0) (2026-08-19)
 
 

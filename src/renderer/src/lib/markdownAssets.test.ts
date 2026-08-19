@@ -6,6 +6,7 @@ import {
   resolveMarkdownAssetPath,
   resolveMarkdownImages,
   __setMarkdownAssetBridge,
+  __setMarkdownAssetCacheLimits,
   __setMarkdownAssetCacheTtl,
   __resetMarkdownAssetCache
 } from './markdownAssets'
@@ -440,5 +441,352 @@ describe('resolveMarkdownImages', () => {
       `data:image/png;base64,AAAA 1x, data:image/png;base64,${b64('docs/b.png')} 2x`
     )
     expect(b.reads).toEqual(['w1:docs/b.png'])
+  })
+})
+
+/* ---- Cache policy --------------------------------------------------------- */
+
+/** Base64 payload length every read in these tests returns. */
+const IMG_B64 = 1_000
+
+/** What one cached image costs the budget: the data URL, prefix included. */
+const ENTRY_BYTES = `data:image/png;base64,${'A'.repeat(IMG_B64)}`.length
+
+/**
+ * A bridge whose reads return `units(path)` whole images' worth of payload, so a
+ * budget can be expressed in whole images ("two fit") rather than in the
+ * incidental length of whichever path the test happened to pick. `units` is what
+ * lets a test build an image bigger than the entire budget, which is the one
+ * shape the eviction rule has a special case for.
+ */
+function makeSizedBridge(
+  fail: (path: string) => boolean = () => false,
+  units: (path: string) => number = () => 1
+): {
+  bridge: { readFileBase64: (worktreeId: string, path: string) => Promise<string> }
+  reads: string[]
+} {
+  const reads: string[] = []
+  return {
+    bridge: {
+      readFileBase64: async (worktreeId: string, path: string): Promise<string> => {
+        reads.push(`${worktreeId}:${path}`)
+        if (fail(path)) throw new Error('ENOENT')
+        return 'A'.repeat(IMG_B64 * units(path))
+      }
+    },
+    reads
+  }
+}
+
+/**
+ * Resolve a document listing `paths` as images, in that order.
+ *
+ * Document order is load-bearing for eviction, which is why these tests can't
+ * all be one image at a time: reads are charged in the order they settle, and
+ * the entry the budget spares is the most recently used one. A one-image
+ * document is the single shape where "the entry being charged" and "the last
+ * entry in the map" cannot come apart.
+ *
+ * Every assertion below is made on the bridge's read log: a path that is still
+ * cached is never read again, and one that was evicted is — which is the only
+ * externally visible consequence of the cache's policy, and the one that
+ * actually costs IPC.
+ */
+function loadDoc(paths: readonly string[]): Promise<string> {
+  const html = paths.map((path) => `<img src="${path}">`).join('')
+  return resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'guide.md' })
+}
+
+/** Resolve a one-image document. */
+function load(path: string): Promise<string> {
+  return loadDoc([path])
+}
+
+describe('markdown asset cache policy', () => {
+  beforeEach(() => {
+    __resetMarkdownAssetCache()
+    __setMarkdownAssetCacheTtl(30_000)
+  })
+  afterEach(() => {
+    __setMarkdownAssetBridge(null)
+    __setMarkdownAssetCacheTtl(30_000)
+    __setMarkdownAssetCacheLimits(null)
+    __resetMarkdownAssetCache()
+  })
+
+  it('evicts by stored bytes rather than by entry count', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    // A budget of two images — far below the old 64-entry cap, which would have
+    // held all three regardless of how many megabytes that came to.
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+    await load('c.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    // The two newest are still resident…
+    await load('c.png')
+    await load('b.png')
+    expect(b.reads).toHaveLength(3)
+
+    // …and the oldest was pushed out to stay inside the budget.
+    await load('a.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:a.png'])
+  })
+
+  it('keeps a lone image that by itself exceeds the budget', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 1 })
+
+    // Evicting the entry whose read just landed would mean re-reading the image
+    // over IPC on every keystroke — the exact cost the cache exists to avoid,
+    // and worst on the very file that triggers it.
+    //
+    // This is only the easy half of that claim, and for a long time it was the
+    // whole of what was tested: in a one-image document the entry being charged
+    // is also the last entry in the map, so a rule that spares either one looks
+    // identical. The two tests below are the ones that can tell them apart.
+    await load('huge.png')
+    await load('huge.png')
+    expect(b.reads).toEqual(['w1:huge.png'])
+  })
+
+  it('keeps an oversized image charged before a smaller one in the same document', async () => {
+    const b = makeSizedBridge(
+      () => false,
+      (path) => (path === 'huge.png' ? 3 : 1)
+    )
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    await loadDoc(['huge.png', 'small.png'])
+    expect(b.reads).toEqual(['w1:huge.png', 'w1:small.png'])
+
+    // `huge` settles first and overshoots the budget on its own, so its charge is
+    // the one that has to evict. The entry spared used to be the map tail —
+    // `small`, purely because the author listed it second — which left `huge`
+    // evicting *itself* the instant its read landed, and the next render reading
+    // the largest image in the document all over again.
+    await load('huge.png')
+    expect(b.reads).toEqual(['w1:huge.png', 'w1:small.png'])
+  })
+
+  it('keeps an oversized image charged after a smaller one in the same document', async () => {
+    const b = makeSizedBridge(
+      () => false,
+      (path) => (path === 'huge.png' ? 3 : 1)
+    )
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    // The mirror image of the case above: same two images, opposite order, so the
+    // oversized charge arrives last instead of first. The guarantee is about the
+    // entry being charged, so it must not depend on where in the document it sat.
+    await loadDoc(['small.png', 'huge.png'])
+    expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png'])
+
+    await load('huge.png')
+    expect(b.reads).toHaveLength(2)
+
+    // What the rule does *not* buy, stated so nobody reads more into it than is
+    // there: this document's working set is four images' worth against a
+    // two-image budget, so `small` was evicted to pay for `huge` and the next
+    // reference to it costs a read. Sparing one entry bounds the overshoot of a
+    // single charge; it is not a fix for a working set that doesn't fit.
+    await load('small.png')
+    expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png', 'w1:small.png'])
+
+    // With only two images the assertions above hold under the old rule too:
+    // the entry charged last is also the map tail, so sparing either spares the
+    // same one. Give the oversized image a neighbour on each side and the two
+    // rules come apart again: `tiny` is the map tail, while `huge` is the entry
+    // whose charge does the evicting and so the one that has to survive.
+    __resetMarkdownAssetCache()
+    b.reads.length = 0
+    await loadDoc(['small.png', 'huge.png', 'tiny.png'])
+    expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png', 'w1:tiny.png'])
+
+    await load('huge.png')
+    expect(b.reads).toHaveLength(3)
+  })
+
+  it('bounds the map by entry count too, so cached failures cannot pile up', async () => {
+    const b = makeSizedBridge(() => true)
+    __setMarkdownAssetBridge(b.bridge)
+    // Failures retain nothing, so they never trip a byte budget — only the
+    // entry ceiling can bound a document full of broken image paths.
+    __setMarkdownAssetCacheLimits({ maxEntries: 2 })
+
+    await load('x.png')
+    await load('x.png')
+    expect(b.reads).toEqual(['w1:x.png']) // a failure is cached, per the module's decision
+
+    await load('y.png')
+    await load('z.png')
+    await load('x.png')
+    expect(b.reads).toEqual(['w1:x.png', 'w1:y.png', 'w1:z.png', 'w1:x.png'])
+  })
+
+  it('makes a cache hit the most recently used entry', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+    await load('a.png') // a hit — this is what has to move `a` to the recent end
+
+    await load('c.png') // over budget: the least recently used must go, i.e. b
+    await load('a.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    await load('b.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:b.png'])
+  })
+
+  it('makes a refreshed entry the most recently used one', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+
+    // Expire `a` and read it again. `Map.set` on a key already present leaves it
+    // where it first landed, so before the fix the freshly re-read `a` was still
+    // the oldest thing in the map and the next insert threw it away — the
+    // opposite of what a re-read means.
+    __setMarkdownAssetCacheTtl(0)
+    await load('a.png')
+    __setMarkdownAssetCacheTtl(30_000)
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:a.png'])
+
+    await load('c.png')
+    await load('a.png') // refreshed, so still resident
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:a.png', 'w1:c.png'])
+
+    await load('b.png') // the genuinely least recently used one is what went
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:a.png', 'w1:c.png', 'w1:b.png'])
+  })
+
+  it('returns a replaced entry bytes to the budget', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 3 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+
+    // Refresh one key repeatedly. Each pass replaces the entry rather than
+    // adding one, so the total must stay at two images' worth; a leak here would
+    // silently evict `b` to pay for bytes nothing is holding.
+    __setMarkdownAssetCacheTtl(0)
+    for (let i = 0; i < 5; i++) await load('a.png')
+    __setMarkdownAssetCacheTtl(30_000)
+
+    await load('b.png')
+    expect(b.reads.filter((r) => r === 'w1:b.png')).toEqual(['w1:b.png'])
+  })
+
+  it('applies a lowered byte budget immediately, evicting least-recently-used first', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 3 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+    await load('c.png')
+    await load('a.png') // a hit, so the order is now b (oldest), c, a (newest)
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    // Lowering the budget has to bite here rather than at the next read: a hook
+    // that exists to make eviction observable must not leave the cache sitting
+    // over its own stated limit, or a test measuring the cache is really
+    // measuring whether an unrelated load happened to run first.
+    __setMarkdownAssetCacheLimits({ maxBytes: ENTRY_BYTES })
+
+    // The most recently used entry is the one that survived…
+    await load('a.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    // …and the two older ones are actually gone, in LRU order, not merely
+    // queued up to be dropped by whatever read comes next.
+    await load('b.png')
+    await load('c.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:b.png', 'w1:c.png'])
+  })
+
+  it('keeps the newest entry when the budget is lowered below a single image', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    await load('a.png')
+    await load('b.png')
+
+    // Same rule as the insert path, because it is the same eviction: shrinking
+    // the budget below one image must not leave an empty cache that re-reads on
+    // every keystroke. This is the test that pins the *shape* of the shared
+    // policy rather than the deferral bug — it is what fails if the budget hook
+    // ever grows its own `while (bytes > max) drop()` loop instead of calling
+    // the one `evict` the insert path uses.
+    __setMarkdownAssetCacheLimits({ maxBytes: 1 })
+
+    await load('b.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png'])
+  })
+
+  it('applies a lowered entry ceiling immediately too', async () => {
+    const b = makeSizedBridge(() => true)
+    __setMarkdownAssetBridge(b.bridge)
+
+    // Failures retain zero bytes, so the entry ceiling is the only budget that
+    // can move here — which makes this the clean test of that half.
+    await load('x.png')
+    await load('y.png')
+    await load('z.png')
+    expect(b.reads).toEqual(['w1:x.png', 'w1:y.png', 'w1:z.png'])
+
+    __setMarkdownAssetCacheLimits({ maxEntries: 1 })
+
+    await load('z.png') // the newest, and the only survivor
+    expect(b.reads).toHaveLength(3)
+
+    await load('x.png')
+    await load('y.png')
+    expect(b.reads).toEqual(['w1:x.png', 'w1:y.png', 'w1:z.png', 'w1:x.png', 'w1:y.png'])
+  })
+
+  it('drops cached images when the bridge is swapped', async () => {
+    const first = makeSizedBridge()
+    __setMarkdownAssetBridge(first.bridge)
+    await load('a.png')
+    expect(first.reads).toEqual(['w1:a.png'])
+
+    // A cache entry is an answer the *old* bridge gave, and keys carry no notion
+    // of who read them — so a swap that left entries resident would keep serving
+    // them and the new bridge would never see the read.
+    const second = makeSizedBridge()
+    __setMarkdownAssetBridge(second.bridge)
+    await load('a.png')
+    expect(second.reads).toEqual(['w1:a.png'])
+  })
+
+  it('still expires on the TTL, however recently the entry was used', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    await load('a.png')
+    await load('a.png') // a hit: touched, but its load time must not be reset
+    expect(b.reads).toEqual(['w1:a.png'])
+
+    // Otherwise an image referenced on every keystroke would be pinned for the
+    // session, and an edit to it on disk would never show up in the preview.
+    __setMarkdownAssetCacheTtl(0)
+    await load('a.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:a.png'])
   })
 })

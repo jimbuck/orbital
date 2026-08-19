@@ -4,6 +4,7 @@ import {
   type OrbitalApi,
   type AppState,
   type Settings,
+  type SettingsPatch,
   type Project,
   type Worktree,
   type Tab,
@@ -46,7 +47,7 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: OrbitalApi = {
   // state
   getState: () => ipcRenderer.invoke(IPC.getState) as Promise<AppState>,
-  setSettings: (settings: Settings) => ipcRenderer.invoke(IPC.setSettings, settings) as Promise<Settings>,
+  setSettings: (patch: SettingsPatch) => ipcRenderer.invoke(IPC.setSettings, patch) as Promise<Settings>,
 
   // workspaces
   listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces) as Promise<WorkspaceInfo[]>,

@@ -3,7 +3,6 @@ import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, Refresh
 import { marked } from 'marked'
 import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
-import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { useFileTree } from '@renderer/lib/fileTree'
 import { extOf, imageMime, resolveMarkdownImages } from '@renderer/lib/markdownAssets'
@@ -456,7 +455,18 @@ function findNode(nodes: FileNode[], path: string): FileNode | null {
  * for markdown and HTML.
  */
 export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }): JSX.Element {
-  const worktreeId = useStore((s) => activeWorktree(s)?.id)
+  // The tab's OWN worktree, never the globally active one. Every read this
+  // component makes — the file tree, file contents, diffs, and the preview's
+  // inlined images — has to be against the repo whose file the tab is showing.
+  // Reading `activeWorktree(store)` instead coupled all of that to a value the
+  // cockpit's worktree switcher changes underneath a still-mounted tab: the load
+  // effects re-ran against the *other* repo while `content`/`draft` still held
+  // this repo's text, spending IPC on files nobody asked for and seeding the
+  // markdown asset cache with the wrong worktree's bytes. A tab belongs to
+  // exactly one worktree for its whole life (tabs only ever move between panes
+  // of their own worktree — see moveTab/moveTabToEdge in main/ipc), so
+  // `tab.worktreeId` is both correct and stable.
+  const worktreeId = tab.worktreeId
   // Shared, per-worktree file tree: dedupes fetches across editor tabs and only
   // refetches on state changes while this tab is active (see lib/fileTree).
   const { tree, refresh: refetchTree } = useFileTree(worktreeId, active)
@@ -497,7 +507,6 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
 
   const loadDir = useCallback(
     (path: string): void => {
-      if (!worktreeId) return
       void window.orbital
         .listDir(worktreeId, path)
         .then((kids) => setLazyChildren((m) => ({ ...m, [path]: kids })))
@@ -566,7 +575,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
 
   // Fetch whatever the current mode needs and doesn't have yet.
   useEffect(() => {
-    if (!worktreeId || !selected) return
+    if (!selected) return
     const mime = imageMime(selected.path)
     const needDiff = mode === 'diff' && diff === null
     const needImage = mode !== 'diff' && !!mime && imageData === null
@@ -625,7 +634,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   }, [tab.config.filePath, tab.config.diffStaged, tree, openFile])
 
   const save = async (): Promise<void> => {
-    if (!worktreeId || !selected) return
+    if (!selected) return
     await window.orbital.writeFile(worktreeId, selected.path, draft)
     const c = await window.orbital.readFile(worktreeId, selected.path)
     setContent(c)
@@ -638,7 +647,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   const onPreviewLink = useCallback(
     (href: string, external: boolean): void => {
       if (external) void window.orbital.openExternal(href)
-      else if (worktreeId) void window.orbital.createTab(worktreeId, tab.paneId, 'browser', { url: href })
+      else void window.orbital.createTab(worktreeId, tab.paneId, 'browser', { url: href })
     },
     [worktreeId, tab.paneId]
   )
@@ -696,7 +705,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
         </div>
       </div>
 
-      {menu && worktreeId && (
+      {menu && (
         <FileContextMenu
           worktreeId={worktreeId}
           node={menu.node}

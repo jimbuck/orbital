@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import type { Settings, ThemeMode } from '@shared/types'
+import type { Settings, SettingsPatch, ThemeMode } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 // TabStrip is imported only for its serverLabel helper, but loading the real
@@ -11,7 +11,7 @@ vi.mock('./body/TabStrip', () => ({ serverLabel: (url: string) => url }))
 import TitleBar from './TitleBar'
 
 /** The settings-bridge call every theme click is expected to make. */
-const setSettings = vi.fn(async (s: Settings) => s)
+const setSettings = vi.fn(async (patch: SettingsPatch) => patch as Settings)
 
 /**
  * jsdom's matchMedia always reports matches: false, which would pin the OS
@@ -142,12 +142,10 @@ describe('TitleBar View menu — theme', () => {
     fireEvent.click(themeItem(openViewMenu(), 'Light'))
 
     expect(setSettings).toHaveBeenCalledTimes(1)
-    const written = setSettings.mock.calls[0][0]
-    expect(written.theme).toBe('light')
-    // The bridge takes a WHOLE Settings object, so anything not carried over here
-    // would be wiped from the user's config by a theme click.
-    expect(written.defaultShell).toBe('pwsh.exe')
-    expect(written.envSyncPatterns).toEqual(['**/.env'])
+    // Exactly one key: the rest of the settings are shared with every other
+    // workspace instance, and a menu click carrying this window's stale copy of
+    // them would revert whatever another window had just changed.
+    expect(setSettings.mock.calls[0][0]).toEqual({ theme: 'light' })
     // Applied to the store on the click as well, so the app re-themes immediately
     // rather than an IPC round trip later.
     expect(useStore.getState().settings?.theme).toBe('light')

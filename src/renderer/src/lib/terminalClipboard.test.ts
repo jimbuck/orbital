@@ -1,61 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { decodeOsc52, terminalCopyIntent } from './terminalClipboard'
-
-/** A minimal stand-in for the KeyboardEvent fields the intent check reads. */
-function key(over: Partial<KeyboardEvent> = {}): KeyboardEvent {
-  return {
-    type: 'keydown',
-    code: 'KeyC',
-    ctrlKey: false,
-    metaKey: false,
-    shiftKey: false,
-    altKey: false,
-    ...over
-  } as KeyboardEvent
-}
+import { decodeOsc52 } from './terminalClipboard'
 
 /** base64 of a UTF-8 string, the way a TUI would encode an OSC 52 payload. */
 function b64(text: string): string {
   return btoa(String.fromCharCode(...new TextEncoder().encode(text)))
 }
-
-describe('terminalCopyIntent', () => {
-  it('copies on Ctrl+C when there is a selection', () => {
-    expect(terminalCopyIntent(key({ ctrlKey: true }), true)).toBe('copy')
-  })
-
-  it('passes Ctrl+C through with no selection, so it still interrupts', () => {
-    expect(terminalCopyIntent(key({ ctrlKey: true }), false)).toBe('passthrough')
-  })
-
-  it('copies on Ctrl+Shift+C when there is a selection', () => {
-    expect(terminalCopyIntent(key({ ctrlKey: true, shiftKey: true }), true)).toBe('copy')
-  })
-
-  it('passes Ctrl+Shift+C through with no selection, rather than swallowing the key', () => {
-    // xterm maps it to 0x03 as well, so this stays an interrupt instead of
-    // becoming a shortcut that visibly does nothing.
-    expect(terminalCopyIntent(key({ ctrlKey: true, shiftKey: true }), false)).toBe('passthrough')
-  })
-
-  it('copies on Meta+C with a selection, on every platform (no macOS guard)', () => {
-    expect(terminalCopyIntent(key({ metaKey: true }), true)).toBe('copy')
-  })
-
-  it('passes Meta+C through with no selection', () => {
-    expect(terminalCopyIntent(key({ metaKey: true }), false)).toBe('passthrough')
-  })
-
-  it('ignores Alt+Ctrl+C, which TUIs bind themselves', () => {
-    expect(terminalCopyIntent(key({ ctrlKey: true, altKey: true }), true)).toBe('passthrough')
-  })
-
-  it('ignores an unmodified C, keyup, and other keys', () => {
-    expect(terminalCopyIntent(key(), true)).toBe('passthrough')
-    expect(terminalCopyIntent(key({ ctrlKey: true, type: 'keyup' }), true)).toBe('passthrough')
-    expect(terminalCopyIntent(key({ ctrlKey: true, code: 'KeyV' }), true)).toBe('passthrough')
-  })
-})
 
 describe('decodeOsc52', () => {
   it('decodes a clipboard write', () => {

@@ -91,14 +91,21 @@ function mountTerminal(): (typeof terminals)[number] {
   return terminals[0]
 }
 
-/** Feed a key event to the handler TerminalTab attached; returns xterm's verdict. */
+/**
+ * Feed a key event to the handler TerminalTab attached; returns xterm's verdict.
+ * `type` is a parameter rather than a hard-coded 'keydown' because xterm invokes
+ * the custom handler for keyup and keypress as well, and the component's
+ * `e.type === 'keydown'` guards are the only thing stopping one keypress from
+ * copying several times over — a test can only pin that by sending a keyup.
+ */
 function press(
   term: (typeof terminals)[number],
-  init: KeyboardEventInit
+  init: KeyboardEventInit,
+  type: 'keydown' | 'keyup' | 'keypress' = 'keydown'
 ): { handled: boolean; event: KeyboardEvent } {
   // cancelable, like a real keydown — otherwise preventDefault() is a no-op
   // and `defaultPrevented` could never tell us whether we suppressed the key.
-  const event = new KeyboardEvent('keydown', { code: 'KeyC', cancelable: true, ...init })
+  const event = new KeyboardEvent(type, { code: 'KeyC', cancelable: true, ...init })
   const handled = term.keyHandler!(event)
   return { handled, event }
 }
@@ -208,20 +215,15 @@ describe('TerminalTab copy', () => {
     expect(event.defaultPrevented).toBe(false)
   })
 
-  it('copies on Ctrl+Shift+C, the unambiguous terminal binding', () => {
+  it('does not copy on Ctrl+Shift+C, even with a selection — Ctrl+C is the only copy', () => {
+    // A deliberate narrowing: one copy shortcut instead of three. Passing the
+    // chord through does NOT make it an interrupt — xterm only emits 0x03 on the
+    // `ctrlKey && !shiftKey && !altKey && !metaKey` branch, so with Shift held it
+    // sends nothing at all and Ctrl+Shift+C is simply inert in the terminal. That
+    // is the accepted cost of a single copy binding; what this test pins is that
+    // the chord never reaches the clipboard and is never swallowed by us.
     const term = mountTerminal()
     term.selection = 'selected output'
-
-    const { handled } = press(term, { ctrlKey: true, shiftKey: true })
-
-    expect(writeClipboard).toHaveBeenCalledWith('selected output')
-    expect(handled).toBe(false)
-  })
-
-  it('lets Ctrl+Shift+C through when nothing is selected, so it still interrupts', () => {
-    // Swallowing it would leave a user with a runaway process and nothing
-    // selected pressing a key that does absolutely nothing.
-    const term = mountTerminal()
 
     const { handled, event } = press(term, { ctrlKey: true, shiftKey: true })
 
@@ -230,14 +232,20 @@ describe('TerminalTab copy', () => {
     expect(event.defaultPrevented).toBe(false)
   })
 
-  it('copies on Meta+C with a selection, the macOS accelerator', () => {
-    // Not platform-guarded — off macOS this combination simply never arrives
-    // with a selection to copy. See terminalCopyIntent for why.
+  it('does not copy on Meta+C, even with a selection, so Cmd+C is not a copy', () => {
+    // Also deliberate: Orbital is a Windows cockpit, so the macOS accelerator is
+    // not worth a second binding on the one key that also has to mean SIGINT.
+    // Like Ctrl+Shift+C, passing it through does not make it an interrupt —
+    // xterm's C0 branch wants Ctrl with no other modifier — it just means we
+    // neither copy nor swallow it.
     const term = mountTerminal()
     term.selection = 'selected output'
 
-    expect(press(term, { metaKey: true }).handled).toBe(false)
-    expect(writeClipboard).toHaveBeenCalledWith('selected output')
+    const { handled, event } = press(term, { metaKey: true })
+
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(handled).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('interrupts on the second Ctrl+C, because the copy cleared the selection', () => {
@@ -254,6 +262,50 @@ describe('TerminalTab copy', () => {
     expect(second.handled).toBe(true)
     expect(second.event.defaultPrevented).toBe(false)
     expect(writeClipboard).toHaveBeenCalledTimes(1)
+  })
+
+  it('copies on keydown only, so one keypress is not several copies', () => {
+    // xterm calls the custom handler from _keyDown, _keyUp AND _keyPress, so a
+    // handler that only looked at the modifiers would run up to three times for a
+    // single Ctrl+C — overwriting the clipboard and, worse, calling
+    // clearSelection() on the first pass so later passes see nothing. The
+    // `e.type === 'keydown'` guard is what keeps a copy to one per press.
+    const term = mountTerminal()
+    term.selection = 'selected output'
+
+    const { handled, event } = press(term, { ctrlKey: true }, 'keyup')
+
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(term.clearSelection).not.toHaveBeenCalled()
+    expect(handled).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('passes Alt+Ctrl+C through, because TUIs bind it themselves', () => {
+    // Emacs-style TUIs read Alt+Ctrl+C as their own chord (ESC-prefixed 0x03).
+    // Copying there would steal a keystroke the running program is waiting for,
+    // so the copy chord requires Ctrl with no Alt.
+    const term = mountTerminal()
+    term.selection = 'selected output'
+
+    const { handled, event } = press(term, { ctrlKey: true, altKey: true })
+
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(handled).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('does not copy on an unmodified C, which is just a character', () => {
+    // The guard has to be the whole chord, not merely the key: typing `c` into a
+    // shell prompt while an old selection is still live must stay a `c`.
+    const term = mountTerminal()
+    term.selection = 'selected output'
+
+    const { handled, event } = press(term, {})
+
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(handled).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('leaves ordinary keys alone so they reach the PTY', () => {
@@ -317,6 +369,48 @@ describe('TerminalTab paste', () => {
     await nextFlush()
 
     expect(term.paste).not.toHaveBeenCalled()
+  })
+})
+
+describe('TerminalTab right-click', () => {
+  /** Mount with the given selection live, then right-click the terminal surface. */
+  function rightClick(selection: string): {
+    term: (typeof terminals)[number]
+    event: MouseEvent
+  } {
+    const { container } = render(<TerminalTab tab={makeTab('T1')} active />)
+    const term = terminals[0]
+    term.selection = selection
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    container.firstElementChild!.dispatchEvent(event)
+    return { term, event }
+  }
+
+  it('pastes even when a selection is live, rather than silently copying it', () => {
+    // The regression this simplification exists to prevent: right-click used to
+    // copy whenever anything was selected, so a paste the user asked for would
+    // vanish — and overwrite their clipboard on the way out.
+    readClipboard.mockReturnValue('pasted text')
+
+    const { term } = rightClick('a stray selection')
+
+    expect(term.paste).toHaveBeenCalledWith('pasted text')
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(term.clearSelection).not.toHaveBeenCalled()
+  })
+
+  it('pastes with nothing selected', () => {
+    readClipboard.mockReturnValue('pasted text')
+
+    const { term } = rightClick('')
+
+    expect(term.paste).toHaveBeenCalledWith('pasted text')
+  })
+
+  it('suppresses the browser context menu', () => {
+    const { event } = rightClick('')
+
+    expect(event.defaultPrevented).toBe(true)
   })
 })
 

@@ -64,6 +64,7 @@ export function SegmentedControl<T extends string>({
   options,
   value,
   onChange,
+  describedBy,
   fill = false,
   className = ''
 }: {
@@ -72,6 +73,13 @@ export function SegmentedControl<T extends string>({
   options: readonly SegmentedOption<T>[]
   value: T
   onChange: (value: T) => void
+  /**
+   * Id of an element describing the group, wired up as `aria-describedby`. For a
+   * note a sighted user reads off the row anyway — "applies immediately", say —
+   * which would otherwise be invisible to someone arriving at the control with a
+   * screen reader, i.e. exactly the person who most needs telling.
+   */
+  describedBy?: string
   /** Stretch the options to share the width evenly (long labels). */
   fill?: boolean
   /** Extra classes for the group container, e.g. layout margins. */
@@ -105,6 +113,7 @@ export function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
+      aria-describedby={describedBy}
       className={`flex items-center rounded-[7px] border border-line-2 bg-bg p-[2px] ${className}`}
     >
       {options.map((option, i) => (
