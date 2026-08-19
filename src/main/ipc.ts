@@ -892,6 +892,35 @@ export function registerIpc(): void {
     await git.writeFile(worktreeRepoPath(worktreeId), path, content)
     broadcast()
   })
+  // The four mutating file operations behind the editor tree's context menu.
+  // Each resolves its renderer-supplied path through the git service's
+  // containment gate — lexically, and then against the real filesystem so a
+  // symlinked directory can't lead one out of the checkout — so an escaping
+  // path is rejected before anything touches disk. The read-only resolvePath
+  // below stops at the lexical check; it hands back a string and writes
+  // nothing.
+  h(IPC.createFile, async (_e, worktreeId: string, parentDir: string, name: string) => {
+    const path = await git.createFile(worktreeRepoPath(worktreeId), parentDir, name)
+    broadcast()
+    return path
+  })
+  h(IPC.createDirectory, async (_e, worktreeId: string, parentDir: string, name: string) => {
+    const path = await git.createDirectory(worktreeRepoPath(worktreeId), parentDir, name)
+    broadcast()
+    return path
+  })
+  h(IPC.renamePath, async (_e, worktreeId: string, path: string, newName: string) => {
+    const next = await git.renamePath(worktreeRepoPath(worktreeId), path, newName)
+    broadcast()
+    return next
+  })
+  h(IPC.trashPath, async (_e, worktreeId: string, path: string) => {
+    await git.trashPath(worktreeRepoPath(worktreeId), path)
+    broadcast()
+  })
+  h(IPC.resolvePath, (_e, worktreeId: string, path: string) =>
+    git.resolveInRepo(worktreeRepoPath(worktreeId), path)
+  )
 
   // ---- tasks ----
   h(IPC.createTask, (_e, projectId: string, title: string, description?: string, tags?: string[]) => {
@@ -928,6 +957,12 @@ export function registerIpc(): void {
   })
   h(IPC.openPath, async (_e, p: string) => {
     await shell.openPath(p)
+  })
+  // showItemInFolder, not openPath: this opens the CONTAINING folder with the
+  // item selected, which is what "Reveal in File Explorer" means for a file
+  // (openPath on a file would launch its default application instead).
+  h(IPC.revealPath, (_e, p: string) => {
+    shell.showItemInFolder(p)
   })
   h(IPC.openLogFolder, async () => {
     // Reveal the rotating debug-log folder in Explorer so users can grab the file.

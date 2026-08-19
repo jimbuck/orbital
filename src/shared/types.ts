@@ -779,6 +779,11 @@ export const IPC = {
   readFile: 'orbital:readFile',
   readFileBase64: 'orbital:readFileBase64',
   writeFile: 'orbital:writeFile',
+  createFile: 'orbital:createFile',
+  createDirectory: 'orbital:createDirectory',
+  renamePath: 'orbital:renamePath',
+  trashPath: 'orbital:trashPath',
+  resolvePath: 'orbital:resolvePath',
   // tasks
   createTask: 'orbital:createTask',
   updateTask: 'orbital:updateTask',
@@ -787,6 +792,7 @@ export const IPC = {
   openExternal: 'orbital:openExternal',
   registerBrowserView: 'orbital:registerBrowserView',
   openPath: 'orbital:openPath',
+  revealPath: 'orbital:revealPath',
   openInTerminal: 'orbital:openInTerminal',
   openLogFolder: 'orbital:openLogFolder',
   // window
@@ -940,6 +946,24 @@ export interface OrbitalApi {
   /** Raw file bytes as base64 — for rendering binary content (images) in the editor. */
   readFileBase64(worktreeId: string, path: string): Promise<string>
   writeFile(worktreeId: string, path: string, content: string): Promise<void>
+  /**
+   * Create an empty file `name` inside the checkout-relative directory
+   * `parentDir` (`''` = repo root); resolves to the new file's relative path.
+   * Rejects when the name isn't a single path segment or the file exists.
+   */
+  createFile(worktreeId: string, parentDir: string, name: string): Promise<string>
+  /** As `createFile`, for a directory. */
+  createDirectory(worktreeId: string, parentDir: string, name: string): Promise<string>
+  /** Rename a file/directory in place; resolves to its new relative path. */
+  renamePath(worktreeId: string, path: string, newName: string): Promise<string>
+  /** Send a file/directory to the OS recycle bin (recoverable, unlike unlink). */
+  trashPath(worktreeId: string, path: string): Promise<void>
+  /**
+   * Absolute path of a checkout-relative path, for the OS-level actions
+   * (reveal, open with the default app, open a terminal there) and for
+   * "Copy Path". Rejects for anything outside the Worktree.
+   */
+  resolvePath(worktreeId: string, path: string): Promise<string>
 
   // tasks
   createTask(projectId: string, title: string, description?: string, tags?: string[]): Promise<Task>
@@ -956,6 +980,12 @@ export interface OrbitalApi {
   registerBrowserView(webContentsId: number, worktreeId: string, paneId: string): Promise<void>
   /** Reveal a folder in the OS file manager (Explorer on Windows). */
   openPath(path: string): Promise<void>
+  /**
+   * Show a file/folder SELECTED in its containing folder (`showItemInFolder`).
+   * Distinct from `openPath`, which opens the item itself — for a file that
+   * would launch its default application instead of revealing it.
+   */
+  revealPath(path: string): Promise<void>
   /** Open an external terminal window at a folder (Windows Terminal / PowerShell on Windows). */
   openInTerminal(path: string): Promise<void>
   /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */
