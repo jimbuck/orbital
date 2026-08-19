@@ -189,32 +189,41 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                   closeMenu()
                 }}
               />
+              {/* The OS hand-offs name the root Worktree, not `project.repoPath`:
+                  main resolves a Worktree id to a path it already trusts, where
+                  an absolute path over the bridge is something it would have to
+                  take on faith. The header row IS the root Worktree, so the two
+                  always denote the same directory — and they join Clear Status
+                  behind the same guard, because a project adopted from the
+                  workspace YAML has no root row until its first scan lands. */}
               {root && (
-                <MenuItem
-                  icon={<CircleOff size={13} strokeWidth={1.5} />}
-                  label="Clear Status"
-                  onClick={() => {
-                    void window.orbital.clearWorktreeStatus(root.id)
-                    closeMenu()
-                  }}
-                />
+                <>
+                  <MenuItem
+                    icon={<CircleOff size={13} strokeWidth={1.5} />}
+                    label="Clear Status"
+                    onClick={() => {
+                      void window.orbital.clearWorktreeStatus(root.id)
+                      closeMenu()
+                    }}
+                  />
+                  <MenuItem
+                    icon={<FolderOpen size={13} strokeWidth={1.5} />}
+                    label="Open in Explorer"
+                    onClick={() => {
+                      void window.orbital.openPath(root.id, '')
+                      closeMenu()
+                    }}
+                  />
+                  <MenuItem
+                    icon={<Terminal size={13} strokeWidth={1.5} />}
+                    label="Open in External Terminal"
+                    onClick={() => {
+                      void window.orbital.openInTerminal(root.id, '')
+                      closeMenu()
+                    }}
+                  />
+                </>
               )}
-              <MenuItem
-                icon={<FolderOpen size={13} strokeWidth={1.5} />}
-                label="Open in Explorer"
-                onClick={() => {
-                  void window.orbital.openPath(project.repoPath)
-                  closeMenu()
-                }}
-              />
-              <MenuItem
-                icon={<Terminal size={13} strokeWidth={1.5} />}
-                label="Open in External Terminal"
-                onClick={() => {
-                  void window.orbital.openInTerminal(project.repoPath)
-                  closeMenu()
-                }}
-              />
               <div className="my-1 h-px bg-soft" />
               <MenuItem
                 icon={<Trash2 size={13} strokeWidth={1.5} />}

@@ -184,9 +184,12 @@ const api: OrbitalApi = {
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
   registerBrowserView: (webContentsId: number, worktreeId: string, paneId: string) =>
     ipcRenderer.invoke(IPC.registerBrowserView, webContentsId, worktreeId, paneId) as Promise<void>,
-  openPath: (path: string) => ipcRenderer.invoke(IPC.openPath, path) as Promise<void>,
-  revealPath: (path: string) => ipcRenderer.invoke(IPC.revealPath, path) as Promise<void>,
-  openInTerminal: (path: string) => ipcRenderer.invoke(IPC.openInTerminal, path) as Promise<void>,
+  openPath: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.openPath, worktreeId, path) as Promise<void>,
+  revealPath: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.revealPath, worktreeId, path) as Promise<void>,
+  openInTerminal: (worktreeId: string, path: string) =>
+    ipcRenderer.invoke(IPC.openInTerminal, worktreeId, path) as Promise<void>,
   openLogFolder: () => ipcRenderer.invoke(IPC.openLogFolder) as Promise<void>,
   windowMinimize: () => ipcRenderer.send(IPC.windowMinimize),
   windowMaximize: () => ipcRenderer.send(IPC.windowMaximize),

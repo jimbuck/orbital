@@ -187,11 +187,13 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
                 label="Clear Status"
                 onClick={clearStatus}
               />
+              {/* `''` is the Worktree root: main turns the id into the checkout
+                  path itself, so the renderer never names a path to the OS. */}
               <MenuItem
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
                 label="Open in Explorer"
                 onClick={() => {
-                  void window.orbital.openPath(worktree.path)
+                  void window.orbital.openPath(worktree.id, '')
                   closeMenu()
                 }}
               />
@@ -199,7 +201,7 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
                 icon={<Terminal size={13} strokeWidth={1.5} />}
                 label="Open in External Terminal"
                 onClick={() => {
-                  void window.orbital.openInTerminal(worktree.path)
+                  void window.orbital.openInTerminal(worktree.id, '')
                   closeMenu()
                 }}
               />

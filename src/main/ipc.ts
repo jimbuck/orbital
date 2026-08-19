@@ -885,6 +885,11 @@ export function registerIpc(): void {
     git.diff(worktreeRepoPath(worktreeId), path, staged)
   )
   h(IPC.fileTree, (_e, worktreeId: string) => git.fileTree(worktreeRepoPath(worktreeId)))
+  // Every handler from here down is given a checkout-relative path chosen by
+  // the renderer, and every one of them resolves it through the git service's
+  // containment gate rather than joining it onto the checkout root and hoping.
+  // Which half of the gate each uses (lexical, or lexical plus a real-path
+  // check of the ancestors) is argued in git.ts beside the functions.
   h(IPC.listDir, (_e, worktreeId: string, path: string) => git.listDir(worktreeRepoPath(worktreeId), path))
   h(IPC.readFile, (_e, worktreeId: string, path: string) => git.readFile(worktreeRepoPath(worktreeId), path))
   h(IPC.readFileBase64, (_e, worktreeId: string, path: string) => git.readFileBase64(worktreeRepoPath(worktreeId), path))
@@ -893,12 +898,11 @@ export function registerIpc(): void {
     broadcast()
   })
   // The four mutating file operations behind the editor tree's context menu.
-  // Each resolves its renderer-supplied path through the git service's
-  // containment gate — lexically, and then against the real filesystem so a
-  // symlinked directory can't lead one out of the checkout — so an escaping
-  // path is rejected before anything touches disk. The read-only resolvePath
-  // below stops at the lexical check; it hands back a string and writes
-  // nothing.
+  // Like writeFile above, each is checked lexically AND against the real
+  // filesystem, so a symlinked directory can't lead one out of the checkout;
+  // an escaping path is rejected before anything touches disk. The read-only
+  // resolvePath below stops at the lexical check — it hands back a string and
+  // writes nothing.
   h(IPC.createFile, async (_e, worktreeId: string, parentDir: string, name: string) => {
     const path = await git.createFile(worktreeRepoPath(worktreeId), parentDir, name)
     broadcast()
@@ -955,20 +959,52 @@ export function registerIpc(): void {
       return { action: 'deny' }
     })
   })
-  h(IPC.openPath, async (_e, p: string) => {
-    await shell.openPath(p)
+  /* ---- OS hand-offs ------------------------------------------------------
+   *
+   * These three used to take an absolute path straight from the renderer, so
+   * `shell.openPath('C:\\evil.exe')` was one compromised-renderer message
+   * away — the strongest of the three, since openPath LAUNCHES whatever it is
+   * given with its registered application. They now take the same
+   * `(worktreeId, path)` pair as every other file operation and do the
+   * resolution here, so the absolute path handed to Electron is one main
+   * derived itself from a checkout it knows about.
+   *
+   * The lexical gate is the right one here. These operations hand a path to
+   * the OS on an explicit user click, and the thing the user clicked is the
+   * entry as the tree spells it: resolving links would refuse to open a
+   * junction-backed folder that is plainly sitting in the checkout. The escape
+   * real-path resolution would catch — a committed symlink aimed at an
+   * executable — is not a new capability either, because anyone who can commit
+   * that link can commit the executable beside it.
+   *
+   * An empty `path` means the checkout root, which is what the rail's "Open in
+   * Explorer" / "Open in External Terminal" want.
+   */
+  const worktreePath = (worktreeId: string, path: string): string =>
+    git.resolveInRepo(worktreeRepoPath(worktreeId), path)
+
+  h(IPC.openPath, async (_e, worktreeId: string, path: string) => {
+    // `shell.openPath` reports failure by RESOLVING with a message rather than
+    // rejecting, so without this an unopenable file is a silent no-op — the
+    // context menu closes and nothing happens. Rethrowing puts the OS's own
+    // words in front of the user.
+    const err = await shell.openPath(worktreePath(worktreeId, path))
+    if (err) throw new Error(err)
   })
   // showItemInFolder, not openPath: this opens the CONTAINING folder with the
   // item selected, which is what "Reveal in File Explorer" means for a file
   // (openPath on a file would launch its default application instead).
-  h(IPC.revealPath, (_e, p: string) => {
-    shell.showItemInFolder(p)
+  h(IPC.revealPath, (_e, worktreeId: string, path: string) => {
+    shell.showItemInFolder(worktreePath(worktreeId, path))
   })
   h(IPC.openLogFolder, async () => {
     // Reveal the rotating debug-log folder in Explorer so users can grab the file.
+    // No containment check: the path is `logger.dir`, main's own, not the
+    // renderer's — there is nothing here for a caller to influence.
     await shell.openPath(logger.dir)
   })
-  h(IPC.openInTerminal, (_e, p: string) => {
+  h(IPC.openInTerminal, (_e, worktreeId: string, path: string) => {
+    const p = worktreePath(worktreeId, path)
     if (process.platform === 'win32') {
       // Prefer Windows Terminal; fall back to a new PowerShell window if wt is missing.
       const wt = spawn('wt', ['-d', p], { detached: true, stdio: 'ignore' })

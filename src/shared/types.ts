@@ -940,6 +940,13 @@ export interface OrbitalApi {
   gitCheckout(worktreeId: string, branch: string, create?: boolean): Promise<void>
   gitDiff(worktreeId: string, path: string, staged: boolean): Promise<FileDiff>
   fileTree(worktreeId: string): Promise<FileNode[]>
+  /*
+   * `path` on every file call below is CHECKOUT-RELATIVE and main rejects
+   * anything that resolves outside the Worktree. An absolute path is not an
+   * escape hatch, it is an error: it was never honoured (main joins it onto the
+   * checkout root, producing `C:\repo\C:\…`, which no filesystem will open) and
+   * it is now refused with a message that says so.
+   */
   /** Immediate children of an ignored directory (not enumerated in fileTree). */
   listDir(worktreeId: string, path: string): Promise<FileNode[]>
   readFile(worktreeId: string, path: string): Promise<string>
@@ -978,16 +985,30 @@ export interface OrbitalApi {
    * internal browser tab instead of a real OS popup window.
    */
   registerBrowserView(webContentsId: number, worktreeId: string, paneId: string): Promise<void>
-  /** Reveal a folder in the OS file manager (Explorer on Windows). */
-  openPath(path: string): Promise<void>
+  /**
+   * Hand an entry in a Worktree to the OS: open it with its registered
+   * application (a folder opens in the file manager).
+   *
+   * Takes the same checkout-relative `path` as the rest of the file API, NOT an
+   * absolute one, and main resolves it against the Worktree — an absolute path
+   * from here would be a request for main to launch any file on the machine.
+   * `''` means the Worktree root, which is what the rail's "Open in Explorer"
+   * asks for. Rejects for anything outside the Worktree.
+   */
+  openPath(worktreeId: string, path: string): Promise<void>
   /**
    * Show a file/folder SELECTED in its containing folder (`showItemInFolder`).
    * Distinct from `openPath`, which opens the item itself — for a file that
-   * would launch its default application instead of revealing it.
+   * would launch its default application instead of revealing it. Same
+   * `(worktreeId, path)` contract, resolved and containment-checked in main.
    */
-  revealPath(path: string): Promise<void>
-  /** Open an external terminal window at a folder (Windows Terminal / PowerShell on Windows). */
-  openInTerminal(path: string): Promise<void>
+  revealPath(worktreeId: string, path: string): Promise<void>
+  /**
+   * Open an external terminal window at a folder in a Worktree (Windows
+   * Terminal / PowerShell on Windows). Same `(worktreeId, path)` contract,
+   * resolved and containment-checked in main.
+   */
+  openInTerminal(worktreeId: string, path: string): Promise<void>
   /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */
   openLogFolder(): Promise<void>
   windowMinimize(): void
