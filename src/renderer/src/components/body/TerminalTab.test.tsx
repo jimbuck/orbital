@@ -208,20 +208,11 @@ describe('TerminalTab copy', () => {
     expect(event.defaultPrevented).toBe(false)
   })
 
-  it('copies on Ctrl+Shift+C, the unambiguous terminal binding', () => {
+  it('passes Ctrl+Shift+C through even with a selection — Ctrl+C is the only copy', () => {
+    // A deliberate narrowing: one copy shortcut instead of three. Nothing is
+    // lost, because xterm maps Ctrl+Shift+C to 0x03 too, so it stays an interrupt.
     const term = mountTerminal()
     term.selection = 'selected output'
-
-    const { handled } = press(term, { ctrlKey: true, shiftKey: true })
-
-    expect(writeClipboard).toHaveBeenCalledWith('selected output')
-    expect(handled).toBe(false)
-  })
-
-  it('lets Ctrl+Shift+C through when nothing is selected, so it still interrupts', () => {
-    // Swallowing it would leave a user with a runaway process and nothing
-    // selected pressing a key that does absolutely nothing.
-    const term = mountTerminal()
 
     const { handled, event } = press(term, { ctrlKey: true, shiftKey: true })
 
@@ -230,14 +221,17 @@ describe('TerminalTab copy', () => {
     expect(event.defaultPrevented).toBe(false)
   })
 
-  it('copies on Meta+C with a selection, the macOS accelerator', () => {
-    // Not platform-guarded — off macOS this combination simply never arrives
-    // with a selection to copy. See terminalCopyIntent for why.
+  it('passes Meta+C through even with a selection, so Cmd+C does not copy', () => {
+    // Also deliberate: Orbital is a Windows cockpit, so the macOS accelerator is
+    // not worth a second binding on the one key that also has to mean SIGINT.
     const term = mountTerminal()
     term.selection = 'selected output'
 
-    expect(press(term, { metaKey: true }).handled).toBe(false)
-    expect(writeClipboard).toHaveBeenCalledWith('selected output')
+    const { handled, event } = press(term, { metaKey: true })
+
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(handled).toBe(true)
+    expect(event.defaultPrevented).toBe(false)
   })
 
   it('interrupts on the second Ctrl+C, because the copy cleared the selection', () => {
@@ -317,6 +311,48 @@ describe('TerminalTab paste', () => {
     await nextFlush()
 
     expect(term.paste).not.toHaveBeenCalled()
+  })
+})
+
+describe('TerminalTab right-click', () => {
+  /** Mount with the given selection live, then right-click the terminal surface. */
+  function rightClick(selection: string): {
+    term: (typeof terminals)[number]
+    event: MouseEvent
+  } {
+    const { container } = render(<TerminalTab tab={makeTab('T1')} active />)
+    const term = terminals[0]
+    term.selection = selection
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    container.firstElementChild!.dispatchEvent(event)
+    return { term, event }
+  }
+
+  it('pastes even when a selection is live, rather than silently copying it', () => {
+    // The regression this simplification exists to prevent: right-click used to
+    // copy whenever anything was selected, so a paste the user asked for would
+    // vanish — and overwrite their clipboard on the way out.
+    readClipboard.mockReturnValue('pasted text')
+
+    const { term } = rightClick('a stray selection')
+
+    expect(term.paste).toHaveBeenCalledWith('pasted text')
+    expect(writeClipboard).not.toHaveBeenCalled()
+    expect(term.clearSelection).not.toHaveBeenCalled()
+  })
+
+  it('pastes with nothing selected', () => {
+    readClipboard.mockReturnValue('pasted text')
+
+    const { term } = rightClick('')
+
+    expect(term.paste).toHaveBeenCalledWith('pasted text')
+  })
+
+  it('suppresses the browser context menu', () => {
+    const { event } = rightClick('')
+
+    expect(event.defaultPrevented).toBe(true)
   })
 })
 
