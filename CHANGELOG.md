@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.24.2](https://github.com/jimbuck/orbital/compare/v1.24.1...v1.24.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* contain renderer-supplied paths in main-process file operations ([#18](https://github.com/jimbuck/orbital/issues/18)) ([334938e](https://github.com/jimbuck/orbital/commit/334938eef554631ede80fa76ca09a223e5829319)), closes [#34](https://github.com/jimbuck/orbital/issues/34) [#41](https://github.com/jimbuck/orbital/issues/41)
+
 ## [1.24.1](https://github.com/jimbuck/orbital/compare/v1.24.0...v1.24.1) (2026-08-19)
 
 
