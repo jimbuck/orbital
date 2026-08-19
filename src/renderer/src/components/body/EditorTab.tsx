@@ -29,7 +29,7 @@ function gitBadge(state: GitFileState): { letter: string; cls: string } {
     case 'conflicted':
       return { letter: 'U', cls: 'bg-red/15 text-red-2' }
     case 'untracked':
-      return { letter: '?', cls: 'bg-white/[0.06] text-muted' }
+      return { letter: '?', cls: 'bg-line-2 text-muted' }
     default:
       return { letter: 'M', cls: 'bg-amber/15 text-amber-2' }
   }
@@ -415,7 +415,7 @@ function ImageView({ src, alt }: { src: string; alt: string }): JSX.Element {
         src={src}
         alt={alt}
         onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-        className="min-h-0 max-h-full max-w-full rounded border border-line-2 object-contain [background:repeating-conic-gradient(#1a2029_0%_25%,#10141b_0%_50%)_0_0/16px_16px]"
+        className="min-h-0 max-h-full max-w-full rounded border border-line-2 object-contain [background:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)_0_0/16px_16px]"
       />
       {dims && (
         <span className="flex-none font-mono text-[10px] text-faint">
@@ -679,7 +679,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                     <button
                       onClick={() => void save()}
                       disabled={!dirty}
-                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-[#06122e] hover:brightness-110 disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
+                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-on-accent hover:bg-accent-hover transition-colors disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
                     >
                       <Save size={13} strokeWidth={1.5} />
                       Save

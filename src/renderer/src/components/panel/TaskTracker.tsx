@@ -147,7 +147,7 @@ export default function TaskTracker(): JSX.Element {
                     onClick={() => startWorktree(task)}
                     title="Start a Worktree from this task"
                     aria-label="Start a Worktree from this task"
-                    className="inline-flex size-[22px] flex-none items-center justify-center rounded-full bg-accent text-[#06122e] outline-none transition hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent/60"
+                    className="inline-flex size-[22px] flex-none items-center justify-center rounded-full bg-accent text-on-accent outline-none transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent/60"
                   >
                     <Play size={10} strokeWidth={2} fill="currentColor" className="translate-x-[0.5px]" />
                   </button>

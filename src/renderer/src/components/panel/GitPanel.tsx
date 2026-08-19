@@ -61,7 +61,7 @@ function stateBadge(state: GitFileState): { letter: string; className: string } 
     case 'conflicted':
       return { letter: 'U', className: 'bg-red/15 text-red-2' }
     case 'untracked':
-      return { letter: '?', className: 'bg-white/[0.06] text-muted' }
+      return { letter: '?', className: 'bg-line-2 text-muted' }
     case 'modified':
     default:
       return { letter: 'M', className: 'bg-amber/15 text-amber-2' }
@@ -856,7 +856,7 @@ export default function GitPanel(): JSX.Element {
             onClick={commit}
             disabled={commitDisabled}
             title="Ctrl+Enter"
-            className="flex-1 py-[9px] inline-flex items-center justify-center gap-1.5 rounded-btn bg-accent text-[12.5px] font-bold text-[#06122e] hover:bg-[#6a9dff] transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent"
+            className="flex-1 py-[9px] inline-flex items-center justify-center gap-1.5 rounded-btn bg-accent text-[12.5px] font-bold text-on-accent hover:bg-accent-hover transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent"
           >
             {busy === 'commit' && spinner}
             {amend ? 'Amend' : 'Commit'}

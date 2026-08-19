@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
-import type { Settings as SettingsModel, ThemeMode, AgentConfig, ProfileDirInfo } from '@shared/types'
+import type { Settings as SettingsModel, AgentConfig, ProfileDirInfo } from '@shared/types'
+import { setThemeMode, themeModeLabel, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { SegmentedControl } from '../SegmentedControl'
 import {
   SUPPORTED_AGENTS,
   defaultAgentConfigs,
@@ -363,8 +365,11 @@ export default function Settings(): React.JSX.Element {
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
-  // App theme; missing on installs predating this setting -> default dark (the original look).
-  const [theme, setTheme] = useState<ThemeMode>(() => settings?.theme ?? 'dark')
+  // App theme is NOT a working copy: it is applied and persisted the moment it is
+  // clicked (see the control below), so it is read live from the store — that way
+  // a change made from the View menu while this modal is open shows up here, and
+  // Save can never write back a stale theme over it.
+  const theme = useThemeMode()
   // The workspace's agent profiles. Existing installs lack the key -> default lineup.
   const [agents, setAgents] = useState<AgentConfig[]>(() => settings?.agents ?? defaultAgentConfigs())
   // Extra-CLI-args fields edit as raw text per profile; parsed into argv on save.
@@ -574,22 +579,19 @@ export default function Settings(): React.JSX.Element {
       <div className={sectionLabel}>Appearance</div>
       <div className="mt-2.5 flex items-center justify-between gap-4">
         <span className="text-[12.5px] text-text-2">Theme</span>
-        {/* 3-way segmented control; theme re-applies on Save (useResolvedTheme reads the store). */}
-        <div className="flex items-center rounded-[7px] border border-line-2 bg-bg p-[2px]">
-          {(['system', 'light', 'dark'] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setTheme(mode)}
-              aria-pressed={theme === mode}
-              className={`rounded-[5px] px-2.5 py-[3px] text-[11px] font-semibold capitalize ${
-                theme === mode ? 'bg-accent/15 text-blue' : 'text-muted hover:text-text-2'
-              } focus-visible:ring-2 focus-visible:ring-accent/60 outline-none`}
-            >
-              {mode}
-            </button>
-          ))}
-        </div>
+        {/* 3-way segmented control. Unlike the other fields here it applies (and
+            persists) on selection rather than on Save, because the View menu
+            offers the same three options and does the same — one shared write
+            path in lib/theme.ts keeps the two controls from ever disagreeing,
+            and a theme picker you have to Save to see is a poor preview. That
+            also makes arrow-key selection-follows-focus the right pattern here:
+            every arrow press is a real, instantly visible preview. */}
+        <SegmentedControl
+          label="Theme"
+          options={THEME_MODES.map((mode) => ({ value: mode, label: themeModeLabel(mode) }))}
+          value={theme}
+          onChange={setThemeMode}
+        />
       </div>
 
       <div className="my-[18px] h-px bg-soft" />
