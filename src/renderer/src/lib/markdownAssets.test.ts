@@ -609,6 +609,89 @@ describe('markdown asset cache policy', () => {
     expect(b.reads.filter((r) => r === 'w1:b.png')).toEqual(['w1:b.png'])
   })
 
+  it('applies a lowered byte budget immediately, evicting least-recently-used first', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 3 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+    await load('c.png')
+    await load('a.png') // a hit, so the order is now b (oldest), c, a (newest)
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    // Lowering the budget has to bite here rather than at the next read: a hook
+    // that exists to make eviction observable must not leave the cache sitting
+    // over its own stated limit, or a test measuring the cache is really
+    // measuring whether an unrelated load happened to run first.
+    __setMarkdownAssetCacheLimits({ maxBytes: ENTRY_BYTES })
+
+    // The most recently used entry is the one that survived…
+    await load('a.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    // …and the two older ones are actually gone, in LRU order, not merely
+    // queued up to be dropped by whatever read comes next.
+    await load('b.png')
+    await load('c.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:b.png', 'w1:c.png'])
+  })
+
+  it('keeps the newest entry when the budget is lowered below a single image', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+
+    await load('a.png')
+    await load('b.png')
+
+    // Same rule as the insert path, because it is the same eviction: shrinking
+    // the budget below one image must not leave an empty cache that re-reads on
+    // every keystroke. This is the test that pins the *shape* of the shared
+    // policy rather than the deferral bug — it is what fails if the budget hook
+    // ever grows its own `while (bytes > max) drop()` loop instead of calling
+    // the one `evict` the insert path uses.
+    __setMarkdownAssetCacheLimits({ maxBytes: 1 })
+
+    await load('b.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png'])
+  })
+
+  it('applies a lowered entry ceiling immediately too', async () => {
+    const b = makeSizedBridge(() => true)
+    __setMarkdownAssetBridge(b.bridge)
+
+    // Failures retain zero bytes, so the entry ceiling is the only budget that
+    // can move here — which makes this the clean test of that half.
+    await load('x.png')
+    await load('y.png')
+    await load('z.png')
+    expect(b.reads).toEqual(['w1:x.png', 'w1:y.png', 'w1:z.png'])
+
+    __setMarkdownAssetCacheLimits({ maxEntries: 1 })
+
+    await load('z.png') // the newest, and the only survivor
+    expect(b.reads).toHaveLength(3)
+
+    await load('x.png')
+    await load('y.png')
+    expect(b.reads).toEqual(['w1:x.png', 'w1:y.png', 'w1:z.png', 'w1:x.png', 'w1:y.png'])
+  })
+
+  it('drops cached images when the bridge is swapped', async () => {
+    const first = makeSizedBridge()
+    __setMarkdownAssetBridge(first.bridge)
+    await load('a.png')
+    expect(first.reads).toEqual(['w1:a.png'])
+
+    // A cache entry is an answer the *old* bridge gave, and keys carry no notion
+    // of who read them — so a swap that left entries resident would keep serving
+    // them and the new bridge would never see the read.
+    const second = makeSizedBridge()
+    __setMarkdownAssetBridge(second.bridge)
+    await load('a.png')
+    expect(second.reads).toEqual(['w1:a.png'])
+  })
+
   it('still expires on the TTL, however recently the entry was used', async () => {
     const b = makeSizedBridge()
     __setMarkdownAssetBridge(b.bridge)

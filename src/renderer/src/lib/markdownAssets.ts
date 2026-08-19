@@ -548,9 +548,21 @@ export async function resolveMarkdownImages(html: string, ctx: MarkdownAssetCont
 
 /* ---- Test hooks ---------------------------------------------------------- */
 
-/** Swap the IPC bridge (tests). Pass null to restore the real `window.orbital`. */
+/**
+ * Swap the IPC bridge (tests). Pass null to restore the real `window.orbital`.
+ *
+ * Swapping also drops every cached image, because a cache entry is nothing but
+ * an answer the *previous* bridge gave: keys are worktree id + path and carry no
+ * notion of who read them, so any key still resident would keep being served
+ * from the old bridge and the new one would never see the read at all. Every
+ * caller happens to reset the cache itself today — which is exactly the kind of
+ * discipline that holds until the one test that forgets, and that test would
+ * then quietly assert on reads that never happened. Making the swap self-
+ * sufficient is what lets the hook's name be the whole story.
+ */
 export function __setMarkdownAssetBridge(b: MarkdownAssetBridge | null): void {
   bridgeOverride = b
+  __resetMarkdownAssetCache()
 }
 
 /** Override the resolved-image cache TTL (tests). */
@@ -562,13 +574,29 @@ export function __setMarkdownAssetCacheTtl(ms: number): void {
  * Shrink the cache budgets so eviction is observable (tests) — proving the byte
  * policy for real would otherwise mean allocating 64 MiB of base64. Pass null to
  * restore the shipping values.
+ *
+ * Applying a budget *includes* enforcing it, hence the {@link evict} call:
+ * without it a hook whose entire purpose is to make eviction observable would
+ * leave the cache sitting visibly over its own stated limit until some unrelated
+ * read wandered past and noticed. A test that lowered the budget and then
+ * measured the cache would really be measuring whether it got that incidental
+ * read — which is how a test ends up passing for a reason nobody wrote down.
+ * This is the same {@link evict} the production path calls, deliberately, so the
+ * LRU policy has exactly one implementation and cannot drift: entries still go
+ * oldest-first, and the newest one still survives a budget it cannot fit under.
  */
 export function __setMarkdownAssetCacheLimits(limits: { maxBytes?: number; maxEntries?: number } | null): void {
   cacheMaxBytes = limits?.maxBytes ?? DEFAULT_MAX_BYTES
   cacheMaxEntries = limits?.maxEntries ?? DEFAULT_MAX_ENTRIES
+  evict()
 }
 
-/** Drop every cached image (tests). */
+/**
+ * Drop every cached image (tests) — and only that. The TTL and the budgets are
+ * configuration rather than cache contents, so they survive; a test that changed
+ * them restores them itself, which keeps this from being a hook whose effect you
+ * have to read the source to predict.
+ */
 export function __resetMarkdownAssetCache(): void {
   cache.clear()
   cacheBytes = 0
