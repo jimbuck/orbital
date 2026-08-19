@@ -214,9 +214,20 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     // way to interrupt a running process — so with nothing selected it must fall
     // through to xterm as SIGINT. copySelection() clears the selection, so
     // copy-then-interrupt is just Ctrl+C twice. Ctrl+Shift+C and Cmd+C are
-    // deliberately NOT bound: xterm turns the former into 0x03 anyway, and the
-    // latter is macOS-only on a Windows cockpit. `e.code` (not `e.key`) keeps both
-    // bindings layout-independent; Alt+Ctrl+C is left alone because TUIs bind it.
+    // deliberately NOT bound, and the honest consequence is that both chords are
+    // now INERT in the terminal — they neither copy nor interrupt. xterm only
+    // turns Ctrl+letter into a C0 control code on the branch guarded by
+    // `ctrlKey && !shiftKey && !altKey && !metaKey`; with Shift (or Meta) held it
+    // falls through to a branch that special-cases only `_` and `@`, leaves `key`
+    // undefined and sends nothing. So bare Ctrl+C is the one chord that emits
+    // 0x03. That is the price of a single copy binding, and it is xterm's
+    // behaviour rather than anything this handler could change without re-adding
+    // a binding. Cmd+C stays unbound because Orbital is a Windows cockpit.
+    // `e.code` (not `e.key`) keeps both bindings layout-independent; Alt+Ctrl+C is
+    // left alone because TUIs bind it. The `e.type === 'keydown'` guards are
+    // load-bearing, not decorative: xterm hands the custom handler its keyup and
+    // keypress events too, so an unguarded branch would fire two or three times
+    // per keypress.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') {
         e.preventDefault()
