@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { Tab, Worktree } from '@shared/types'
+import { useStore } from '@renderer/store'
+import { __resetFileTreeRegistry, __setFileTreeBridge } from '@renderer/lib/fileTree'
 import {
   __resetMarkdownAssetCache,
   __setMarkdownAssetBridge,
   __setMarkdownAssetCacheTtl
 } from '@renderer/lib/markdownAssets'
-import { Preview } from './EditorTab'
+import EditorTab, { Preview } from './EditorTab'
 
 /**
  * A readFileBase64 bridge whose reads stay in flight until the test settles
@@ -193,5 +196,155 @@ describe('Preview markdown staleness', () => {
       <Preview kind="html" source="<p>hi</p>" path="a.html" worktreeId="w1" onLink={noop} />
     )
     expect(frameDoc(container)).toBe('<p>hi</p>')
+  })
+})
+
+/* ---- Worktree binding ----------------------------------------------------- */
+
+/** Let every queued microtask + timer-0 continuation land, inside act(). */
+async function flush(): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0))
+  })
+}
+
+function worktree(id: string): Worktree {
+  return {
+    id,
+    projectId: 'p1',
+    kind: 'root',
+    name: id,
+    path: `/tmp/${id}`,
+    branch: 'main',
+    status: 'idle',
+    taskId: null,
+    layout: null,
+    createdAt: 0,
+    panes: []
+  }
+}
+
+/** An editor tab belonging to `worktreeId`, auto-opening README.md. */
+function editorTab(worktreeId: string): Tab {
+  return {
+    id: 'E1',
+    worktreeId,
+    paneId: 'pane1',
+    type: 'editor',
+    status: null,
+    position: 0,
+    config: { filePath: 'README.md' }
+  }
+}
+
+describe('EditorTab worktree binding', () => {
+  let treeReads: string[]
+  let fileReads: string[]
+  let assetReads: string[]
+
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    treeReads = []
+    fileReads = []
+    assetReads = []
+
+    __resetFileTreeRegistry()
+    __setFileTreeBridge({
+      fileTree: async (id: string) => {
+        treeReads.push(id)
+        return [{ name: 'README.md', path: 'README.md', type: 'file' as const }]
+      },
+      onStateChanged: () => () => {}
+    })
+
+    __resetMarkdownAssetCache()
+    __setMarkdownAssetCacheTtl(30_000)
+    __setMarkdownAssetBridge({
+      readFileBase64: async (worktreeId: string, path: string) => {
+        assetReads.push(`${worktreeId}:${path}`)
+        return b64(path)
+      }
+    })
+
+    // Only the methods the editor tab reaches for — anything else it starts
+    // calling should fail loudly rather than silently no-op.
+    vi.stubGlobal('orbital', {
+      readFile: async (id: string, path: string) => {
+        fileReads.push(`${id}:${path}`)
+        return '# hi\n\n![logo](logo.png)\n'
+      },
+      readFileBase64: async () => '',
+      gitDiff: async () => null,
+      listDir: async () => [],
+      writeFile: async () => undefined,
+      createTab: () => undefined,
+      openExternal: () => undefined
+    })
+
+    // Two worktrees exist and w1 is the active one — the cockpit's starting state.
+    useStore.setState({
+      projects: [{ id: 'p1' }],
+      worktrees: [worktree('w1'), worktree('w2')],
+      activeProjectId: 'p1',
+      activeWorktreeId: 'w1'
+    } as unknown as Parameters<typeof useStore.setState>[0])
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    __setFileTreeBridge(null)
+    __resetFileTreeRegistry()
+    __setMarkdownAssetBridge(null)
+    __setMarkdownAssetCacheTtl(30_000)
+    __resetMarkdownAssetCache()
+  })
+
+  it('keeps reading its own worktree after the cockpit switches to another one', async () => {
+    const tab = editorTab('w1')
+    const { rerender } = render(<EditorTab tab={tab} active />)
+    await flush()
+
+    // The tab opened its configured file and previewed it, so the file tree, the
+    // file itself and the preview's inlined image have all been read — from w1.
+    fireEvent.click(screen.getByText('Preview'))
+    await flush()
+    expect(treeReads).toEqual(['w1'])
+    expect(fileReads).toEqual(['w1:README.md'])
+    expect(assetReads).toEqual(['w1:logo.png'])
+
+    // The user switches to another tab (this editor stays mounted, just hidden —
+    // see PaneGroup) and then switches the cockpit to the other worktree.
+    rerender(<EditorTab tab={tab} active={false} />)
+    act(() => {
+      useStore.setState({ activeWorktreeId: 'w2' } as unknown as Parameters<typeof useStore.setState>[0])
+    })
+    await flush()
+
+    // Nothing about this tab changed, so nothing may be read against w2. Reading
+    // the globally active worktree instead of the tab's own made every one of
+    // these fire again against the wrong repo — burning IPC on files nobody
+    // asked for, and seeding the shared markdown asset cache with w2's bytes
+    // while `content`/`draft` still held w1's text.
+    expect(treeReads).toEqual(['w1'])
+    expect(fileReads).toEqual(['w1:README.md'])
+    expect(assetReads).toEqual(['w1:logo.png'])
+  })
+
+  it('reads the tab own worktree even when it is not the active one', async () => {
+    // A tab whose worktree is not the cockpit's selection at any point: every
+    // read must still name w2, never the active w1.
+    render(<EditorTab tab={editorTab('w2')} active />)
+    await flush()
+    fireEvent.click(screen.getByText('Preview'))
+    await flush()
+
+    expect(treeReads).toEqual(['w2'])
+    expect(fileReads).toEqual(['w2:README.md'])
+    expect(assetReads).toEqual(['w2:logo.png'])
   })
 })

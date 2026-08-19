@@ -4,7 +4,6 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Tab } from '@shared/types'
-import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { registerTerminal } from '@renderer/lib/editActions'
 import { decodeOsc52 } from '@renderer/lib/terminalClipboard'
@@ -88,9 +87,16 @@ function claimFocus(tabId: string): boolean {
  */
 export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean }): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
-  // Keep the latest paneId available to the (long-lived) web-links handler.
+  // Keep the latest pane AND worktree available to the (long-lived) web-links
+  // handler. The worktree has to come from the tab rather than from the store's
+  // active one: the pane id beside it is this tab's own, so pairing it with a
+  // different worktree's id asks main to open a browser tab in a pane that
+  // worktree does not own. Same class of bug as the editor tab's preview reads,
+  // and the same one-line fix — a tab's worktree never changes.
   const paneIdRef = useRef(tab.paneId)
   paneIdRef.current = tab.paneId
+  const worktreeIdRef = useRef(tab.worktreeId)
+  worktreeIdRef.current = tab.worktreeId
 
   const theme = useResolvedTheme()
   // The terminal is created in a mount-only effect, so read the initial palette
@@ -123,8 +129,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         if (event.ctrlKey || event.metaKey) {
           void window.orbital.openExternal(uri)
         } else {
-          const w = activeWorktree(useStore.getState())
-          if (w) void window.orbital.createTab(w.id, paneIdRef.current, 'browser', { url: uri })
+          void window.orbital.createTab(worktreeIdRef.current, paneIdRef.current, 'browser', { url: uri })
         }
       })
     )
