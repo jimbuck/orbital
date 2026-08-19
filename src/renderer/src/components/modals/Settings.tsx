@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
 import type { Settings as SettingsModel, SettingsPatch, AgentConfig, ProfileDirInfo } from '@shared/types'
@@ -79,25 +79,35 @@ const envChip =
   'inline-flex items-center gap-2 rounded-[7px] bg-accent/10 border border-accent/25 pl-[11px] pr-[9px] py-[5px] font-mono text-[11.5px] text-blue'
 
 /**
- * Reduce the modal's form values to just the ones that differ from `current`,
+ * Reduce the modal's form values to just the ones that differ from `seeded`,
  * so Save writes a patch of what the user actually touched.
  *
- * The working copies are seeded when the modal opens and the modal can sit open
- * for a long time, while the machine-global settings are shared with every other
- * workspace instance. Saving the untouched fields back would push this modal's
- * opening snapshot over anything that changed in between — the shell another
- * window just picked, say. Values are compared as JSON so nested ones (the alerts
- * object, the agent-profile array) match by content rather than identity; every
- * settings field is a plain JSON value, which is also how they are persisted. A
- * false difference (same content, different key order) is harmless: the patch
- * then writes a value that already equals the stored one.
+ * `seeded` is the snapshot the working copies were initialised from — pointedly
+ * NOT the live store. The distinction is the whole point of this function. The
+ * working copies are seeded when the modal opens and never resync, while the
+ * store behind them is replaced by every state broadcast, and those are constant
+ * (appState() re-reads settings, and main broadcasts from dozens of places). Some
+ * of those broadcasts carry a machine-global setting another workspace instance
+ * just changed. Diffing against the live store therefore reports "the user
+ * changed this" for a field the user never touched and someone else did, and Save
+ * hands that field back to this modal's opening snapshot — the exact lost update
+ * this modal exists to avoid. Diffed against the seed instead, an untouched field
+ * is never in the patch no matter what arrived meanwhile, while a field the user
+ * genuinely edited still goes out and wins (last writer, which is what a person
+ * typing into a form means).
+ *
+ * Values are compared as JSON so nested ones (the alerts object, the agent-profile
+ * array) match by content rather than identity; every settings field is a plain
+ * JSON value, which is also how they are persisted. A false difference (same
+ * content, different key order) is harmless: the patch then writes a value that
+ * already equals the stored one.
  */
-function changedOnly(edited: SettingsPatch, current: SettingsModel | null): SettingsPatch {
+function changedOnly(edited: SettingsPatch, seeded: SettingsModel | null): SettingsPatch {
   // Nothing loaded to diff against — send the form as-is rather than nothing.
-  if (!current) return edited
+  if (!seeded) return edited
   const patch: Record<string, unknown> = {}
   for (const key of Object.keys(edited) as (keyof SettingsModel)[]) {
-    if (JSON.stringify(edited[key]) !== JSON.stringify(current[key])) patch[key] = edited[key]
+    if (JSON.stringify(edited[key]) !== JSON.stringify(seeded[key])) patch[key] = edited[key]
   }
   return patch as SettingsPatch
 }
@@ -382,6 +392,17 @@ export default function Settings(): React.JSX.Element {
   const workspace = useStore((s) => s.workspace)
   const closeModal = useStore((s) => s.closeModal)
 
+  // The exact settings snapshot the working copies below were seeded from, kept
+  // for the lifetime of the modal because Save diffs against it (see changedOnly)
+  // rather than against `settings`, which keeps moving as broadcasts arrive.
+  // A ref rather than state: it must be captured once and must not itself cause a
+  // render. The only value ever replaced is a null one — settings land before the
+  // app is usable, but were this modal somehow rendered first there would be no
+  // snapshot worth protecting, and the first real settings to arrive are the
+  // closest thing to what the (fallback-seeded) form is showing.
+  const seededRef = useRef<SettingsModel | null>(settings)
+  if (seededRef.current === null && settings !== null) seededRef.current = settings
+
   // Editable working copies seeded from the current store state.
   const [workspaceName, setWorkspaceName] = useState(() => workspace?.name ?? '')
   const [patterns, setPatterns] = useState<string[]>(() => settings?.envSyncPatterns ?? [])
@@ -409,6 +430,10 @@ export default function Settings(): React.JSX.Element {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  // Why the last Save failed, shown in the footer. Deliberately separate from
+  // InstallPanel's own `error`: that one belongs to a single agent profile's
+  // install and is rendered inside that card.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Per-project agent config. A default stored before profiles had ids names a
   // provider — resolve it to the profile it refers to. The fallback is the first
@@ -485,6 +510,7 @@ export default function Settings(): React.JSX.Element {
 
   const save = async (): Promise<void> => {
     setSaving(true)
+    setSaveError(null)
     try {
       const wsName = workspaceName.trim()
       if (workspace && wsName && wsName !== workspace.name) {
@@ -517,8 +543,17 @@ export default function Settings(): React.JSX.Element {
         debugLogging,
         agents: cleanedAgents
       }
-      await window.orbital.setSettings(changedOnly(edited, settings))
+      await window.orbital.setSettings(changedOnly(edited, seededRef.current))
       closeModal()
+    } catch (e) {
+      // Every await above can reject — the settings write itself takes SQLite's
+      // write lock, and with the DB shared by every workspace instance it can
+      // give up with SQLITE_BUSY. Without this catch the rejection escaped
+      // unhandled, closeModal() never ran, and the modal just sat there looking
+      // busy with no hint that nothing had been saved. Keep it open with the
+      // user's edits intact — they are the only remaining copy — and say so, so
+      // Save can simply be pressed again.
+      setSaveError(`Couldn't save settings — ${e instanceof Error ? e.message : 'the write failed'}`)
     } finally {
       setSaving(false)
     }
@@ -532,6 +567,14 @@ export default function Settings(): React.JSX.Element {
       onClose={closeModal}
       footer={
         <>
+          {/* Beside the button that produced it, and announced: a failed save
+              leaves the modal open and unchanged, which on its own looks
+              indistinguishable from a click that missed. */}
+          {saveError && (
+            <div role="alert" className="mr-auto min-w-0 text-[11px] text-red-2 text-pretty">
+              {saveError}
+            </div>
+          )}
           <button type="button" className={ghostBtn} onClick={closeModal}>
             Cancel
           </button>

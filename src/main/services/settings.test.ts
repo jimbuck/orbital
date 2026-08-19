@@ -129,8 +129,10 @@ describe('setSettings — partial writes', () => {
   })
 
   it('drops keys that are not settings instead of persisting them', () => {
-    // Types stop this at every call site; the runtime pick is the backstop for a
-    // renderer that is a version ahead or behind the main process it is talking to.
+    // Types catch this only where the patch is an object literal — excess-property
+    // checking does not survive assignment to a variable — so the runtime pick is
+    // the real backstop, both for a stray key that type-checked its way through and
+    // for a renderer a version ahead of or behind the main process it talks to.
     setSettings({ theme: 'light', notASetting: 'junk' } as SettingsPatch)
 
     expect(storedGlobalKeys()).toEqual(['theme'])
@@ -241,6 +243,40 @@ describe('setSettings — unrecognized keys in the stored workspace blob', () =>
     const s = getSettings()
     expect(s.defaultShell).toBe('pwsh.exe')
     expect((s as unknown as Record<string, unknown>).fromANewerBuild).toBeUndefined()
+  })
+})
+
+describe('setSettings — unrecognized keys in the stored global blob', () => {
+  // Same argument as the workspace blob above, and it has to hold here too: the
+  // settings row is the one every instance on the machine shares, and its most
+  // frequent write is a single theme click. Narrowing it to the keys THIS build
+  // names would delete a newer build's new global setting on that click.
+
+  it('keeps them when merging a global patch', () => {
+    globalRow = JSON.stringify({
+      theme: 'dark',
+      // A global setting only a newer build knows about.
+      fromANewerBuild: 42,
+      // Retired by this build; still what an older one reads its install state from.
+      claudeHooksInstalled: true
+    })
+
+    setSettings({ theme: 'light' })
+
+    const stored = JSON.parse(globalRow as string)
+    expect(stored.theme).toBe('light')
+    expect(stored.fromANewerBuild).toBe(42)
+    expect(stored.claudeHooksInstalled).toBe(true)
+  })
+
+  it('does not let them reach the assembled settings', () => {
+    globalRow = JSON.stringify({ theme: 'dark', fromANewerBuild: 42, envSyncPatterns: ['leftover'] })
+
+    const s = getSettings()
+
+    expect((s as unknown as Record<string, unknown>).fromANewerBuild).toBeUndefined()
+    // A pre-split blob's copy of a WORKSPACE key must not shadow the workspace's own.
+    expect(s.envSyncPatterns).not.toEqual(['leftover'])
   })
 })
 

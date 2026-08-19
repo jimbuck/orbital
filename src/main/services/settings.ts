@@ -80,31 +80,53 @@ export function patchTouches(patch: SettingsPatch, key: keyof Settings): boolean
 }
 
 /**
- * The global slice from the settings table. Pre-split blobs also carried the
- * workspace fields; picking only the global keys keeps those leftovers from
- * shadowing a workspace's own (or default) values.
+ * The stored `app` blob exactly as it is on disk — every key, recognized or not.
+ *
+ * Only the write path wants this (it merges over it, see setSettings); everything
+ * that READS settings goes through {@link readGlobalSettings}, which narrows it to
+ * the keys this build knows.
  */
-function readGlobalSettings(): Partial<GlobalSettings> {
+function readGlobalBlob(): Record<string, unknown> {
   const row = getDb().prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
   if (!row) return {}
-  let blob: Record<string, unknown>
+  let blob: unknown
   try {
     blob = JSON.parse(row.value)
   } catch {
     return {}
   }
-  if (!blob || typeof blob !== 'object') return {}
+  if (!blob || typeof blob !== 'object' || Array.isArray(blob)) return {}
+  return blob as Record<string, unknown>
+}
+
+/**
+ * The global slice of the stored blob, narrowed to the keys this build knows.
+ *
+ * The row accumulates keys that are not current settings: pre-split blobs also
+ * carried the workspace fields, blobs written before installs became
+ * per-agent-profile carry claudeHooksInstalled / claudeSkillInstalled, and a
+ * NEWER build sharing this DB may have written a global setting this one has
+ * never heard of. Picking keeps all of them out of the assembled settings, so a
+ * leftover cannot shadow a workspace's own (or default) value and no field
+ * reaches the app that this build could not mean anything by. Dropping them on
+ * the way out is free; dropping them from STORAGE is not, which is why the write
+ * path merges over {@link readGlobalBlob} instead.
+ */
+function readGlobalSettings(): Partial<GlobalSettings> {
+  const blob = readGlobalBlob()
   const out: Record<string, unknown> = {}
-  // Blobs written before installs became per-agent-profile also carry
-  // claudeHooksInstalled / claudeSkillInstalled; picking only current keys drops
-  // them (the installed state is read from each profile's files, not mirrored).
   for (const key of GLOBAL_SETTING_KEYS) {
     if (blob[key] !== undefined) out[key] = blob[key]
   }
   return out as Partial<GlobalSettings>
 }
 
-function writeGlobalSettings(s: Partial<GlobalSettings>): void {
+/**
+ * Replace the stored `app` blob wholesale. Takes a loose record rather than
+ * `Partial<GlobalSettings>` because what gets written is the merge of the stored
+ * blob (unknown keys and all) with the patch — see setSettings.
+ */
+function writeGlobalSettings(s: Record<string, unknown>): void {
   getDb()
     .prepare(
       "INSERT INTO settings (key, value) VALUES ('app', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
@@ -175,13 +197,18 @@ export function setSettings(patch: SettingsPatch): Settings {
     // Skip the row entirely when the patch touches nothing on that side: a theme
     // click should not rewrite (and bump) the workspace row at all.
     if (Object.keys(globalPatch).length > 0) {
-      // Merging over readGlobalSettings (not the raw blob) means this row's
-      // retired keys — claudeHooksInstalled & co, named there — do get dropped on
-      // the next write. That asymmetry with the workspace blob below is intended:
-      // these are keys THIS app retired and can name, so nothing is being guessed
-      // at, whereas an unrecognized workspace key may simply be one we have not
-      // learned yet.
-      writeGlobalSettings({ ...readGlobalSettings(), ...globalPatch })
+      // Merged over the RAW stored blob, exactly like the workspace row below,
+      // and for exactly the same reason. Merging over readGlobalSettings() would
+      // narrow the row to the keys this build happens to name, and that list is
+      // of CURRENT keys, not retired ones — so it deletes a newer build's new
+      // global setting just as readily as it deletes claudeHooksInstalled. This
+      // row is the one shared by every instance on the machine, and its most
+      // frequent write is a single theme click: run the released app beside a
+      // worktree build that added a global setting, click the theme once, and
+      // that setting would be gone. Unknown keys are instead dropped where
+      // dropping them is free — on the way OUT, in readGlobalSettings — so they
+      // stay safe in storage without ever influencing this build's behavior.
+      writeGlobalSettings({ ...readGlobalBlob(), ...globalPatch })
     }
     if (Object.keys(workspacePatch).length > 0) {
       // The stored blob is spread WHOLE — deliberately not filtered to

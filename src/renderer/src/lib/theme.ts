@@ -51,12 +51,37 @@ export function useThemeMode(): ThemeMode {
  * No-ops until settings have loaded — with nothing to update optimistically the
  * app would not re-theme until the next broadcast anyway, and there is no user
  * to please before the first state arrives.
+ *
+ * If the write fails the optimistic apply is rolled back. That is the deliberate
+ * choice here, over both alternatives:
+ *
+ * - Leaving the new theme applied is the worst option. The user is shown a
+ *   success that never happened, and the app then contradicts it minutes later,
+ *   when some unrelated state broadcast lands and snaps the theme back with no
+ *   apparent cause. Rolling back puts the failure where the user can connect it
+ *   to something — the click they just made visibly did not take.
+ * - Popping a message would mean inventing an app-wide notification surface,
+ *   which Orbital does not have; this control is also reachable from the View
+ *   menu, where there is nothing to render one into. That is disproportionate for
+ *   a failure that needs the settings row to be locked by another process for
+ *   several seconds. The console line is for whoever is debugging that case.
+ *
+ * The rollback is conditional: if the store has since moved to some other theme
+ * (a later click, or a broadcast carrying another instance's change), that value
+ * is newer than what this call knows and is left alone.
  */
 export function setThemeMode(mode: ThemeMode): void {
   const settings = useStore.getState().settings
   if (!settings || settings.theme === mode) return
+  const previous = settings.theme
   useStore.setState({ settings: { ...settings, theme: mode } })
-  void window.orbital.setSettings({ theme: mode })
+  void window.orbital.setSettings({ theme: mode }).catch((err: unknown) => {
+    const current = useStore.getState().settings
+    if (current && current.theme === mode) {
+      useStore.setState({ settings: { ...current, theme: previous } })
+    }
+    console.error("Couldn't save the theme — it has been reverted.", err)
+  })
 }
 
 /**

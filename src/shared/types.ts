@@ -466,9 +466,13 @@ export type GlobalSettings = Omit<Settings, keyof WorkspaceSettings>
  * workspace, one DB), so a writer that sends its whole in-memory copy reverts
  * whatever another instance changed in the meantime. Naming the changed keys and
  * nothing else is what makes concurrent edits to different keys compose. Being a
- * `Partial` of {@link Settings} rather than a loose bag also means an unknown key
- * is a compile error at the call sites (object literals get excess-property
- * checked), and main drops anything unrecognized before it reaches the DB.
+ * `Partial` of {@link Settings} rather than a loose bag also catches most unknown
+ * keys at the call site — but only where the patch is written inline, since
+ * excess-property checking is a rule about object LITERALS: `setSettings({ theme,
+ * bogus })` is a compile error, while `const p = { theme, bogus }` followed by
+ * `setSettings(p)` compiles clean. The type is a good early warning, not a
+ * guarantee; the guarantee is that main drops anything unrecognized before it
+ * reaches storage.
  */
 export type SettingsPatch = Partial<Settings>
 
