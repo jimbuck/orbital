@@ -35,26 +35,53 @@ export function useThemeMode(): ThemeMode {
 /**
  * Persist a new theme mode.
  *
- * The settings bridge takes a whole Settings object (main splits it across the
- * machine-global store and the workspace file), so this reads the current
- * settings and writes them back with only `theme` changed. Every theme control
- * funnels through here — the View menu and the Settings modal cannot drift apart
- * because there is only one write path.
+ * Sends `theme` and nothing else. The theme lives in the machine-global slice
+ * that every workspace instance shares, so writing a whole Settings object here
+ * would push this window's snapshot of defaultShell / alerts / debugLogging over
+ * whatever another instance had just changed — a one-click control writing five
+ * unrelated fields is exactly how a lost update happens. Every theme control
+ * funnels through here, so the View menu and the Settings modal cannot drift
+ * apart: there is only one write path.
  *
- * The store is also updated optimistically: the write round-trips through the
+ * The store is still updated optimistically: the write round-trips through the
  * main process before the state broadcast that would normally update it lands,
  * and re-theming the whole app should track the click rather than lag an IPC hop
  * behind it. The broadcast then overwrites this with the authoritative value.
  *
- * No-ops until settings have loaded — there is nothing to merge the theme into
- * yet, and writing a fabricated Settings object would clobber the real one.
+ * No-ops until settings have loaded — with nothing to update optimistically the
+ * app would not re-theme until the next broadcast anyway, and there is no user
+ * to please before the first state arrives.
+ *
+ * If the write fails the optimistic apply is rolled back. That is the deliberate
+ * choice here, over both alternatives:
+ *
+ * - Leaving the new theme applied is the worst option. The user is shown a
+ *   success that never happened, and the app then contradicts it minutes later,
+ *   when some unrelated state broadcast lands and snaps the theme back with no
+ *   apparent cause. Rolling back puts the failure where the user can connect it
+ *   to something — the click they just made visibly did not take.
+ * - Popping a message would mean inventing an app-wide notification surface,
+ *   which Orbital does not have; this control is also reachable from the View
+ *   menu, where there is nothing to render one into. That is disproportionate for
+ *   a failure that needs the settings row to be locked by another process for
+ *   several seconds. The console line is for whoever is debugging that case.
+ *
+ * The rollback is conditional: if the store has since moved to some other theme
+ * (a later click, or a broadcast carrying another instance's change), that value
+ * is newer than what this call knows and is left alone.
  */
 export function setThemeMode(mode: ThemeMode): void {
   const settings = useStore.getState().settings
   if (!settings || settings.theme === mode) return
-  const next = { ...settings, theme: mode }
-  useStore.setState({ settings: next })
-  void window.orbital.setSettings(next)
+  const previous = settings.theme
+  useStore.setState({ settings: { ...settings, theme: mode } })
+  void window.orbital.setSettings({ theme: mode }).catch((err: unknown) => {
+    const current = useStore.getState().settings
+    if (current && current.theme === mode) {
+      useStore.setState({ settings: { ...current, theme: previous } })
+    }
+    console.error("Couldn't save the theme — it has been reverted.", err)
+  })
 }
 
 /**

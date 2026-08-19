@@ -459,6 +459,23 @@ export type WorkspaceSettings = Pick<Settings, (typeof WORKSPACE_SETTING_KEYS)[n
 /** The machine-global slice of {@link Settings} (persisted in the global store). */
 export type GlobalSettings = Omit<Settings, keyof WorkspaceSettings>
 
+/**
+ * A settings write: only the keys the caller actually changed.
+ *
+ * The global slice is shared by every running instance (one process per
+ * workspace, one DB), so a writer that sends its whole in-memory copy reverts
+ * whatever another instance changed in the meantime. Naming the changed keys and
+ * nothing else is what makes concurrent edits to different keys compose. Being a
+ * `Partial` of {@link Settings} rather than a loose bag also catches most unknown
+ * keys at the call site — but only where the patch is written inline, since
+ * excess-property checking is a rule about object LITERALS: `setSettings({ theme,
+ * bogus })` is a compile error, while `const p = { theme, bogus }` followed by
+ * `setSettings(p)` compiles clean. The type is a good early warning, not a
+ * guarantee; the guarantee is that main drops anything unrecognized before it
+ * reaches storage.
+ */
+export type SettingsPatch = Partial<Settings>
+
 /** Full application state pushed to / pulled by the renderer. */
 export interface AppState {
   projects: Project[]
@@ -820,7 +837,8 @@ export const IPC = {
 export interface OrbitalApi {
   // state
   getState(): Promise<AppState>
-  setSettings(settings: Settings): Promise<Settings>
+  /** Persist only the changed keys; resolves with the full merged settings. */
+  setSettings(patch: SettingsPatch): Promise<Settings>
 
   // workspaces
   /** Every workspace in the global DB, most recently opened first. */

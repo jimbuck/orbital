@@ -156,7 +156,13 @@ export const workspaces = {
       return {}
     }
   },
-  updateSettings(workspaceId: string, settings: WorkspaceSettings): void {
+  /**
+   * Replace the workspace's stored settings blob. Partial because callers patch
+   * it — the settings facade merges the keys it is changing over what
+   * {@link getSettings} just returned, and an untouched key simply stays absent
+   * rather than being written back as an assumed value.
+   */
+  updateSettings(workspaceId: string, settings: Partial<WorkspaceSettings>): void {
     getDb().prepare('UPDATE workspaces SET settings = ? WHERE id = ?').run(JSON.stringify(settings), workspaceId)
   }
 }
