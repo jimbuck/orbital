@@ -24,6 +24,10 @@ let globalRow: string | undefined
 let workspaceRow: Record<string, unknown>
 /** How the last transaction was opened — the write lock must be taken at BEGIN. */
 let lastTransactionMode: string | null
+/** Transactions actually entered, so a no-op write can assert it took no lock. */
+let transactionsRun: number
+/** Writes to the workspace row, likewise. */
+let workspaceWrites: number
 /** Whether the stored global blob was re-read while a transaction was open. */
 let readInsideTransaction: boolean
 let inTransaction = false
@@ -50,6 +54,7 @@ const fakeDb = {
   transaction(fn: () => void) {
     const run = (mode: string) => (): void => {
       lastTransactionMode = mode
+      transactionsRun += 1
       inTransaction = true
       try {
         fn()
@@ -71,16 +76,17 @@ vi.mock('../db/database', () => ({ getDb: () => fakeDb }))
 vi.mock('../db/repositories', () => ({
   requireWorkspaceId: () => 'ws-1',
   workspaces: {
-    // A fresh copy per read: the service deletes a legacy key off what it gets
-    // back, and a shared object would let that mutate the "stored" row.
+    // A fresh copy per read, so nothing the service does to what it gets back can
+    // reach into the "stored" row behind its own write.
     getSettings: () => JSON.parse(JSON.stringify(workspaceRow)),
     updateSettings: (_workspaceId: string, settings: unknown) => {
+      workspaceWrites += 1
       workspaceRow = JSON.parse(JSON.stringify(settings))
     }
   }
 }))
 
-const { getSettings, setSettings } = await import('./settings')
+const { getSettings, patchTouches, setSettings } = await import('./settings')
 
 /** The keys actually present in the stored global blob. */
 function storedGlobalKeys(): string[] {
@@ -91,6 +97,8 @@ beforeEach(() => {
   globalRow = undefined
   workspaceRow = {}
   lastTransactionMode = null
+  transactionsRun = 0
+  workspaceWrites = 0
   readInsideTransaction = false
   inTransaction = false
 })
@@ -166,5 +174,95 @@ describe('setSettings — concurrent instances', () => {
     expect(after.theme).toBe('light')
     // Before the fix, B's write handed A's change back to the stale 'pwsh.exe'.
     expect(after.defaultShell).toBe('bash.exe')
+  })
+})
+
+describe('setSettings — patches with nothing to write', () => {
+  // An IMMEDIATE transaction takes the write lock at BEGIN, and the DB is shared
+  // by every running instance — so opening one for a write that never comes
+  // stalls the other instances for no reason. Empty patches are routine, not
+  // exotic: an untouched Save sends {} by design.
+
+  it('opens no transaction at all for an empty patch', () => {
+    setSettings({ defaultShell: 'pwsh.exe', periodicFetch: false })
+    transactionsRun = 0
+    workspaceWrites = 0
+    lastTransactionMode = null
+
+    const after = setSettings({})
+
+    expect(transactionsRun).toBe(0)
+    expect(lastTransactionMode).toBeNull()
+    expect(workspaceWrites).toBe(0)
+    // Still answers with the current settings — a no-op write, not a failed one.
+    expect(after.defaultShell).toBe('pwsh.exe')
+    expect(after.periodicFetch).toBe(false)
+  })
+
+  it('opens no transaction for a patch of only unrecognized keys', () => {
+    setSettings({ theme: 'light' })
+    transactionsRun = 0
+    lastTransactionMode = null
+
+    // Nothing here survives the pick, so this reduces to exactly the empty case.
+    setSettings({ notASetting: 'junk' } as SettingsPatch)
+
+    expect(transactionsRun).toBe(0)
+    expect(lastTransactionMode).toBeNull()
+    expect(storedGlobalKeys()).toEqual(['theme'])
+  })
+})
+
+describe('setSettings — unrecognized keys in the stored workspace blob', () => {
+  // The blob is the only copy of anything in it, and this build is not its only
+  // writer: a second install (a worktree build beside the released app, or a
+  // downgrade) may know keys this one does not. So they are kept in storage and
+  // dropped on the way out, rather than deleted on the first write that happens
+  // to touch the row.
+
+  it('keeps them when merging a workspace patch', () => {
+    workspaceRow = { periodicFetch: true, enabledAgents: ['claude'], fromANewerBuild: 42 }
+
+    setSettings({ periodicFetch: false })
+
+    expect(workspaceRow.periodicFetch).toBe(false)
+    // Still what an older build reads its agent list from.
+    expect(workspaceRow.enabledAgents).toEqual(['claude'])
+    expect(workspaceRow.fromANewerBuild).toBe(42)
+  })
+
+  it('does not let them reach the assembled settings', () => {
+    // defaultShell is a GLOBAL key: spreading the workspace blob raw would let a
+    // stray copy of it here shadow the real, machine-global value.
+    workspaceRow = { defaultShell: 'shadowed.exe', fromANewerBuild: 42 }
+
+    setSettings({ defaultShell: 'pwsh.exe' })
+
+    const s = getSettings()
+    expect(s.defaultShell).toBe('pwsh.exe')
+    expect((s as unknown as Record<string, unknown>).fromANewerBuild).toBeUndefined()
+  })
+})
+
+describe('patchTouches', () => {
+  // What ipc.ts gates its side effects on, so a patch that cannot affect a
+  // subsystem does not restart it — { theme } used to stop and restart the
+  // env-sync FS watcher of every project. The handler itself needs an Electron
+  // main process to import, so the predicate it turns on is what is asserted here.
+
+  it('is true only for the keys the patch actually names', () => {
+    expect(patchTouches({ envSyncPatterns: ['.env'] }, 'envSyncPatterns')).toBe(true)
+    expect(patchTouches({ periodicFetch: false }, 'periodicFetch')).toBe(true)
+    // A false/empty value is still a change the caller made.
+    expect(patchTouches({ debugLogging: false }, 'debugLogging')).toBe(true)
+  })
+
+  it('is false for a key the patch leaves out, including an empty patch', () => {
+    expect(patchTouches({ theme: 'light' }, 'envSyncPatterns')).toBe(false)
+    expect(patchTouches({ theme: 'light' }, 'periodicFetch')).toBe(false)
+    expect(patchTouches({ theme: 'light' }, 'debugLogging')).toBe(false)
+    expect(patchTouches({}, 'envSyncPatterns')).toBe(false)
+    // Explicitly undefined means absent, the same rule the write path picks by.
+    expect(patchTouches({ debugLogging: undefined }, 'debugLogging')).toBe(false)
   })
 })

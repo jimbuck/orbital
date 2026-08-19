@@ -48,19 +48,35 @@ const GLOBAL_SETTING_KEYS = Object.keys({
 } satisfies Record<keyof GlobalSettings, true>) as readonly (keyof GlobalSettings)[]
 
 /**
- * The subset of `patch` covered by `keys`, dropping keys the caller left out.
+ * The subset of `source` covered by `keys`, dropping everything else.
+ *
+ * Used both ways: on an inbound patch (keys the caller left out) and on a stored
+ * blob (keys this build does not recognize), so neither can reach past the slice
+ * it belongs to.
  *
  * `undefined` means "not part of this patch" rather than "clear this field" —
  * every settings field has a meaningful empty value ('' / [] / false) that a
  * caller sends instead, so treating undefined as absent costs nothing and stops
  * a sparse object literal from erasing a stored value.
  */
-function pick<K extends keyof Settings>(patch: SettingsPatch, keys: readonly K[]): Partial<Pick<Settings, K>> {
+function pick<K extends keyof Settings>(source: SettingsPatch, keys: readonly K[]): Partial<Pick<Settings, K>> {
   const out: Partial<Pick<Settings, K>> = {}
   for (const key of keys) {
-    if (patch[key] !== undefined) out[key] = patch[key] as Settings[K]
+    if (source[key] !== undefined) out[key] = source[key] as Settings[K]
   }
   return out
+}
+
+/**
+ * Whether `patch` actually names `key`, i.e. whether this write can change that
+ * field at all. Callers with a side effect to run — restarting env watchers,
+ * reconfiguring the fetch loop — gate it on this so a patch that cannot possibly
+ * affect them ({ theme } from a single click, or {} from an untouched Save) does
+ * not churn subsystems it never touched. Same `undefined`-means-absent rule as
+ * {@link pick}, kept in one place so the two cannot drift apart.
+ */
+export function patchTouches(patch: SettingsPatch, key: keyof Settings): boolean {
+  return patch[key] !== undefined
 }
 
 /**
@@ -101,12 +117,15 @@ export function getSettings(): Settings {
   // A workspace row written before configured agents existed carries a legacy
   // `enabledAgents` id array instead of `agents` — convert it (and scrub any
   // malformed hand-edit) so the rest of the app only ever sees AgentConfig[].
-  const ws = workspaces.getSettings(requireWorkspaceId()) as Partial<WorkspaceSettings> & {
+  const stored = workspaces.getSettings(requireWorkspaceId()) as Partial<WorkspaceSettings> & {
     enabledAgents?: unknown
   }
-  const agents = normalizeAgentConfigs(ws.agents, ws.enabledAgents)
-  delete ws.enabledAgents
-  const merged = { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...ws }
+  const agents = normalizeAgentConfigs(stored.agents, stored.enabledAgents)
+  // Pick rather than spread: the stored blob keeps keys this build does not know
+  // (see setSettings), and spreading it raw would let one of them shadow a global
+  // field of the same name, or hand the renderer a field its build cannot mean
+  // anything by. Storage remembers them; the runtime object never sees them.
+  const merged = { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...pick(stored, WORKSPACE_SETTING_KEYS) }
   merged.agents = agents ?? DEFAULT_SETTINGS.agents
   // The top-level merge is shallow, so a stored alerts blob written before a
   // toggle existed would shadow that toggle's default with undefined — deep-merge
@@ -141,15 +160,40 @@ export function getSettings(): Settings {
 export function setSettings(patch: SettingsPatch): Settings {
   const globalPatch = pick(patch, GLOBAL_SETTING_KEYS)
   const workspacePatch = pick(patch, WORKSPACE_SETTING_KEYS)
+
+  // Nothing to write: return the current settings without opening a transaction
+  // at all. IMMEDIATE takes SQLite's write lock at BEGIN, so doing this for a
+  // no-op would make every other instance queue behind a write that never comes.
+  // Empty patches are routine, not exotic — an untouched Save sends {} by design
+  // — and the guard is on the PICKED slices rather than on `patch` itself, since
+  // a patch of only unrecognized keys reduces to exactly the same no-op.
+  if (Object.keys(globalPatch).length === 0 && Object.keys(workspacePatch).length === 0) return getSettings()
+
   const workspaceId = requireWorkspaceId()
 
   const apply = getDb().transaction(() => {
     // Skip the row entirely when the patch touches nothing on that side: a theme
     // click should not rewrite (and bump) the workspace row at all.
     if (Object.keys(globalPatch).length > 0) {
+      // Merging over readGlobalSettings (not the raw blob) means this row's
+      // retired keys — claudeHooksInstalled & co, named there — do get dropped on
+      // the next write. That asymmetry with the workspace blob below is intended:
+      // these are keys THIS app retired and can name, so nothing is being guessed
+      // at, whereas an unrecognized workspace key may simply be one we have not
+      // learned yet.
       writeGlobalSettings({ ...readGlobalSettings(), ...globalPatch })
     }
     if (Object.keys(workspacePatch).length > 0) {
+      // The stored blob is spread WHOLE — deliberately not filtered to
+      // WORKSPACE_SETTING_KEYS. It is the only copy of anything in it, and this
+      // process is not the only writer: a user running two versions (a build from
+      // a worktree beside the installed app, or a downgrade) hands the blob to a
+      // build that knows a key this one does not. Filtering here would delete
+      // that key the first time someone toggled periodicFetch, irreversibly and
+      // silently. The same goes for the legacy `enabledAgents` array, which is
+      // still what an older build reads its agent list from. Unknown keys are
+      // instead dropped where dropping them is free — on the way OUT, in
+      // getSettings — so they can never influence this build's behavior.
       workspaces.updateSettings(workspaceId, { ...workspaces.getSettings(workspaceId), ...workspacePatch })
     }
   })

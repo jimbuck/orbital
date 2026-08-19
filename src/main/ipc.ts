@@ -44,7 +44,7 @@ import * as codexInstructions from './services/agents/codex-instructions'
 import { updater } from './services/updater'
 import { logger, summarizeArgs } from './services/logger'
 import { activeControlPipePath, exportWorkspaceToFile, importWorkspaceFromFile } from './services/workspaces'
-import { getSettings, setSettings } from './services/settings'
+import { getSettings, patchTouches, setSettings } from './services/settings'
 import { refreshJumpList } from './services/jump-list'
 
 /* ---- helpers ----------------------------------------------------------- */
@@ -454,14 +454,24 @@ export function registerIpc(): void {
     // Merges the patch's keys across the global store and the workspace YAML
     // behind the facade, leaving every key the renderer did not send untouched.
     const s = setSettings(patch)
+    // Each side effect is gated on the key that actually drives it. Patches are
+    // now single-key and frequent — a theme click sends { theme }, an untouched
+    // Save sends {} — and running all three unconditionally meant every one of
+    // those stopped and restarted the FS watcher of every project
+    // (ensureEnvWatcher -> updatePatterns) to re-apply patterns that had not
+    // changed.
+    //
     // Env-sync patterns are a workspace setting — refresh every project's watcher.
-    for (const project of repo.projects.list()) runtime.ensureEnvWatcher(project.id)
+    if (patchTouches(patch, 'envSyncPatterns')) {
+      for (const project of repo.projects.list()) runtime.ensureEnvWatcher(project.id)
+    }
     // Toggling periodicFetch starts/stops the background fetcher live.
-    runtime.configureFetch()
-    // Toggling debug logging takes effect immediately (no restart needed). Read
-    // from the merged result, not the patch: a patch that leaves debugLogging out
-    // must not be read as "turn it off".
-    logger.setEnabled(s.debugLogging)
+    if (patchTouches(patch, 'periodicFetch')) runtime.configureFetch()
+    // Toggling debug logging takes effect immediately (no restart needed). Gated
+    // on the key, but the VALUE comes from the merged result rather than from the
+    // patch: a patch that leaves debugLogging out must not be read as "turn it
+    // off", and the stored value is the one another instance may have just set.
+    if (patchTouches(patch, 'debugLogging')) logger.setEnabled(s.debugLogging)
     broadcast()
     return s
   })
