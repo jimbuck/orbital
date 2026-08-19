@@ -233,22 +233,28 @@ export default function FileContextMenu({
             onClick={() => void run(async () => window.orbital.writeClipboard(node.path))}
           />
 
+          {/* The OS hand-offs pass the RELATIVE path and let main resolve it.
+              Sending the absolute path resolvePath just handed back would work
+              equally well here, but it would mean main accepting an absolute
+              path from the renderer at all — and the point of the gate is that
+              it cannot be talked past by whoever is on the other end of the
+              bridge. Rejections still surface in the menu via `run`. */}
           <div className="my-1 h-px bg-soft" />
           <MenuItem
             icon={<FolderOpen size={13} strokeWidth={1.5} />}
             label="Reveal in File Explorer"
-            onClick={() => void run(async () => window.orbital.revealPath(await absolute()))}
+            onClick={() => void run(() => window.orbital.revealPath(worktreeId, node.path))}
           />
           <MenuItem
             icon={<ExternalLink size={13} strokeWidth={1.5} />}
             label={isDir ? 'Open Folder' : 'Open with Default App'}
-            onClick={() => void run(async () => window.orbital.openPath(await absolute()))}
+            onClick={() => void run(() => window.orbital.openPath(worktreeId, node.path))}
           />
           {isDir && (
             <MenuItem
               icon={<Terminal size={13} strokeWidth={1.5} />}
               label="Open in Terminal"
-              onClick={() => void run(async () => window.orbital.openInTerminal(await absolute()))}
+              onClick={() => void run(() => window.orbital.openInTerminal(worktreeId, node.path))}
             />
           )}
 

@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync
@@ -194,7 +195,26 @@ afterEach(() => {
   trashItem.mockClear()
   rmSync(repo, { recursive: true, force: true })
   rmSync(outside, { recursive: true, force: true })
+  // The near-miss sibling some containment tests plant beside the checkout.
+  rmSync(`${repo}-evil`, { recursive: true, force: true })
 })
+
+/**
+ * A tree whose path is the checkout's path plus a suffix — `C:\repo` next to
+ * `C:\repo-evil`. Returns its absolute path; `${repo}-evil` is reachable from
+ * inside the checkout as `../<basename>-evil`, which is how the tests aim at it.
+ */
+function siblingTree(): string {
+  const dir = `${repo}-evil`
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'secret.txt'), 'sibling secret\n')
+  return dir
+}
+
+/** `../<name>-evil/...` — the sibling above, spelled the way the renderer would. */
+function siblingRel(child: string): string {
+  return `../${repo.split(/[\\/]/).pop()}-evil/${child}`
+}
 
 describe('git.createFile', () => {
   it('creates an empty file and returns its checkout-relative path', async () => {
@@ -320,6 +340,132 @@ describe('git.trashPath', () => {
   })
 })
 
+/* ---- Read / write containment --------------------------------------------
+ *
+ * These four were bare `join(repoPath, relPath)` until the guard was retrofitted
+ * onto them, so `writeFile(repo, '../../evil.txt', …)` planted a file two levels
+ * above the checkout and `readFile` read whatever it was pointed at. They are
+ * reachable straight from the renderer over IPC, which is what made it a live
+ * hole rather than a latent one.
+ *
+ * Each gets the same three questions: does traversal out get refused, does an
+ * ordinary nested path still work, and is the sibling near-miss (`repo` vs
+ * `repo-evil`) caught — the case a prefix comparison waves through.
+ * ------------------------------------------------------------------------- */
+
+describe('git.readFile', () => {
+  it('reads a nested file inside the checkout', async () => {
+    expect(await git.readFile(repo, 'src/existing.ts')).toBe('export const a = 1\n')
+  })
+
+  it('normalises harmless traversal that stays inside', async () => {
+    expect(await git.readFile(repo, 'src/../src/existing.ts')).toBe('export const a = 1\n')
+  })
+
+  it('refuses to read out of the checkout', async () => {
+    await expect(git.readFile(repo, '../../evil.txt')).rejects.toThrow(/escapes/)
+    await expect(git.readFile(repo, 'src/../../outside.txt')).rejects.toThrow(/escapes/)
+  })
+
+  it('refuses the sibling tree whose path merely starts with the checkout path', async () => {
+    const sibling = siblingTree()
+    await expect(git.readFile(repo, siblingRel('secret.txt'))).rejects.toThrow(/escapes/)
+    // The file really is there and really is readable — the guard is what stopped it.
+    expect(readFileSync(join(sibling, 'secret.txt'), 'utf8')).toBe('sibling secret\n')
+  })
+
+  /*
+   * `orbital tab new editor <path>` puts its argument straight into
+   * `tab.config.filePath`, and the editor tab hands that to readFile unchanged
+   * — so the CLI is a second, un-vetted way into this function and the reason
+   * the guard was deferred here in the first place. Every spelling the CLI can
+   * actually deliver a file with still works.
+   */
+  it('still reads the path shapes the CLI open-editor argument delivers', async () => {
+    expect(await git.readFile(repo, 'src/existing.ts')).toBe('export const a = 1\n')
+    expect(await git.readFile(repo, './src/existing.ts')).toBe('export const a = 1\n')
+  })
+
+  it.skipIf(!onWindows)('reads a backslash-spelled relative path from the CLI', async () => {
+    // A Windows shell completes paths with backslashes, so this is what a
+    // tab-completed `orbital tab new editor src\existing.ts` sends.
+    expect(await git.readFile(repo, 'src\\existing.ts')).toBe('export const a = 1\n')
+  })
+
+  it('refuses an absolute path with a message, where it used to fail with an errno', async () => {
+    // Not a behaviour change worth preserving: `join('C:/repo', 'C:/other/x')`
+    // produced `C:\repo\C:\other\x`, which no filesystem opens, so an absolute
+    // path has never once succeeded through this call. What changes is that the
+    // refusal now says why instead of surfacing ENOENT.
+    await expect(git.readFile(repo, join(repo, 'src', 'existing.ts'))).rejects.toThrow(
+      /not a path inside/
+    )
+    await expect(git.readFile(repo, '/etc/passwd')).rejects.toThrow(/not a path inside/)
+  })
+})
+
+describe('git.readFileBase64', () => {
+  it('reads a nested file inside the checkout', async () => {
+    const b64 = await git.readFileBase64(repo, 'src/existing.ts')
+    expect(Buffer.from(b64, 'base64').toString('utf8')).toBe('export const a = 1\n')
+  })
+
+  it('refuses to read out of the checkout', async () => {
+    // The markdown preview reaches this one with paths derived from REPO
+    // CONTENT (an image src), so a `../../` in a committed file lands here.
+    await expect(git.readFileBase64(repo, '../../../.ssh/id_rsa')).rejects.toThrow(/escapes/)
+  })
+
+  it('refuses the sibling near-miss', async () => {
+    siblingTree()
+    await expect(git.readFileBase64(repo, siblingRel('secret.txt'))).rejects.toThrow(/escapes/)
+  })
+})
+
+describe('git.writeFile', () => {
+  it('writes a nested file inside the checkout, creating parents', async () => {
+    await git.writeFile(repo, 'src/deep/nested/new.ts', 'ok\n')
+    expect(readFileSync(join(repo, 'src', 'deep', 'nested', 'new.ts'), 'utf8')).toBe('ok\n')
+  })
+
+  it('refuses to write out of the checkout, leaving nothing behind', async () => {
+    await expect(git.writeFile(repo, '../../evil.txt', 'pwned')).rejects.toThrow(/escapes/)
+    expect(existsSync(resolve(repo, '..', '..', 'evil.txt'))).toBe(false)
+    await expect(git.writeFile(repo, join(outside, 'secret.txt'), 'pwned')).rejects.toThrow(
+      /not a path inside/
+    )
+    // The parent directories are created by writeFile, so a guard that ran too
+    // late would still leave a trail outside the checkout. It doesn't.
+    expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('do not touch\n')
+  })
+
+  it('refuses the sibling near-miss without touching it', async () => {
+    const sibling = siblingTree()
+    await expect(git.writeFile(repo, siblingRel('secret.txt'), 'pwned')).rejects.toThrow(/escapes/)
+    expect(readFileSync(join(sibling, 'secret.txt'), 'utf8')).toBe('sibling secret\n')
+  })
+})
+
+describe('git.listDir', () => {
+  it('lists a directory inside the checkout', async () => {
+    expect((await git.listDir(repo, 'src')).map((n) => n.path)).toEqual(['src/existing.ts'])
+  })
+
+  it('lists the checkout root for an empty path', async () => {
+    expect((await git.listDir(repo, '')).map((n) => n.name)).toEqual(['src'])
+  })
+
+  it('refuses to enumerate out of the checkout', async () => {
+    await expect(git.listDir(repo, '../..')).rejects.toThrow(/escapes/)
+    await expect(git.listDir(repo, outside)).rejects.toThrow(/not a path inside/)
+  })
+
+  it('refuses the sibling near-miss', async () => {
+    siblingTree()
+    await expect(git.listDir(repo, siblingRel(''))).rejects.toThrow(/escapes/)
+  })
+})
+
 /* ---- Symlink containment -------------------------------------------------
  *
  * `resolveInRepo` is lexical, so `link/x.txt` satisfies it however far out of
@@ -374,6 +520,29 @@ describe('real-path containment', () => {
     expect(existsSync(join(repo, 'src', 'via-link.ts'))).toBe(true)
   })
 
+  it('refuses to write through a link that leaves the checkout', async () => {
+    linkDir(outside, join(repo, 'escape'))
+    await expect(git.writeFile(repo, 'escape/secret.txt', 'pwned')).rejects.toThrow(
+      /resolves outside/
+    )
+    expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('do not touch\n')
+  })
+
+  it('still READS through such a link — the deliberate half of the split', async () => {
+    // Reads stop at the lexical gate on purpose. `listDir` exists to expand
+    // ignored directories, i.e. node_modules, where pnpm and npm hand out links
+    // into a store outside the checkout; refusing those would turn "expand
+    // node_modules" and "open the file I can see" into errors. Nothing in the
+    // file IPC surface creates such a link and every entry-creating call is
+    // real-path checked, so it has to have arrived in a repo the user chose to
+    // open, where the terminal tab beside the editor reads the same bytes.
+    // Writing through one still changes state outside the checkout, which is
+    // why the test above refuses it.
+    linkDir(outside, join(repo, 'escape'))
+    expect(await git.readFile(repo, 'escape/secret.txt')).toBe('do not touch\n')
+    expect((await git.listDir(repo, 'escape')).map((n) => n.name)).toContain('secret.txt')
+  })
+
   it('lets a link entry itself be renamed and binned', async () => {
     // Only the ANCESTORS are resolved: a symlink is a directory entry like any
     // other, and renaming or binning one edits the link, not its target.
@@ -385,5 +554,26 @@ describe('real-path containment', () => {
     expect(trashItem).toHaveBeenCalledWith(join(repo, 'renamed-link'))
     // The link's target is untouched by either operation.
     expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('do not touch\n')
+  })
+
+  it('resolves a linked entry to a path whose real target is outside the repo', () => {
+    // What this pins is `resolveInRepo` itself: given a link that leaves the
+    // checkout, it returns the lexical path unchanged, and that path's REAL
+    // target is outside. That is the stated negative in the API docs for
+    // `openPath` / `revealPath` / `openInTerminal` — those three contain the
+    // SPELLING, not the destination — and it is worth a test because the
+    // property is deliberate rather than accidental.
+    //
+    // Be precise about what it does NOT pin. The hand-offs live in
+    // `main/ipc.ts`, which no test imports (it pulls in electron, the sqlite
+    // repo and node-pty), so nothing here observes their wiring: swapping
+    // `worktreePath` to a real-path gate would leave this test green. Read it
+    // as "the gate those three call behaves this way", not as a regression
+    // guard on the call sites. Covering those properly needs a test that can
+    // load `ipc.ts`, which is a bigger change than this file.
+    linkDir(outside, join(repo, 'escape'))
+    const handedToTheOs = resolveInRepo(repo, 'escape/secret.txt')
+    expect(handedToTheOs).toBe(join(repo, 'escape', 'secret.txt'))
+    expect(realpathSync(handedToTheOs)).toBe(join(realpathSync(outside), 'secret.txt'))
   })
 })

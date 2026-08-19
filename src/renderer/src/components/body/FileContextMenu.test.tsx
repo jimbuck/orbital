@@ -211,8 +211,43 @@ describe('OS and git hand-offs', () => {
   it('reveals via showItemInFolder, not openPath', async () => {
     show(file)
     fireEvent.click(screen.getByText('Reveal in File Explorer'))
-    await waitFor(() => expect(bridge.revealPath).toHaveBeenCalledWith('C:\\repo\\src\\a.ts'))
+    await waitFor(() => expect(bridge.revealPath).toHaveBeenCalledWith('w1', 'src/a.ts'))
     expect(bridge.openPath).not.toHaveBeenCalled()
+  })
+
+  /*
+   * The OS hand-offs send the Worktree id and the RELATIVE path so main does
+   * the resolving. Sending the absolute path `resolvePath` returns would mean
+   * main accepting an absolute path from the renderer — which is exactly the
+   * hole these three used to be.
+   */
+  it('hands the OS a worktree id and a relative path, never an absolute one', async () => {
+    show(dir)
+    fireEvent.click(screen.getByText('Open Folder'))
+    await waitFor(() => expect(bridge.openPath).toHaveBeenCalledWith('w1', 'src'))
+    cleanup()
+
+    show(dir)
+    fireEvent.click(screen.getByText('Open in Terminal'))
+    await waitFor(() => expect(bridge.openInTerminal).toHaveBeenCalledWith('w1', 'src'))
+
+    // Copy Path is the only item left that wants an absolute string, and it is
+    // the only caller that still asks main to resolve one.
+    expect(bridge.resolvePath).not.toHaveBeenCalled()
+  })
+
+  it('shows a rejected path in the menu instead of closing it', async () => {
+    // Main rejects anything escaping the checkout; the message has to land
+    // where the user can read it, not vanish with the menu.
+    bridge.openPath = vi.fn(async () => {
+      throw new Error(
+        'Error invoking remote method \'orbital:openPath\': Error: "../x" escapes the Worktree'
+      )
+    })
+    show(dir)
+    fireEvent.click(screen.getByText('Open Folder'))
+    await waitFor(() => expect(screen.getByText('"../x" escapes the Worktree')).toBeTruthy())
+    expect(closed).toBe(0)
   })
 
   it('stages the file directly, with no confirm step', async () => {

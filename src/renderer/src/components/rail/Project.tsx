@@ -189,6 +189,8 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                   closeMenu()
                 }}
               />
+              {/* Clear Status acts on a Worktree row, so it can only appear when
+                  there is one. */}
               {root && (
                 <MenuItem
                   icon={<CircleOff size={13} strokeWidth={1.5} />}
@@ -199,11 +201,25 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                   }}
                 />
               )}
+              {/* The two OS hand-offs are NOT behind that guard, and must not be.
+                  A project's root Worktree row is created by
+                  `reconcileProjectWorktrees`, which gives up without writing any
+                  rows when `git worktree list` fails — a path that is not a git
+                  repo, or has gone unreadable, never gets one. That state is
+                  permanent, and it is exactly when a user wants to open the
+                  folder and find out why, so hiding both items there would take
+                  the tools away at the moment they are needed.
+
+                  They still don't send a path over the bridge: these two name
+                  the PROJECT and main reads its own stored `repoPath`, the same
+                  provenance as the Worktree path the `(worktreeId, path)` calls
+                  resolve against. What is not coming back is the renderer
+                  handing main an absolute path to open. */}
               <MenuItem
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
                 label="Open in Explorer"
                 onClick={() => {
-                  void window.orbital.openPath(project.repoPath)
+                  void window.orbital.openProjectPath(project.id)
                   closeMenu()
                 }}
               />
@@ -211,7 +227,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<Terminal size={13} strokeWidth={1.5} />}
                 label="Open in External Terminal"
                 onClick={() => {
-                  void window.orbital.openInTerminal(project.repoPath)
+                  void window.orbital.openProjectInTerminal(project.id)
                   closeMenu()
                 }}
               />

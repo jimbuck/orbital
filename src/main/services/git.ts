@@ -422,8 +422,22 @@ async function diff(repoPath: string, path: string, staged: boolean): Promise<Fi
  * of the operations create, rename or bin real files. A relative path from the
  * file tree is data, not a promise: a compromised renderer (or a bug that lets
  * repo content reach one of these calls) must not be able to walk out of the
- * checkout and rewrite the user's home directory. `resolveInRepo` is the single
- * gate every mutating operation goes through.
+ * checkout and rewrite the user's home directory. `resolveInRepo` is the gate
+ * for the file operations — the mutating ones defined here, the read/write pair
+ * further down, and, in `ipc.ts`, `resolvePath` plus the OS hand-offs (open /
+ * reveal / open-in-terminal), which resolve through it rather than being handed
+ * an absolute path to trust.
+ *
+ * It is NOT every renderer-supplied path in this file. `gitStage`, `gitUnstage`,
+ * `gitDiscard` and `gitDiff` also take a path the renderer chose and never call
+ * it; they hand it to `git` as a pathspec after `--` instead and lean on git's
+ * own containment, which is a different rule with a different shape. Git refuses
+ * a pathspec that resolves outside the repo — relative or absolute, "is outside
+ * repository" — but it happily accepts an ABSOLUTE path that lands inside, which
+ * `resolveInRepo` would reject outright. So these four are contained, just not
+ * to the same spelling rule as everything below. The one hole is `diff
+ * --no-index`, which bypasses pathspec checking entirely and does read outside;
+ * it predates this gate and is tracked separately.
  * -------------------------------------------------------------------------- */
 
 /**
@@ -444,9 +458,15 @@ const ROOTED = /^(?:[a-zA-Z]:|[\\/])/
  * This is the LEXICAL half of the gate — it reasons about the string only, and
  * so cannot see a symlinked directory that points out of the tree. Mutating
  * callers pair it with `resolveInRepoReal` below, which resolves the path's
- * ancestors on disk. Read-only callers (`resolvePath`, backing Copy Path and
- * the OS hand-offs) stop here: they touch nothing, and a syscall per menu click
- * to decide whether a path may be *shown* to the user buys nothing.
+ * ancestors on disk.
+ *
+ * The callers that stop HERE, and therefore get containment of the spelling
+ * rather than of the destination, are `resolvePath` (Copy Path, which returns a
+ * string and touches nothing), `readFile` / `readFileBase64` / `listDir`, and
+ * the three OS hand-offs in `ipc.ts`. Each of those is a deliberate choice
+ * argued where it is made — the reads just below, the hand-offs in `ipc.ts` —
+ * and for all of them a link committed inside the checkout still resolves
+ * through to whatever it points at.
  *
  * Containment is decided by `relative()`, deliberately NOT by a string prefix
  * test: `C:\repo-evil` starts with `C:\repo` yet is a different tree entirely.
@@ -849,13 +869,62 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
   return root
 }
 
+/* ----------------------------------------------------------------------------
+ * Which gate the read/write pair uses, and why they differ
+ *
+ * All four functions below take a path the RENDERER chose, so all four are
+ * containment-checked — before this they were bare `join(repoPath, relPath)`,
+ * which let `../../evil.txt` land wherever it liked.
+ *
+ * `writeFile` uses `resolveInRepoReal`, the same gate as every other mutating
+ * operation: writing THROUGH a symlink that leaves the checkout edits a file
+ * that is not in the checkout, and a link is a directory entry a merely-cloned
+ * repo can carry. Saving into a globally linked dependency — one put there by
+ * `npm link` / `pnpm link --global`, so the editor tree is really showing the
+ * package's own source directory somewhere else on the machine — is the
+ * concrete failure this refuses, and it is refused consistently with
+ * createFile / createDirectory / renamePath / trashPath.
+ *
+ * The three reads stop at the lexical `resolveInRepo`, deliberately:
+ *
+ *  - Cost. A read runs on every tree click, every lazy directory expand and
+ *    every image in a markdown preview; a write runs when a human presses save.
+ *    `resolveInRepoReal` walks the ancestor chain with `realpath`, so it is a
+ *    per-path syscall burst on the hot path and a single one on the cold path.
+ *  - What it would actually buy. Nothing in the file IPC surface creates a
+ *    symlink and every call that makes a directory entry is real-path gated, so
+ *    an escaping link has to have been committed in the repo the user chose to
+ *    open — where the same bytes are readable from the terminal tab beside the
+ *    editor. Nor is this the gate that stops a hostile renderer: one able to
+ *    call these unattended can also open a terminal tab and type into its PTY,
+ *    which is arbitrary command execution and is the whole point of the app.
+ *    What containment genuinely defends against is repo CONTENT and mistaken
+ *    call paths reaching main — a markdown `<img src="../../../.ssh/id_rsa">`
+ *    arriving at readFileBase64, a CLI argument arriving at readFile — and
+ *    neither of those involves a link at all.
+ *  - What it would cost in correctness. `listDir` exists to expand IGNORED
+ *    directories, i.e. `node_modules`, and some of what lives there is a link
+ *    out of the checkout: an `npm link` / `pnpm link --global` package, a yarn
+ *    `link:` or `portal:` dependency, or a workspace whose root sits ABOVE the
+ *    checkout. A plain install is NOT one of those — pnpm's default hoisted
+ *    layout has no symlinks under `node_modules`, `node-linker=isolated` links
+ *    only back into `node_modules/.pnpm`, and the global store is reached by
+ *    HARDLINK, which `realpath` does not follow. So the cost is narrower than
+ *    "every node_modules", but it is still real, and it lands as an error on a
+ *    read the user explicitly asked for: "expand node_modules" or "open the
+ *    file I can see in the tree" failing on a linked dependency.
+ *
+ * Reading through a link is the smaller exposure; writing through one is the
+ * one that changes state outside the checkout. The split follows that.
+ * -------------------------------------------------------------------------- */
+
 /**
  * Immediate children of an ignored directory, read from disk (git knows nothing
  * about them). Everything under an ignored directory is itself ignored; child
  * dirs again come back without children, for another lazy expand.
  */
 async function listDir(repoPath: string, relPath: string): Promise<FileNode[]> {
-  const entries = await readdir(join(repoPath, relPath), { withFileTypes: true })
+  const entries = await readdir(resolveInRepo(repoPath, relPath), { withFileTypes: true })
   const nodes: FileNode[] = entries.map((e) => {
     const p = relPath ? `${relPath}/${e.name}` : e.name
     return e.isDirectory()
@@ -867,17 +936,17 @@ async function listDir(repoPath: string, relPath: string): Promise<FileNode[]> {
 }
 
 async function readFile(repoPath: string, relPath: string): Promise<string> {
-  return fsReadFile(join(repoPath, relPath), 'utf8')
+  return fsReadFile(resolveInRepo(repoPath, relPath), 'utf8')
 }
 
 /** Raw file bytes as base64 — lets the renderer display binary content (images). */
 async function readFileBase64(repoPath: string, relPath: string): Promise<string> {
-  const buf = await fsReadFile(join(repoPath, relPath))
+  const buf = await fsReadFile(resolveInRepo(repoPath, relPath))
   return buf.toString('base64')
 }
 
 async function writeFile(repoPath: string, relPath: string, content: string): Promise<void> {
-  const full = join(repoPath, relPath)
+  const full = await resolveInRepoReal(repoPath, relPath)
   await mkdir(dirname(full), { recursive: true })
   await fsWriteFile(full, content, 'utf8')
 }
