@@ -44,7 +44,7 @@ export default function AddProject(): React.JSX.Element {
         type="button"
         onClick={choose}
         disabled={busy}
-        className="mt-4 flex w-full items-center justify-center gap-2.5 rounded-btn bg-accent px-4 py-3 text-[13px] font-bold text-[#06122e] hover:bg-[#6a9dff] transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+        className="mt-4 flex w-full items-center justify-center gap-2.5 rounded-btn bg-accent px-4 py-3 text-[13px] font-bold text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
       >
         {busy ? (
           <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />

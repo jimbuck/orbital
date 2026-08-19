@@ -2,6 +2,14 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.22.1](https://github.com/jimbuck/orbital/compare/v1.22.0...v1.22.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* ctrl+c copies the terminal selection to the clipboard ([#14](https://github.com/jimbuck/orbital/issues/14)) ([9a125b3](https://github.com/jimbuck/orbital/commit/9a125b3bb3debe7e9252d1bfe9ec751c3005b329))
+* render local images in markdown previews ([#15](https://github.com/jimbuck/orbital/issues/15)) ([676a59c](https://github.com/jimbuck/orbital/commit/676a59cb5ba58729d8d0ec188f8627ae52c74a6d))
+
 # [1.22.0](https://github.com/jimbuck/orbital/compare/v1.21.0...v1.22.0) (2026-08-13)
 
 

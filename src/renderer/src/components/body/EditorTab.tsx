@@ -6,6 +6,7 @@ import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useStore, activeWorktree } from '@renderer/store'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { useFileTree } from '@renderer/lib/fileTree'
+import { extOf, imageMime, resolveMarkdownImages } from '@renderer/lib/markdownAssets'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
 
@@ -30,7 +31,7 @@ function gitBadge(state: GitFileState): { letter: string; cls: string } {
     case 'conflicted':
       return { letter: 'U', cls: 'bg-red/15 text-red-2' }
     case 'untracked':
-      return { letter: '?', cls: 'bg-white/[0.06] text-muted' }
+      return { letter: '?', cls: 'bg-line-2 text-muted' }
     default:
       return { letter: 'M', cls: 'bg-amber/15 text-amber-2' }
   }
@@ -41,12 +42,6 @@ function gitBadge(state: GitFileState): { letter: string; cls: string } {
 type ViewMode = 'file' | 'diff' | 'preview'
 type PreviewKind = 'markdown' | 'html' | 'svg' | null
 
-function extOf(path: string): string {
-  const name = path.split('/').pop() ?? ''
-  const dot = name.lastIndexOf('.')
-  return dot === -1 ? '' : name.slice(dot + 1).toLowerCase()
-}
-
 /** Files that get a rendered Preview mode. */
 function previewKind(path: string): PreviewKind {
   const ext = extOf(path)
@@ -54,24 +49,6 @@ function previewKind(path: string): PreviewKind {
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'svg') return 'svg'
   return null
-}
-
-/* ---- Images --------------------------------------------------------------- */
-
-/** Binary image formats rendered directly in File mode (SVG stays text + Preview). */
-const IMAGE_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  bmp: 'image/bmp',
-  ico: 'image/x-icon'
-}
-
-function imageMime(path: string): string | null {
-  return IMAGE_MIME[extOf(path)] ?? null
 }
 
 /* ---- Syntax highlighting (shiki, loaded lazily) -------------------------- */
@@ -284,23 +261,89 @@ function mdCss(theme: ResolvedTheme): string {
  * markdown case we add allow-same-origin — with no scripts this is safe, and it's
  * needed so the PARENT can read the frame's DOM to intercept anchor clicks (per
  * the link-handling spec: plain click → internal browser tab, Ctrl/Cmd → external).
+ *
+ * A srcDoc frame has no usable base URL, so relative image references would all
+ * break; lib/markdownAssets inlines them as data: URLs before the document is
+ * written. That happens outside the frame, on parsed DOM, and adds no sandbox
+ * permissions — the frame stays script-free.
  */
-function Preview({
+export function Preview({
   kind,
   source,
+  path,
+  worktreeId,
   onLink
 }: {
   kind: Exclude<PreviewKind, null>
   source: string
+  /** Repo-relative path of the previewed file — the base for relative images. */
+  path: string
+  worktreeId: string | undefined
   onLink: (href: string, external: boolean) => void
 }): JSX.Element {
   const theme = useResolvedTheme()
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const doc = useMemo(() => {
-    if (kind !== 'markdown') return source
+  const [doc, setDoc] = useState('')
+  // Same request-id guard EditorTab uses for its loads: image resolution is
+  // async, so a slow render of the previous file must never land on top of a
+  // newer one after a fast file switch or another keystroke.
+  const reqRef = useRef(0)
+  // Identifies the *document* currently in the frame — see the staleness note in
+  // the effect below. Null while nothing trustworthy is on screen.
+  const shownRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const id = ++reqRef.current
+    // Identity of the thing being previewed: a file (or worktree) switch changes
+    // it, a keystroke or a theme flip does not.
+    const docId = JSON.stringify([worktreeId ?? '', kind, path])
+    const show = (html: string): void => {
+      if (reqRef.current !== id) return
+      shownRef.current = docId
+      setDoc(html)
+    }
+
+    if (kind !== 'markdown') {
+      show(source)
+      return
+    }
     const body = marked.parse(source, { async: false }) as string
-    return `<!doctype html><meta charset="utf-8"><style>${mdCss(theme)}</style><body>${body}</body>`
-  }, [kind, source, theme])
+    const wrap = (b: string): string =>
+      `<!doctype html><meta charset="utf-8"><style>${mdCss(theme)}</style><body>${b}</body>`
+    if (!worktreeId) {
+      show(wrap(body))
+      return
+    }
+
+    // Local images become data: URLs *before* the frame is written, so the
+    // preview never flashes broken images and is only rebuilt once. Cached
+    // images resolve in a microtask, which keeps typing and theme flips smooth.
+    //
+    // That still leaves a window (first render of a file, cold cache, slow IPC)
+    // in which the frame holds the previous render. Whether that is acceptable
+    // depends entirely on *what changed*, which is what shownRef tracks:
+    //
+    //  - A different file (or worktree) is now selected. What's on screen is
+    //    another document entirely, and showing it under this file's header is
+    //    simply false — blank the frame and let the new render fill it.
+    //  - The same file re-rendered after a keystroke or a theme flip. The last
+    //    good render is still an honest picture of that file, only a beat
+    //    behind, so holding it is the correct behaviour. Blanking here would
+    //    strobe the preview on every keypress — a far worse regression than the
+    //    momentary lag it would "fix".
+    if (shownRef.current !== docId) {
+      shownRef.current = null
+      setDoc('')
+    }
+
+    void resolveMarkdownImages(body, { worktreeId, mdPath: path })
+      .then((resolved) => show(wrap(resolved)))
+      .catch(() => {
+        // Resolution as a whole failed (it shouldn't — individual images already
+        // degrade on their own). Show the unresolved markdown rather than nothing.
+        show(wrap(body))
+      })
+  }, [kind, source, theme, path, worktreeId])
 
   // Intercept anchor clicks inside the (same-origin, script-free) markdown frame:
   // the sandbox would otherwise navigate the tiny iframe itself. Reattach on each
@@ -374,7 +417,7 @@ function ImageView({ src, alt }: { src: string; alt: string }): JSX.Element {
         src={src}
         alt={alt}
         onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-        className="min-h-0 max-h-full max-w-full rounded border border-line-2 object-contain [background:repeating-conic-gradient(#1a2029_0%_25%,#10141b_0%_50%)_0_0/16px_16px]"
+        className="min-h-0 max-h-full max-w-full rounded border border-line-2 object-contain [background:repeating-conic-gradient(var(--checker-a)_0%_25%,var(--checker-b)_0%_50%)_0_0/16px_16px]"
       />
       {dims && (
         <span className="flex-none font-mono text-[10px] text-faint">
@@ -695,7 +738,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                     <button
                       onClick={() => void save()}
                       disabled={!dirty}
-                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-[#06122e] hover:brightness-110 disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
+                      className={`flex items-center gap-1.5 rounded-chip bg-accent px-2.5 py-1 text-[11px] font-semibold text-on-accent hover:bg-accent-hover transition-colors disabled:pointer-events-none disabled:opacity-40 ${FOCUS}`}
                     >
                       <Save size={13} strokeWidth={1.5} />
                       Save
@@ -742,7 +785,13 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 </div>
               ) : mode === 'preview' && kind ? (
                 // Preview renders the draft, so unsaved edits show up live.
-                <Preview kind={kind} source={draft} onLink={onPreviewLink} />
+                <Preview
+                  kind={kind}
+                  source={draft}
+                  path={selected.path}
+                  worktreeId={worktreeId}
+                  onLink={onPreviewLink}
+                />
               ) : (
                 <CodeEditor path={selected.path} value={draft} onChange={setDraft} />
               )}

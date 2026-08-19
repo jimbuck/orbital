@@ -1,14 +1,25 @@
 import { useEffect, useState, type JSX } from 'react'
-import { Minus, Square, X, ChevronRight, RefreshCw, Globe } from 'lucide-react'
+import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
+import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
 
 interface MenuItem {
   label: string
   onClick?: () => void
   disabled?: boolean
   sep?: boolean
+  /**
+   * Present (true OR false) turns the row into a `menuitemradio`: it renders a
+   * check gutter and reports aria-checked. Absent leaves a plain `menuitem` with
+   * no gutter, so the ordinary commands keep their existing look.
+   */
+  checked?: boolean
+  /** Dimmed trailing text — used to show the OS preference 'System' would follow. */
+  hint?: string
+  /** A non-interactive group caption (e.g. "Theme") rather than a command. */
+  heading?: boolean
 }
 interface Menu {
   id: string
@@ -35,6 +46,14 @@ export default function TitleBar(): JSX.Element {
 
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [devMenu, setDevMenu] = useState(false)
+
+  // The picked mode drives the check mark. The 'System' row's hint is the OS
+  // preference itself — NOT the theme currently applied — because the question
+  // that row answers is "what would I get if I switched to System?". Someone on
+  // a light OS who has pinned Dark is exactly who opens this menu to decide, and
+  // echoing their pinned theme back would tell them the opposite of the truth.
+  const themeMode = useThemeMode()
+  const systemTheme = useSystemTheme()
 
   const activeWorktreeId = useStore((s) => s.activeWorktreeId)
   const servers = useStore((s) => (s.activeWorktreeId ? s.devServers[s.activeWorktreeId] : undefined)) ?? []
@@ -84,7 +103,17 @@ export default function TitleBar(): JSX.Element {
       items: [
         { label: 'All Tasks…', onClick: () => openModal('board') },
         { label: 'Reload', onClick: () => window.location.reload() },
-        { label: 'Toggle Developer Tools', onClick: () => window.orbital.toggleDevTools() }
+        { label: 'Toggle Developer Tools', onClick: () => window.orbital.toggleDevTools() },
+        { sep: true, label: '' },
+        { label: 'Theme', heading: true },
+        // Applies (and persists) on click through the same path the Settings
+        // modal uses, so the two controls always agree.
+        ...THEME_MODES.map<MenuItem>((mode) => ({
+          label: themeModeLabel(mode),
+          checked: themeMode === mode,
+          hint: mode === 'system' ? systemTheme : undefined,
+          onClick: () => setThemeMode(mode)
+        }))
       ]
     },
     {
@@ -149,24 +178,44 @@ export default function TitleBar(): JSX.Element {
               {openMenu === m.id && (
                 <div
                   role="menu"
-                  className="absolute left-0 top-[34px] z-50 min-w-[210px] rounded-b-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+                  className="absolute left-0 top-[34px] z-50 min-w-[210px] rounded-b-[9px] border border-line-strong bg-elev p-1 elev-menu"
                 >
                   {m.items.map((it, i) =>
                     it.sep ? (
-                      <div key={i} className="my-1 h-px bg-soft" />
+                      <div key={i} role="separator" className="my-1 h-px bg-soft" />
+                    ) : it.heading ? (
+                      <div
+                        key={i}
+                        role="presentation"
+                        className="px-2.5 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-[0.6px] text-faint"
+                      >
+                        {it.label}
+                      </div>
                     ) : (
                       <button
                         key={i}
                         type="button"
-                        role="menuitem"
+                        role={it.checked === undefined ? 'menuitem' : 'menuitemradio'}
+                        aria-checked={it.checked}
                         disabled={it.disabled}
                         // Preserve focus (see the menu button above) so Edit
                         // actions target the terminal/input, not this menuitem.
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => choose(it)}
-                        className="flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-[12px] font-medium text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent"
+                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] font-medium text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent"
                       >
-                        {it.label}
+                        {/* Reserve the gutter on every radio row so the labels
+                            line up whether or not that row is the selected one. */}
+                        {it.checked !== undefined && (
+                          <Check
+                            size={12}
+                            strokeWidth={2.5}
+                            aria-hidden
+                            className={`flex-none text-accent ${it.checked ? '' : 'invisible'}`}
+                          />
+                        )}
+                        <span className="min-w-0 truncate">{it.label}</span>
+                        {it.hint && <span className="ml-auto flex-none text-[11px] text-faint">{it.hint}</span>}
                       </button>
                     )
                   )}
@@ -219,7 +268,7 @@ export default function TitleBar(): JSX.Element {
                 <div className="fixed inset-0 z-40" onClick={() => setDevMenu(false)} />
                 <div
                   role="menu"
-                  className="absolute right-0 top-[30px] z-50 min-w-[190px] rounded-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+                  className="absolute right-0 top-[30px] z-50 min-w-[190px] rounded-[9px] border border-line-strong bg-elev p-1 elev-menu"
                 >
                   {servers.map((url) => (
                     <button

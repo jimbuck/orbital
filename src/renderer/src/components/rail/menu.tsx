@@ -40,7 +40,7 @@ export function ContextMenu({
       <div
         role="menu"
         style={{ left: pos.x, top: pos.y, width }}
-        className="fixed z-50 rounded-[9px] border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+        className="fixed z-50 rounded-[9px] border border-line-strong bg-elev p-1 elev-menu"
       >
         {children}
       </div>

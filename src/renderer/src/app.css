@@ -47,6 +47,14 @@
   --color-diff-del: #ffb0b0;
   --color-diff-hunk: #7d9cff;
 
+  /* accent companions — the ink that sits ON an accent fill, and the fill's
+     hover shade. Dark mode lightens on hover; the light block flips both. */
+  --color-on-accent: #06122e;
+  --color-accent-hover: #6a9dff;
+
+  /* modal scrim (alpha baked in, so bg-scrim is one token per theme) */
+  --color-scrim: rgb(5 7 11 / 0.7);
+
   /* type */
   --font-sans: 'Hanken Grotesk', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -73,6 +81,26 @@
  * ========================================================================== */
 :root {
   color-scheme: dark;
+
+  /* Non-@theme custom properties. Tailwind INLINES shadow/gradient values into
+     the generated utility rather than emitting a var(), so a redeclared
+     --shadow-* token would never take effect at runtime. These are therefore
+     plain properties, consumed by the .elev-* classes below and by explicit
+     var() references in the components that need them. */
+
+  /* Elevation. A dark UI needs a deep, near-black shadow to lift a menu off the
+     surface behind it; on white that same alpha reads as soot, so the light
+     block trades depth for a softer, cooler, shorter throw. */
+  --shadow-menu: 0 14px 36px rgb(0 0 0 / 0.55);
+  --shadow-modal: 0 24px 70px rgb(0 0 0 / 0.6);
+
+  /* Scrollbar thumb: a neutral grey that has to stay visible against both a
+     near-black pane and a white one, hence a per-theme value. */
+  --scrollbar-thumb: rgb(128 135 150 / 0.32);
+
+  /* Transparency checkerboard behind images in the editor's image view. */
+  --checker-a: #1a2029;
+  --checker-b: #10141b;
 }
 :root[data-theme='light'] {
   color-scheme: light;
@@ -120,6 +148,22 @@
   --color-diff-add: #1a7f4b;
   --color-diff-del: #c0392b;
   --color-diff-hunk: #3b5bdb;
+
+  /* Accent companions. The light accent is dark enough that the dark navy ink
+     used on the pale dark-mode accent drops to ~3.9:1 on it — white clears 4.5:1
+     — and "hover = lighter" would read as the fill fading out, so hover darkens. */
+  --color-on-accent: #ffffff;
+  --color-accent-hover: #1d4fb8;
+
+  /* A near-black scrim under a white modal is far heavier than it needs to be. */
+  --color-scrim: rgb(15 23 42 / 0.4);
+
+  /* Non-@theme properties (see :root above for why they are not tokens). */
+  --shadow-menu: 0 10px 26px rgb(15 23 42 / 0.16);
+  --shadow-modal: 0 20px 56px rgb(15 23 42 / 0.22);
+  --scrollbar-thumb: rgb(71 81 95 / 0.32);
+  --checker-a: #e4e8ef;
+  --checker-b: #f6f8fb;
 }
 
 @keyframes pulseDot {
@@ -181,7 +225,7 @@
     height: 8px;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(128 135 150 / 0.32);
+    background: var(--scrollbar-thumb);
     border-radius: 6px;
   }
   ::-webkit-scrollbar-track {
@@ -199,6 +243,18 @@
   textarea,
   .allow-select {
     user-select: text;
+  }
+}
+
+@layer components {
+  /* Elevation for floating surfaces. A class rather than a `shadow-[…]`
+     arbitrary value so the shadow is a single theme-swappable definition — see
+     --shadow-menu / --shadow-modal above for why these cannot be @theme tokens. */
+  .elev-menu {
+    box-shadow: var(--shadow-menu);
+  }
+  .elev-modal {
+    box-shadow: var(--shadow-modal);
   }
 }
 

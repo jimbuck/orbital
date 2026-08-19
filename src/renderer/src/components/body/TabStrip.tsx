@@ -292,7 +292,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             <div className="fixed inset-0 z-40" onClick={() => setAddOpen(false)} />
             <div
               role="menu"
-              className="absolute left-0 top-8 z-[41] w-40 rounded-card border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+              className="absolute left-0 top-8 z-[41] w-40 rounded-card border border-line-strong bg-elev p-1 elev-menu"
             >
               {addOptions.map(({ type, label, config, provider }) => (
                 <button
@@ -354,7 +354,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             <div className="fixed inset-0 z-40" onClick={() => setPaneMenu(false)} />
             <div
               role="menu"
-              className="absolute right-0 top-8 z-[41] w-44 rounded-card border border-line-strong bg-elev p-1 shadow-[0_14px_36px_rgba(0,0,0,0.55)]"
+              className="absolute right-0 top-8 z-[41] w-44 rounded-card border border-line-strong bg-elev p-1 elev-menu"
             >
               <PaneMenuItem
                 icon={<SplitSquareHorizontal size={14} strokeWidth={1.5} />}

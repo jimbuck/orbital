@@ -32,7 +32,7 @@ import Workspaces from './Workspaces'
 /** Primary (accent) action button. */
 export const primaryBtn =
   'inline-flex items-center justify-center gap-2 rounded-btn px-[18px] py-[9px] text-[12.5px] font-bold ' +
-  'bg-accent text-[#06122e] hover:bg-[#6a9dff] transition-colors no-drag ' +
+  'bg-accent text-on-accent hover:bg-accent-hover transition-colors no-drag ' +
   'disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-accent/60 outline-none'
 
 /** Secondary / Cancel button. */
@@ -84,7 +84,7 @@ export function ModalShell({
   return (
     <div
       style={{ width, minHeight, maxWidth: '94vw', animation: 'panelIn .16s ease-out' }}
-      className="flex max-h-[84vh] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
+      className="flex max-h-[84vh] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal elev-modal"
     >
       <header className="flex flex-none items-center justify-between px-[18px] py-4 border-b border-soft">
         <div className="min-w-0">
@@ -190,7 +190,7 @@ function FullBoard(): React.JSX.Element {
   return (
     <div
       style={{ animation: 'panelIn .16s ease-out' }}
-      className="flex h-[86vh] w-[2360px] max-w-[95vw] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal shadow-[0_24px_70px_rgba(0,0,0,.6)]"
+      className="flex h-[86vh] w-[2360px] max-w-[95vw] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal elev-modal"
     >
       <header className="flex flex-none items-center justify-between px-[18px] py-[15px] border-b border-soft">
         <div className="min-w-0">
@@ -319,7 +319,7 @@ export default function ModalRoot(): React.JSX.Element | null {
         <div
           key={`${i}:${entry.type}`}
           style={{ animation: 'overlayIn .12s ease-out', zIndex: 50 + i * 10 }}
-          className="fixed inset-0 grid place-items-center bg-[#05070b]/70 p-8 no-drag"
+          className="fixed inset-0 grid place-items-center bg-scrim p-8 no-drag"
         >
           {entry.type === 'settings' && <Settings />}
           {entry.type === 'addProject' && <AddProject />}
