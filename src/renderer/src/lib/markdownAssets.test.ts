@@ -453,11 +453,16 @@ const IMG_B64 = 1_000
 const ENTRY_BYTES = `data:image/png;base64,${'A'.repeat(IMG_B64)}`.length
 
 /**
- * A bridge whose reads all return the SAME-sized payload, so a budget can be
- * expressed in whole images ("two fit") rather than in the incidental length of
- * whichever path the test happened to pick.
+ * A bridge whose reads return `units(path)` whole images' worth of payload, so a
+ * budget can be expressed in whole images ("two fit") rather than in the
+ * incidental length of whichever path the test happened to pick. `units` is what
+ * lets a test build an image bigger than the entire budget, which is the one
+ * shape the eviction rule has a special case for.
  */
-function makeSizedBridge(fail: (path: string) => boolean = () => false): {
+function makeSizedBridge(
+  fail: (path: string) => boolean = () => false,
+  units: (path: string) => number = () => 1
+): {
   bridge: { readFileBase64: (worktreeId: string, path: string) => Promise<string> }
   reads: string[]
 } {
@@ -467,7 +472,7 @@ function makeSizedBridge(fail: (path: string) => boolean = () => false): {
       readFileBase64: async (worktreeId: string, path: string): Promise<string> => {
         reads.push(`${worktreeId}:${path}`)
         if (fail(path)) throw new Error('ENOENT')
-        return 'A'.repeat(IMG_B64)
+        return 'A'.repeat(IMG_B64 * units(path))
       }
     },
     reads
@@ -475,13 +480,27 @@ function makeSizedBridge(fail: (path: string) => boolean = () => false): {
 }
 
 /**
- * Resolve a one-image document. Every assertion below is made on the bridge's
- * read log: a path that is still cached is never read again, and one that was
- * evicted is — which is the only externally visible consequence of the cache's
- * policy, and the one that actually costs IPC.
+ * Resolve a document listing `paths` as images, in that order.
+ *
+ * Document order is load-bearing for eviction, which is why these tests can't
+ * all be one image at a time: reads are charged in the order they settle, and
+ * the entry the budget spares is the most recently used one. A one-image
+ * document is the single shape where "the entry being charged" and "the last
+ * entry in the map" cannot come apart.
+ *
+ * Every assertion below is made on the bridge's read log: a path that is still
+ * cached is never read again, and one that was evicted is — which is the only
+ * externally visible consequence of the cache's policy, and the one that
+ * actually costs IPC.
  */
+function loadDoc(paths: readonly string[]): Promise<string> {
+  const html = paths.map((path) => `<img src="${path}">`).join('')
+  return resolveMarkdownImages(html, { worktreeId: 'w1', mdPath: 'guide.md' })
+}
+
+/** Resolve a one-image document. */
 function load(path: string): Promise<string> {
-  return resolveMarkdownImages(`<img src="${path}">`, { worktreeId: 'w1', mdPath: 'guide.md' })
+  return loadDoc([path])
 }
 
 describe('markdown asset cache policy', () => {
@@ -518,17 +537,81 @@ describe('markdown asset cache policy', () => {
     expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:a.png'])
   })
 
-  it('keeps the newest entry even when it alone exceeds the budget', async () => {
+  it('keeps a lone image that by itself exceeds the budget', async () => {
     const b = makeSizedBridge()
     __setMarkdownAssetBridge(b.bridge)
     __setMarkdownAssetCacheLimits({ maxBytes: 1 })
 
-    // Evicting the entry that was just inserted would mean re-reading the image
+    // Evicting the entry whose read just landed would mean re-reading the image
     // over IPC on every keystroke — the exact cost the cache exists to avoid,
     // and worst on the very file that triggers it.
+    //
+    // This is only the easy half of that claim, and for a long time it was the
+    // whole of what was tested: in a one-image document the entry being charged
+    // is also the last entry in the map, so a rule that spares either one looks
+    // identical. The two tests below are the ones that can tell them apart.
     await load('huge.png')
     await load('huge.png')
     expect(b.reads).toEqual(['w1:huge.png'])
+  })
+
+  it('keeps an oversized image charged before a smaller one in the same document', async () => {
+    const b = makeSizedBridge(
+      () => false,
+      (path) => (path === 'huge.png' ? 3 : 1)
+    )
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    await loadDoc(['huge.png', 'small.png'])
+    expect(b.reads).toEqual(['w1:huge.png', 'w1:small.png'])
+
+    // `huge` settles first and overshoots the budget on its own, so its charge is
+    // the one that has to evict. The entry spared used to be the map tail —
+    // `small`, purely because the author listed it second — which left `huge`
+    // evicting *itself* the instant its read landed, and the next render reading
+    // the largest image in the document all over again.
+    await load('huge.png')
+    expect(b.reads).toEqual(['w1:huge.png', 'w1:small.png'])
+  })
+
+  it('keeps an oversized image charged after a smaller one in the same document', async () => {
+    const b = makeSizedBridge(
+      () => false,
+      (path) => (path === 'huge.png' ? 3 : 1)
+    )
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    // The mirror image of the case above: same two images, opposite order, so the
+    // oversized charge arrives last instead of first. The guarantee is about the
+    // entry being charged, so it must not depend on where in the document it sat.
+    await loadDoc(['small.png', 'huge.png'])
+    expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png'])
+
+    await load('huge.png')
+    expect(b.reads).toHaveLength(2)
+
+    // What the rule does *not* buy, stated so nobody reads more into it than is
+    // there: this document's working set is four images' worth against a
+    // two-image budget, so `small` was evicted to pay for `huge` and the next
+    // reference to it costs a read. Sparing one entry bounds the overshoot of a
+    // single charge; it is not a fix for a working set that doesn't fit.
+    await load('small.png')
+    expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png', 'w1:small.png'])
+
+    // With only two images the assertions above hold under the old rule too:
+    // the entry charged last is also the map tail, so sparing either spares the
+    // same one. Give the oversized image a neighbour on each side and the two
+    // rules come apart again: `tiny` is the map tail, while `huge` is the entry
+    // whose charge does the evicting and so the one that has to survive.
+    __resetMarkdownAssetCache()
+    b.reads.length = 0
+    await loadDoc(['small.png', 'huge.png', 'tiny.png'])
+    expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png', 'w1:tiny.png'])
+
+    await load('huge.png')
+    expect(b.reads).toHaveLength(3)
   })
 
   it('bounds the map by entry count too, so cached failures cannot pile up', async () => {

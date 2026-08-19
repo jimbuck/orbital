@@ -321,18 +321,41 @@ function charge(key: string, entry: CacheEntry, bytes: number): void {
   if (cache.get(key) !== entry) return
   entry.bytes = bytes
   cacheBytes += bytes
+  // A read that just landed is by definition the most recent use of its key, and
+  // {@link evict} spares exactly one entry: the Map tail. Without this touch the
+  // spared entry was whatever key happened to sit last in insertion order, which
+  // is the entry being charged only in a document with a single image. Given
+  // `<img huge><img small>`, `huge` charged first, overshot the budget, and
+  // evicted *itself* the instant it settled — so the preview re-read the largest
+  // image in the document over IPC on every keystroke, which is precisely the
+  // cost the spare-one-entry rule exists to prevent. Touching first is what makes
+  // the entry the rule spares and the entry being charged the same entry.
+  touch(key, entry)
   evict()
 }
 
 /**
  * Evict least-recently-used entries until both budgets are satisfied.
  *
- * The loop stops at `cache.size > 1` rather than `> 0`: an image that is on its
- * own bigger than the entire budget would otherwise evict itself the instant it
- * settled, so the preview would re-read it over IPC on every keystroke — exactly
- * the cost this cache exists to prevent, at its worst on the file where it hurts
- * most. Keeping the newest entry overshoots the budget by at most one image,
- * which is memory the visible `srcDoc` is holding anyway.
+ * The loop stops at `cache.size > 1` rather than `> 0`, so the Map tail — the
+ * most recently used entry — is always spared. Every caller arranges for the
+ * tail to be the entry it is about to serve: the freshly inserted one on the
+ * insert path, the one whose read just settled in {@link charge} (which touches
+ * it first, for exactly this reason), and the most recently used one when a test
+ * lowers the budget. An image that is on its own bigger than the entire budget
+ * would otherwise evict itself the instant it settled, so the preview would
+ * re-read it over IPC on every keystroke — the cost this cache exists to prevent,
+ * at its worst on the file where it hurts most.
+ *
+ * Precisely what that buys, and what it does not: a charge overshoots the budget
+ * by at most the one entry it just charged, which is memory the visible `srcDoc`
+ * is holding anyway, and that entry is guaranteed to survive its own charge. It
+ * is *not* a guarantee that an oversized image stays cached across renders. When
+ * a document's whole working set exceeds the budget, each image loaded in a pass
+ * evicts one loaded earlier in the same pass, and the next pass re-reads it —
+ * the classic LRU sequential-scan cliff, which drops the hit rate to zero rather
+ * than degrading it. Fixing that needs a "don't evict anything touched during the
+ * current pass" rule, i.e. a notion of a pass; that is deliberately not here.
  */
 function evict(): void {
   while (cache.size > 1 && (cacheBytes > cacheMaxBytes || cache.size > cacheMaxEntries)) {
