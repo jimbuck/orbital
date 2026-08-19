@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
-import type { Settings as SettingsModel, AgentConfig, ProfileDirInfo } from '@shared/types'
+import type { Settings as SettingsModel, SettingsPatch, AgentConfig, ProfileDirInfo } from '@shared/types'
 import { setThemeMode, themeModeLabel, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
 import { SegmentedControl } from '../SegmentedControl'
 import {
@@ -77,6 +77,30 @@ function AlertRow({
 
 const envChip =
   'inline-flex items-center gap-2 rounded-[7px] bg-accent/10 border border-accent/25 pl-[11px] pr-[9px] py-[5px] font-mono text-[11.5px] text-blue'
+
+/**
+ * Reduce the modal's form values to just the ones that differ from `current`,
+ * so Save writes a patch of what the user actually touched.
+ *
+ * The working copies are seeded when the modal opens and the modal can sit open
+ * for a long time, while the machine-global settings are shared with every other
+ * workspace instance. Saving the untouched fields back would push this modal's
+ * opening snapshot over anything that changed in between — the shell another
+ * window just picked, say. Values are compared as JSON so nested ones (the alerts
+ * object, the agent-profile array) match by content rather than identity; every
+ * settings field is a plain JSON value, which is also how they are persisted. A
+ * false difference (same content, different key order) is harmless: the patch
+ * then writes a value that already equals the stored one.
+ */
+function changedOnly(edited: SettingsPatch, current: SettingsModel | null): SettingsPatch {
+  // Nothing loaded to diff against — send the form as-is rather than nothing.
+  if (!current) return edited
+  const patch: Record<string, unknown> = {}
+  for (const key of Object.keys(edited) as (keyof SettingsModel)[]) {
+    if (JSON.stringify(edited[key]) !== JSON.stringify(current[key])) patch[key] = edited[key]
+  }
+  return patch as SettingsPatch
+}
 
 /** Normalized view of one installable file, whichever kind it is. */
 interface InstallState {
@@ -370,6 +394,10 @@ export default function Settings(): React.JSX.Element {
   // a change made from the View menu while this modal is open shows up here, and
   // Save can never write back a stale theme over it.
   const theme = useThemeMode()
+  // Ties the theme row's "applies immediately" note to the control via
+  // aria-describedby. Generated rather than hard-coded so the id stays unique
+  // even if this modal is ever rendered twice.
+  const themeHintId = useId()
   // The workspace's agent profiles. Existing installs lack the key -> default lineup.
   const [agents, setAgents] = useState<AgentConfig[]>(() => settings?.agents ?? defaultAgentConfigs())
   // Extra-CLI-args fields edit as raw text per profile; parsed into argv on save.
@@ -478,15 +506,18 @@ export default function Settings(): React.JSX.Element {
             args: parseArgsString(argsDrafts[a.id] ?? formatArgsString(a.args ?? []))
           }))
         ) ?? []
-      await window.orbital.setSettings({
+      // `theme` is deliberately absent: it is persisted the moment it is clicked
+      // (see the Appearance control), so including it here would only give Save a
+      // chance to write a stale value back over a later View-menu change.
+      const edited = {
         defaultShell,
         alerts,
         envSyncPatterns: patterns,
         periodicFetch,
         debugLogging,
-        agents: cleanedAgents,
-        theme
-      })
+        agents: cleanedAgents
+      }
+      await window.orbital.setSettings(changedOnly(edited, settings))
       closeModal()
     } finally {
       setSaving(false)
@@ -578,7 +609,19 @@ export default function Settings(): React.JSX.Element {
       {/* Appearance */}
       <div className={sectionLabel}>Appearance</div>
       <div className="mt-2.5 flex items-center justify-between gap-4">
-        <span className="text-[12.5px] text-text-2">Theme</span>
+        <div className="min-w-0">
+          <div className="text-[12.5px] text-text-2">Theme</div>
+          {/* Every other field in this modal is a working copy: committed on Save,
+              thrown away on Cancel. Theme is not, and nothing about a segmented
+              control says so — a user who previews Dark and then hits Cancel is
+              entitled to expect the old theme back, and gets Dark. The behaviour
+              is right (see the control below), so the fix is to say it, in the
+              same muted-hint treatment the alert rows use rather than a callout
+              that would shout about the quietest row on the page. */}
+          <div id={themeHintId} className="mt-px text-[11px] text-dim">
+            Applies immediately — Cancel won&apos;t undo it.
+          </div>
+        </div>
         {/* 3-way segmented control. Unlike the other fields here it applies (and
             persists) on selection rather than on Save, because the View menu
             offers the same three options and does the same — one shared write
@@ -591,6 +634,7 @@ export default function Settings(): React.JSX.Element {
           options={THEME_MODES.map((mode) => ({ value: mode, label: themeModeLabel(mode) }))}
           value={theme}
           onChange={setThemeMode}
+          describedBy={themeHintId}
         />
       </div>
 

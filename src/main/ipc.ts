@@ -21,6 +21,7 @@ import {
   type SplitWhere,
   type TaskPatch,
   type ProjectAgentPatch,
+  type SettingsPatch,
   type Worktree,
   type Tab,
   type ControlRequest,
@@ -449,15 +450,18 @@ export function registerIpc(): void {
 
   // ---- state / settings ----
   h(IPC.getState, () => runtime.appState())
-  h(IPC.setSettings, (_e, settings) => {
-    // Splits across the global store and the workspace YAML behind the facade.
-    const s = setSettings(settings)
+  h(IPC.setSettings, (_e, patch: SettingsPatch) => {
+    // Merges the patch's keys across the global store and the workspace YAML
+    // behind the facade, leaving every key the renderer did not send untouched.
+    const s = setSettings(patch)
     // Env-sync patterns are a workspace setting — refresh every project's watcher.
     for (const project of repo.projects.list()) runtime.ensureEnvWatcher(project.id)
     // Toggling periodicFetch starts/stops the background fetcher live.
     runtime.configureFetch()
-    // Toggling debug logging takes effect immediately (no restart needed).
-    logger.setEnabled(settings.debugLogging)
+    // Toggling debug logging takes effect immediately (no restart needed). Read
+    // from the merged result, not the patch: a patch that leaves debugLogging out
+    // must not be read as "turn it off".
+    logger.setEnabled(s.debugLogging)
     broadcast()
     return s
   })
