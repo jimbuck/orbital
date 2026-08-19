@@ -447,10 +447,15 @@ const ROOTED = /^(?:[a-zA-Z]:|[\\/])/
  * This is the LEXICAL half of the gate — it reasons about the string only, and
  * so cannot see a symlinked directory that points out of the tree. Mutating
  * callers pair it with `resolveInRepoReal` below, which resolves the path's
- * ancestors on disk. Read-only callers stop here — `resolvePath` (Copy Path and
- * the OS hand-offs, where a syscall per menu click to decide whether a path may
- * be *shown* buys nothing) and `readFile` / `readFileBase64` / `listDir`, whose
- * split from the writing side is argued where they are defined.
+ * ancestors on disk.
+ *
+ * The callers that stop HERE, and therefore get containment of the spelling
+ * rather than of the destination, are `resolvePath` (Copy Path, which returns a
+ * string and touches nothing), `readFile` / `readFileBase64` / `listDir`, and
+ * the three OS hand-offs in `ipc.ts`. Each of those is a deliberate choice
+ * argued where it is made — the reads just below, the hand-offs in `ipc.ts` —
+ * and for all of them a link committed inside the checkout still resolves
+ * through to whatever it points at.
  *
  * Containment is decided by `relative()`, deliberately NOT by a string prefix
  * test: `C:\repo-evil` starts with `C:\repo` yet is a different tree entirely.
@@ -874,11 +879,17 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
  *    every image in a markdown preview; a write runs when a human presses save.
  *    `resolveInRepoReal` walks the ancestor chain with `realpath`, so it is a
  *    per-path syscall burst on the hot path and a single one on the cold path.
- *  - What it would actually buy. A renderer cannot CREATE an escaping link —
- *    there is no symlink IPC, and every path that makes a directory entry is
- *    already gated — so the link would have to be committed in the repo the
- *    user chose to open. At that point the same bytes are readable from the
- *    terminal tab sitting next to the editor.
+ *  - What it would actually buy. Nothing in the file IPC surface creates a
+ *    symlink and every call that makes a directory entry is real-path gated, so
+ *    an escaping link has to have been committed in the repo the user chose to
+ *    open — where the same bytes are readable from the terminal tab beside the
+ *    editor. Nor is this the gate that stops a hostile renderer: one able to
+ *    call these unattended can also open a terminal tab and type into its PTY,
+ *    which is arbitrary command execution and is the whole point of the app.
+ *    What containment genuinely defends against is repo CONTENT and mistaken
+ *    call paths reaching main — a markdown `<img src="../../../.ssh/id_rsa">`
+ *    arriving at readFileBase64, a CLI argument arriving at readFile — and
+ *    neither of those involves a link at all.
  *  - What it would cost in correctness. `listDir` exists to expand IGNORED
  *    directories, i.e. `node_modules` — where pnpm and npm both hand out
  *    symlinks into a store outside the checkout. Real-path containment would

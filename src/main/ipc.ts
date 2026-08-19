@@ -969,13 +969,39 @@ export function registerIpc(): void {
    * resolution here, so the absolute path handed to Electron is one main
    * derived itself from a checkout it knows about.
    *
-   * The lexical gate is the right one here. These operations hand a path to
-   * the OS on an explicit user click, and the thing the user clicked is the
-   * entry as the tree spells it: resolving links would refuse to open a
-   * junction-backed folder that is plainly sitting in the checkout. The escape
-   * real-path resolution would catch — a committed symlink aimed at an
-   * executable — is not a new capability either, because anyone who can commit
-   * that link can commit the executable beside it.
+   * The gate is the LEXICAL `resolveInRepo`, on all three, and that is a
+   * decision rather than an oversight — so it is worth writing down what it
+   * does not catch. A symlink or junction committed inside the checkout is a
+   * directory entry like any other; the OS follows it, so `link/app.exe` (or
+   * `link` itself) can resolve anywhere on the machine and still be handed to
+   * `shell.openPath`. `resolveInRepoReal` was weighed for this and turned down:
+   *
+   *  - It would only half-close it. That gate resolves the ANCESTORS and leaves
+   *    the final segment alone on purpose (so a link entry can be renamed and
+   *    binned like the ordinary directory entry it is), which means the natural
+   *    shape here — one committed symlink aimed at an executable, named
+   *    directly — sails straight through it. Only a target NESTED under a
+   *    linked directory would be refused. A leaf-resolving variant would close
+   *    that, at the cost below, and it exists nowhere else in the codebase.
+   *  - The cost is a false rejection of exactly what the user clicked. These
+   *    three act on an entry the tree is showing: a junction-backed folder
+   *    sitting in the checkout, or any file inside a pnpm-linked `node_modules`
+   *    package, which is precisely where "Reveal in File Explorer" earns its
+   *    keep. Refusing to reveal a file the tree just drew is a bug the user
+   *    meets; the escape is one they have to be attacked with.
+   *  - And it would not buy the guarantee it looks like it buys. Containment
+   *    here is least-authority scoping — main never takes an absolute path from
+   *    the renderer on faith — not an exploit barrier, because there isn't one
+   *    to be had at this layer: a payload committed IN the checkout satisfies
+   *    every containment gate there is, so real-path resolution changes which
+   *    file can be launched, not whether one can be. And a renderer compromised
+   *    enough to call these unattended already has `IPC.createTab` +
+   *    `IPC.terminalInput`, i.e. arbitrary commands in a PTY, by design —
+   *    Orbital is a terminal multiplexer. Nothing decided here narrows that.
+   *
+   * What the gate does earn is real: the renderer can only name entries in a
+   * checkout main already knows about, `..` and absolute paths are refused with
+   * a message, and every caller is an explicit click on a visible entry.
    *
    * An empty `path` means the checkout root, which is what the rail's "Open in
    * Explorer" / "Open in External Terminal" want.

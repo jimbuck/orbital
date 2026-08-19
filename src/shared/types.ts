@@ -941,11 +941,20 @@ export interface OrbitalApi {
   gitDiff(worktreeId: string, path: string, staged: boolean): Promise<FileDiff>
   fileTree(worktreeId: string): Promise<FileNode[]>
   /*
-   * `path` on every file call below is CHECKOUT-RELATIVE and main rejects
-   * anything that resolves outside the Worktree. An absolute path is not an
-   * escape hatch, it is an error: it was never honoured (main joins it onto the
-   * checkout root, producing `C:\repo\C:\…`, which no filesystem will open) and
-   * it is now refused with a message that says so.
+   * `path` on every file call below is CHECKOUT-RELATIVE, and main refuses any
+   * spelling that leaves the Worktree: `../…` traversal, and an absolute path —
+   * which is not an escape hatch but an error. It was never honoured (main
+   * joins it onto the checkout root, producing `C:\repo\C:\…`, which no
+   * filesystem will open) and is now refused with a message that says so.
+   *
+   * Be precise about how far that reaches. For the reads — `listDir`,
+   * `readFile`, `readFileBase64` — the check is LEXICAL: it reasons about the
+   * string, so a symlink or junction committed INSIDE the checkout is followed
+   * like any other entry, and the bytes finally read can live outside. That is
+   * deliberate; `node_modules` is full of such links. `writeFile` additionally
+   * resolves the path's ancestors on disk and refuses to write THROUGH a link
+   * that leaves the checkout, as do the four mutating calls below it. The
+   * argument for the split is in `main/services/git.ts`, beside the functions.
    */
   /** Immediate children of an ignored directory (not enumerated in fileTree). */
   listDir(worktreeId: string, path: string): Promise<FileNode[]>
@@ -966,9 +975,10 @@ export interface OrbitalApi {
   /** Send a file/directory to the OS recycle bin (recoverable, unlike unlink). */
   trashPath(worktreeId: string, path: string): Promise<void>
   /**
-   * Absolute path of a checkout-relative path, for the OS-level actions
-   * (reveal, open with the default app, open a terminal there) and for
-   * "Copy Path". Rejects for anything outside the Worktree.
+   * Absolute path of a checkout-relative path, for "Copy Path". Rejects any
+   * path that LEXICALLY leaves the Worktree (`../…`, absolute); it does not
+   * realpath, so the string handed back can still point through a link
+   * committed in the checkout to a target outside it.
    */
   resolvePath(worktreeId: string, path: string): Promise<string>
 
@@ -993,20 +1003,29 @@ export interface OrbitalApi {
    * absolute one, and main resolves it against the Worktree — an absolute path
    * from here would be a request for main to launch any file on the machine.
    * `''` means the Worktree root, which is what the rail's "Open in Explorer"
-   * asks for. Rejects for anything outside the Worktree.
+   * asks for.
+   *
+   * Rejects any `path` that LEXICALLY leaves the Worktree (`../…`, absolute).
+   * It does NOT realpath, so this is not a promise that what opens lives inside
+   * the checkout: a symlink or junction committed in the repo is followed by
+   * the OS like any other entry, and `link/app.exe` — or `link` itself — can
+   * resolve anywhere. Deliberate, and argued in the OS hand-off block in
+   * `main/ipc.ts`.
    */
   openPath(worktreeId: string, path: string): Promise<void>
   /**
    * Show a file/folder SELECTED in its containing folder (`showItemInFolder`).
    * Distinct from `openPath`, which opens the item itself — for a file that
    * would launch its default application instead of revealing it. Same
-   * `(worktreeId, path)` contract, resolved and containment-checked in main.
+   * `(worktreeId, path)` contract, resolved in main behind the same lexical
+   * containment check, with the same link caveat as `openPath`.
    */
   revealPath(worktreeId: string, path: string): Promise<void>
   /**
    * Open an external terminal window at a folder in a Worktree (Windows
    * Terminal / PowerShell on Windows). Same `(worktreeId, path)` contract,
-   * resolved and containment-checked in main.
+   * resolved in main behind the same lexical containment check, with the same
+   * link caveat as `openPath` — the path is the new shell's working directory.
    */
   openInTerminal(worktreeId: string, path: string): Promise<void>
   /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */

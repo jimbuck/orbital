@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync
@@ -531,12 +532,12 @@ describe('real-path containment', () => {
     // Reads stop at the lexical gate on purpose. `listDir` exists to expand
     // ignored directories, i.e. node_modules, where pnpm and npm hand out links
     // into a store outside the checkout; refusing those would turn "expand
-    // node_modules" and "open the file I can see" into errors. A renderer
-    // cannot plant such a link either — nothing in the IPC surface creates one,
-    // and every entry-creating path is real-path checked — so it has to have
-    // arrived in a repo the user chose to open, where the terminal tab beside
-    // the editor reads the same bytes. Writing through one still changes state
-    // outside the checkout, which is why the test above refuses it.
+    // node_modules" and "open the file I can see" into errors. Nothing in the
+    // file IPC surface creates such a link and every entry-creating call is
+    // real-path checked, so it has to have arrived in a repo the user chose to
+    // open, where the terminal tab beside the editor reads the same bytes.
+    // Writing through one still changes state outside the checkout, which is
+    // why the test above refuses it.
     linkDir(outside, join(repo, 'escape'))
     expect(await git.readFile(repo, 'escape/secret.txt')).toBe('do not touch\n')
     expect((await git.listDir(repo, 'escape')).map((n) => n.name)).toContain('secret.txt')
@@ -553,5 +554,18 @@ describe('real-path containment', () => {
     expect(trashItem).toHaveBeenCalledWith(join(repo, 'renamed-link'))
     // The link's target is untouched by either operation.
     expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('do not touch\n')
+  })
+
+  it('hands the OS hand-offs a path that a link can still lead out of', async () => {
+    // `openPath` / `revealPath` / `openInTerminal` resolve with `resolveInRepo`
+    // and give the answer straight to the OS, so this is the literal string
+    // Explorer or the shell would receive. The API docs make that a stated
+    // negative — these three contain the SPELLING, not the destination — and a
+    // stated negative deserves a test: if a future change adds real-path
+    // resolution here, this fails and the docs get corrected with it.
+    linkDir(outside, join(repo, 'escape'))
+    const handedToTheOs = resolveInRepo(repo, 'escape/secret.txt')
+    expect(handedToTheOs).toBe(join(repo, 'escape', 'secret.txt'))
+    expect(realpathSync(handedToTheOs)).toBe(join(realpathSync(outside), 'secret.txt'))
   })
 })
