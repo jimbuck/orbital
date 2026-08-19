@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.23.0](https://github.com/jimbuck/orbital/compare/v1.22.1...v1.23.0) (2026-08-19)
+
+
+### Features
+
+* theme switching from the view menu ([#16](https://github.com/jimbuck/orbital/issues/16)) ([782cf90](https://github.com/jimbuck/orbital/commit/782cf90d3090f28e7f56076d90edfdb29f120435))
+
 ## [1.22.1](https://github.com/jimbuck/orbital/compare/v1.22.0...v1.22.1) (2026-08-19)
 
 
