@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.25.0](https://github.com/jimbuck/orbital/compare/v1.24.2...v1.25.0) (2026-09-04)
+
+
+### Features
+
+* **editor:** line-number gutter and right-click editing menu ([9288b74](https://github.com/jimbuck/orbital/commit/9288b74a72ef7bf1e7fd433e6e8c959587437fae))
+
 ## [1.24.2](https://github.com/jimbuck/orbital/compare/v1.24.1...v1.24.2) (2026-08-19)
 
 
