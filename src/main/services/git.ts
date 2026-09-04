@@ -389,6 +389,16 @@ function parseDiff(path: string, raw: string): FileDiff {
 }
 
 async function diff(repoPath: string, path: string, staged: boolean): Promise<FileDiff> {
+  // Containment is ours to check here, not git's. The tracked branches below
+  // hand `path` to git as a pathspec after `--`, which git refuses when it
+  // resolves outside the repository — but the untracked fallback is `diff
+  // --no-index`, which exists precisely to compare files that are NOT in a
+  // repository and so ignores its boundary entirely. Before this check,
+  // `../secret.txt` and `C:/Windows/win.ini` both came back in full as a diff
+  // against /dev/null. Gating the whole function, rather than only that branch,
+  // gives gitDiff the same spelling rule as every file operation: a
+  // checkout-relative path, never an absolute one, even one that lands inside.
+  resolveInRepo(repoPath, path)
   if (staged) {
     const raw = await run(repoPath, ['diff', '--cached', '--unified=3', '--', path])
     return parseDiff(path, raw)
@@ -428,16 +438,16 @@ async function diff(repoPath: string, path: string, staged: boolean): Promise<Fi
  * reveal / open-in-terminal), which resolve through it rather than being handed
  * an absolute path to trust.
  *
- * It is NOT every renderer-supplied path in this file. `gitStage`, `gitUnstage`,
- * `gitDiscard` and `gitDiff` also take a path the renderer chose and never call
- * it; they hand it to `git` as a pathspec after `--` instead and lean on git's
- * own containment, which is a different rule with a different shape. Git refuses
- * a pathspec that resolves outside the repo — relative or absolute, "is outside
+ * It is NOT every renderer-supplied path in this file. `gitStage`, `gitUnstage`
+ * and `gitDiscard` also take a path the renderer chose and never call it; they
+ * hand it to `git` as a pathspec after `--` instead and lean on git's own
+ * containment, which is a different rule with a different shape. Git refuses a
+ * pathspec that resolves outside the repo — relative or absolute, "is outside
  * repository" — but it happily accepts an ABSOLUTE path that lands inside, which
- * `resolveInRepo` would reject outright. So these four are contained, just not
- * to the same spelling rule as everything below. The one hole is `diff
- * --no-index`, which bypasses pathspec checking entirely and does read outside;
- * it predates this gate and is tracked separately.
+ * `resolveInRepo` would reject outright. So those three are contained, just not
+ * to the same spelling rule as everything below. `gitDiff` used to be the fourth
+ * and is now gated here: its untracked fallback is `diff --no-index`, which
+ * bypasses pathspec checking entirely and did read outside the checkout.
  * -------------------------------------------------------------------------- */
 
 /**

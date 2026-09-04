@@ -10,6 +10,7 @@ import {
   symlinkSync,
   writeFileSync
 } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -463,6 +464,73 @@ describe('git.listDir', () => {
   it('refuses the sibling near-miss', async () => {
     siblingTree()
     await expect(git.listDir(repo, siblingRel(''))).rejects.toThrow(/escapes/)
+  })
+})
+
+/* ---- Diff -----------------------------------------------------------------
+ *
+ * `diff` is the one git-pathspec operation that ALSO has a `--no-index` branch,
+ * and `--no-index` is git's "compare files that are not in a repository" mode:
+ * it ignores the repository boundary by design. So the containment story for
+ * this function is not git's, and these tests run against a real `git init`
+ * checkout to prove the gate is ours.
+ * ------------------------------------------------------------------------- */
+
+/** Turn the scratch checkout into a real repository with one commit. */
+function gitInit(): void {
+  const g = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+  }
+  g('init', '-q')
+  g('config', 'user.email', 'test@example.com')
+  g('config', 'user.name', 'Test')
+  g('add', '.')
+  g('commit', '-q', '-m', 'init')
+}
+
+describe('git.diff', () => {
+  it('diffs an untracked file against nothing, so it renders as all additions', async () => {
+    gitInit()
+    writeFileSync(join(repo, 'src', 'fresh.ts'), 'one\ntwo\n')
+    const d = await git.diff(repo, 'src/fresh.ts', false)
+    expect(d.additions).toBe(2)
+    expect(d.deletions).toBe(0)
+    expect(d.lines.filter((l) => l.type === 'add').map((l) => l.text)).toEqual(['one', 'two'])
+  })
+
+  it('diffs a modified tracked file', async () => {
+    gitInit()
+    writeFileSync(join(repo, 'src', 'existing.ts'), 'export const a = 2\n')
+    const d = await git.diff(repo, 'src/existing.ts', false)
+    expect(d.additions).toBe(1)
+    expect(d.deletions).toBe(1)
+  })
+
+  it('refuses to read out of the checkout through the --no-index fallback', async () => {
+    // Before the gate, both of these came back as the full file contents: the
+    // path is untracked (not in this repo at all), so the untracked branch ran
+    // `diff --no-index -- /dev/null <path>`, which reads anything it is given.
+    gitInit()
+    await expect(git.diff(repo, '../outside/secret.txt', false)).rejects.toThrow(/escapes/)
+    await expect(git.diff(repo, join(outside, 'secret.txt'), false)).rejects.toThrow(
+      /not a path inside/
+    )
+  })
+
+  it('refuses the sibling near-miss', async () => {
+    gitInit()
+    siblingTree()
+    await expect(git.diff(repo, siblingRel('secret.txt'), false)).rejects.toThrow(/escapes/)
+  })
+
+  it('applies the same spelling rule to the staged and tracked branches', async () => {
+    // Git would refuse these itself ("is outside repository"), but the gate
+    // answers first, with the same message every file operation uses.
+    gitInit()
+    await expect(git.diff(repo, '../nope.txt', true)).rejects.toThrow(/escapes/)
+    await expect(git.diff(repo, join(outside, 'secret.txt'), true)).rejects.toThrow(
+      /not a path inside/
+    )
   })
 })
 
