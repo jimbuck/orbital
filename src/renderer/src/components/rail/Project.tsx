@@ -6,6 +6,7 @@ import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import WorktreeRow from './WorktreeRow'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
+import { fireAndForget } from '@renderer/lib/bridge'
 
 /**
  * A project (repo) header in the rail. The header row IS the root Worktree:
@@ -219,7 +220,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
                 label="Open in Explorer"
                 onClick={() => {
-                  void window.orbital.openProjectPath(project.id)
+                  fireAndForget(window.orbital.openProjectPath(project.id))
                   closeMenu()
                 }}
               />
@@ -227,7 +228,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<Terminal size={13} strokeWidth={1.5} />}
                 label="Open in External Terminal"
                 onClick={() => {
-                  void window.orbital.openProjectInTerminal(project.id)
+                  fireAndForget(window.orbital.openProjectInTerminal(project.id))
                   closeMenu()
                 }}
               />

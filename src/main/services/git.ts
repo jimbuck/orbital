@@ -934,13 +934,28 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
  * dirs again come back without children, for another lazy expand.
  */
 async function listDir(repoPath: string, relPath: string): Promise<FileNode[]> {
-  const entries = await readdir(resolveInRepo(repoPath, relPath), { withFileTypes: true })
-  const nodes: FileNode[] = entries.map((e) => {
-    const p = relPath ? `${relPath}/${e.name}` : e.name
-    return e.isDirectory()
-      ? { name: e.name, path: p, type: 'dir', ignored: true }
-      : { name: e.name, path: p, type: 'file', ignored: true }
-  })
+  const dir = resolveInRepo(repoPath, relPath)
+  const entries = await readdir(dir, { withFileTypes: true })
+  const nodes: FileNode[] = await Promise.all(
+    entries.map(async (e): Promise<FileNode> => {
+      const p = relPath ? `${relPath}/${e.name}` : e.name
+      // A Dirent describes the entry itself, so for a symlink or junction
+      // `isDirectory()` is false whatever it points at — and `node_modules` is
+      // where links live (pnpm's isolated layout, `npm link`, workspaces). Ask
+      // the target instead, so a linked package expands like the directory it
+      // is rather than showing as a file that opens to nothing. A dangling link
+      // stats to nothing and is listed as a file, which is as honest as it gets.
+      let isDir = e.isDirectory()
+      if (e.isSymbolicLink()) {
+        isDir = await fsStat(join(dir, e.name))
+          .then((st) => st.isDirectory())
+          .catch(() => false)
+      }
+      return isDir
+        ? { name: e.name, path: p, type: 'dir', ignored: true }
+        : { name: e.name, path: p, type: 'file', ignored: true }
+    })
+  )
   sortNodes(nodes)
   return nodes
 }
@@ -957,6 +972,20 @@ async function readFileBase64(repoPath: string, relPath: string): Promise<string
 
 async function writeFile(repoPath: string, relPath: string, content: string): Promise<void> {
   const full = await resolveInRepoReal(repoPath, relPath)
+  // Saving to a path that does not exist yet is a CREATE, and gets the same
+  // name check as New File: without it `writeFile(wt, 'CON', …)` made a literal
+  // CON (verified: Node happily creates it, and Explorer, git and the app's own
+  // delete then all fail to address it). An EXISTING file is saved under
+  // whatever name it already has — the rules in checkEntryName are about not
+  // producing unmanageable names, not about refusing to edit a file the user
+  // could open. The one exception is a reserved device name, which is refused
+  // even if something by that name is already there: the file the user thinks
+  // they are saving is not reliably the entry `stat` just found.
+  const name = basename(full)
+  const exists = await fsStat(full).then(() => true, () => false)
+  if (!exists || WINDOWS_RESERVED.test(name)) {
+    if (checkEntryName(name) !== name) throw new Error(`"${name}" is not a valid file name`)
+  }
   await mkdir(dirname(full), { recursive: true })
   await fsWriteFile(full, content, 'utf8')
 }

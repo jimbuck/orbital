@@ -1086,7 +1086,9 @@ export function registerIpc(): void {
     // `shell.openPath` reports failure by RESOLVING with a message rather than
     // rejecting, so without this an unopenable file is a silent no-op — the
     // context menu closes and nothing happens. Rethrowing puts the OS's own
-    // words in front of the user.
+    // words in front of the user from the file context menu; the rail's
+    // callers have no error line and route through `fireAndForget`, so there
+    // the rejection lands in the app log (the handler wrapper logs it) instead.
     const err = await shell.openPath(worktreePath(worktreeId, path))
     if (err) throw new Error(err)
   })

@@ -445,6 +445,26 @@ describe('git.writeFile', () => {
     await expect(git.writeFile(repo, siblingRel('secret.txt'), 'pwned')).rejects.toThrow(/escapes/)
     expect(readFileSync(join(sibling, 'secret.txt'), 'utf8')).toBe('sibling secret\n')
   })
+
+  it('refuses to CREATE a file under a name Windows cannot manage', async () => {
+    // The same class createFile refuses: a literal CON/NUL/COM1 in the repo is
+    // a one-way trip — nothing can delete it afterwards.
+    await expect(git.writeFile(repo, 'src/CON', 'x')).rejects.toThrow(/reserved device name/)
+    await expect(git.writeFile(repo, 'src/NUL.txt', 'x')).rejects.toThrow(/reserved device name/)
+    await expect(git.writeFile(repo, 'src/trailing.', 'x')).rejects.toThrow(/cannot end with/)
+    await expect(git.writeFile(repo, 'src/bad:name', 'x')).rejects.toThrow(/cannot contain/)
+    expect(readdirSync(join(repo, 'src'))).toEqual(['existing.ts'])
+  })
+
+  it('still saves an existing file whose name would fail the create check', async () => {
+    // Saving is not creating. A checkout can carry a name that checkEntryName
+    // would refuse in a New File box (committed from a platform that allows
+    // it); the editor opened it, so the editor can save it.
+    if (onWindows) return // Win32 cannot create such a name to begin with
+    writeFileSync(join(repo, 'src', 'odd:name'), 'before')
+    await git.writeFile(repo, 'src/odd:name', 'after')
+    expect(readFileSync(join(repo, 'src', 'odd:name'), 'utf8')).toBe('after')
+  })
 })
 
 describe('git.listDir', () => {
@@ -464,6 +484,22 @@ describe('git.listDir', () => {
   it('refuses the sibling near-miss', async () => {
     siblingTree()
     await expect(git.listDir(repo, siblingRel(''))).rejects.toThrow(/escapes/)
+  })
+
+  it('lists a linked directory as a directory, not as a file', async () => {
+    // A Dirent's isDirectory() is false for a link, so a pnpm-style linked
+    // package used to show as an unexpandable file in the tree.
+    mkdirSync(join(repo, 'real-pkg'))
+    linkDir(join(repo, 'real-pkg'), join(repo, 'src', 'linked-pkg'))
+    const nodes = await git.listDir(repo, 'src')
+    expect(nodes.find((n) => n.name === 'linked-pkg')?.type).toBe('dir')
+    expect(nodes.find((n) => n.name === 'existing.ts')?.type).toBe('file')
+  })
+
+  it('lists a dangling link as a file rather than failing the whole listing', async () => {
+    linkDir(join(repo, 'gone'), join(repo, 'src', 'dangling'))
+    const nodes = await git.listDir(repo, 'src')
+    expect(nodes.find((n) => n.name === 'dangling')?.type).toBe('file')
   })
 })
 
