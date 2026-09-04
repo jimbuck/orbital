@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.26.0](https://github.com/jimbuck/orbital/compare/v1.25.1...v1.26.0) (2026-09-04)
+
+
+### Features
+
+* **settings:** per-workspace accent colour ([07b08f6](https://github.com/jimbuck/orbital/commit/07b08f6dc4c787c2fdb7514ac8aac1ea94768e96))
+
 ## [1.25.1](https://github.com/jimbuck/orbital/compare/v1.25.0...v1.25.1) (2026-09-04)
 
 
