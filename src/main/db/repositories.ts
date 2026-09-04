@@ -378,6 +378,11 @@ export const panes = {
   firstPaneId(worktreeId: string): string | undefined {
     const r = getDb().prepare('SELECT id FROM panes WHERE worktree_id = ? ORDER BY position LIMIT 1').get(worktreeId) as any
     return r?.id
+  },
+  /** The worktree a pane belongs to, or undefined for an unknown pane. */
+  worktreeIdOf(pid: string): string | undefined {
+    const r = getDb().prepare('SELECT worktree_id FROM panes WHERE id = ?').get(pid) as any
+    return r?.worktree_id
   }
 }
 

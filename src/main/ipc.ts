@@ -795,9 +795,24 @@ export function registerIpc(): void {
     broadcast()
   })
 
+  /**
+   * A tab belongs to exactly one worktree for its whole life. EditorTab and
+   * TerminalTab read `tab.worktreeId` on that basis, and `tabs.move` updates
+   * only `pane_id` — so a move into another worktree's pane would leave a tab
+   * whose stored worktree disagrees with the pane rendering it. The renderer
+   * cannot produce such a drag today (PaneGroup only shows one worktree's
+   * panes), but an invariant main depends on is main's to enforce.
+   */
+  const assertPaneInWorktree = (tab: Tab, paneId: string): void => {
+    const owner = repo.panes.worktreeIdOf(paneId)
+    if (!owner) throw new Error(`pane ${paneId} not found`)
+    if (owner !== tab.worktreeId) throw new Error('a tab cannot move to a pane in another worktree')
+  }
+
   h(IPC.moveTab, (_e, tabId: string, targetPaneId: string) => {
     const tab = repo.tabs.get(tabId)
     if (!tab || tab.paneId === targetPaneId) return
+    assertPaneInWorktree(tab, targetPaneId)
     const source = tab.paneId
     repo.tabs.move(tabId, targetPaneId)
     collapseIfEmpty(tab.worktreeId, source)
@@ -830,6 +845,9 @@ export function registerIpc(): void {
     if (!tab) return
     const worktree = repo.worktrees.get(tab.worktreeId)
     if (!worktree) return
+    // Splitting at a pane from another worktree would be a no-op on this
+    // worktree's layout, leaving the fresh pane orphaned outside it.
+    assertPaneInWorktree(tab, targetPaneId)
     const source = tab.paneId
     const { dir, where } = edgeToSplit(edge)
     const pane = repo.panes.create(worktree.id)
