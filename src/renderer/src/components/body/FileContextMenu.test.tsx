@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { FileNode } from '@shared/types'
 
-import FileContextMenu, { type FileMutation } from './FileContextMenu'
+import FileContextMenu, { cleanError, type FileMutation } from './FileContextMenu'
 
 /**
  * The window.orbital bridge, restubbed per test so call assertions are clean.
@@ -273,5 +273,114 @@ describe('OS and git hand-offs', () => {
 
     await waitFor(() => expect(screen.getByText('index.lock exists')).toBeTruthy())
     expect(closed).toBe(0)
+  })
+})
+
+describe('rename prompt', () => {
+  it('seeds the field with the row name so Rename is a type-over', () => {
+    show(file)
+    fireEvent.click(screen.getByText('Rename…'))
+    const input = screen.getByRole('textbox', { name: 'Rename file' }) as HTMLInputElement
+    expect(input.value).toBe('a.ts')
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 4])
+  })
+
+  it('renames through the bridge and reports where the file went', async () => {
+    show(file)
+    fireEvent.click(screen.getByText('Rename…'))
+    const input = screen.getByRole('textbox', { name: 'Rename file' })
+    fireEvent.change(input, { target: { value: 'renamed.ts' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(closed).toBe(1))
+    expect(bridge.renamePath).toHaveBeenCalledWith('w1', 'src/a.ts', 'renamed.ts')
+    expect(mutations).toEqual([{ kind: 'renamed', from: 'src/a.ts', to: 'src/renamed.ts' }])
+  })
+})
+
+describe('in-flight lock', () => {
+  it('fires a slow delete once however many times the confirm is clicked', async () => {
+    let finish: () => void = () => {}
+    bridge.trashPath.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    )
+    show(file)
+    fireEvent.click(screen.getByText('Delete'))
+    const confirm = screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    // Locked while the bin call is in flight: the button is disabled and the
+    // menu ignores its dismiss overlay too, so the error (if any) has somewhere
+    // to land.
+    expect(bridge.trashPath).toHaveBeenCalledTimes(1)
+    expect((screen.getByRole('button', { name: 'Deleting…' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(closed).toBe(0)
+
+    finish()
+    await waitFor(() => expect(closed).toBe(1))
+    expect(mutations).toEqual([{ kind: 'deleted', path: 'src/a.ts' }])
+  })
+})
+
+describe('delete confirm copy', () => {
+  function showWithUnsaved(node: FileNode, unsavedPath: string): void {
+    render(
+      <FileContextMenu
+        worktreeId="w1"
+        node={node}
+        pos={{ x: 10, y: 10 }}
+        unsavedPath={unsavedPath}
+        onClose={() => {}}
+        onMutated={() => {}}
+      />
+    )
+    fireEvent.click(screen.getByText('Delete'))
+  }
+
+  it('says nothing about edits when the open file is not involved', () => {
+    showWithUnsaved(file, 'src/other.ts')
+    expect(screen.queryByText(/unsaved edits/)).toBeNull()
+  })
+
+  it('warns that binning the open file loses its unsaved edits', () => {
+    showWithUnsaved(file, 'src/a.ts')
+    expect(screen.getByText(/Your unsaved edits will be lost/)).toBeTruthy()
+  })
+
+  it('names the unsaved file when a folder containing it is binned', () => {
+    showWithUnsaved(dir, 'src/deep/a.ts')
+    expect(screen.getByText(/unsaved edits to "a.ts" will be lost/)).toBeTruthy()
+  })
+})
+
+describe('cleanError', () => {
+  it('strips the Electron IPC wrapper', () => {
+    expect(cleanError(new Error(`Error invoking remote method 'orbital:x': Error: "b.ts" already exists`))).toBe(
+      '"b.ts" already exists'
+    )
+  })
+
+  it('reduces a Node errno to its reason, dropping the code, syscall and paths', () => {
+    // Raw fs errors carry one or two absolute paths, which is most of what a
+    // 216px-wide menu would then be showing.
+    expect(
+      cleanError(
+        new Error(
+          `Error invoking remote method 'orbital:renamePath': Error: EPERM: operation not permitted, rename 'C:\\Users\\me\\repo\\src\\a.ts' -> 'C:\\Users\\me\\repo\\src\\b.ts'`
+        )
+      )
+    ).toBe('Operation not permitted')
+    expect(cleanError(new Error(`EBUSY: resource busy or locked, unlink 'C:\\repo\\a.ts'`))).toBe(
+      'Resource busy or locked'
+    )
+    expect(cleanError(new Error('ENOENT: no such file or directory'))).toBe('No such file or directory')
+  })
+
+  it('leaves messages the app wrote itself alone', () => {
+    expect(cleanError(new Error('"../x" escapes the Worktree'))).toBe('"../x" escapes the Worktree')
+    expect(cleanError('plain string')).toBe('plain string')
   })
 })

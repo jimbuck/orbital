@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { Tab, Worktree } from '@shared/types'
+import type { FileNode, Tab, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { __resetFileTreeRegistry, __setFileTreeBridge } from '@renderer/lib/fileTree'
 import {
@@ -458,5 +458,202 @@ describe('CodeEditor', () => {
     fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
     fireEvent.click(screen.getByRole('menuitem', { name: /redo/i }))
     expect(execCommand).toHaveBeenCalledWith('redo')
+  })
+})
+
+/* ---- File mutations -------------------------------------------------------
+ *
+ * The tree's context menu reports what it did and EditorTab has to react: the
+ * tree refetches, the open file follows a rename (its own, or an ancestor's),
+ * a deleted file stops being shown, and a just-created file opens. Driven
+ * through the real FileContextMenu so the wiring is covered too.
+ * -------------------------------------------------------------------------- */
+
+describe('EditorTab file mutations', () => {
+  /** The tree the bridge hands back; tests reshape it to mirror a mutation. */
+  let tree: FileNode[]
+  let bridge: Record<string, ReturnType<typeof vi.fn>>
+
+  const dirWith = (name: string, files: string[]): FileNode => ({
+    name,
+    path: name,
+    type: 'dir',
+    children: files.map((f) => ({ name: f, path: `${name}/${f}`, type: 'file' as const }))
+  })
+
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    // `.txt` throughout: no known grammar, so no shiki load is kicked off.
+    tree = [dirWith('src', ['notes.txt'])]
+    __resetFileTreeRegistry()
+    __setFileTreeBridge({
+      fileTree: async () => tree,
+      onStateChanged: () => () => {}
+    })
+    bridge = {
+      readFile: vi.fn(async () => 'hello\n'),
+      readFileBase64: vi.fn(async () => ''),
+      gitDiff: vi.fn(async () => null),
+      listDir: vi.fn(async () => []),
+      writeFile: vi.fn(async () => undefined),
+      createFile: vi.fn(async (_w: string, parent: string, name: string) => `${parent}/${name}`),
+      createDirectory: vi.fn(async (_w: string, parent: string, name: string) => `${parent}/${name}`),
+      renamePath: vi.fn(async () => ''),
+      trashPath: vi.fn(async () => undefined)
+    }
+    vi.stubGlobal('orbital', bridge)
+    useStore.setState({
+      projects: [{ id: 'p1' }],
+      worktrees: [worktree('w1')],
+      activeProjectId: 'p1',
+      activeWorktreeId: 'w1'
+    } as unknown as Parameters<typeof useStore.setState>[0])
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    __setFileTreeBridge(null)
+    __resetFileTreeRegistry()
+  })
+
+  /** Mount with no configured file. */
+  async function mount(): Promise<void> {
+    render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
+    await flush()
+  }
+
+  /** Mount, expand `src`, and open src/notes.txt. */
+  async function openNotes(): Promise<void> {
+    await mount()
+    fireEvent.click(screen.getByText('src'))
+    fireEvent.click(screen.getByText('notes.txt'))
+    await flush()
+    expect(screen.getByText('src/notes.txt')).toBeTruthy() // the header
+  }
+
+  /** Right-click a tree row and pick a menu item. */
+  function menu(row: string, item: string): void {
+    fireEvent.contextMenu(screen.getByText(row))
+    fireEvent.click(screen.getByText(item))
+  }
+
+  /** Type into the open prompt and submit it. */
+  function submitPrompt(label: string, value: string): void {
+    const input = screen.getByRole('textbox', { name: label })
+    fireEvent.change(input, { target: { value } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+  }
+
+  it('follows the open file to its new name', async () => {
+    await openNotes()
+    bridge.renamePath.mockResolvedValueOnce('src/renamed.txt')
+    tree = [dirWith('src', ['renamed.txt'])]
+
+    menu('notes.txt', 'Rename…')
+    submitPrompt('Rename file', 'renamed.txt')
+    await flush()
+
+    expect(bridge.renamePath).toHaveBeenCalledWith('w1', 'src/notes.txt', 'renamed.txt')
+    expect(screen.getByText('src/renamed.txt')).toBeTruthy()
+    expect(screen.queryByText('src/notes.txt')).toBeNull()
+  })
+
+  it('follows the open file when an ancestor folder is renamed, and keeps that folder open', async () => {
+    await openNotes()
+    bridge.renamePath.mockResolvedValueOnce('lib')
+    tree = [dirWith('lib', ['notes.txt'])]
+
+    menu('src', 'Rename…')
+    submitPrompt('Rename folder', 'lib')
+    await flush()
+
+    expect(screen.getByText('lib/notes.txt')).toBeTruthy()
+    // The folder was expanded under its old key; the key moved with it. Before
+    // this, a renamed folder snapped shut and its children vanished from view.
+    expect(screen.getByText('notes.txt')).toBeTruthy()
+  })
+
+  it('closes the open file when it is deleted', async () => {
+    await openNotes()
+    tree = [dirWith('src', [])]
+
+    menu('notes.txt', 'Delete')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await flush()
+
+    expect(bridge.trashPath).toHaveBeenCalledWith('w1', 'src/notes.txt')
+    expect(screen.getByText('Select a file')).toBeTruthy()
+  })
+
+  it('closes the open file when a folder containing it is deleted', async () => {
+    await openNotes()
+    tree = []
+
+    menu('src', 'Delete')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await flush()
+
+    expect(screen.getByText('Select a file')).toBeTruthy()
+  })
+
+  it('leaves an unrelated open file alone when something else is deleted', async () => {
+    tree = [dirWith('src', ['notes.txt', 'other.txt'])]
+    await openNotes()
+    tree = [dirWith('src', ['notes.txt'])]
+
+    menu('other.txt', 'Delete')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await flush()
+
+    expect(screen.getByText('src/notes.txt')).toBeTruthy()
+  })
+
+  it('opens a file it just created and expands the folder it landed in', async () => {
+    await mount()
+    // `src` is collapsed: its child is not in the document yet.
+    expect(screen.queryByText('notes.txt')).toBeNull()
+
+    tree = [dirWith('src', ['fresh.txt', 'notes.txt'])]
+    menu('src', 'New File…')
+    submitPrompt('New file in src', 'fresh.txt')
+    await flush()
+
+    expect(bridge.createFile).toHaveBeenCalledWith('w1', 'src', 'fresh.txt')
+    expect(screen.getByText('src/fresh.txt')).toBeTruthy() // opened
+    expect(screen.getByText('notes.txt')).toBeTruthy() // folder expanded
+    expect(bridge.readFile).toHaveBeenCalledWith('w1', 'src/fresh.txt')
+  })
+
+  it('expands the folder a new folder landed in, without opening anything', async () => {
+    await mount()
+    tree = [{ ...dirWith('src', ['notes.txt']), children: [dirWith('src/sub', []), ...dirWith('src', ['notes.txt']).children!] }]
+
+    menu('src', 'New Folder…')
+    submitPrompt('New folder in src', 'sub')
+    await flush()
+
+    expect(bridge.createDirectory).toHaveBeenCalledWith('w1', 'src', 'sub')
+    expect(screen.getByText('Select a file')).toBeTruthy()
+    expect(screen.getByText('notes.txt')).toBeTruthy()
+    expect(bridge.readFile).not.toHaveBeenCalled()
+  })
+
+  it('warns in the delete confirm when the open file has unsaved edits', async () => {
+    await openNotes()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'hello, edited\n' } })
+
+    menu('notes.txt', 'Delete')
+    expect(screen.getByText(/Your unsaved edits will be lost/)).toBeTruthy()
+  })
+
+  it('does not warn about edits when the buffer is clean', async () => {
+    await openNotes()
+    menu('notes.txt', 'Delete')
+    expect(screen.queryByText(/unsaved edits/)).toBeNull()
   })
 })

@@ -646,11 +646,24 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
       } else if (m.kind === 'renamed') {
         // Follow the open file to its new path — including the case where an
         // ANCESTOR directory was what got renamed.
+        const moved = (p: string): string | null =>
+          p === m.from ? m.to : p.startsWith(`${m.from}/`) ? m.to + p.slice(m.from.length) : null
         setSelected((s) => {
-          if (!s) return s
-          if (s.path === m.from) return { ...s, path: m.to }
-          if (s.path.startsWith(`${m.from}/`)) return { ...s, path: m.to + s.path.slice(m.from.length) }
-          return s
+          const next = s && moved(s.path)
+          return s && next ? { ...s, path: next } : s
+        })
+        // Expansion is keyed by path, so a renamed directory (or one under it)
+        // has to carry its open/closed state across to the new key — otherwise
+        // renaming an expanded folder snaps it shut in the user's face.
+        setExpanded((e) => {
+          let changed = false
+          const out: Record<string, boolean> = {}
+          for (const [key, open] of Object.entries(e)) {
+            const next = moved(key)
+            if (next !== null) changed = true
+            out[next ?? key] = open
+          }
+          return changed ? out : e
         })
       } else {
         // Deleted. Keeping a binned file open in an editable buffer would invite
@@ -798,6 +811,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
           worktreeId={worktreeId}
           node={menu.node}
           pos={menu.pos}
+          unsavedPath={dirty && selected ? selected.path : null}
           onClose={() => setMenu(null)}
           onMutated={onFileMutated}
         />

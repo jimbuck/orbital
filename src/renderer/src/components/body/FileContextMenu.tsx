@@ -33,10 +33,28 @@ type Stage = 'menu' | 'newFile' | 'newFolder' | 'rename' | 'delete' | 'discard'
 
 export const FILE_MENU_WIDTH = 216
 
-/** Strip Electron's IPC-rejection wrapper so the menu shows the real message. */
-function cleanError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '').trim()
+/**
+ * A raw Node errno as `fs` throws it: a code, the reason, and then the syscall
+ * with one or two absolute paths — `EBUSY: resource busy or locked, unlink
+ * 'C:\Users\…\src\a.ts'`. The code is nothing the user can act on and the
+ * paths are already on screen (they right-clicked the row); in a 216px-wide
+ * menu the paths are also what ends up filling it. Capture the reason.
+ */
+const ERRNO = /^E[A-Z0-9]+:\s*([^,]+?)(?:,\s*[a-z_]+\s+'.*)?$/s
+
+/**
+ * Turn a bridge rejection into the line shown in the menu: strip Electron's
+ * IPC-rejection wrapper, and reduce a Node errno to its reason. Messages this
+ * app wrote itself ("already exists", "escapes the Worktree") pass through.
+ */
+export function cleanError(err: unknown): string {
+  const msg = (err instanceof Error ? err.message : String(err))
+    .replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '')
+    .trim()
+  const errno = ERRNO.exec(msg)
+  if (!errno) return msg
+  const reason = errno[1].trim()
+  return reason.charAt(0).toUpperCase() + reason.slice(1)
 }
 
 /** The directory a "New …" action creates into: the dir itself, or a file's parent. */
@@ -64,12 +82,19 @@ export default function FileContextMenu({
   worktreeId,
   node,
   pos,
+  unsavedPath = null,
   onClose,
   onMutated
 }: {
   worktreeId: string
   node: FileNode
   pos: MenuPos
+  /**
+   * Path of the file open in the editor with edits not yet saved, if any. The
+   * delete confirm says so when the row (or a folder containing it) is that
+   * file — binning it keeps only what was last saved.
+   */
+  unsavedPath?: string | null
   onClose: () => void
   onMutated: (mutation: FileMutation) => void
 }): JSX.Element {
@@ -80,6 +105,8 @@ export default function FileContextMenu({
   const isDir = node.type === 'dir'
   const parentDir = parentDirOf(node)
   const label = isDir ? 'folder' : 'file'
+  const losesEdits =
+    unsavedPath !== null && (unsavedPath === node.path || unsavedPath.startsWith(`${node.path}/`))
 
   /**
    * Run one bridge call with busy/error bookkeeping. On success the menu
@@ -174,7 +201,14 @@ export default function FileContextMenu({
       ) : stage === 'delete' ? (
         <MenuConfirm
           message={`Delete "${node.name}"?`}
-          hint={`Moved to the recycle bin${isDir ? ', with everything inside it' : ''} — you can restore it from there.`}
+          hint={
+            `Moved to the recycle bin${isDir ? ', with everything inside it' : ''} — you can restore it from there.` +
+            (losesEdits
+              ? isDir
+                ? ` Your unsaved edits to "${unsavedPath.split('/').pop()}" will be lost.`
+                : ' Your unsaved edits will be lost.'
+              : '')
+          }
           confirmLabel="Delete"
           busy={busy}
           busyLabel="Deleting…"
