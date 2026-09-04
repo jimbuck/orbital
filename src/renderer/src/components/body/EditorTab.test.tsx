@@ -8,7 +8,7 @@ import {
   __setMarkdownAssetBridge,
   __setMarkdownAssetCacheTtl
 } from '@renderer/lib/markdownAssets'
-import EditorTab, { CodeEditor, Preview } from './EditorTab'
+import EditorTab, { CodeEditor, PREVIEW_TYPING_DEBOUNCE_MS, Preview } from './EditorTab'
 
 /**
  * A readFileBase64 bridge whose reads stay in flight until the test settles
@@ -19,12 +19,17 @@ import EditorTab, { CodeEditor, Preview } from './EditorTab'
 function makeDeferredBridge(): {
   bridge: { readFileBase64: (worktreeId: string, path: string) => Promise<string> }
   settle: () => Promise<void>
+  /** Every read issued so far, in order — a render that never started reads nothing. */
+  reads: string[]
 } {
   const pending: (() => void)[] = []
+  const reads: string[] = []
   return {
+    reads,
     bridge: {
       readFileBase64: (_worktreeId: string, path: string): Promise<string> =>
         new Promise<string>((resolve) => {
+          reads.push(path)
           pending.push(() => resolve(Buffer.from(path).toString('base64')))
         })
     },
@@ -78,6 +83,18 @@ function frameDoc(container: HTMLElement): string {
 }
 
 const noop = (): void => {}
+
+/** Let the preview's typing debounce elapse, inside act(). */
+async function typingPause(): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, PREVIEW_TYPING_DEBOUNCE_MS + 20))
+  })
+}
+
+/** A Preview of one.md in w1 with the given markdown. */
+function md(source: string, path = 'one.md'): JSX.Element {
+  return <Preview kind="markdown" source={source} path={path} worktreeId="w1" onLink={noop} />
+}
 
 describe('Preview markdown staleness', () => {
   beforeEach(() => {
@@ -160,8 +177,58 @@ describe('Preview markdown staleness', () => {
     )
     expect(frameDoc(container)).toBe(first)
 
+    await typingPause()
     await d.settle()
     expect(frameDoc(container)).toContain('typing')
+  })
+
+  it('coalesces a burst of keystrokes into one render after typing pauses', async () => {
+    const d = makeDeferredBridge()
+    __setMarkdownAssetBridge(d.bridge)
+
+    const { container, rerender } = render(md('![a](a.png)'))
+    await d.settle()
+    expect(d.reads).toEqual(['a.png'])
+
+    // Three keystrokes in quick succession. None of them starts a render —
+    // the old behaviour re-parsed and re-inlined every image on each one.
+    rerender(md('![a](a.png) burst-one'))
+    rerender(md('![a](a.png) burst-two'))
+    rerender(md('![a](a.png) burst-three'))
+    expect(d.reads).toEqual(['a.png'])
+    expect(frameDoc(container)).not.toContain('burst-')
+
+    // Typing pauses: exactly one render, of the latest source.
+    await typingPause()
+    expect(d.reads).toEqual(['a.png', 'a.png'])
+    await d.settle()
+    expect(frameDoc(container)).toContain('burst-three')
+    expect(frameDoc(container)).not.toContain('burst-two')
+  })
+
+  it('renders a file switch at once, without waiting out the debounce', async () => {
+    const d = makeDeferredBridge()
+    __setMarkdownAssetBridge(d.bridge)
+
+    const { container, rerender } = render(md('![a](a.png)'))
+    await d.settle()
+
+    rerender(md('![b](b.png)', 'two.md'))
+    // The read for the new file is already in flight and the stale frame is
+    // blanked — neither waited 150 ms.
+    expect(d.reads).toEqual(['a.png', 'b.png'])
+    expect(frameDoc(container)).toBe('')
+  })
+
+  it('renders the first keystroke at once while nothing is on screen yet', async () => {
+    // Before the first render lands there is no "last good render" to hold,
+    // so typing during a cold load must not be held back behind the debounce.
+    const d = makeDeferredBridge()
+    __setMarkdownAssetBridge(d.bridge)
+
+    const { rerender } = render(md('![a](a.png)'))
+    rerender(md('![a](a.png) t'))
+    expect(d.reads).toEqual(['a.png', 'a.png'])
   })
 
   it('drops a resolve that lands after a newer file was selected', async () => {
