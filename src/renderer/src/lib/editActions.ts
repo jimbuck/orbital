@@ -60,6 +60,20 @@ export function editCopy(): void {
   if (sel) window.orbital.writeClipboard(sel)
 }
 
+/**
+ * Cut only applies to a natively-editable input/textarea — a terminal's
+ * selection is output, not something that can be removed. Copies, then
+ * deletes through execCommand so the edit stays on the native undo stack.
+ */
+export function editCut(): void {
+  const input = focusedInput()
+  if (!input || input.selectionStart == null || input.selectionEnd == null) return
+  const text = input.value.slice(input.selectionStart, input.selectionEnd)
+  if (!text) return
+  window.orbital.writeClipboard(text)
+  document.execCommand('delete')
+}
+
 export function editPaste(): void {
   const term = focusedTerminal()
   if (term) {

@@ -53,20 +53,24 @@ export function MenuItem({
   label,
   hint,
   danger,
+  disabled,
   onClick
 }: {
   icon: ReactNode
   label: string
   hint?: string
   danger?: boolean
+  /** Shown but inert — for actions that need state the menu doesn't have (e.g. Copy with nothing selected). */
+  disabled?: boolean
   onClick: () => void
 }): JSX.Element {
   return (
     <button
       type="button"
       role="menuitem"
+      disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11.5px] font-semibold outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 ${
+      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11.5px] font-semibold outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-40 ${
         danger ? 'text-red-2' : 'text-text-2'
       }`}
     >

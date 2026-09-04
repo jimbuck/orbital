@@ -6,8 +6,10 @@ import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { useFileTree } from '@renderer/lib/fileTree'
 import { extOf, imageMime, resolveMarkdownImages } from '@renderer/lib/markdownAssets'
+import { editCopy, editCut, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
+import EditorContextMenu, { EDITOR_MENU_HEIGHT, EDITOR_MENU_WIDTH, type EditorAction } from './EditorContextMenu'
 
 /** Shiki bundled theme id for each resolved app theme. */
 function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
@@ -103,11 +105,17 @@ const HIGHLIGHT_MAX = 300_000
 /**
  * Editable source view with live syntax highlighting: a transparent-text
  * textarea (caret + input) stacked over a shiki-rendered mirror of the draft,
- * scroll-synced. Both layers share the exact font metrics and padding, so the
- * glyphs line up. Falls back to a plain visible textarea when the grammar is
+ * scroll-synced, with a line-number gutter down the left. All three layers
+ * share the exact font metrics, padding and line height, so the glyphs and
+ * numbers line up. Falls back to a plain visible textarea when the grammar is
  * unknown or the file is too large to highlight.
+ *
+ * The gutter is painted LAST (on top) with an opaque background: padding
+ * scrolls with content in a textarea, so on a horizontal scroll the text would
+ * otherwise slide out under the numbers. It ignores the pointer, so clicks
+ * there still land in the textarea.
  */
-function CodeEditor({
+export function CodeEditor({
   path,
   value,
   onChange
@@ -117,9 +125,21 @@ function CodeEditor({
   onChange: (next: string) => void
 }): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
+  const [menu, setMenu] = useState<{ pos: MenuPos; hasSelection: boolean } | null>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
+  const gutterRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const theme = useResolvedTheme()
+
+  // One number per line. wrap="off" on the textarea means a source line is
+  // exactly one visual line, so a plain count is all the gutter needs.
+  const lineCount = useMemo(() => value.split('\n').length, [value])
+  const lineNumbers = useMemo(() => Array.from({ length: lineCount }, (_, i) => i + 1).join('\n'), [lineCount])
+  // Widths are in `ch` of the shared monospace font, so the gutter grows with
+  // the digit count and the text columns move over by exactly the same amount.
+  const digits = Math.max(2, String(lineCount).length)
+  const gutterWidth = `calc(${digits}ch + 20px)`
+  const textPadLeft = `calc(${digits}ch + 32px)`
 
   useEffect(() => {
     const lang = langFor(path)
@@ -149,22 +169,69 @@ function CodeEditor({
   }, [path, value, theme])
 
   const syncScroll = (): void => {
-    const mirror = mirrorRef.current
     const ta = taRef.current
-    if (!mirror || !ta) return
-    mirror.scrollTop = ta.scrollTop
-    mirror.scrollLeft = ta.scrollLeft
+    if (!ta) return
+    const mirror = mirrorRef.current
+    if (mirror) {
+      mirror.scrollTop = ta.scrollTop
+      mirror.scrollLeft = ta.scrollLeft
+    }
+    const gutter = gutterRef.current
+    if (gutter) gutter.scrollTop = ta.scrollTop
   }
 
-  useEffect(syncScroll, [html])
+  useEffect(syncScroll, [html, lineCount])
+
+  const openMenu = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const ta = taRef.current
+    if (!ta) return
+    setMenu({
+      pos: clampMenuPos(e, EDITOR_MENU_WIDTH, EDITOR_MENU_HEIGHT),
+      hasSelection: ta.selectionStart !== ta.selectionEnd
+    })
+  }
+
+  /**
+   * The menu's buttons don't take focus, so the textarea is normally still the
+   * active element; focus() is belt-and-braces (it keeps the selection range
+   * either way) so the focus-dispatched edit helpers can't miss.
+   */
+  const runAction = (action: EditorAction): void => {
+    setMenu(null)
+    const ta = taRef.current
+    if (!ta) return
+    ta.focus()
+    switch (action) {
+      case 'undo':
+        document.execCommand('undo')
+        break
+      case 'redo':
+        document.execCommand('redo')
+        break
+      case 'cut':
+        editCut()
+        break
+      case 'copy':
+        editCopy()
+        break
+      case 'paste':
+        editPaste()
+        break
+      case 'selectAll':
+        editSelectAll()
+        break
+    }
+  }
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full font-mono text-[12px] leading-[1.6]">
       {html !== null && (
         <div
           ref={mirrorRef}
           aria-hidden
-          className="shiki-view pointer-events-none absolute inset-0 overflow-hidden whitespace-pre px-4 py-3"
+          className="shiki-view pointer-events-none absolute inset-0 overflow-hidden whitespace-pre py-3 pr-4"
+          style={{ paddingLeft: textPadLeft }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       )}
@@ -173,6 +240,7 @@ function CodeEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onScroll={syncScroll}
+        onContextMenu={openMenu}
         onKeyDown={(e) => {
           // Tab indents instead of moving focus; execCommand keeps native undo.
           if (e.key === 'Tab') {
@@ -182,12 +250,31 @@ function CodeEditor({
         }}
         spellCheck={false}
         wrap="off"
-        className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent px-4 py-3 font-mono text-[12px] leading-[1.6] ${
+        style={{ paddingLeft: textPadLeft }}
+        className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent py-3 pr-4 font-mono text-[12px] leading-[1.6] ${
           html !== null
             ? `text-transparent ${theme === 'light' ? 'caret-[#17202e]' : 'caret-[#e6ebf2]'}`
             : 'text-text-2'
         } ${FOCUS}`}
       />
+      <div
+        ref={gutterRef}
+        aria-hidden
+        data-testid="line-gutter"
+        style={{ width: gutterWidth }}
+        className="pointer-events-none absolute inset-y-0 left-0 z-10 select-none overflow-hidden whitespace-pre border-r border-line bg-pane py-3 pr-2 text-right text-faint"
+      >
+        {lineNumbers}
+      </div>
+
+      {menu && (
+        <EditorContextMenu
+          pos={menu.pos}
+          hasSelection={menu.hasSelection}
+          onAction={runAction}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }

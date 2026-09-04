@@ -8,7 +8,7 @@ import {
   __setMarkdownAssetBridge,
   __setMarkdownAssetCacheTtl
 } from '@renderer/lib/markdownAssets'
-import EditorTab, { Preview } from './EditorTab'
+import EditorTab, { CodeEditor, Preview } from './EditorTab'
 
 /**
  * A readFileBase64 bridge whose reads stay in flight until the test settles
@@ -346,5 +346,117 @@ describe('EditorTab worktree binding', () => {
     expect(treeReads).toEqual(['w2'])
     expect(fileReads).toEqual(['w2:README.md'])
     expect(assetReads).toEqual(['w2:logo.png'])
+  })
+})
+
+describe('CodeEditor', () => {
+  const writeClipboard = vi.fn()
+  const readClipboard = vi.fn((): string => '')
+  const execCommand = vi.fn((): boolean => true)
+
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    vi.stubGlobal('orbital', { writeClipboard, readClipboard })
+    writeClipboard.mockReset()
+    readClipboard.mockReset()
+    readClipboard.mockReturnValue('')
+    execCommand.mockReset()
+    // jsdom has no execCommand; the editor routes every mutating action
+    // through it so the native undo stack stays intact.
+    document.execCommand = execCommand as unknown as typeof document.execCommand
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  /** A path with no known grammar, so no shiki load is kicked off. */
+  const PATH = 'notes.txt'
+
+  function renderEditor(value: string): { ta: HTMLTextAreaElement; gutter: HTMLElement } {
+    render(<CodeEditor path={PATH} value={value} onChange={noop} />)
+    return {
+      ta: screen.getByRole('textbox') as HTMLTextAreaElement,
+      gutter: screen.getByTestId('line-gutter')
+    }
+  }
+
+  it('numbers every line, including a trailing empty one', () => {
+    const { gutter } = renderEditor('a\nb\nc\n')
+    expect(gutter.textContent).toBe('1\n2\n3\n4')
+  })
+
+  it('widens the gutter with the digit count and shifts the text by the same amount', () => {
+    const { gutter, ta } = renderEditor(Array.from({ length: 120 }, () => 'x').join('\n'))
+    expect(gutter.style.width).toBe('calc(3ch + 20px)')
+    expect(ta.style.paddingLeft).toBe('calc(3ch + 32px)')
+  })
+
+  it('opens the editing menu on right-click with Cut/Copy inert when nothing is selected', () => {
+    const { ta } = renderEditor('hello world')
+    ta.setSelectionRange(0, 0)
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+
+    expect(screen.getByRole('menu')).toBeTruthy()
+    expect((screen.getByRole('menuitem', { name: /cut/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('menuitem', { name: /copy/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('menuitem', { name: /paste/i }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('menuitem', { name: /select all/i }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('copies the selection to the clipboard and closes the menu', () => {
+    const { ta } = renderEditor('hello world')
+    ta.focus()
+    ta.setSelectionRange(6, 11)
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+    fireEvent.click(screen.getByRole('menuitem', { name: /copy/i }))
+
+    expect(writeClipboard).toHaveBeenCalledWith('world')
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('cuts by copying the selection and deleting it through execCommand', () => {
+    const { ta } = renderEditor('hello world')
+    ta.focus()
+    ta.setSelectionRange(0, 5)
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+    fireEvent.click(screen.getByRole('menuitem', { name: /cut/i }))
+
+    expect(writeClipboard).toHaveBeenCalledWith('hello')
+    expect(execCommand).toHaveBeenCalledWith('delete')
+  })
+
+  it('pastes the clipboard through insertText so the draft observes it', () => {
+    readClipboard.mockReturnValue('pasted')
+    const { ta } = renderEditor('hello')
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+    fireEvent.click(screen.getByRole('menuitem', { name: /paste/i }))
+
+    expect(execCommand).toHaveBeenCalledWith('insertText', false, 'pasted')
+  })
+
+  it('selects the whole buffer', () => {
+    const { ta } = renderEditor('hello world')
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+    fireEvent.click(screen.getByRole('menuitem', { name: /select all/i }))
+
+    expect(ta.selectionStart).toBe(0)
+    expect(ta.selectionEnd).toBe('hello world'.length)
+  })
+
+  it('routes undo and redo to the native stack', () => {
+    const { ta } = renderEditor('hello')
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+    fireEvent.click(screen.getByRole('menuitem', { name: /undo/i }))
+    expect(execCommand).toHaveBeenCalledWith('undo')
+
+    fireEvent.contextMenu(ta, { clientX: 40, clientY: 40 })
+    fireEvent.click(screen.getByRole('menuitem', { name: /redo/i }))
+    expect(execCommand).toHaveBeenCalledWith('redo')
   })
 })
