@@ -2,6 +2,23 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.25.1](https://github.com/jimbuck/orbital/compare/v1.25.0...v1.25.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **editor:** keep renamed folders open, warn before binning unsaved edits, tidy errno messages ([e04a250](https://github.com/jimbuck/orbital/commit/e04a2500f317d84332e15ebafb16e3743f871ec3)), closes [#17](https://github.com/jimbuck/orbital/issues/17)
+* **editor:** spare the current render's images when the preview cache evicts ([1286e1a](https://github.com/jimbuck/orbital/commit/1286e1a3c4b07094044074e8695b246de33d9235))
+* **git:** contain gitDiff paths before the --no-index fallback ([ace58dc](https://github.com/jimbuck/orbital/commit/ace58dc749919a5cf40d808822b9873f4f961947))
+* **main:** name-check new files on save, expand linked dirs, and catch rail hand-offs ([dd1b049](https://github.com/jimbuck/orbital/commit/dd1b0494a0f87fcedeb60ae3ee1e298984ef82fc)), closes [#18](https://github.com/jimbuck/orbital/issues/18)
+* **main:** refuse to move a tab into a pane of another worktree ([c17cb01](https://github.com/jimbuck/orbital/commit/c17cb01cdb2f1f0cc5500303fafd2ce93852b24f))
+* **worktree:** make the node_modules copy report, resume, and run one at a time ([45c5baf](https://github.com/jimbuck/orbital/commit/45c5baf59ad82a8023432a9e1bbb38b76765c23a))
+
+
+### Performance Improvements
+
+* **editor:** re-render the markdown preview once typing pauses ([6380a0a](https://github.com/jimbuck/orbital/commit/6380a0acee2e6656bcec34d2ee5c534511a73015))
+
 # [1.25.0](https://github.com/jimbuck/orbital/compare/v1.24.2...v1.25.0) (2026-09-04)
 
 
