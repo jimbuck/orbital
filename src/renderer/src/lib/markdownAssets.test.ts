@@ -592,11 +592,12 @@ describe('markdown asset cache policy', () => {
     await load('huge.png')
     expect(b.reads).toHaveLength(2)
 
-    // What the rule does *not* buy, stated so nobody reads more into it than is
-    // there: this document's working set is four images' worth against a
-    // two-image budget, so `small` was evicted to pay for `huge` and the next
-    // reference to it costs a read. Sparing one entry bounds the overshoot of a
-    // single charge; it is not a fix for a working set that doesn't fit.
+    // Where the overshoot goes: the two-image document was four images' worth
+    // against a two-image budget and stayed resident as a whole while it was
+    // the document on screen. The `load('huge.png')` above was a *different*
+    // document (one image), so `small` stopped being protected and was
+    // reclaimed to bring the total back under budget; the next reference to
+    // it costs a read.
     await load('small.png')
     expect(b.reads).toEqual(['w1:small.png', 'w1:huge.png', 'w1:small.png'])
 
@@ -896,5 +897,110 @@ describe('markdown asset cache straggling reads', () => {
     b.release()
     await again
     expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:a.png'])
+  })
+})
+
+/* ---- Passes ---------------------------------------------------------------
+ *
+ * One render of one document is a pass, and nothing a pass asked for is evicted
+ * to make room for something else the same pass asked for. Without that, a
+ * document over budget hit the LRU sequential-scan cliff: 0% hit rate, every
+ * image re-read on every keystroke.
+ * -------------------------------------------------------------------------- */
+
+describe('markdown asset cache passes', () => {
+  beforeEach(() => {
+    __resetMarkdownAssetCache()
+    __setMarkdownAssetCacheTtl(30_000)
+  })
+  afterEach(() => {
+    __setMarkdownAssetBridge(null)
+    __setMarkdownAssetCacheTtl(30_000)
+    __setMarkdownAssetCacheLimits(null)
+    __resetMarkdownAssetCache()
+  })
+
+  it('keeps a document resident across renders even when it exceeds the byte budget', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 3 * ENTRY_BYTES })
+    const doc = ['a.png', 'b.png', 'c.png', 'd.png', 'e.png']
+
+    await loadDoc(doc)
+    expect(b.reads).toHaveLength(5)
+
+    // A keystroke, then another. Before the pass rule each image loaded here
+    // evicted one loaded earlier in the same render, so every render re-read
+    // all five.
+    await loadDoc(doc)
+    await loadDoc(doc)
+    expect(b.reads).toHaveLength(5)
+  })
+
+  it('keeps a document resident across renders even when it exceeds the entry ceiling', async () => {
+    // The probe from the original report: 50 broken images against a
+    // 10-entry ceiling gave 50 reads on render 1 and 50 again on render 2.
+    const b = makeSizedBridge(() => true)
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxEntries: 10 })
+    const doc = Array.from({ length: 50 }, (_, i) => `broken-${i}.png`)
+
+    await loadDoc(doc)
+    expect(b.reads).toHaveLength(50)
+    await loadDoc(doc)
+    expect(b.reads).toHaveLength(50)
+  })
+
+  it('does not evict the rest of an over-budget document when an image is added at its top', async () => {
+    // The order images are asked for is the document order, so a new first
+    // image is inserted before the others are re-touched. Evicting at that
+    // insert would drop every image the render is about to ask for; eviction
+    // therefore waits until the whole pass has been asked for.
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 3 * ENTRY_BYTES })
+    const doc = ['a.png', 'b.png', 'c.png', 'd.png', 'e.png']
+    await loadDoc(doc)
+
+    await loadDoc(['new.png', ...doc])
+    expect(b.reads).toHaveLength(6)
+    await loadDoc(['new.png', ...doc])
+    expect(b.reads).toHaveLength(6)
+  })
+
+  it('reclaims the overshoot once another document renders, oldest first', async () => {
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 3 * ENTRY_BYTES })
+    const doc = ['a.png', 'b.png', 'c.png', 'd.png', 'e.png']
+    await loadDoc(doc)
+
+    // A different file: its one image is the new pass, and the previous
+    // document's five are fair game down to the budget — a, b, c go, d and e
+    // stay beside z.
+    await load('z.png')
+    expect(b.reads).toHaveLength(6)
+    await load('d.png')
+    await load('e.png')
+    expect(b.reads).toHaveLength(6)
+    await load('a.png')
+    expect(b.reads).toHaveLength(7)
+  })
+
+  it('still evicts within the budget when the document fits', async () => {
+    // The pass rule must not turn into "never evict": an ordinary sequence of
+    // small documents is still bounded by the budget, LRU first.
+    const b = makeSizedBridge()
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    await load('a.png')
+    await load('b.png')
+    await load('c.png') // over budget: a is the oldest and not in this pass
+    await load('b.png')
+    await load('c.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+    await load('a.png')
+    expect(b.reads).toHaveLength(4)
   })
 })

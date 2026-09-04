@@ -251,6 +251,8 @@ interface CacheEntry {
    * read, which retains nothing but a null.
    */
   bytes: number
+  /** The {@link pass} that last asked for this entry — see {@link evict}. */
+  pass: number
 }
 
 /**
@@ -272,6 +274,16 @@ const cache = new Map<string, CacheEntry>()
 
 /** Sum of every live entry's `bytes`, kept in step by {@link drop} and {@link charge}. */
 let cacheBytes = 0
+
+/**
+ * Which render of which document is asking. Bumped once per
+ * {@link resolveMarkdownImages} call that has images to resolve, and stamped on
+ * every entry that call inserts or hits, so {@link evict} can tell "part of the
+ * document on screen right now" from "left over from an earlier one". A number
+ * rather than a set of keys because that is all eviction needs to ask: is this
+ * entry's pass the latest?
+ */
+let pass = 0
 
 /** Roughly how long a decoded image stays good for. */
 let cacheTtlMs = 30_000
@@ -328,47 +340,45 @@ function charge(key: string, entry: CacheEntry, bytes: number): void {
   if (cache.get(key) !== entry) return
   entry.bytes = bytes
   cacheBytes += bytes
-  // A read that just landed is by definition the most recent use of its key, and
-  // {@link evict} spares exactly one entry: the Map tail. Without this touch the
-  // spared entry was whatever key happened to sit last in insertion order, which
-  // is the entry being charged only in a document with a single image. Given
-  // `<img huge><img small>`, `huge` charged first, overshot the budget, and
-  // evicted *itself* the instant it settled — so the preview re-read the largest
-  // image in the document over IPC on every keystroke, which is precisely the
-  // cost the spare-one-entry rule exists to prevent. Touching first is what makes
-  // the entry the rule spares and the entry being charged the same entry.
+  // A read that just landed is the most recent use of its key: move it to the
+  // recently-used end so LRU order reflects that, then settle the budget.
   touch(key, entry)
   evict()
 }
 
 /**
- * Evict least-recently-used entries until both budgets are satisfied.
+ * Evict least-recently-used entries until both budgets are satisfied — never
+ * evicting anything the current {@link pass} asked for.
  *
- * The loop stops at `cache.size > 1` rather than `> 0`, so the Map tail — the
- * most recently used entry — is always spared. Every caller arranges for the
- * tail to be the entry it is about to serve: the freshly inserted one on the
- * insert path, the one whose read just settled in {@link charge} (which touches
- * it first, for exactly this reason), and the most recently used one when a test
- * lowers the budget. An image that is on its own bigger than the entire budget
- * would otherwise evict itself the instant it settled, so the preview would
- * re-read it over IPC on every keystroke — the cost this cache exists to prevent,
- * at its worst on the file where it hurts most.
+ * Why the pass rule exists. Plain LRU has a cliff: when one document's images
+ * exceed the budget, every render walks them in the same order, so each image
+ * loaded evicts one loaded earlier in the same render, and the next render
+ * re-reads all of them. The hit rate does not degrade, it drops to ZERO — and
+ * with a byte budget that regime is reachable by one README with twenty 5 MiB
+ * screenshots, which the old entry-count cap cached in full. Sparing the
+ * current pass turns the cliff back into a slope: the document on screen stays
+ * resident whatever its size, and only what an *earlier* document left behind
+ * is reclaimed, oldest first.
  *
- * Precisely what that buys, and what it does not: a charge overshoots the budget
- * by at most the one entry it just charged, which is memory the visible `srcDoc`
- * is holding anyway, and that entry is guaranteed to survive its own charge. It
- * is *not* a guarantee that an oversized image stays cached across renders. When
- * a document's whole working set exceeds the budget, each image loaded in a pass
- * evicts one loaded earlier in the same pass, and the next pass re-reads it —
- * the classic LRU sequential-scan cliff, which drops the hit rate to zero rather
- * than degrading it. Fixing that needs a "don't evict anything touched during the
- * current pass" rule, i.e. a notion of a pass; that is deliberately not here.
+ * What that costs: the cache can overshoot the budget by one document's working
+ * set. That is memory the visible `srcDoc` is holding a copy of anyway, so the
+ * overshoot never more than roughly doubles what the preview already costs, and
+ * it lasts only until the next document renders. An image on its own larger
+ * than the whole budget is the one-image case of the same rule, which is why
+ * there is no separate "spare the tail" special case any more.
+ *
+ * When it runs matters as much as what it spares: only once every image in the
+ * pass has been asked for (and so stamped), and then as each read's charge
+ * lands. Never on the insert or hit path — see cachedDataUrl.
+ *
+ * Deleting during `for..of` over a Map is defined behaviour — entries removed
+ * ahead of the iterator are simply not visited.
  */
 function evict(): void {
-  while (cache.size > 1 && (cacheBytes > cacheMaxBytes || cache.size > cacheMaxEntries)) {
-    const oldest = cache.keys().next()
-    if (oldest.done) break
-    drop(oldest.value)
+  for (const [key, entry] of cache) {
+    if (cacheBytes <= cacheMaxBytes && cache.size <= cacheMaxEntries) return
+    if (entry.pass === pass) continue
+    drop(key)
   }
 }
 
@@ -391,6 +401,7 @@ function cachedDataUrl(worktreeId: string, path: string, mime: string): Promise<
   const now = Date.now()
   const hit = cache.get(key)
   if (hit && now - hit.loadedAt < cacheTtlMs) {
+    hit.pass = pass
     touch(key, hit)
     return hit.value
   }
@@ -404,7 +415,7 @@ function cachedDataUrl(worktreeId: string, path: string, mime: string): Promise<
     .readFileBase64(worktreeId, path)
     .then((b64) => `data:${mime};base64,${b64}`)
     .catch(() => null)
-  const entry: CacheEntry = { value, loadedAt: now, bytes: 0 }
+  const entry: CacheEntry = { value, loadedAt: now, bytes: 0, pass }
   cache.set(key, entry)
 
   // Size is only knowable once the read lands, so the charge is a SECOND
@@ -417,7 +428,11 @@ function cachedDataUrl(worktreeId: string, path: string, mime: string): Promise<
     if (url !== null) charge(key, entry, url.length)
   })
 
-  evict()
+  // No eviction here, deliberately. Entries this pass has not reached yet
+  // still carry the previous pass's stamp, so evicting mid-pass would drop
+  // images the document is about to ask for. The pass evicts once, after every
+  // image has been asked for — see resolveMarkdownImages — and again as each
+  // charge lands, by which point the whole pass is stamped.
   return value
 }
 
@@ -515,6 +530,10 @@ export async function resolveMarkdownImages(html: string, ctx: MarkdownAssetCont
   // (comments, including the common `<!-- omit in toc -->` marker).
   if (!REWRITABLE.test(html)) return html
 
+  // One render of one document, for the cache's eviction rule: every image
+  // asked for below is stamped with this pass and spared until the next one.
+  pass++
+
   // Fragment parsing via a detached `<template>`, not document parsing. A
   // template's contents live in an inert document — nothing is fetched, nothing
   // runs — and, unlike `DOMParser`, fragment parsing has no `<head>` to hoist
@@ -568,6 +587,14 @@ export async function resolveMarkdownImages(html: string, ctx: MarkdownAssetCont
       })
     )
   }
+
+  // Every image this pass wants has been asked for and stamped, so this is the
+  // first moment eviction can run without touching one of them. It settles the
+  // entry ceiling now and whatever bytes are already known; the bytes of reads
+  // still in flight are settled as each one lands (see charge). A pass made
+  // entirely of hits — switching back to a small, cached document — is also
+  // the moment an earlier document's overshoot stops being protected.
+  evict()
 
   if (jobs.length > 0) await Promise.all(jobs)
 
