@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useStore } from './store'
 import { useResolvedTheme } from './lib/theme'
+import { applyAccentColor, useAccentColor } from './lib/accent'
 import TitleBar from './components/TitleBar'
 import Rail from './components/rail/Rail'
 import PaneGroup from './components/body/PaneGroup'
@@ -14,9 +15,16 @@ import ModalRoot from './components/modals/ModalRoot'
  */
 function ThemeManager(): null {
   const theme = useResolvedTheme()
+  const accent = useAccentColor()
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+  // The accent overrides the theme's accent tokens inline on <html>, derived
+  // for the resolved theme (a colour that reads on dark does not on white), so
+  // it has to be recomputed on a theme flip as well as on a change of colour.
+  useEffect(() => {
+    applyAccentColor(document.documentElement, accent, theme)
+  }, [accent, theme])
   return null
 }
 

@@ -25,7 +25,8 @@ function makeSettings(theme: ThemeMode): SettingsModel {
     // No agent profiles: the profile cards each stat the disk on mount, and this
     // test is about the Appearance section.
     agents: [],
-    theme
+    theme,
+    accentColor: null
   } as unknown as SettingsModel
 }
 
@@ -51,6 +52,13 @@ const realCloseModal = useStore.getState().closeModal
 beforeEach(() => {
   setSettings.mockClear()
   vi.stubGlobal('orbital', { setSettings, inspectProfileDir: vi.fn(async () => null), openLogFolder: vi.fn() })
+  // jsdom has no matchMedia; the accent picker resolves the theme for its
+  // Default swatch, which subscribes to it.
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  }))
 })
 
 afterEach(() => {
@@ -236,5 +244,123 @@ describe('Settings — Save', () => {
     // The edits are the only remaining copy — they must survive for a retry.
     expect((screen.getByLabelText('Default shell') as HTMLSelectElement).value).toBe('cmd.exe')
     expect((screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+describe('Settings — accent colour', () => {
+  /** The accent radio group's swatches, in rendered order. */
+  function swatches(): HTMLElement[] {
+    return within(screen.getByRole('radiogroup', { name: 'Accent color' })).getAllByRole('radio')
+  }
+  const hexField = (): HTMLInputElement => screen.getByRole('textbox', { name: 'Accent hex' }) as HTMLInputElement
+  const swatchNamed = (name: string): HTMLElement => swatches().find((r) => r.getAttribute('aria-label') === name)!
+
+  it('offers Default, the presets and Custom, with Default checked when no accent is set', () => {
+    seed('dark')
+    render(<Settings />)
+    const names = swatches().map((r) => r.getAttribute('aria-label'))
+    expect(names[0]).toBe('Default')
+    expect(names[names.length - 1]).toBe('Custom')
+    expect(names.length).toBeGreaterThan(4)
+    expect(swatches()[0].getAttribute('aria-checked')).toBe('true')
+    expect(hexField().value).toBe('')
+  })
+
+  it('persists a clicked preset as accentColor and nothing else, applying it at once', () => {
+    seed('dark')
+    render(<Settings />)
+    fireEvent.click(swatchNamed('Violet'))
+    expect(setSettings).toHaveBeenCalledTimes(1)
+    expect(setSettings).toHaveBeenCalledWith({ accentColor: '#8b7cf6' })
+    expect(useStore.getState().settings?.accentColor).toBe('#8b7cf6')
+    expect(swatchNamed('Violet').getAttribute('aria-checked')).toBe('true')
+    expect(hexField().value).toBe('#8b7cf6')
+  })
+
+  it('clears the accent back to Default with a null write', () => {
+    seed('dark')
+    useStore.setState({ settings: { ...makeSettings('dark'), accentColor: '#8b7cf6' } })
+    render(<Settings />)
+    fireEvent.click(swatches()[0])
+    expect(setSettings).toHaveBeenCalledWith({ accentColor: null })
+    expect(useStore.getState().settings?.accentColor).toBeNull()
+  })
+
+  it('checks Custom for a colour that is not a preset', () => {
+    seed('dark')
+    useStore.setState({ settings: { ...makeSettings('dark'), accentColor: '#123456' } })
+    render(<Settings />)
+    expect(swatchNamed('Custom').getAttribute('aria-checked')).toBe('true')
+    expect(swatches()[0].getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('applies a typed hex on Enter, normalised, and ignores one that is not a colour', () => {
+    seed('dark')
+    render(<Settings />)
+    fireEvent.change(hexField(), { target: { value: 'ABCDEF' } })
+    fireEvent.keyDown(hexField(), { key: 'Enter' })
+    expect(setSettings).toHaveBeenCalledWith({ accentColor: '#abcdef' })
+
+    setSettings.mockClear()
+    fireEvent.change(hexField(), { target: { value: 'not a colour' } })
+    fireEvent.blur(hexField())
+    expect(setSettings).not.toHaveBeenCalled()
+    // The field falls back to the applied colour rather than holding junk.
+    expect(hexField().value).toBe('#abcdef')
+  })
+
+  it('previews a dragged custom colour at once and persists it when the drag pauses', async () => {
+    vi.useFakeTimers()
+    try {
+      seed('dark')
+      render(<Settings />)
+      fireEvent.change(swatchNamed('Custom'), { target: { value: '#112233' } })
+      fireEvent.change(swatchNamed('Custom'), { target: { value: '#445566' } })
+      // Every movement re-tints the app...
+      expect(useStore.getState().settings?.accentColor).toBe('#445566')
+      // ...but nothing has been written yet.
+      expect(setSettings).not.toHaveBeenCalled()
+      await act(async () => {
+        vi.advanceTimersByTime(300)
+      })
+      expect(setSettings).toHaveBeenCalledTimes(1)
+      expect(setSettings).toHaveBeenCalledWith({ accentColor: '#445566' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rolls the accent back when it cannot be persisted', async () => {
+    seed('dark')
+    setSettings.mockRejectedValueOnce(new Error('SQLITE_BUSY'))
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<Settings />)
+    fireEvent.click(swatchNamed('Green'))
+    expect(useStore.getState().settings?.accentColor).toBe('#3ddc97')
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(useStore.getState().settings?.accentColor).toBeNull()
+    error.mockRestore()
+  })
+
+  it('leaves the accent out of Save, which persists it on selection', async () => {
+    seed('dark')
+    render(<Settings />)
+    fireEvent.click(swatchNamed('Teal'))
+    setSettings.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(setSettings).toHaveBeenCalledWith({})
+  })
+
+  it('says the accent applies immediately, next to the control and to assistive tech', () => {
+    seed('dark')
+    render(<Settings />)
+    const group = screen.getByRole('radiogroup', { name: 'Accent color' })
+    const hint = document.getElementById(group.getAttribute('aria-describedby')!)
+    expect(hint?.textContent).toMatch(/Applies immediately/)
   })
 })

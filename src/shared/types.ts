@@ -448,10 +448,28 @@ export interface Settings {
   agents: AgentConfig[]
   /** App color theme: 'system' follows the OS, else an explicit 'light'/'dark'. Defaults to 'dark'. */
   theme: ThemeMode
+  /**
+   * The workspace's accent colour as `#rrggbb`, or null for the theme's built-in
+   * blue. Workspace-scoped on purpose: each workspace runs in its own window,
+   * and a different accent per window is what lets the eye tell them apart
+   * without reading the title bar.
+   */
+  accentColor: string | null
 }
 
 /** Settings that belong to a workspace (persisted in its YAML config file). */
-export const WORKSPACE_SETTING_KEYS = ['envSyncPatterns', 'periodicFetch', 'agents'] as const
+export const WORKSPACE_SETTING_KEYS = ['envSyncPatterns', 'periodicFetch', 'agents', 'accentColor'] as const
+
+/**
+ * Coerce a stored or imported accent value to `#rrggbb` lowercase, or null when
+ * it is not one. Storage is shared with hand-edited YAML and other builds, so
+ * this is checked on the way OUT of storage rather than trusted.
+ */
+export function normalizeAccentColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const m = /^#?([0-9a-f]{6})$/i.exec(value.trim())
+  return m ? `#${m[1].toLowerCase()}` : null
+}
 
 /** The workspace-scoped slice of {@link Settings}. */
 export type WorkspaceSettings = Pick<Settings, (typeof WORKSPACE_SETTING_KEYS)[number]>

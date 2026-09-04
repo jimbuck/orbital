@@ -152,7 +152,9 @@ export default function TitleBar(): JSX.Element {
       <div className="no-drag z-50 flex h-full items-center gap-2.5 bg-bar">
         <div className="relative size-[15px] flex-none">
           <div className="absolute inset-0 rounded-full border-[1.2px] border-accent/55" />
-          <div className="absolute left-1/2 top-1/2 -ml-[2.5px] -mt-[2.5px] size-[5px] rounded-full bg-accent shadow-[0_0_7px_rgba(79,140,255,0.9)]" />
+          {/* The glow is the accent token, not a baked-in blue: with a per-workspace
+              accent this orb is the first thing that says which window this is. */}
+          <div className="absolute left-1/2 top-1/2 -ml-[2.5px] -mt-[2.5px] size-[5px] rounded-full bg-accent shadow-[0_0_7px_var(--color-accent)]" />
         </div>
         <span className="text-[12px] font-semibold tracking-[0.2px]">Orbital</span>
 

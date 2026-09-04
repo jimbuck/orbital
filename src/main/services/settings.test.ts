@@ -302,3 +302,27 @@ describe('patchTouches', () => {
     expect(patchTouches({ debugLogging: undefined }, 'debugLogging')).toBe(false)
   })
 })
+
+describe('accentColor', () => {
+  it('lives on the workspace row and defaults to null', () => {
+    expect(getSettings().accentColor).toBeNull()
+    setSettings({ accentColor: '#8b7cf6' })
+    expect(workspaceRow.accentColor).toBe('#8b7cf6')
+    expect(storedGlobalKeys()).toEqual([])
+    expect(getSettings().accentColor).toBe('#8b7cf6')
+  })
+
+  it('clears with an explicit null rather than treating it as absent', () => {
+    setSettings({ accentColor: '#8b7cf6' })
+    setSettings({ accentColor: null })
+    expect(workspaceRow.accentColor).toBeNull()
+    expect(getSettings().accentColor).toBeNull()
+  })
+
+  it('reads a hand-edited value that is not a colour as no accent', () => {
+    workspaceRow = { accentColor: 'hotpink' }
+    expect(getSettings().accentColor).toBeNull()
+    workspaceRow = { accentColor: 'F06A8A' }
+    expect(getSettings().accentColor).toBe('#f06a8a')
+  })
+})

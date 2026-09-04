@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { parse, stringify } from 'yaml'
 import {
   WORKSPACE_CONFIG_VERSION,
+  normalizeAccentColor,
   normalizeAgentConfigs,
   type WorkspaceConfig,
   type WorkspaceProjectConfig
@@ -69,6 +70,8 @@ export function normalize(raw: unknown): WorkspaceConfig {
       settings.envSyncPatterns = s.envSyncPatterns
     }
     if (typeof s.periodicFetch === 'boolean') settings.periodicFetch = s.periodicFetch
+    const accent = normalizeAccentColor(s.accentColor)
+    if (accent) settings.accentColor = accent
     // Modern `agents` entries, or a legacy `enabledAgents` id array from an
     // export written before agents were configurable.
     const agents = normalizeAgentConfigs(s.agents, s.enabledAgents)

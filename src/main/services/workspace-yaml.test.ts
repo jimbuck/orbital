@@ -45,3 +45,18 @@ describe('workspace-yaml normalize — agent settings', () => {
     expect(cfg.settings).toBeUndefined()
   })
 })
+
+describe('workspace-yaml normalize — accent colour', () => {
+  it('keeps a valid accent, normalised to lowercase #rrggbb', () => {
+    const cfg = normalize({ id: 'ws', name: 'Work', settings: { accentColor: 'F06A8A' }, projects: [] })
+    expect(cfg.settings?.accentColor).toBe('#f06a8a')
+  })
+
+  it('drops an accent that is not a colour', () => {
+    for (const bad of ['red', '#fff', '#12345g', 42, null]) {
+      const cfg = normalize({ id: 'ws', name: 'Work', settings: { accentColor: bad, periodicFetch: true }, projects: [] })
+      expect(cfg.settings?.accentColor).toBeUndefined()
+      expect(cfg.settings?.periodicFetch).toBe(true)
+    }
+  })
+})

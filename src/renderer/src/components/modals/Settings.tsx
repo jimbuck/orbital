@@ -3,6 +3,8 @@ import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
 import type { Settings as SettingsModel, SettingsPatch, AgentConfig, ProfileDirInfo } from '@shared/types'
 import { setThemeMode, themeModeLabel, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { previewAccentColor, setAccentColor, useAccentColor } from '@renderer/lib/accent'
+import { AccentPicker } from '../AccentPicker'
 import { SegmentedControl } from '../SegmentedControl'
 import {
   SUPPORTED_AGENTS,
@@ -419,6 +421,11 @@ export default function Settings(): React.JSX.Element {
   // aria-describedby. Generated rather than hard-coded so the id stays unique
   // even if this modal is ever rendered twice.
   const themeHintId = useId()
+  // The accent is applied and persisted on selection exactly like the theme —
+  // a colour you have to Save to see is no way to choose one — and for the same
+  // reason is read live from the store rather than held as a working copy.
+  const accentColor = useAccentColor()
+  const accentHintId = useId()
   // The workspace's agent profiles. Existing installs lack the key -> default lineup.
   const [agents, setAgents] = useState<AgentConfig[]>(() => settings?.agents ?? defaultAgentConfigs())
   // Extra-CLI-args fields edit as raw text per profile; parsed into argv on save.
@@ -597,6 +604,23 @@ export default function Settings(): React.JSX.Element {
         spellCheck={false}
         className={`mt-1.5 ${inputBase}`}
       />
+      <div className={`${fieldLabel} mt-3.5`}>
+        Accent color{' '}
+        <span className="font-normal text-faint">· tints this workspace&apos;s window so it can be told apart at a glance</span>
+      </div>
+      <div className="mt-2">
+        <AccentPicker
+          value={accentColor}
+          onPreview={previewAccentColor}
+          onChange={setAccentColor}
+          describedBy={accentHintId}
+        />
+      </div>
+      {/* Same treatment as the theme row's note, for the same reason: this is
+          the other control in the modal that Cancel does not undo. */}
+      <div id={accentHintId} className="mt-1.5 text-[11px] text-dim">
+        Applies immediately — Cancel won&apos;t undo it.
+      </div>
 
       <div className="my-[18px] h-px bg-soft" />
 

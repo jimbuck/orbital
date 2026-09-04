@@ -2,6 +2,7 @@ import {
   DEFAULT_ENV_SYNC_PATTERNS,
   WORKSPACE_SETTING_KEYS,
   defaultAgentConfigs,
+  normalizeAccentColor,
   normalizeAgentConfigs,
   type GlobalSettings,
   type Settings,
@@ -30,7 +31,8 @@ const DEFAULT_SETTINGS: Settings = {
   agents: defaultAgentConfigs(),
   // Existing installs merge over this default, so they stay dark and keep the
   // current look; only an explicit change opts a user into light/system.
-  theme: 'dark'
+  theme: 'dark',
+  accentColor: null
 }
 
 /**
@@ -153,6 +155,9 @@ export function getSettings(): Settings {
   // toggle existed would shadow that toggle's default with undefined — deep-merge
   // the alerts object so new alert settings arrive enabled on old installs.
   merged.alerts = { ...DEFAULT_SETTINGS.alerts, ...merged.alerts }
+  // The workspace row can be hand-edited (or written by an import); a value that
+  // is not a colour must read as "no accent", not reach the renderer's CSS.
+  merged.accentColor = normalizeAccentColor(merged.accentColor)
   return merged
 }
 
