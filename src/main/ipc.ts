@@ -31,7 +31,7 @@ import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree } from './services/worktree'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
-import { copyNodeModulesTree, targetsNodeModules } from './services/env-sync'
+import { copyNodeModulesTree, hasIncompleteCopy, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
 import { getProvider } from './services/agents/provider'
@@ -55,13 +55,57 @@ import { refreshJumpList } from './services/jump-list'
  * for minutes), flagging the worktree as "setting up" so the rail shows a
  * spinner until the copy finishes. No-op for root Worktrees or when
  * node_modules isn't a sync target.
+ *
+ * The outcome goes to the log either way. There is no in-app channel for a
+ * background failure, and the spinner clearing is the only thing the rail can
+ * say — so the report (files, bytes, errors, duration) is what a "why is my
+ * worktree missing packages" question gets answered from.
  */
 function beginWorktreeSetup(worktree: Worktree, repoPath: string): void {
   if (worktree.kind !== 'linked') return
   if (!targetsNodeModules(getSettings().envSyncPatterns)) return
   runtime.markSettingUp(worktree.id)
-  void copyNodeModulesTree(repoPath, worktree.path).finally(() => runtime.clearSettingUp(worktree.id))
+  logger.info('node_modules copy started', { worktree: worktree.name, from: repoPath })
+  // The failure actually seen in the field was a copy that made no progress
+  // for a quarter of an hour and reported nothing. Whatever its cause, that
+  // shape is now at least visible: a progress counter, and a warning when it
+  // stops moving. (A copy queued behind another for the same root has not
+  // started yet and is not "stalled"; the counter only exists once it runs.)
+  let done = 0
+  let seen = -1
+  const watchdog = setInterval(() => {
+    if (done === seen && done > 0) {
+      logger.warn('node_modules copy has made no progress', {
+        worktree: worktree.name,
+        files: done,
+        seconds: COPY_STALL_SECONDS
+      })
+    }
+    seen = done
+  }, COPY_STALL_SECONDS * 1000)
+  void copyNodeModulesTree(repoPath, worktree.path, {
+    onProgress: (n) => {
+      done = n
+    }
+  })
+    .then((report) => {
+      const level = report.errorCount > 0 ? 'warn' : 'info'
+      logger[level]('node_modules copy finished', { worktree: worktree.name, ...report })
+    })
+    .catch((err: unknown) => {
+      logger.error('node_modules copy failed', {
+        worktree: worktree.name,
+        message: err instanceof Error ? err.message : String(err)
+      })
+    })
+    .finally(() => {
+      clearInterval(watchdog)
+      runtime.clearSettingUp(worktree.id)
+    })
 }
+
+/** How long a running node_modules copy may go without copying a file before the log says so. */
+const COPY_STALL_SECONDS = 60
 
 function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> {
   const path = `${cliDir()}${PATH_DELIM}${process.env.PATH ?? ''}`
@@ -1523,6 +1567,16 @@ export function resumeProjects(): void {
     if (w.kind === 'linked' && existsSync(w.path)) {
       runtime.gitWatcher.watch(w.path)
       checkouts.add(w.path)
+      // A node_modules copy that was still running when the app last quit (or
+      // that never finished) left its marker behind. Pick it up where it
+      // stopped: the copy skips files the worktree already has.
+      if (hasIncompleteCopy(w.path)) {
+        const project = repo.projects.get(w.projectId)
+        if (project) {
+          logger.info('resuming interrupted node_modules copy', { worktree: w.name })
+          beginWorktreeSetup(w, project.repoPath)
+        }
+      }
     }
   }
   // Reconcile every project against `git worktree list` (adopt checkouts created
