@@ -7,6 +7,7 @@ import type { Tab } from '@shared/types'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { registerTerminal } from '@renderer/lib/editActions'
 import { decodeOsc52 } from '@renderer/lib/terminalClipboard'
+import { fireAndForget } from '@renderer/lib/bridge'
 
 /** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
 const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
@@ -126,10 +127,14 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     term.loadAddon(
       new WebLinksAddon((event, uri) => {
         // Ctrl/Cmd-click opens externally; a plain click opens an in-app browser tab.
+        // Both are fire-and-forget: a rejection from main (the worktree gone,
+        // say) has no line in a terminal to land on, so it goes to the log.
         if (event.ctrlKey || event.metaKey) {
-          void window.orbital.openExternal(uri)
+          fireAndForget(window.orbital.openExternal(uri))
         } else {
-          void window.orbital.createTab(worktreeIdRef.current, paneIdRef.current, 'browser', { url: uri })
+          fireAndForget(
+            window.orbital.createTab(worktreeIdRef.current, paneIdRef.current, 'browser', { url: uri })
+          )
         }
       })
     )

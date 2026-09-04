@@ -8,8 +8,15 @@ import type { Tab } from '@shared/types'
  * terminal" without threading ids through the mock. Hoisted alongside the
  * vi.mock factory below, which runs before this module body.
  */
-const { terminals, FakeTerminal } = vi.hoisted(() => {
+const { terminals, FakeTerminal, webLinks, FakeWebLinksAddon } = vi.hoisted(() => {
   const built: FakeTerminal[] = []
+  /** The link-click handler each TerminalTab installed, in mount order. */
+  const links: FakeWebLinksAddon[] = []
+  class FakeWebLinksAddon {
+    constructor(public handler: (event: MouseEvent, uri: string) => void) {
+      links.push(this)
+    }
+  }
   class FakeTerminal {
     options: Record<string, unknown> = {}
     cols = 80
@@ -50,7 +57,7 @@ const { terminals, FakeTerminal } = vi.hoisted(() => {
       built.push(this)
     }
   }
-  return { terminals: built, FakeTerminal }
+  return { terminals: built, FakeTerminal, webLinks: links, FakeWebLinksAddon }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }))
@@ -59,7 +66,7 @@ vi.mock('@xterm/addon-fit', () => ({
     fit = (): void => {}
   }
 }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }))
+vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: FakeWebLinksAddon }))
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: class {
     dispose = (): void => {}
@@ -84,6 +91,8 @@ const writeClipboard = vi.fn()
 const readClipboard = vi.fn((): string => '')
 /** The image half: resolves to a scratch PNG path, or null when there is no image either. */
 const pasteClipboardImage = vi.fn((): Promise<string | null> => Promise.resolve(null))
+const openExternal = vi.fn((): Promise<void> => Promise.resolve())
+const createTab = vi.fn((): Promise<unknown> => Promise.resolve({}))
 
 /** Mount one terminal and hand back the fake xterm behind it. */
 function mountTerminal(): (typeof terminals)[number] {
@@ -117,6 +126,9 @@ beforeEach(() => {
   // next one — vi.fn(impl) restores that impl on reset.
   readClipboard.mockReset()
   pasteClipboardImage.mockReset()
+  openExternal.mockReset()
+  createTab.mockReset()
+  webLinks.length = 0
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -135,8 +147,8 @@ beforeEach(() => {
     terminalBuffer: () => Promise.resolve({ data: '', seq: 0 }),
     terminalInput: () => {},
     terminalResize: () => {},
-    openExternal: () => {},
-    createTab: () => {},
+    openExternal,
+    createTab,
     writeClipboard,
     readClipboard,
     pasteClipboardImage
@@ -444,5 +456,43 @@ describe('TerminalTab OSC 52', () => {
     expect(terminals[0].oscHandlers.has(52)).toBe(true)
     unmount()
     expect(terminals[0].oscHandlers.has(52)).toBe(false)
+  })
+})
+
+describe('TerminalTab link clicks', () => {
+  /** Fire the handler the component gave the web-links addon. */
+  function clickLink(init: MouseEventInit = {}): void {
+    mountTerminal()
+    webLinks[0].handler(new MouseEvent('click', init), 'https://example.test/page')
+  }
+
+  it('opens a plain click as a browser tab in the terminal own worktree and pane', () => {
+    clickLink()
+    expect(createTab).toHaveBeenCalledWith('w1', 'pane1', 'browser', { url: 'https://example.test/page' })
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
+  it('opens a ctrl-click in the OS browser', () => {
+    clickLink({ ctrlKey: true })
+    expect(openExternal).toHaveBeenCalledWith('https://example.test/page')
+    expect(createTab).not.toHaveBeenCalled()
+  })
+
+  it('opens a cmd-click in the OS browser', () => {
+    clickLink({ metaKey: true })
+    expect(openExternal).toHaveBeenCalledWith('https://example.test/page')
+    expect(createTab).not.toHaveBeenCalled()
+  })
+
+  it('does not leak a rejected createTab as an unhandled rejection', async () => {
+    // Main can throw (the worktree was removed under the tab). The old bare
+    // `void` would have surfaced that as an "Uncaught (in promise)" nobody
+    // handles; now it is caught and warned, with main's log holding the detail.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    createTab.mockReturnValueOnce(Promise.reject(new Error('worktree w1 not found')))
+    clickLink()
+    await nextFlush()
+    expect(warn).toHaveBeenCalledWith('bridge call failed', expect.any(Error))
+    warn.mockRestore()
   })
 })

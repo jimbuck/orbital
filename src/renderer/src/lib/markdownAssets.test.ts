@@ -790,3 +790,111 @@ describe('markdown asset cache policy', () => {
     expect(b.reads).toEqual(['w1:a.png', 'w1:a.png'])
   })
 })
+
+/* ---- Straggling reads ------------------------------------------------------
+ *
+ * A read is charged to the budget when it SETTLES, and by then its entry may no
+ * longer be the live one for its key: the TTL replaced it, or eviction dropped
+ * it while the read was still in flight. `charge` has an identity check for
+ * exactly this, and before these tests deleting that check killed nothing.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * A sized bridge whose reads for `held` paths do not settle until the test
+ * says so (in order), so a read can be made to land after its entry has been
+ * replaced or evicted. Reads for every other path settle immediately.
+ */
+function makeHeldBridge(held: readonly string[]): {
+  bridge: { readFileBase64: (worktreeId: string, path: string) => Promise<string> }
+  reads: string[]
+  release: () => void
+} {
+  const reads: string[] = []
+  const pending: (() => void)[] = []
+  return {
+    bridge: {
+      readFileBase64: (worktreeId: string, path: string): Promise<string> => {
+        reads.push(`${worktreeId}:${path}`)
+        const bytes = 'A'.repeat(IMG_B64)
+        if (!held.includes(path)) return Promise.resolve(bytes)
+        return new Promise((resolve) => pending.push(() => resolve(bytes)))
+      }
+    },
+    reads,
+    release: (): void => {
+      pending.shift()?.()
+    }
+  }
+}
+
+describe('markdown asset cache straggling reads', () => {
+  beforeEach(() => {
+    __resetMarkdownAssetCache()
+    __setMarkdownAssetCacheTtl(30_000)
+  })
+  afterEach(() => {
+    __setMarkdownAssetBridge(null)
+    __setMarkdownAssetCacheTtl(30_000)
+    __setMarkdownAssetCacheLimits(null)
+    __resetMarkdownAssetCache()
+  })
+
+  it('does not charge a read that settles after its entry was replaced', async () => {
+    const b = makeHeldBridge(['a.png'])
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxBytes: 2 * ENTRY_BYTES })
+
+    // Two reads of `a` in flight at once: the first entry expired (TTL 0)
+    // before it settled, so the second load dropped it and inserted a fresh
+    // entry with its own read.
+    const first = load('a.png')
+    __setMarkdownAssetCacheTtl(0)
+    const second = load('a.png')
+    __setMarkdownAssetCacheTtl(30_000)
+    expect(b.reads).toEqual(['w1:a.png', 'w1:a.png'])
+
+    // The stale read lands first. Its entry is no longer the live one, so its
+    // bytes must not be charged — and it must not be reinserted over the live
+    // entry either.
+    b.release()
+    await first
+    b.release()
+    await second
+
+    // With `a` charged once, `a` + `b` fit the two-image budget exactly, so
+    // `a` is still resident. A leaked charge from the stale read would have
+    // put the total one image over and evicted `a` to pay for it — in which
+    // case this last load is a fresh (held) read, released so the assertion
+    // rather than the test timeout is what reports it.
+    await load('b.png')
+    const again = load('a.png')
+    b.release()
+    await again
+    expect(b.reads).toEqual(['w1:a.png', 'w1:a.png', 'w1:b.png'])
+  })
+
+  it('does not resurrect or charge an entry evicted while its read was in flight', async () => {
+    const b = makeHeldBridge(['a.png'])
+    __setMarkdownAssetBridge(b.bridge)
+    __setMarkdownAssetCacheLimits({ maxEntries: 2 })
+
+    // `a` is pending; `b` and `c` land at once and push it out by count.
+    const a = load('a.png')
+    await load('b.png')
+    await load('c.png')
+
+    // Now `a` settles. Its entry is gone: the charge must be ignored rather
+    // than reinserting the entry and evicting `b` to make room for it.
+    b.release()
+    await a
+    await load('b.png')
+    await load('c.png')
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png'])
+
+    // And `a` really is gone — asking for it again is a fresh read.
+    const again = load('a.png')
+    b.release()
+    await again
+    expect(b.reads).toEqual(['w1:a.png', 'w1:b.png', 'w1:c.png', 'w1:a.png'])
+  })
+})

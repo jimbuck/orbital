@@ -10,6 +10,7 @@ import { editCopy, editCut, editPaste, editSelectAll } from '@renderer/lib/editA
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
 import EditorContextMenu, { EDITOR_MENU_HEIGHT, EDITOR_MENU_WIDTH, type EditorAction } from './EditorContextMenu'
+import { fireAndForget } from '@renderer/lib/bridge'
 
 /** Shiki bundled theme id for each resolved app theme. */
 function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
@@ -733,8 +734,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // click → a new internal browser tab in this pane (per the link-handling spec).
   const onPreviewLink = useCallback(
     (href: string, external: boolean): void => {
-      if (external) void window.orbital.openExternal(href)
-      else void window.orbital.createTab(worktreeId, tab.paneId, 'browser', { url: href })
+      if (external) fireAndForget(window.orbital.openExternal(href))
+      else fireAndForget(window.orbital.createTab(worktreeId, tab.paneId, 'browser', { url: href }))
     },
     [worktreeId, tab.paneId]
   )
