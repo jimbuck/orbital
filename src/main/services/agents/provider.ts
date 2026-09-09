@@ -9,12 +9,12 @@
 import type { Project, Worktree } from '@shared/types'
 
 /**
- * The conversation an agent launch is pinned to. Orbital mints the id for a
- * fresh session (so it knows the id without waiting for a hook) and asks for a
- * resume when the tab already ran one — see TabConfig.agentSessionId.
+ * The conversation an agent launch is pinned to: either one the tab already ran
+ * (resume) or a new one under an id chosen before launch — see
+ * TabConfig.agentSessionId and {@link SessionSupport}.
  */
 export interface AgentSession {
-  /** The provider's session id (a UUID for Claude). */
+  /** The provider's session id (a UUID for every supported CLI). */
   id: string
   /** True to continue the stored conversation; false to start a new one under `id`. */
   resume: boolean
@@ -27,7 +27,7 @@ export interface AgentContext {
   briefingPath: string | null
   /** Explicit executable path configured on the project, if any. */
   execPath?: string
-  /** Session to run under; only given to providers with `tracksSessions`. */
+  /** Session to run under; only given to providers with {@link SessionSupport}. */
   session?: AgentSession
 }
 
@@ -36,6 +36,41 @@ export interface ResolvedCommand {
   file: string
   /** argv passed after the executable. */
   args: string[]
+}
+
+/** What a session lookup needs to know about the launch. */
+export interface SessionLookup {
+  /** The config/profile directory the CLI reads — where it keeps its sessions. */
+  profileDir: string
+  /** The worktree the session runs in (sessions are filed per directory). */
+  cwd: string
+  /** Explicit executable path, for providers that must shell out to mint an id. */
+  execPath?: string
+}
+
+/**
+ * How a provider's conversations are picked back up after a respawn. A CLI
+ * either lets Orbital choose the id before launch ({@link mint}) or reveals it
+ * only once the session is running ({@link discover}); every provider must be
+ * able to say whether a stored id still exists ({@link find}), because the
+ * CLIs exit with an error for an unknown id and that would leave a dead tab
+ * where a fresh session belongs.
+ */
+export interface SessionSupport {
+  /**
+   * Choose the id a NEW session will run under, before launch — or null when
+   * the CLI only assigns ids itself, in which case {@link discover} is polled
+   * after launch instead.
+   */
+  mint(lookup: SessionLookup): Promise<string | null>
+  /** Path of the stored session `id`, or null when the CLI no longer has it. */
+  find(lookup: SessionLookup, id: string): Promise<string | null>
+  /**
+   * The id of a session the CLI started in `lookup.cwd` at or after `since`
+   * (ms epoch) that no other tab owns (`taken`), or null if none has appeared
+   * yet. Only needed when {@link mint} returns null.
+   */
+  discover?(lookup: SessionLookup, since: number, taken: ReadonlySet<string>): Promise<string | null>
 }
 
 export interface AgentProvider {
@@ -52,19 +87,8 @@ export interface AgentProvider {
    * codex-instructions.ts).
    */
   acceptsBriefingFile: boolean
-  /**
-   * Whether the CLI can be launched under a session id Orbital chooses and
-   * later resumed by that id. When true, every launch gets an {@link AgentSession}
-   * and {@link sessionTranscriptPath} says where the provider persists it.
-   */
-  tracksSessions: boolean
-  /**
-   * Where the provider stores the transcript of `sessionId` for a session run
-   * in `cwd` with the profile at `profileDir`. Orbital only asks to resume a
-   * session whose transcript is still there — the CLI exits with an error for
-   * an unknown id, which would leave a dead tab where a fresh session belongs.
-   */
-  sessionTranscriptPath?(profileDir: string, cwd: string, sessionId: string): string
+  /** Session resume support; absent when the CLI cannot resume by id. */
+  sessions?: SessionSupport
   /** Resolve the executable + argv to spawn; throws a clear Error if unresolvable. */
   resolveCommand(ctx: AgentContext): Promise<ResolvedCommand>
 }

@@ -38,23 +38,28 @@ instructions below are for.
 
 ## Sessions survive a restart
 
-Closing Orbital (or a workspace) does not throw a Claude tab's conversation
-away. Each agent tab is pinned to a session id from the moment it launches, and
-when the tab comes back — the app restarts, the workspace is reopened, a
-worktree removal is rolled back — Orbital starts `claude --resume <id>` instead
-of a blank `claude`, so the agent carries on where it left off, mid-task and
-all.
+Closing Orbital (or a workspace) does not throw an agent tab's conversation
+away. Each agent tab is pinned to its session id, and when the tab comes back —
+the app restarts, the workspace is reopened, a worktree removal is rolled back —
+Orbital resumes that session instead of launching a blank agent, so it carries
+on where it left off, mid-task and all.
 
-- The id is minted by Orbital and handed to Claude at launch, so this works
-  with or without the status hooks. With the hooks installed the tab also
-  follows a `/clear`, which starts a new session under a new id.
-- Only a session whose transcript still exists is resumed. If Claude has since
-  cleaned it up, the tab starts fresh rather than sitting on a "no conversation
+- **Claude** is launched with `--session-id` (an id Orbital mints), so this
+  works with or without the status hooks. With the hooks installed the tab
+  also follows a `/clear`, which starts a new session under a new id. A
+  respawn runs `claude --resume <id>`.
+- **Cursor** is given a chat minted with `cursor-agent create-chat` and opened
+  with `--resume=<id>`, on the first launch and on every respawn.
+- **Codex** assigns its own thread id, so Orbital learns it from the rollout
+  file Codex writes for the session (it keeps checking until one appears for
+  this worktree) and respawns with `codex resume <id>`. Two Codex tabs
+  launched at the same moment in the same worktree could, in principle, be
+  matched to each other's sessions.
+- Only a session the CLI still has on disk is resumed. If it has since been
+  cleaned up, the tab starts fresh rather than sitting on a "no conversation
   found" error.
 - A tab you open yourself is always a new conversation; close the old tab and
   add a new one to start over.
-- Codex and Cursor tabs start fresh on every launch — their CLIs cannot be
-  handed a session id up front.
 
 ## The `orbital` skill
 

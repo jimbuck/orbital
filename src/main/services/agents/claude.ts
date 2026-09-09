@@ -6,8 +6,10 @@
  * Every launch is pinned to a session id Orbital chose (`--session-id`) so the
  * tab can pick the same conversation back up with `--resume` after a restart.
  */
+import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentContext, AgentProvider, ResolvedCommand } from './provider'
+import type { AgentContext, AgentProvider, ResolvedCommand, SessionLookup } from './provider'
 import { resolveExecutable } from './executable'
 
 /**
@@ -30,8 +32,17 @@ export const claudeProvider: AgentProvider = {
   // Used later to auto-suggest a provider per project; defined now, unused for now.
   detectFiles: ['CLAUDE.md', 'AGENTS.md'],
   acceptsBriefingFile: true,
-  tracksSessions: true,
-  sessionTranscriptPath: claudeTranscriptPath,
+
+  sessions: {
+    // `--session-id` takes any UUID, so the id is known before Claude even starts.
+    async mint(): Promise<string> {
+      return randomUUID()
+    },
+    async find({ profileDir, cwd }: SessionLookup, id: string): Promise<string | null> {
+      const path = claudeTranscriptPath(profileDir, cwd, id)
+      return existsSync(path) ? path : null
+    }
+  },
 
   async resolveCommand(ctx: AgentContext): Promise<ResolvedCommand> {
     const { file, prefixArgs } = await resolveExecutable(ctx.execPath, 'claude')

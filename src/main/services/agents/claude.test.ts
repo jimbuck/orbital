@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { join } from 'node:path'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import type { Project, Worktree } from '@shared/types'
 
 vi.mock('./executable', () => ({
@@ -45,9 +47,20 @@ describe('claudeProvider.resolveCommand', () => {
     expect(cmd.args).toEqual(['/c', 'claude.cmd'])
   })
 
-  it('declares that it tracks sessions', () => {
-    expect(claudeProvider.tracksSessions).toBe(true)
-    expect(claudeProvider.sessionTranscriptPath).toBe(claudeTranscriptPath)
+  it('mints a UUID up front and finds a session by its transcript', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'orbital-claude-'))
+    try {
+      const lookup = { profileDir: root, cwd: 'C:\\Projects\\orbital' }
+      const id = await claudeProvider.sessions!.mint(lookup)
+      expect(id).toMatch(/^[0-9a-f-]{36}$/)
+      expect(await claudeProvider.sessions!.find(lookup, id!)).toBeNull()
+      const transcript = claudeTranscriptPath(root, lookup.cwd, id!)
+      mkdirSync(dirname(transcript), { recursive: true })
+      writeFileSync(transcript, '{}\n')
+      expect(await claudeProvider.sessions!.find(lookup, id!)).toBe(transcript)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 

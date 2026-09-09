@@ -1,7 +1,6 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { ipcMain, dialog, shell, app, BrowserWindow, webContents, type IpcMainInvokeEvent } from 'electron'
 import {
   IPC,
@@ -35,7 +34,12 @@ import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './service
 import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
-import { getProvider, type AgentProvider, type AgentSession } from './services/agents/provider'
+import {
+  getProvider,
+  type AgentProvider,
+  type AgentSession,
+  type SessionLookup
+} from './services/agents/provider'
 import { agentProfileDir, defaultProfileDir, inspectProfileDir, resolveAgent } from './services/agents/profiles'
 import { expandUserPath } from './services/agents/user-path'
 import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
@@ -171,32 +175,91 @@ function recordAgentSession(tab: Tab, sessionId: unknown): void {
   repo.tabs.updateConfig(tab.id, { ...current.config, agentSessionId: sessionId })
 }
 
+/** Session ids every agent tab currently holds — what a discovery must not claim twice. */
+function takenSessionIds(): Set<string> {
+  const taken = new Set<string>()
+  for (const worktree of repo.worktrees.list()) {
+    for (const pane of worktree.panes) {
+      for (const tab of pane.tabs) {
+        if (tab.type === 'agent' && tab.config.agentSessionId) taken.add(tab.config.agentSessionId.toLowerCase())
+      }
+    }
+  }
+  return taken
+}
+
 /**
  * The session an agent tab launches under. A tab that already ran a conversation
- * resumes it, provided the provider still has its transcript — the CLI exits
- * with an error for an id it does not know, which would leave a dead tab where a
- * fresh session belongs. Otherwise (first launch, transcript cleaned up) a new
- * id is minted and stored so the NEXT respawn can resume this one.
+ * resumes it, provided the provider still has it — the CLIs exit with an error
+ * for an id they do not know, which would leave a dead tab where a fresh session
+ * belongs. Otherwise (first launch, session cleaned up) a new id is minted and
+ * stored so the NEXT respawn can resume this one; a provider that cannot choose
+ * its id up front gets nothing here and is watched after launch instead (see
+ * discoverAgentSession). Undefined for providers without session support.
  */
-function agentSession(
-  tab: Tab,
-  worktree: Worktree,
-  provider: AgentProvider,
-  profileDir: string
-): AgentSession | undefined {
-  if (!provider.tracksSessions) return undefined
+async function agentSession(tab: Tab, provider: AgentProvider, lookup: SessionLookup): Promise<AgentSession | undefined> {
+  const sessions = provider.sessions
+  if (!sessions) return undefined
   const stored = tab.config.agentSessionId
   if (stored && SESSION_ID_RE.test(stored)) {
-    const transcript = provider.sessionTranscriptPath?.(profileDir, worktree.path, stored)
-    if (transcript && existsSync(transcript)) {
-      logger.info('resuming agent session', { tab: tab.id, provider: provider.id, session: stored })
+    const found = await sessions.find(lookup, stored).catch(() => null)
+    if (found) {
+      logger.info('resuming agent session', { tab: tab.id, provider: provider.id, session: stored, path: found })
       return { id: stored, resume: true }
     }
-    logger.info('agent session transcript gone, starting fresh', { tab: tab.id, session: stored, transcript })
+    logger.info('agent session gone, starting fresh', { tab: tab.id, provider: provider.id, session: stored })
   }
-  const id = randomUUID()
+  const id = await sessions.mint(lookup).catch((err: unknown) => {
+    logger.warn('could not mint agent session', { tab: tab.id, provider: provider.id, error: String(err) })
+    return null
+  })
+  if (!id) return undefined
   recordAgentSession(tab, id)
   return { id, resume: false }
+}
+
+/**
+ * Poll schedule for a provider that reveals its session id only after launch
+ * (Codex writes the rollout file itself): quick checks first, then a slow
+ * heartbeat while the tab lives — the file may not appear until the first
+ * prompt, and nothing says how long the human takes to type it.
+ */
+const DISCOVERY_DELAYS_MS = [2_000, 3_000, 5_000, 10_000, 20_000, 30_000]
+const DISCOVERY_HEARTBEAT_MS = 60_000
+const DISCOVERY_DEADLINE_MS = 4 * 60 * 60 * 1000
+
+/**
+ * Watch for the session a just-launched agent tab started and pin the tab to
+ * it once it appears. Stops when the id is found, the tab is gone, or the
+ * deadline passes; a tab that is respawned meanwhile starts its own watch and
+ * this one bows out as soon as the tab already carries an id.
+ */
+function discoverAgentSession(tab: Tab, provider: AgentProvider, lookup: SessionLookup, launchedAt: number): void {
+  const discover = provider.sessions?.discover
+  if (!discover) return
+  logger.info('watching for agent session', { tab: tab.id, provider: provider.id, profileDir: lookup.profileDir, cwd: lookup.cwd })
+  let attempt = 0
+  const tick = async (): Promise<void> => {
+    const current = repo.tabs.get(tab.id)
+    if (!current || current.config.agentSessionId) return
+    if (Date.now() - launchedAt > DISCOVERY_DEADLINE_MS) {
+      logger.info('gave up watching for agent session', { tab: tab.id, provider: provider.id })
+      return
+    }
+    const id = await discover(lookup, launchedAt, takenSessionIds()).catch((err: unknown) => {
+      logger.warn('agent session discovery failed', { tab: tab.id, provider: provider.id, error: String(err) })
+      return null
+    })
+    if (id) {
+      logger.info('discovered agent session', { tab: tab.id, provider: provider.id, session: id })
+      recordAgentSession(current, id)
+      return
+    }
+    const delay = DISCOVERY_DELAYS_MS[attempt] ?? DISCOVERY_HEARTBEAT_MS
+    attempt += 1
+    setTimeout(() => void tick(), delay)
+  }
+  setTimeout(() => void tick(), DISCOVERY_DELAYS_MS[0])
 }
 
 /**
@@ -243,15 +306,12 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
             provider.id === 'claude' && !!agentConfig && claudeHooks.status(agentConfig).installed
         })
       : null
-    const command = await provider.resolveCommand({
-      project,
-      worktree,
-      briefingPath,
-      // A project-level path is the more specific override; the workspace
-      // agent's path fills in when the project doesn't set one.
-      execPath: project.agentExecPath || agentConfig?.execPath,
-      session: agentSession(tab, worktree, provider, profileDir)
-    })
+    // A project-level path is the more specific override; the workspace
+    // agent's path fills in when the project doesn't set one.
+    const execPath = project.agentExecPath || agentConfig?.execPath
+    const lookup: SessionLookup = { profileDir, cwd: worktree.path, execPath }
+    const session = await agentSession(tab, provider, lookup)
+    const command = await provider.resolveCommand({ project, worktree, briefingPath, execPath, session })
     if (agentConfig?.args?.length) command.args.push(...agentConfig.args)
     // The tab may have been closed during the async executable lookup; don't spawn
     // a PTY nothing references (it could never be killed before app exit).
@@ -273,6 +333,9 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
       },
       command
     })
+    // A provider that could not name the session up front: learn it from what
+    // the CLI writes, so this tab too can resume next time.
+    if (!session) discoverAgentSession(tab, provider, lookup, Date.now())
   } catch (err) {
     if (!repo.tabs.get(tab.id)) return // tab gone during resolution — nothing to report
     const msg = err instanceof Error ? err.message : String(err)
