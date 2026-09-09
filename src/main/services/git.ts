@@ -43,6 +43,46 @@ const execFileP = promisify(execFile)
 /** 64 MB — diffs / `ls-files` on large repos can dwarf the default 1 MB. */
 const MAX_BUFFER = 64 * 1024 * 1024
 
+/**
+ * Ceilings on how long one git process may run. There is no terminal behind
+ * any of these spawns, so a git that stops to ask a question (a credential, a
+ * passphrase, "are you sure") would otherwise sit there until the app quits —
+ * and, for the background fetcher, wedge its `fetching` guard so no later tick
+ * ever runs. Local commands are generous (a cold `status` on a huge Windows
+ * checkout is seconds, not minutes); network commands and worktree checkouts
+ * get more, but still a bound.
+ */
+const LOCAL_TIMEOUT_MS = 60_000
+const NETWORK_TIMEOUT_MS = 3 * 60_000
+const CHECKOUT_TIMEOUT_MS = 10 * 60_000
+
+interface SpawnOptions {
+  timeoutMs?: number
+  /**
+   * Refuse every interactive prompt (terminal, askpass, Git Credential
+   * Manager's dialog) so the command fails fast instead. Used by the
+   * background fetcher, which the user did not ask for and must never pop a
+   * dialog. User-initiated network commands leave the GUI helpers available.
+   */
+  nonInteractive?: boolean
+}
+
+/**
+ * Environment for every git spawn. `GIT_TERMINAL_PROMPT=0` turns a would-be
+ * terminal prompt into an immediate error — there is no terminal to answer it.
+ * Askpass / GCM helpers stay as the user configured them unless
+ * `nonInteractive` is set.
+ */
+function gitEnv(nonInteractive: boolean | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  if (nonInteractive) {
+    env.GIT_ASKPASS = ''
+    env.SSH_ASKPASS = ''
+    env.GCM_INTERACTIVE = 'never'
+  }
+  return env
+}
+
 /** Git understands `/dev/null` as the empty file even on Windows. */
 const NULL_DEVICE = '/dev/null'
 
@@ -50,6 +90,8 @@ type ExecError = Error & {
   code?: number | string
   stdout?: string
   stderr?: string
+  /** Set by execFile when the process was killed — for us, only ever by the timeout. */
+  killed?: boolean
 }
 
 interface GitResult {
@@ -59,12 +101,15 @@ interface GitResult {
 }
 
 /** Run git, never throwing — the caller inspects `code` (used where non-zero is expected). */
-async function capture(cwd: string, args: string[]): Promise<GitResult> {
+async function capture(cwd: string, args: string[], opts: SpawnOptions = {}): Promise<GitResult> {
+  const timeout = opts.timeoutMs ?? LOCAL_TIMEOUT_MS
   try {
     const { stdout, stderr } = await execFileP('git', args, {
       cwd,
       maxBuffer: MAX_BUFFER,
-      windowsHide: true
+      windowsHide: true,
+      timeout,
+      env: gitEnv(opts.nonInteractive)
     })
     return { stdout: stdout as string, stderr: stderr as string, code: 0 }
   } catch (err) {
@@ -72,14 +117,20 @@ async function capture(cwd: string, args: string[]): Promise<GitResult> {
     const code = typeof e.code === 'number' ? e.code : 1
     const stdout = typeof e.stdout === 'string' ? e.stdout : ''
     let stderr = typeof e.stderr === 'string' ? e.stderr : ''
+    if (e.killed) {
+      // The timeout fired. Say so in words the panel can show; git's own
+      // partial stderr (often a credential prompt it could not complete) follows.
+      const what = `git ${args.find((a) => !a.startsWith('-') && a !== 'core.quotePath=false') ?? ''}`.trim()
+      stderr = `${what} timed out after ${Math.round(timeout / 1000)}s${stderr ? `\n${stderr.trim()}` : ''}`
+    }
     if (!stderr && !stdout && e.message) stderr = e.message
     return { stdout, stderr, code }
   }
 }
 
 /** Run git, throwing `Error(stderr||stdout)` on any non-zero exit. */
-async function run(cwd: string, args: string[]): Promise<string> {
-  const { stdout, stderr, code } = await capture(cwd, args)
+async function run(cwd: string, args: string[], opts: SpawnOptions = {}): Promise<string> {
+  const { stdout, stderr, code } = await capture(cwd, args, opts)
   if (code !== 0) throw new Error(stderr || stdout || `git ${args.join(' ')} failed`)
   return stdout
 }
@@ -309,18 +360,23 @@ async function push(repoPath: string): Promise<void> {
     '@{u}'
   ])
   if (upstream.code !== 0) {
-    await run(repoPath, ['push', '-u', 'origin', 'HEAD'])
+    await run(repoPath, ['push', '-u', 'origin', 'HEAD'], { timeoutMs: NETWORK_TIMEOUT_MS })
   } else {
-    await run(repoPath, ['push'])
+    await run(repoPath, ['push'], { timeoutMs: NETWORK_TIMEOUT_MS })
   }
 }
 
 async function pull(repoPath: string): Promise<void> {
-  await run(repoPath, ['pull'])
+  await run(repoPath, ['pull'], { timeoutMs: NETWORK_TIMEOUT_MS })
 }
 
-async function fetch(repoPath: string): Promise<void> {
-  await run(repoPath, ['fetch'])
+/**
+ * `background` is the periodic fetcher: it must never surface a credential
+ * dialog the user did not ask for, so every prompt is refused and a repo whose
+ * remote needs one simply fails that tick (the caller swallows it).
+ */
+async function fetch(repoPath: string, opts: { background?: boolean } = {}): Promise<void> {
+  await run(repoPath, ['fetch'], { timeoutMs: NETWORK_TIMEOUT_MS, nonInteractive: opts.background })
 }
 
 /** Switch the checkout to `branch`; `create` forks a new branch from HEAD first. */
@@ -1008,10 +1064,10 @@ async function worktreeAdd(
     const args = ['worktree', 'add']
     if (opts.track) args.push('--track')
     args.push('-b', opts.branch, opts.worktreePath, opts.baseRef || 'HEAD')
-    await run(repoPath, args)
+    await run(repoPath, args, { timeoutMs: CHECKOUT_TIMEOUT_MS })
   } else {
     // Check out an existing branch into the new worktree.
-    await run(repoPath, ['worktree', 'add', opts.worktreePath, opts.branch])
+    await run(repoPath, ['worktree', 'add', opts.worktreePath, opts.branch], { timeoutMs: CHECKOUT_TIMEOUT_MS })
   }
 }
 
@@ -1023,7 +1079,7 @@ async function worktreeRemove(
   const args = ['worktree', 'remove']
   if (force) args.push('--force')
   args.push(worktreePath)
-  await run(repoPath, args)
+  await run(repoPath, args, { timeoutMs: CHECKOUT_TIMEOUT_MS })
 }
 
 /**

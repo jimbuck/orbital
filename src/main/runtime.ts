@@ -272,7 +272,7 @@ class Runtime {
     try {
       for (const project of repo.projects.list()) {
         try {
-          await git.fetch(project.repoPath)
+          await git.fetch(project.repoPath, { background: true })
           // Remote-tracking refs may have moved — every worktree of the project
           // shares them, so nudge them all to re-read ahead/behind.
           this.broadcastGitChanged(repo.worktrees.idsByProject(project.id))
