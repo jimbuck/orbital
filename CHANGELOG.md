@@ -2,6 +2,25 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.28.0](https://github.com/jimbuck/orbital/compare/v1.27.0...v1.28.0) (2026-09-09)
+
+
+### Bug Fixes
+
+* **git:** open a change's diff in the pane the user last worked in ([6b97eed](https://github.com/jimbuck/orbital/commit/6b97eedb31110b2ce201d77a3a4c70725847aca0)), closes [#54](https://github.com/jimbuck/orbital/issues/54)
+* **titlebar:** keep the logo glow on the live accent colour ([4e1c4a9](https://github.com/jimbuck/orbital/commit/4e1c4a9f6d977484b96a512adcf29d007692aef5))
+
+
+### Features
+
+* **git:** commit history modal with a lane graph, file list and diffs ([e6df87c](https://github.com/jimbuck/orbital/commit/e6df87c062ac070982edb84397128a4c315ba1e3)), closes [#28](https://github.com/jimbuck/orbital/issues/28)
+* **titlebar:** draw the real Orbital mark instead of the CSS orb ([ab2d3d1](https://github.com/jimbuck/orbital/commit/ab2d3d1944c46bd8c6a61c7e503f6cd5a250aca9)), closes [#69](https://github.com/jimbuck/orbital/issues/69)
+
+
+### Performance Improvements
+
+* **git:** read a commit's message and file lists concurrently ([2131d34](https://github.com/jimbuck/orbital/commit/2131d34d25bef6a217ebbb91e484340ec628a4c0))
+
 # [1.27.0](https://github.com/jimbuck/orbital/compare/v1.26.0...v1.27.0) (2026-09-09)
 
 
