@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.30.0](https://github.com/jimbuck/orbital/compare/v1.29.0...v1.30.0) (2026-09-09)
+
+
+### Features
+
+* **agent:** resume Codex and Cursor sessions when a tab is respawned ([d86c969](https://github.com/jimbuck/orbital/commit/d86c9698b99369c7b06946d21f6efcb115fc5410)), closes [#68](https://github.com/jimbuck/orbital/issues/68) [#70](https://github.com/jimbuck/orbital/issues/70)
+
 # [1.29.0](https://github.com/jimbuck/orbital/compare/v1.28.0...v1.29.0) (2026-09-09)
 
 
