@@ -1243,11 +1243,15 @@ export function parseCommitFiles(nameStatus: string, numstat: string): GitCommit
 /** A commit's full message plus what it changed, with per-file line counts. */
 async function commitDetail(repoPath: string, hash: string): Promise<GitCommitDetail> {
   const [full, ...parents] = await commitParents(repoPath, hash)
-  const body = (await run(repoPath, ['show', '-s', '--format=%B', full, '--'])).replace(/\s+$/, '')
   const range = changeRange(full, parents)
-  const nameStatus = await run(repoPath, ['diff-tree', '-r', '-M', '-z', '--no-commit-id', '--name-status', ...range, '--'])
-  const numstat = await run(repoPath, ['diff-tree', '-r', '-M', '-z', '--no-commit-id', '--numstat', ...range, '--'])
-  return { hash: full, body, files: parseCommitFiles(nameStatus, numstat) }
+  // Three independent reads; run them together so a large commit's detail
+  // pane fills in one git round-trip rather than three.
+  const [rawBody, nameStatus, numstat] = await Promise.all([
+    run(repoPath, ['show', '-s', '--format=%B', full, '--']),
+    run(repoPath, ['diff-tree', '-r', '-M', '-z', '--no-commit-id', '--name-status', ...range, '--']),
+    run(repoPath, ['diff-tree', '-r', '-M', '-z', '--no-commit-id', '--numstat', ...range, '--'])
+  ])
+  return { hash: full, body: rawBody.replace(/\s+$/, ''), files: parseCommitFiles(nameStatus, numstat) }
 }
 
 /**
