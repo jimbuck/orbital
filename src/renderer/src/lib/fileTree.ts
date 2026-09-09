@@ -6,32 +6,39 @@ import type { FileNode } from '@shared/types'
  *
  * Editor tabs stay mounted (hidden) when inactive so their in-memory state
  * survives tab switches. Naively, each mounted `EditorTab` would subscribe to
- * `onStateChanged` and fire its own debounced `fileTree(worktreeId)` refetch —
+ * `onGitChanged` and fire its own debounced `fileTree(worktreeId)` refetch —
  * so N editors of the same worktree would multiply identical IPC calls on every
- * state broadcast, and even a single hidden editor would keep refetching in the
+ * change, and even a single hidden editor would keep refetching in the
  * background while the user is on another tab.
  *
  * This registry fixes both:
- *  - Dedup (#2): one `onStateChanged` subscription + one `fileTree` fetch per
+ *  - Dedup (#2): one `onGitChanged` subscription + one `fileTree` fetch per
  *    worktree id, shared by every editor consuming that worktree. New consumers
  *    reuse the cached tree immediately.
- *  - Pause-while-hidden (#1): a state change only triggers a refetch while at
+ *  - Pause-while-hidden (#1): a git change only triggers a refetch while at
  *    least one consumer of that worktree is active (its tab is showing). While
  *    every consumer is hidden the entry is marked dirty and refetched once, on
  *    the next reveal — a hidden editor does no background IPC.
+ *
+ * The trigger is main's git-changed push for THIS worktree (working-tree
+ * writes, git operations), not the general state broadcast: a terminal status
+ * flip has nothing to do with the tree and must not re-run `git ls-files`.
  */
 
 interface FileTreeBridge {
   fileTree: (worktreeId: string) => Promise<FileNode[]>
-  onStateChanged: (cb: () => void) => () => void
+  /** Fire `cb` whenever main reports a git/working-tree change for `worktreeId`. */
+  onGitChanged: (worktreeId: string, cb: () => void) => () => void
 }
 
 /** Lazily bound so importing this module never touches `window.orbital`. */
 function defaultBridge(): FileTreeBridge {
   return {
     fileTree: (id) => window.orbital.fileTree(id),
-    // The app broadcast carries a state payload we don't need here.
-    onStateChanged: (cb) => window.orbital.onStateChanged(() => cb())
+    onGitChanged: (id, cb) =>
+      window.orbital.onGitChanged((evt) => {
+        if (evt.worktreeIds.includes(id)) cb()
+      })
   }
 }
 
@@ -40,7 +47,7 @@ function bridge(): FileTreeBridge {
   return bridgeOverride ?? defaultBridge()
 }
 
-/** Debounce (ms) for coalescing state-change-driven refetches. */
+/** Debounce (ms) for coalescing change-driven refetches. */
 let debounceMs = 400
 
 interface Subscriber {
@@ -54,7 +61,7 @@ interface Entry {
   subscribers: Set<Subscriber>
   unsub: (() => void) | null
   timer: ReturnType<typeof setTimeout> | undefined
-  /** A state change arrived since the last fetch. */
+  /** A git change arrived since the last fetch. */
   dirty: boolean
   /** A fetch is in flight (coalesces concurrent triggers to one RPC). */
   fetching: boolean
@@ -76,8 +83,8 @@ function refetchNow(entry: Entry): void {
   clearTimeout(entry.timer)
   entry.timer = undefined
   entry.fetching = true
-  // Clear before the RPC so a state change arriving mid-fetch re-dirties us and
-  // is chased below (clearing on completion would swallow those changes).
+  // Clear before the RPC so a change arriving mid-fetch re-dirties us and is
+  // chased below (clearing on completion would swallow those changes).
   entry.dirty = false
   void bridge()
     .fileTree(entry.worktreeId)
@@ -87,7 +94,7 @@ function refetchNow(entry: Entry): void {
       entry.tree = tree
       entry.loadedOnce = true
       for (const s of entry.subscribers) s.onTree(tree)
-      // A state change during the fetch re-dirtied us — chase it (only while visible).
+      // A change during the fetch re-dirtied us — chase it (only while visible).
       if (entry.dirty && anyActive(entry)) scheduleRefetch(entry)
     })
     .catch(() => {
@@ -113,7 +120,7 @@ function ensureLoaded(entry: Entry): void {
   refetchNow(entry)
 }
 
-function onStateChange(entry: Entry): void {
+function onGitChange(entry: Entry): void {
   entry.dirty = true
   if (anyActive(entry)) scheduleRefetch(entry)
 }
@@ -146,7 +153,7 @@ export function acquireFileTree(worktreeId: string, onTree: (tree: FileNode[]) =
       alive: true
     }
     registry.set(worktreeId, entry)
-    entry.unsub = bridge().onStateChanged(() => onStateChange(entry!))
+    entry.unsub = bridge().onGitChanged(worktreeId, () => onGitChange(entry!))
   }
   const sub: Subscriber = { onTree, active: false }
   entry.subscribers.add(sub)
@@ -177,7 +184,7 @@ export function acquireFileTree(worktreeId: string, onTree: (tree: FileNode[]) =
 /**
  * Subscribe a component to its worktree's shared file tree. `active` reflects
  * whether this editor's tab is currently showing; while it's false the tree is
- * not refetched on state changes (it refreshes once when shown again).
+ * not refetched on git changes (it refreshes once when shown again).
  */
 export function useFileTree(
   worktreeId: string | undefined,

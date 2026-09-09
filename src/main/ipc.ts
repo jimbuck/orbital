@@ -654,6 +654,8 @@ export function registerIpc(): void {
     })
   }
   const broadcast = (): void => runtime.broadcastState()
+  /** A checkout's git/working-tree state moved (not AppState): nudge its git consumers only. */
+  const gitChanged = (worktreeId: string): void => runtime.broadcastGitChanged([worktreeId])
   const broadcastAll = (): void => {
     runtime.broadcastState()
     runtime.broadcastAlert()
@@ -1075,39 +1077,45 @@ export function registerIpc(): void {
   h(IPC.gitStatus, (_e, worktreeId: string) => git.status(worktreeRepoPath(worktreeId)))
   h(IPC.gitStage, async (_e, worktreeId: string, path: string) => {
     await git.stage(worktreeRepoPath(worktreeId), path)
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitUnstage, async (_e, worktreeId: string, path: string) => {
     await git.unstage(worktreeRepoPath(worktreeId), path)
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitStageAll, async (_e, worktreeId: string) => {
     await git.stageAll(worktreeRepoPath(worktreeId))
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitUnstageAll, async (_e, worktreeId: string) => {
     await git.unstageAll(worktreeRepoPath(worktreeId))
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitDiscard, async (_e, worktreeId: string, path: string) => {
     await git.discard(worktreeRepoPath(worktreeId), path)
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitDiscardAll, async (_e, worktreeId: string) => {
     await git.discardAll(worktreeRepoPath(worktreeId))
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitCommit, async (_e, worktreeId: string, message: string, amend?: boolean) => {
     await git.commit(worktreeRepoPath(worktreeId), message, amend)
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitLastCommitMessage, (_e, worktreeId: string) => git.lastCommitMessage(worktreeRepoPath(worktreeId)))
-  h(IPC.gitPush, (_e, worktreeId: string) => git.push(worktreeRepoPath(worktreeId)))
+  h(IPC.gitPush, async (_e, worktreeId: string) => {
+    await git.push(worktreeRepoPath(worktreeId))
+    gitChanged(worktreeId)
+  })
   h(IPC.gitPull, async (_e, worktreeId: string) => {
     await git.pull(worktreeRepoPath(worktreeId))
-    broadcast()
+    gitChanged(worktreeId)
   })
-  h(IPC.gitFetch, (_e, worktreeId: string) => git.fetch(worktreeRepoPath(worktreeId)))
+  h(IPC.gitFetch, async (_e, worktreeId: string) => {
+    await git.fetch(worktreeRepoPath(worktreeId))
+    gitChanged(worktreeId)
+  })
   h(IPC.gitCheckout, async (_e, worktreeId: string, branch: string, create?: boolean) => {
     const w = repo.worktrees.get(worktreeId)
     if (!w) throw new Error(`worktree ${worktreeId} not found`)
@@ -1117,6 +1125,7 @@ export function registerIpc(): void {
     // Persist the new HEAD onto the Worktree so the rail/panel reflect it immediately.
     await runtime.refreshBranch(w.path)
     broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.gitDiff, (_e, worktreeId: string, path: string, staged: boolean) =>
     git.diff(worktreeRepoPath(worktreeId), path, staged)
@@ -1144,7 +1153,7 @@ export function registerIpc(): void {
   h(IPC.readFileBase64, (_e, worktreeId: string, path: string) => git.readFileBase64(worktreeRepoPath(worktreeId), path))
   h(IPC.writeFile, async (_e, worktreeId: string, path: string, content: string) => {
     await git.writeFile(worktreeRepoPath(worktreeId), path, content)
-    broadcast()
+    gitChanged(worktreeId)
   })
   // The four mutating file operations behind the editor tree's context menu.
   // Like writeFile above, each is checked lexically AND against the real
@@ -1154,22 +1163,22 @@ export function registerIpc(): void {
   // writes nothing.
   h(IPC.createFile, async (_e, worktreeId: string, parentDir: string, name: string) => {
     const path = await git.createFile(worktreeRepoPath(worktreeId), parentDir, name)
-    broadcast()
+    gitChanged(worktreeId)
     return path
   })
   h(IPC.createDirectory, async (_e, worktreeId: string, parentDir: string, name: string) => {
     const path = await git.createDirectory(worktreeRepoPath(worktreeId), parentDir, name)
-    broadcast()
+    gitChanged(worktreeId)
     return path
   })
   h(IPC.renamePath, async (_e, worktreeId: string, path: string, newName: string) => {
     const next = await git.renamePath(worktreeRepoPath(worktreeId), path, newName)
-    broadcast()
+    gitChanged(worktreeId)
     return next
   })
   h(IPC.trashPath, async (_e, worktreeId: string, path: string) => {
     await git.trashPath(worktreeRepoPath(worktreeId), path)
-    broadcast()
+    gitChanged(worktreeId)
   })
   h(IPC.resolvePath, (_e, worktreeId: string, path: string) =>
     git.resolveInRepo(worktreeRepoPath(worktreeId), path)

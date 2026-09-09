@@ -1372,14 +1372,19 @@ interface WatchEntry {
   ig: Ignore
 }
 
+/** What moved: `head` covers HEAD/index/reflog (branch may have changed), `tree` the working tree only. */
+export type GitChangeKind = 'head' | 'tree'
+
 /**
  * Watches one or more checkouts (repo roots and linked worktrees) and emits
- * `('change', repoPath)` (debounced) whenever the checkout's git HEAD/index or
- * working tree change.
+ * `('change', repoPath, kind)` (debounced) whenever the checkout's git
+ * HEAD/index or working tree change. Events within one debounce window merge
+ * into a single emit; `head` wins because it implies everything `tree` does.
  */
 export class GitWatcher extends EventEmitter {
   private readonly entries = new Map<string, WatchEntry>()
   private readonly timers = new Map<string, NodeJS.Timeout>()
+  private readonly pendingKind = new Map<string, GitChangeKind>()
 
   watch(repoPath: string): void {
     if (this.entries.has(repoPath)) return
@@ -1396,7 +1401,7 @@ export class GitWatcher extends EventEmitter {
     this.open(entry, repoPath, { recursive: true }, (filename) => {
       if (filename === null) {
         // fs.watch can omit the filename; treat as a generic change.
-        this.schedule(repoPath)
+        this.schedule(repoPath, 'tree')
         return
       }
       const rel = filename.replace(/\\/g, '/')
@@ -1408,21 +1413,21 @@ export class GitWatcher extends EventEmitter {
       } catch {
         // `ignores` rejects paths it can't classify; keep the event.
       }
-      this.schedule(repoPath)
+      this.schedule(repoPath, 'tree')
     })
 
     // HEAD and index live in the git dir. For a linked worktree the git dir sits
     // OUTSIDE the checkout (under the main repo's `.git/worktrees/<name>/`), so
     // the recursive watch above never sees it — this non-recursive handle does.
     this.open(entry, gitDir, { recursive: false }, (filename) => {
-      if (filename === 'HEAD' || filename === 'index') this.schedule(repoPath)
+      if (filename === 'HEAD' || filename === 'index') this.schedule(repoPath, 'head')
     })
 
     // HEAD is replaced by atomic rename, which the file watch can miss (seen on
     // Windows for `checkout -b`); the reflog is appended in place on every HEAD
     // move, so logs/HEAD is the reliable checkout/commit signal.
     this.open(entry, join(gitDir, 'logs'), { recursive: false }, (filename) => {
-      if (filename === 'HEAD') this.schedule(repoPath)
+      if (filename === 'HEAD') this.schedule(repoPath, 'head')
     })
   }
 
@@ -1470,20 +1475,24 @@ export class GitWatcher extends EventEmitter {
       clearTimeout(timer)
       this.timers.delete(repoPath)
     }
+    this.pendingKind.delete(repoPath)
   }
 
   stop(): void {
     for (const repoPath of [...this.entries.keys()]) this.unwatch(repoPath)
   }
 
-  private schedule(repoPath: string): void {
+  private schedule(repoPath: string, kind: GitChangeKind): void {
+    if (kind === 'head' || !this.pendingKind.has(repoPath)) this.pendingKind.set(repoPath, kind)
     const existing = this.timers.get(repoPath)
     if (existing) clearTimeout(existing)
     this.timers.set(
       repoPath,
       setTimeout(() => {
         this.timers.delete(repoPath)
-        this.emit('change', repoPath)
+        const merged = this.pendingKind.get(repoPath) ?? 'tree'
+        this.pendingKind.delete(repoPath)
+        this.emit('change', repoPath, merged)
       }, DEBOUNCE_MS)
     )
   }

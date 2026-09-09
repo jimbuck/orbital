@@ -342,6 +342,21 @@ export const worktrees = {
     getDb().prepare('UPDATE worktrees SET status = ? WHERE id = ?').run(status, wid)
   },
   /** Sync the stored branch for every worktree checked out at `path`; true if anything changed. */
+  /** Ids of this workspace's worktrees whose checkout is `path` (normally one; zero if unknown). */
+  idsByPath(path: string): string[] {
+    const rows = getDb()
+      .prepare(
+        `SELECT w.id FROM worktrees w JOIN projects p ON p.id = w.project_id
+         WHERE p.workspace_id = ? AND w.path = ?`
+      )
+      .all(requireWorkspaceId(), path) as { id: string }[]
+    return rows.map((r) => r.id)
+  },
+  /** Ids of every worktree of a project (they share the repo's refs, so a fetch touches all). */
+  idsByProject(projectId: string): string[] {
+    const rows = getDb().prepare('SELECT id FROM worktrees WHERE project_id = ?').all(projectId) as { id: string }[]
+    return rows.map((r) => r.id)
+  },
   updateBranchByPath(path: string, branch: string): boolean {
     const r = getDb()
       .prepare('UPDATE worktrees SET branch = ? WHERE path = ? AND branch <> ?')

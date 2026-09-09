@@ -325,7 +325,7 @@ describe('EditorTab worktree binding', () => {
         treeReads.push(id)
         return [{ name: 'README.md', path: 'README.md', type: 'file' as const }]
       },
-      onStateChanged: () => () => {}
+      onGitChanged: () => () => {}
     })
 
     __resetMarkdownAssetCache()
@@ -559,7 +559,7 @@ describe('EditorTab file mutations', () => {
     __resetFileTreeRegistry()
     __setFileTreeBridge({
       fileTree: async () => tree,
-      onStateChanged: () => () => {}
+      onGitChanged: () => () => {}
     })
     bridge = {
       readFile: vi.fn(async () => 'hello\n'),

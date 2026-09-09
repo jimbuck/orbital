@@ -1,12 +1,12 @@
 import type { BrowserWindow } from 'electron'
 import { TerminalManager } from './services/terminals'
-import { GitWatcher, git } from './services/git'
+import { GitWatcher, git, type GitChangeKind } from './services/git'
 import { ControlChannel } from './services/control-channel'
 import { AlertManager } from './services/alerts'
 import * as repo from './db/repositories'
 import { deleteBriefing } from './services/agents/briefing'
 import { getSettings } from './services/settings'
-import { IPC, isPtyTabType, type AppState } from '@shared/types'
+import { IPC, isPtyTabType, type AppState, type GitChangedEvent } from '@shared/types'
 
 /**
  * The main-process service hub. Owns the long-lived service singletons and the
@@ -29,6 +29,8 @@ class Runtime {
   private readonly settingUp = new Set<string>()
   private readonly pendingBroadcasts = new Map<string, NodeJS.Timeout>()
   private readonly lastBroadcastAt = new Map<string, number>()
+  /** Worktree ids accumulated for the next coalesced git-changed push. */
+  private readonly pendingGitChanged = new Set<string>()
   /** Background `git fetch` scheduler — null when the setting is off. */
   private fetchTimer: NodeJS.Timeout | null = null
   /** Guards against overlapping ticks when a previous fetch run is still going. */
@@ -66,9 +68,19 @@ class Runtime {
       }
     })
 
-    // External git activity (commits, checkouts) -> resync branch names, refresh the renderer.
-    this.gitWatcher.on('change', (repoPath: string) => {
-      void this.refreshBranch(repoPath).finally(() => this.broadcastState())
+    // External git activity. Only a HEAD/index move can rename the branch that
+    // lives in AppState, so only that kind re-reads HEAD and re-pushes state; a
+    // working-tree write (an agent editing files) is a git-changed nudge alone,
+    // not a full state re-hydration plus a re-render of the whole app.
+    this.gitWatcher.on('change', (repoPath: string, kind: GitChangeKind) => {
+      if (kind === 'head') {
+        void this.refreshBranch(repoPath).finally(() => {
+          this.broadcastState()
+          this.broadcastGitChanged(repo.worktrees.idsByPath(repoPath))
+        })
+      } else {
+        this.broadcastGitChanged(repo.worktrees.idsByPath(repoPath))
+      }
     })
 
     // Background `git fetch` so ahead/behind stays current without a manual Fetch.
@@ -189,6 +201,21 @@ class Runtime {
     this.coalesce('state', () => this.send(IPC.evtStateChanged, this.appState()))
   }
 
+  /**
+   * Tell the renderer these worktrees' git state may have moved (coalesced).
+   * This is the ONLY signal the git panel, file tree and commit history refresh
+   * on — see {@link GitChangedEvent} — so a status flip never spawns git.
+   */
+  broadcastGitChanged(worktreeIds: string[]): void {
+    if (worktreeIds.length === 0) return
+    for (const id of worktreeIds) this.pendingGitChanged.add(id)
+    this.coalesce('git', () => {
+      const evt: GitChangedEvent = { worktreeIds: [...this.pendingGitChanged] }
+      this.pendingGitChanged.clear()
+      this.send(IPC.evtGitChanged, evt)
+    })
+  }
+
   /** Recompute needs-attention, update the taskbar badge, notify the renderer (coalesced). */
   broadcastAlert(): void {
     if (!this.alerts) return
@@ -200,7 +227,7 @@ class Runtime {
    * actions stay snappy; bursts (Claude hooks fire per tool call, each of which
    * would re-hydrate and push the full app state) collapse into one trailing push.
    */
-  private coalesce(key: 'state' | 'alert', fire: () => void): void {
+  private coalesce(key: 'state' | 'alert' | 'git', fire: () => void): void {
     if (this.pendingBroadcasts.has(key)) return
     const elapsed = Date.now() - (this.lastBroadcastAt.get(key) ?? 0)
     if (elapsed >= Runtime.COALESCE_MS) {
@@ -218,7 +245,6 @@ class Runtime {
     )
   }
 
-  /** Ensure an env-sync watcher exists & is running for a project (patterns are a workspace setting). */
   /**
    * Start/stop the background `git fetch` scheduler to match the `periodicFetch`
    * setting. Idempotent — safe to call at startup and again on every settings save.
@@ -244,17 +270,16 @@ class Runtime {
     if (this.fetching) return
     this.fetching = true
     try {
-      let changed = false
       for (const project of repo.projects.list()) {
         try {
           await git.fetch(project.repoPath)
-          changed = true
+          // Remote-tracking refs may have moved — every worktree of the project
+          // shares them, so nudge them all to re-read ahead/behind.
+          this.broadcastGitChanged(repo.worktrees.idsByProject(project.id))
         } catch {
           /* offline / no remote — skip this repo, keep fetching the others */
         }
       }
-      // Remote-tracking refs may have moved — nudge the renderer to re-read ahead/behind.
-      if (changed) this.broadcastState()
     } finally {
       this.fetching = false
     }

@@ -10,7 +10,7 @@ import {
   __resetFileTreeRegistry
 } from './fileTree'
 
-/** A fake IPC bridge that records fileTree calls and lets tests fire state changes. */
+/** A fake IPC bridge that records fileTree calls and lets tests fire git changes. */
 function makeBridge() {
   const listeners = new Set<() => void>()
   const calls: string[] = []
@@ -21,7 +21,7 @@ function makeBridge() {
         calls.push(id)
         return tree
       },
-      onStateChanged: (cb: () => void): (() => void) => {
+      onGitChanged: (_worktreeId: string, cb: () => void): (() => void) => {
         listeners.add(cb)
         return () => listeners.delete(cb)
       }
@@ -49,7 +49,7 @@ function makeDeferredBridge() {
         calls.push(id)
         return new Promise<FileNode[]>((resolve) => pending.push(() => resolve(tree)))
       },
-      onStateChanged: (cb: () => void): (() => void) => {
+      onGitChanged: (_worktreeId: string, cb: () => void): (() => void) => {
         listeners.add(cb)
         return () => listeners.delete(cb)
       }
@@ -89,7 +89,7 @@ describe('fileTree registry', () => {
     h2.setActive(true)
     await tick()
 
-    // One shared onStateChanged listener and a single initial fetch, not one per tab.
+    // One shared onGitChanged listener and a single initial fetch, not one per tab.
     expect(b.listeners.size).toBe(1)
     expect(b.calls.length).toBe(1)
 

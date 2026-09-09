@@ -70,6 +70,60 @@ export type Store = Data & UIState & Actions
 /** Guards init() against re-entry (React StrictMode double-invokes App's effect). */
 let initStarted = false
 
+/* ---- Structural sharing ------------------------------------------------- */
+
+/**
+ * Deep equality over the plain JSON shapes that cross the IPC bridge (objects,
+ * arrays, primitives, null). Key order is irrelevant.
+ */
+export function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false
+    return true
+  }
+  if (Array.isArray(b)) return false
+  const ka = Object.keys(a as object)
+  const kb = Object.keys(b as object)
+  if (ka.length !== kb.length) return false
+  for (const k of ka) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false
+    if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false
+  }
+  return true
+}
+
+/** `next` when it differs from `prev` in content, else `prev` (reference kept). */
+function share<T>(prev: T, next: T): T {
+  return deepEqual(prev, next) ? prev : next
+}
+
+/**
+ * Reconcile a freshly received list against the previous one by id: every item
+ * whose content is unchanged keeps its PREVIOUS object identity, and if nothing
+ * at all changed the previous array itself is returned.
+ *
+ * Every state broadcast arrives via structured clone, so without this each
+ * push (a terminal status flip, a task edit, ...) hands every subscriber brand
+ * new objects and `useShallow` / `React.memo` / `useMemo` can never short-
+ * circuit — the whole app re-renders on every tick while an agent works.
+ */
+export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
+  if (prev === next) return prev
+  const byId = new Map<string, T>()
+  for (const item of prev) byId.set(item.id, item)
+  let same = prev.length === next.length
+  const out = next.map((item, i) => {
+    const old = byId.get(item.id)
+    const kept = old !== undefined && deepEqual(old, item) ? old : item
+    if (kept !== prev[i]) same = false
+    return kept
+  })
+  return same ? prev : out
+}
+
 export const useStore = create<Store>((set, get) => ({
   // data
   projects: [],
@@ -122,19 +176,20 @@ export const useStore = create<Store>((set, get) => ({
       activeWorktreeId = (projectWorktrees.find((w) => w.kind === 'root') ?? projectWorktrees[0])?.id ?? null
     }
 
-    const expanded = { ...prev.expanded }
+    let expanded = prev.expanded
     if (activeProjectId && expanded[activeProjectId] === undefined) {
-      expanded[activeProjectId] = true
+      expanded = { ...expanded, [activeProjectId]: true }
     }
 
+    // Keep previous references wherever the content did not change (see shareById).
     set({
-      projects: s.projects,
-      worktrees: s.worktrees,
-      tasks: s.tasks,
-      settings: s.settings,
-      workspace: s.workspace,
-      devServers: s.devServers,
-      settingUpWorktrees: s.settingUpWorktrees,
+      projects: shareById(prev.projects, s.projects),
+      worktrees: shareById(prev.worktrees, s.worktrees),
+      tasks: shareById(prev.tasks, s.tasks),
+      settings: share(prev.settings, s.settings),
+      workspace: share(prev.workspace, s.workspace),
+      devServers: share(prev.devServers, s.devServers),
+      settingUpWorktrees: share(prev.settingUpWorktrees, s.settingUpWorktrees),
       activeProjectId,
       activeWorktreeId,
       expanded,

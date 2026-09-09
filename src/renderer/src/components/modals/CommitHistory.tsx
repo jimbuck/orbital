@@ -309,13 +309,13 @@ export default function CommitHistory(): JSX.Element {
   }, [loadFirst])
 
   // A commit, checkout or pull elsewhere moves HEAD; the git panel refreshes
-  // on the same broadcast. Only the first page is re-read, and only a changed
-  // tip resets the list — otherwise a long scrolled history would keep
-  // snapping back on every unrelated state change (terminal status etc).
+  // on the same git-changed push. Only the first page is re-read, and only a
+  // changed tip resets the list — otherwise a long scrolled history would keep
+  // snapping back on every working-tree write while an agent edits files.
   useEffect(
     () =>
-      window.orbital.onStateChanged(() => {
-        if (!worktreeId) return
+      window.orbital.onGitChanged((evt) => {
+        if (!worktreeId || !evt.worktreeIds.includes(worktreeId)) return
         void window.orbital
           .gitLog(worktreeId, 0, 1)
           .then((page) => {

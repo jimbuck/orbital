@@ -757,6 +757,19 @@ export interface TerminalExitEvent {
   exitCode: number
 }
 
+/**
+ * Something about a checkout's git state (working tree, index, HEAD, remote
+ * refs) may have changed. Sent for the git watcher's debounced signal, after
+ * the app's own git and file mutations, and after a background fetch — and for
+ * nothing else, so the git panel / file tree / commit history can re-read
+ * without spawning git on every unrelated state broadcast (terminal status
+ * flips, task edits, ...).
+ */
+export interface GitChangedEvent {
+  /** Worktrees whose checkout is affected. */
+  worktreeIds: string[]
+}
+
 export interface AlertEvent {
   /** Worktrees currently needing attention. */
   count: number
@@ -904,7 +917,8 @@ export const IPC = {
   evtTerminalData: 'orbital:evt:terminalData',
   evtTerminalExit: 'orbital:evt:terminalExit',
   evtAlert: 'orbital:evt:alert',
-  evtUpdate: 'orbital:evt:update'
+  evtUpdate: 'orbital:evt:update',
+  evtGitChanged: 'orbital:evt:gitChanged'
 } as const
 
 /* ============================================================================
@@ -1181,6 +1195,7 @@ export interface OrbitalApi {
   onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
   onAlert(cb: (evt: AlertEvent) => void): () => void
   onUpdateStatus(cb: (status: UpdateStatus) => void): () => void
+  onGitChanged(cb: (evt: GitChangedEvent) => void): () => void
 }
 
 /* ============================================================================

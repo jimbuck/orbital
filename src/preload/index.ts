@@ -35,6 +35,7 @@ import {
   type TerminalExitEvent,
   type TerminalBuffer,
   type AlertEvent,
+  type GitChangedEvent,
   type UpdateStatus,
   type WorkspaceInfo
 } from '@shared/types'
@@ -222,7 +223,8 @@ const api: OrbitalApi = {
   onTerminalData: (cb: (evt: TerminalDataEvent) => void) => on<TerminalDataEvent>(IPC.evtTerminalData, cb),
   onTerminalExit: (cb: (evt: TerminalExitEvent) => void) => on<TerminalExitEvent>(IPC.evtTerminalExit, cb),
   onAlert: (cb: (evt: AlertEvent) => void) => on<AlertEvent>(IPC.evtAlert, cb),
-  onUpdateStatus: (cb: (status: UpdateStatus) => void) => on<UpdateStatus>(IPC.evtUpdate, cb)
+  onUpdateStatus: (cb: (status: UpdateStatus) => void) => on<UpdateStatus>(IPC.evtUpdate, cb),
+  onGitChanged: (cb: (evt: GitChangedEvent) => void) => on<GitChangedEvent>(IPC.evtGitChanged, cb)
 }
 
 contextBridge.exposeInMainWorld('orbital', api)

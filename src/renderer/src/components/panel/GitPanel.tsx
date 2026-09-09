@@ -334,7 +334,8 @@ function TreeRow({
  * per file (plus stage-all / unstage-all / discard-all), and a commit area with
  * amend support. One operation runs at a time; failures surface in an error
  * banner instead of vanishing. Status reloads on Worktree change, after every
- * mutation, and whenever main broadcasts state (the git watcher's signal).
+ * mutation, and whenever main says this checkout's git state moved (the git
+ * watcher's signal) — never on an unrelated state broadcast.
  */
 export default function GitPanel(): JSX.Element {
   const worktree = useStore(activeWorktree)
@@ -375,8 +376,14 @@ export default function GitPanel(): JSX.Element {
   }, [refresh])
 
   // External git activity (commits from a terminal, checkouts, agent edits)
-  // triggers a state broadcast via the main-process git watcher — re-read status.
-  useEffect(() => window.orbital.onStateChanged(() => void refresh()), [refresh])
+  // reaches us as a git-changed push scoped to the checkouts it touched.
+  useEffect(
+    () =>
+      window.orbital.onGitChanged((evt) => {
+        if (worktreeId && evt.worktreeIds.includes(worktreeId)) void refresh()
+      }),
+    [worktreeId, refresh]
+  )
 
   // Draft message / amend / confirmations / picker are per-Worktree state; drop them on switch.
   useEffect(() => {
