@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 
@@ -100,5 +100,29 @@ describe('PaneView terminal tab mounting', () => {
 
     act(() => seed('T1'))
     expect(screen.getByTestId('term-T1').getAttribute('data-active')).toBe('true')
+  })
+})
+
+describe('PaneView active-pane tracking', () => {
+  afterEach(cleanup)
+
+  it('records the pane as the worktree\'s active pane on mousedown inside it', () => {
+    seed('T1')
+    useStore.setState({ activePaneIds: {} })
+    render(<PaneGroup />)
+    act(() => {
+      fireEvent.mouseDown(screen.getByTestId('term-T1'))
+    })
+    expect(useStore.getState().activePaneIds).toEqual({ w1: 'pane1' })
+  })
+
+  it('records the pane on focus inside it', () => {
+    seed('E1')
+    useStore.setState({ activePaneIds: {} })
+    render(<PaneGroup />)
+    act(() => {
+      fireEvent.focus(screen.getByTestId('editor-E1'))
+    })
+    expect(useStore.getState().activePaneIds).toEqual({ w1: 'pane1' })
   })
 })

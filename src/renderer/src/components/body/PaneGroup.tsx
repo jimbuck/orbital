@@ -162,6 +162,7 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
   // The workspace's agent profiles (Settings → Agents) fill the agent openers,
   // in list order. Undefined (state not loaded yet) means the default lineup.
   const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
+  const setActivePane = useStore((s) => s.setActivePane)
   const openers = [
     OPENERS[0],
     ...agents.map((a) => ({
@@ -193,8 +194,17 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
     if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropEdge(null)
   }
 
+  // Any click or focus inside the pane — its tab strip, a terminal, an editor —
+  // makes it the Worktree's active pane (see store.activePaneIds). Capture
+  // phase, so children that stop propagation (menus, inputs) still count.
+  const markActive = (): void => setActivePane(worktree.id, pane.id)
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-pane">
+    <div
+      onMouseDownCapture={markActive}
+      onFocusCapture={markActive}
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-pane"
+    >
       <TabStrip pane={pane} worktree={worktree} />
       <div ref={bodyRef} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave} className="relative min-h-0 flex-1">
         {/* PTY-backed tabs (terminal + agent) stay mounted so their PTY survives switches. */}

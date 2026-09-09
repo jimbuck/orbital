@@ -1,6 +1,6 @@
 import { useEffect, useState, type JSX } from 'react'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
-import { useStore, activeProject, activeWorktree } from '@renderer/store'
+import { useStore, activeProject, activeWorktree, activePaneId } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { OrbitalMark } from './icons'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
@@ -61,7 +61,10 @@ export default function TitleBar(): JSX.Element {
 
   const openServer = (url: string): void => {
     setDevMenu(false)
-    if (activeWorktreeId) void window.orbital.createTab(activeWorktreeId, null, 'browser', { url })
+    if (!activeWorktreeId) return
+    // Land in the pane the user last worked in (null = first pane, before any click).
+    const paneId = activePaneId(useStore.getState(), activeWorktreeId)
+    void window.orbital.createTab(activeWorktreeId, paneId, 'browser', { url })
   }
 
   // Escape closes an open menu (WAI-ARIA menu-button pattern).

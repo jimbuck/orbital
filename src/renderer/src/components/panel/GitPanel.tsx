@@ -11,7 +11,7 @@ import {
   Undo2,
   X
 } from 'lucide-react'
-import { useStore, activeWorktree, activeProject } from '@renderer/store'
+import { useStore, activeWorktree, activeProject, activePaneId } from '@renderer/store'
 import { ContextMenu, type MenuPos } from '../rail/menu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
 
@@ -444,7 +444,13 @@ export default function GitPanel(): JSX.Element {
     op: (path: string) => Promise<void>
   ): Promise<void> => files.reduce((p, f) => p.then(() => op(f.path)), Promise.resolve())
 
-  /** Open (or re-focus) an editor tab showing this file's staged/unstaged diff. */
+  /**
+   * Open (or re-focus) an editor tab showing this file's staged/unstaged diff.
+   * A new tab goes to the pane the user last worked in, not the layout's first
+   * pane — the panel sits beside the pane area, so "where I was looking" is the
+   * pane they just clicked out of. Null (nothing recorded yet) is main's "first
+   * pane" default.
+   */
   const openDiff = (f: GitFileStatus): void => {
     for (const pane of worktree.panes) {
       const existing = pane.tabs.find(
@@ -455,7 +461,8 @@ export default function GitPanel(): JSX.Element {
         return
       }
     }
-    void window.orbital.createTab(worktree.id, null, 'editor', { filePath: f.path, diffStaged: f.staged })
+    const paneId = activePaneId(useStore.getState(), worktree.id)
+    void window.orbital.createTab(worktree.id, paneId, 'editor', { filePath: f.path, diffStaged: f.staged })
   }
 
   /** Anchor the branch picker under the branch button and (re)load the local branch list. */

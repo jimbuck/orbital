@@ -25,6 +25,15 @@ interface UIState {
    * existing single-modal consumers keep working unchanged.
    */
   modalStack: { type: Exclude<ModalType, null>; data: unknown }[]
+  /**
+   * The pane the user last worked in, per Worktree (worktreeId → paneId). This
+   * is where a tab opened from OUTSIDE the pane area (a git-panel diff, a dev
+   * server link) lands, so it appears where the user is looking rather than in
+   * whichever pane happens to be first in the layout. Renderer-only: it follows
+   * clicks and focus, and a stale entry (pane since closed) is ignored by the
+   * `activePaneId` selector.
+   */
+  activePaneIds: Record<string, string>
   /** Count of Worktrees currently needing attention (drives the title-bar banner). */
   alertCount: number
   /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
@@ -52,6 +61,7 @@ interface Actions {
   toggleExpanded: (id: string) => void
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
+  setActivePane: (worktreeId: string, paneId: string) => void
 }
 
 export type Store = Data & UIState & Actions
@@ -77,6 +87,7 @@ export const useStore = create<Store>((set, get) => ({
   modal: null,
   modalData: null,
   modalStack: [],
+  activePaneIds: {},
   alertCount: 0,
   updateStatus: { phase: 'idle' },
 
@@ -173,6 +184,13 @@ export const useStore = create<Store>((set, get) => ({
       const top = modalStack[modalStack.length - 1] ?? null
       return { modalStack, modal: top ? top.type : null, modalData: top ? top.data : null }
     })
+  },
+
+  setActivePane(worktreeId, paneId) {
+    // Fired on every mousedown/focus inside a pane, so skip the no-op write —
+    // a fresh object here would re-render every subscriber on each keystroke.
+    if (get().activePaneIds[worktreeId] === paneId) return
+    set((s) => ({ activePaneIds: { ...s.activePaneIds, [worktreeId]: paneId } }))
   }
 }))
 
@@ -188,4 +206,18 @@ export function activeWorktree(s: Store): Worktree | undefined {
 
 export function tasksForProject(s: Store, projectId: string): Task[] {
   return s.tasks.filter((t) => t.projectId === projectId)
+}
+
+/**
+ * The pane a tab opened from outside the pane area should land in: the one the
+ * user last clicked or focused in this Worktree, provided it still exists. Null
+ * when nothing has been recorded (or the pane was since closed) — callers pass
+ * that straight to createTab, whose null means "the first pane", which is also
+ * the only sensible answer before the user has touched anything.
+ */
+export function activePaneId(s: Store, worktreeId: string): string | null {
+  const paneId = s.activePaneIds[worktreeId]
+  if (!paneId) return null
+  const worktree = s.worktrees.find((w) => w.id === worktreeId)
+  return worktree?.panes.some((p) => p.id === paneId) ? paneId : null
 }
