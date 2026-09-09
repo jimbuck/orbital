@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.27.0](https://github.com/jimbuck/orbital/compare/v1.26.0...v1.27.0) (2026-09-09)
+
+
+### Features
+
+* **worktree:** copy env files at creation and on request, never live ([3747580](https://github.com/jimbuck/orbital/commit/3747580e7df8ac2c41afcd37e65e22e03bfc3580))
+
 # [1.26.0](https://github.com/jimbuck/orbital/compare/v1.25.1...v1.26.0) (2026-09-04)
 
 
