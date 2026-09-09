@@ -63,10 +63,7 @@ export default function About(): React.JSX.Element {
     >
       <div className="flex items-center gap-3">
         {/* The logo mark, accent-tinted like the title bar's. */}
-        <OrbitalMark
-          size={30}
-          className="flex-none text-accent drop-shadow-[0_0_7px_color-mix(in_srgb,var(--color-accent)_60%,transparent)]"
-        />
+        <OrbitalMark size={30} glow={7} className="flex-none text-accent" />
         <div>
           <div className="text-[16px] font-bold tracking-[0.2px]">Orbital</div>
           <div className="font-mono text-[11px] text-dim">

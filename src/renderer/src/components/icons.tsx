@@ -67,7 +67,19 @@ export function CursorIcon({ size = 16, className }: BrandIconProps): JSX.Elemen
  * `currentColor` so a `text-accent` class tints it with the workspace accent:
  * in the title bar the mark is the first thing that says which window this is.
  */
-export function OrbitalMark({ size = 16, className }: BrandIconProps): JSX.Element {
+export function OrbitalMark({
+  size = 16,
+  className,
+  glow
+}: BrandIconProps & {
+  /**
+   * Glow radius in px. The halo is a runtime `color-mix` of the accent token —
+   * an inline style, not a Tailwind arbitrary value, because Tailwind resolves
+   * `var(--color-accent)` at build time to the dark theme's blue, which would
+   * pin the glow to one colour under every workspace accent and theme.
+   */
+  glow?: number
+}): JSX.Element {
   return (
     <svg
       width={size}
@@ -75,6 +87,9 @@ export function OrbitalMark({ size = 16, className }: BrandIconProps): JSX.Eleme
       viewBox="16 16 224 224"
       fill="none"
       className={className}
+      style={
+        glow ? { filter: `drop-shadow(0 0 ${glow}px color-mix(in srgb, var(--color-accent) 60%, transparent))` } : undefined
+      }
       aria-hidden="true"
     >
       <g transform="rotate(-28 128 128)">

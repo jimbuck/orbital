@@ -157,10 +157,7 @@ export default function TitleBar(): JSX.Element {
       <div className="no-drag z-50 flex h-full items-center gap-2.5 bg-bar">
         {/* The logo mark in the accent token, not a baked-in blue: with a
             per-workspace accent it is the first thing that says which window this is. */}
-        <OrbitalMark
-          size={16}
-          className="flex-none text-accent drop-shadow-[0_0_5px_color-mix(in_srgb,var(--color-accent)_60%,transparent)]"
-        />
+        <OrbitalMark size={16} glow={5} className="flex-none text-accent" />
         <span className="text-[12px] font-semibold tracking-[0.2px]">Orbital</span>
 
         <nav className="flex h-full items-center">
