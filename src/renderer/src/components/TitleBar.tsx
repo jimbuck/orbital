@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
+import { OrbitalMark } from './icons'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
 
@@ -150,12 +151,12 @@ export default function TitleBar(): JSX.Element {
       {/* Left: brand + app menu bar. bg-bar so the centered breadcrumb is occluded
           here rather than visually colliding at narrow widths. */}
       <div className="no-drag z-50 flex h-full items-center gap-2.5 bg-bar">
-        <div className="relative size-[15px] flex-none">
-          <div className="absolute inset-0 rounded-full border-[1.2px] border-accent/55" />
-          {/* The glow is the accent token, not a baked-in blue: with a per-workspace
-              accent this orb is the first thing that says which window this is. */}
-          <div className="absolute left-1/2 top-1/2 -ml-[2.5px] -mt-[2.5px] size-[5px] rounded-full bg-accent shadow-[0_0_7px_var(--color-accent)]" />
-        </div>
+        {/* The logo mark in the accent token, not a baked-in blue: with a
+            per-workspace accent it is the first thing that says which window this is. */}
+        <OrbitalMark
+          size={16}
+          className="flex-none text-accent drop-shadow-[0_0_5px_color-mix(in_srgb,var(--color-accent)_60%,transparent)]"
+        />
         <span className="text-[12px] font-semibold tracking-[0.2px]">Orbital</span>
 
         <nav className="flex h-full items-center">

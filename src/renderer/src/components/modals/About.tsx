@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '@renderer/store'
 import { ModalShell, ghostBtn } from './ModalRoot'
+import { OrbitalMark } from '../icons'
 import type { UpdateStatus } from '@shared/types'
 
 /** Human line for the updater's current state, shown under the version. */
@@ -61,11 +62,11 @@ export default function About(): React.JSX.Element {
       }
     >
       <div className="flex items-center gap-3">
-        {/* Orbit logo mark. */}
-        <div className="relative size-7 flex-none">
-          <div className="absolute inset-0 rounded-full border-[1.4px] border-accent/55" />
-          <div className="absolute left-1/2 top-1/2 -ml-[4px] -mt-[4px] size-2 rounded-full bg-accent shadow-[0_0_9px_rgba(79,140,255,0.9)]" />
-        </div>
+        {/* The logo mark, accent-tinted like the title bar's. */}
+        <OrbitalMark
+          size={30}
+          className="flex-none text-accent drop-shadow-[0_0_7px_color-mix(in_srgb,var(--color-accent)_60%,transparent)]"
+        />
         <div>
           <div className="text-[16px] font-bold tracking-[0.2px]">Orbital</div>
           <div className="font-mono text-[11px] text-dim">

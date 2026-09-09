@@ -60,3 +60,28 @@ export function CursorIcon({ size = 16, className }: BrandIconProps): JSX.Elemen
     </svg>
   )
 }
+
+/**
+ * Orbital's own mark — the orbit ring, satellite and planet core from
+ * build/icon.svg with the app-tile background stripped away. Drawn in
+ * `currentColor` so a `text-accent` class tints it with the workspace accent:
+ * in the title bar the mark is the first thing that says which window this is.
+ */
+export function OrbitalMark({ size = 16, className }: BrandIconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="16 16 224 224"
+      fill="none"
+      className={className}
+      aria-hidden="true"
+    >
+      <g transform="rotate(-28 128 128)">
+        <ellipse cx="128" cy="128" rx="96" ry="45" stroke="currentColor" strokeWidth="14" opacity="0.7" />
+        <circle cx="176" cy="89" r="17" fill="currentColor" />
+      </g>
+      <circle cx="128" cy="128" r="40" fill="currentColor" />
+    </svg>
+  )
+}
