@@ -36,6 +36,26 @@ others rather than leave a file nobody reads. A `claude` you run yourself in a
 plain terminal is an ordinary session too. That's what the profile-level
 instructions below are for.
 
+## Sessions survive a restart
+
+Closing Orbital (or a workspace) does not throw a Claude tab's conversation
+away. Each agent tab is pinned to a session id from the moment it launches, and
+when the tab comes back — the app restarts, the workspace is reopened, a
+worktree removal is rolled back — Orbital starts `claude --resume <id>` instead
+of a blank `claude`, so the agent carries on where it left off, mid-task and
+all.
+
+- The id is minted by Orbital and handed to Claude at launch, so this works
+  with or without the status hooks. With the hooks installed the tab also
+  follows a `/clear`, which starts a new session under a new id.
+- Only a session whose transcript still exists is resumed. If Claude has since
+  cleaned it up, the tab starts fresh rather than sitting on a "no conversation
+  found" error.
+- A tab you open yourself is always a new conversation; close the old tab and
+  add a new one to start over.
+- Codex and Cursor tabs start fresh on every launch — their CLIs cannot be
+  handed a session id up front.
+
 ## The `orbital` skill
 
 In **Settings → the orbital skill for Claude**, Orbital can install a personal

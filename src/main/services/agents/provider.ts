@@ -8,6 +8,18 @@
  */
 import type { Project, Worktree } from '@shared/types'
 
+/**
+ * The conversation an agent launch is pinned to. Orbital mints the id for a
+ * fresh session (so it knows the id without waiting for a hook) and asks for a
+ * resume when the tab already ran one — see TabConfig.agentSessionId.
+ */
+export interface AgentSession {
+  /** The provider's session id (a UUID for Claude). */
+  id: string
+  /** True to continue the stored conversation; false to start a new one under `id`. */
+  resume: boolean
+}
+
 export interface AgentContext {
   project: Project
   worktree: Worktree
@@ -15,6 +27,8 @@ export interface AgentContext {
   briefingPath: string | null
   /** Explicit executable path configured on the project, if any. */
   execPath?: string
+  /** Session to run under; only given to providers with `tracksSessions`. */
+  session?: AgentSession
 }
 
 export interface ResolvedCommand {
@@ -38,6 +52,19 @@ export interface AgentProvider {
    * codex-instructions.ts).
    */
   acceptsBriefingFile: boolean
+  /**
+   * Whether the CLI can be launched under a session id Orbital chooses and
+   * later resumed by that id. When true, every launch gets an {@link AgentSession}
+   * and {@link sessionTranscriptPath} says where the provider persists it.
+   */
+  tracksSessions: boolean
+  /**
+   * Where the provider stores the transcript of `sessionId` for a session run
+   * in `cwd` with the profile at `profileDir`. Orbital only asks to resume a
+   * session whose transcript is still there — the CLI exits with an error for
+   * an unknown id, which would leave a dead tab where a fresh session belongs.
+   */
+  sessionTranscriptPath?(profileDir: string, cwd: string, sessionId: string): string
   /** Resolve the executable + argv to spawn; throws a clear Error if unresolvable. */
   resolveCommand(ctx: AgentContext): Promise<ResolvedCommand>
 }

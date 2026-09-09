@@ -368,6 +368,14 @@ export interface TabConfig {
    * {@link findAgentConfig}).
    */
   agentProvider?: string
+  /**
+   * agent: the provider's id for the conversation this tab is running, so a
+   * respawn (app restart, workspace reopen) resumes it instead of starting a
+   * blank session. Minted by Orbital at launch and refreshed from the agent's
+   * hook events, so a `/clear` mid-session is tracked too. Only providers that
+   * can resume by id set it (Claude today).
+   */
+  agentSessionId?: string
   /** display title override. */
   title?: string
 }

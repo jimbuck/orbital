@@ -15,6 +15,8 @@ export const codexProvider: AgentProvider = {
   // No --append-system-prompt-file equivalent: Codex reads its instructions from
   // AGENTS.md, so Orbital's go in the profile's global one (codex-instructions.ts).
   acceptsBriefingFile: false,
+  // No launch-time session id, so a respawned tab starts a new conversation.
+  tracksSessions: false,
 
   async resolveCommand(ctx: AgentContext): Promise<ResolvedCommand> {
     const { file, prefixArgs } = await resolveExecutable(ctx.execPath, 'codex')

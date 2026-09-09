@@ -17,6 +17,8 @@ export const cursorProvider: AgentProvider = {
   // file; the only channel is `.cursor/rules` INSIDE the repo, which Orbital will
   // not write (zero git footprint). Cursor sessions learn the CLI from `orbital help`.
   acceptsBriefingFile: false,
+  // No launch-time session id, so a respawned tab starts a new conversation.
+  tracksSessions: false,
 
   async resolveCommand(ctx: AgentContext): Promise<ResolvedCommand> {
     const { file, prefixArgs } = await resolveExecutable(ctx.execPath, 'cursor-agent')

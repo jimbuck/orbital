@@ -1,6 +1,7 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { ipcMain, dialog, shell, app, BrowserWindow, webContents, type IpcMainInvokeEvent } from 'electron'
 import {
   IPC,
@@ -34,8 +35,9 @@ import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './service
 import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
-import { getProvider } from './services/agents/provider'
-import { agentProfileDir, inspectProfileDir, resolveAgent } from './services/agents/profiles'
+import { getProvider, type AgentProvider, type AgentSession } from './services/agents/provider'
+import { agentProfileDir, defaultProfileDir, inspectProfileDir, resolveAgent } from './services/agents/profiles'
+import { expandUserPath } from './services/agents/user-path'
 import { writeBriefing, deleteBriefing, pruneBriefings, briefingKey } from './services/agents/briefing'
 import { savePastedImage, prunePastedImages } from './services/pasted-images'
 import * as claudeHooks from './services/agents/claude-hooks'
@@ -151,10 +153,57 @@ function spawnTerminal(worktree: Worktree, tab: Tab): void {
   })
 }
 
+/** Session ids Orbital will store and hand back to a CLI: Claude's are UUIDs. */
+const SESSION_ID_RE = /^[0-9a-f-]{8,64}$/i
+
+/**
+ * Pin an agent tab to the session it is running, so a later respawn resumes
+ * that conversation. No-op when the id is unchanged or not something a CLI
+ * would accept on its command line.
+ */
+function recordAgentSession(tab: Tab, sessionId: unknown): void {
+  if (tab.type !== 'agent') return
+  if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return
+  if (tab.config.agentSessionId === sessionId) return
+  // Re-read: the tab's config may have moved on (a rename) since `tab` was fetched.
+  const current = repo.tabs.get(tab.id)
+  if (!current) return
+  repo.tabs.updateConfig(tab.id, { ...current.config, agentSessionId: sessionId })
+}
+
+/**
+ * The session an agent tab launches under. A tab that already ran a conversation
+ * resumes it, provided the provider still has its transcript — the CLI exits
+ * with an error for an id it does not know, which would leave a dead tab where a
+ * fresh session belongs. Otherwise (first launch, transcript cleaned up) a new
+ * id is minted and stored so the NEXT respawn can resume this one.
+ */
+function agentSession(
+  tab: Tab,
+  worktree: Worktree,
+  provider: AgentProvider,
+  profileDir: string
+): AgentSession | undefined {
+  if (!provider.tracksSessions) return undefined
+  const stored = tab.config.agentSessionId
+  if (stored && SESSION_ID_RE.test(stored)) {
+    const transcript = provider.sessionTranscriptPath?.(profileDir, worktree.path, stored)
+    if (transcript && existsSync(transcript)) {
+      logger.info('resuming agent session', { tab: tab.id, provider: provider.id, session: stored })
+      return { id: stored, resume: true }
+    }
+    logger.info('agent session transcript gone, starting fresh', { tab: tab.id, session: stored, transcript })
+  }
+  const id = randomUUID()
+  recordAgentSession(tab, id)
+  return { id, resume: false }
+}
+
 /**
  * Boot a coding agent (e.g. Claude) directly as the tab's PTY. Resolution is async
  * (it shells out to `where`/`which`); on failure the tab shows a clear notice and
- * flips to `error` instead of sitting as a silent dead pane.
+ * flips to `error` instead of sitting as a silent dead pane. A tab that has run
+ * before resumes its conversation rather than starting over (see agentSession).
  */
 async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
   const project = repo.projects.get(worktree.projectId)
@@ -170,6 +219,13 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
     project.defaultAgentId
   )
   const provider = getProvider(agentConfig?.provider)
+  const envVar = SUPPORTED_AGENTS.find((a) => a.id === provider.id)?.configDirEnvVar
+  // The directory the CLI will actually read — the same precedence as the env
+  // exported below: the profile's own dir, else a hand-typed env override,
+  // else the machine default. Session transcripts live under it.
+  const profileDir = agentConfig?.configDir
+    ? agentProfileDir(agentConfig)
+    : expandUserPath((envVar && agentConfig?.env?.[envVar]) ?? '') || defaultProfileDir(provider.id)
   try {
     // Only providers that can be handed a briefing get one written — the rest
     // would leave an unread file behind on every launch.
@@ -193,7 +249,8 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
       briefingPath,
       // A project-level path is the more specific override; the workspace
       // agent's path fills in when the project doesn't set one.
-      execPath: project.agentExecPath || agentConfig?.execPath
+      execPath: project.agentExecPath || agentConfig?.execPath,
+      session: agentSession(tab, worktree, provider, profileDir)
     })
     if (agentConfig?.args?.length) command.args.push(...agentConfig.args)
     // The tab may have been closed during the async executable lookup; don't spawn
@@ -202,7 +259,6 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
       deleteBriefing(worktree.id, tab.id)
       return
     }
-    const envVar = SUPPORTED_AGENTS.find((a) => a.id === provider.id)?.configDirEnvVar
     runtime.terminals.prepare({
       tabId: tab.id,
       cwd: worktree.path,
@@ -1452,6 +1508,11 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
         if (!tab) return { ok: true }
         const event = String(req.args.event ?? '')
         const payload = (req.args.payload ?? {}) as Record<string, unknown>
+        // Every hook payload names the session it came from. Keep the tab
+        // pointed at it so a respawn resumes the conversation actually running
+        // — after a `/clear` mid-session that is a different id from the one
+        // Orbital launched with.
+        recordAgentSession(tab, payload.session_id)
         const status = hookEventToStatus(event, payload)
         if (!status) return { ok: true }
         // Async hooks race over the pipe — drop an event a later-fired one beat here.
@@ -1619,6 +1680,9 @@ export function resumeProjects(): void {
 /**
  * Terminals start fresh across restarts (PRD §5): scrollback does not persist,
  * so respawn a clean PTY for every terminal tab and reset its status to idle.
+ * An agent tab's PTY is fresh too, but the agent inside it picks its previous
+ * conversation back up (see agentSession) — a reopened workspace should look
+ * like the one that was closed, mid-task and all.
  */
 export function resumeTerminals(): void {
   const keepBriefings = new Set<string>()
