@@ -29,6 +29,10 @@ import type {
   GitStatus,
   GitFileStatus,
   GitFileState,
+  GitCommit,
+  GitLogPage,
+  GitCommitFile,
+  GitCommitDetail,
   FileDiff,
   DiffLine,
   FileNode
@@ -1080,6 +1084,196 @@ async function commonGitDir(repoPath: string): Promise<string> {
   return resolve(repoPath, out.trim())
 }
 
+/* ----------------------------------------------------------------------------
+ * History
+ * -------------------------------------------------------------------------- */
+
+/** Field separator inside one `git log` record; records themselves end in NUL (`-z`). */
+const LOG_FIELD = '\x1f'
+const LOG_FORMAT = ['%H', '%P', '%an', '%ae', '%at', '%s', '%D'].join('%x1f')
+
+/**
+ * A commit id is handed to git as a positional argument, so it must LOOK like
+ * one: hex only. Anything else (`--output=…`, `HEAD..main`, a path) is refused
+ * before git sees it, the same way file paths go through resolveInRepo.
+ */
+const HASH_RE = /^[0-9a-f]{4,64}$/i
+
+function checkHash(hash: string): string {
+  if (!HASH_RE.test(hash)) throw new Error(`"${hash}" is not a commit hash`)
+  return hash
+}
+
+/** Parse `git log -z --format=LOG_FORMAT` output into commits, newest first. */
+export function parseLog(raw: string): GitCommit[] {
+  const commits: GitCommit[] = []
+  for (const rec of raw.split('\0')) {
+    if (!rec) continue
+    const [hash, parents, author, email, at, subject, refs] = rec.split(LOG_FIELD)
+    if (!hash) continue
+    // `%D` is "HEAD -> main, origin/main, tag: v1.2.0"; the HEAD marker becomes
+    // a flag so the list can badge the checked-out commit.
+    const decorations = (refs ?? '').split(', ').filter(Boolean)
+    const isHead = decorations.some((d) => d === 'HEAD' || d.startsWith('HEAD -> '))
+    commits.push({
+      hash,
+      parents: parents ? parents.split(' ').filter(Boolean) : [],
+      author: author ?? '',
+      email: email ?? '',
+      timestamp: parseInt(at ?? '0', 10) || 0,
+      subject: subject ?? '',
+      refs: decorations.filter((d) => d !== 'HEAD').map((d) => d.replace(/^HEAD -> /, '')),
+      isHead
+    })
+  }
+  return commits
+}
+
+/**
+ * One page of the current branch's history (HEAD backwards, topological order
+ * so the graph's lanes never cross a parent before its child). Asks for one
+ * commit past `limit` to learn whether another page exists without a second
+ * call. An unborn branch (fresh `git init`) is an empty page, not an error.
+ */
+async function log(repoPath: string, skip: number, limit: number): Promise<GitLogPage> {
+  const n = Math.max(1, Math.min(Math.floor(limit) || 1, 1000))
+  const s = Math.max(0, Math.floor(skip) || 0)
+  const r = await capture(repoPath, [
+    'log',
+    '--topo-order',
+    '-z',
+    `--format=${LOG_FORMAT}`,
+    `--skip=${s}`,
+    '-n',
+    String(n + 1),
+    'HEAD',
+    '--'
+  ])
+  if (r.code !== 0) {
+    if (/does not have any commits|bad default revision|bad revision|unknown revision/i.test(r.stderr)) {
+      return { commits: [], hasMore: false }
+    }
+    throw new Error(r.stderr || r.stdout || 'git log failed')
+  }
+  const all = parseLog(r.stdout)
+  return { commits: all.slice(0, n), hasMore: all.length > n }
+}
+
+/** `[fullHash, ...parentHashes]` for a commit (also resolves an abbreviated hash). */
+async function commitParents(repoPath: string, hash: string): Promise<string[]> {
+  const line = await run(repoPath, ['rev-list', '--parents', '-n', '1', checkHash(hash), '--'])
+  return line.trim().split(/\s+/).filter(Boolean)
+}
+
+/**
+ * The two-tree arguments that describe what a commit changed: against its
+ * first parent (a merge shows what the merge brought in), or against the empty
+ * tree for a root commit.
+ */
+function changeRange(full: string, parents: string[]): string[] {
+  return parents.length ? [parents[0], full] : ['--root', full]
+}
+
+/** Map a `--name-status` letter (score suffix already stripped) to a file state. */
+function mapNameStatus(letter: string): GitFileState {
+  switch (letter) {
+    case 'A':
+      return 'added'
+    case 'D':
+      return 'deleted'
+    case 'R':
+      return 'renamed'
+    case 'C':
+      return 'copied'
+    case 'U':
+      return 'conflicted'
+    default:
+      return 'modified' // M, T (type change)
+  }
+}
+
+/**
+ * Join `diff-tree -z --name-status` (states + rename pairs) with `-z --numstat`
+ * (line counts) into one file list. In -z form a rename's numstat record is
+ * `add<TAB>del<TAB>` followed by the old and new paths as two more NUL fields.
+ */
+export function parseCommitFiles(nameStatus: string, numstat: string): GitCommitFile[] {
+  const counts = new Map<string, { additions: number; deletions: number; binary: boolean }>()
+  const statParts = numstat.split('\0')
+  for (let i = 0; i < statParts.length; i++) {
+    const tok = statParts[i]
+    if (!tok) continue
+    const [add, del, inline] = tok.split('\t')
+    let path = inline ?? ''
+    if (path === '') {
+      // Rename: old path, then new path, each in its own field.
+      path = statParts[i + 2] ?? ''
+      i += 2
+    }
+    const binary = add === '-' || del === '-'
+    counts.set(path, {
+      additions: binary ? 0 : parseInt(add, 10) || 0,
+      deletions: binary ? 0 : parseInt(del, 10) || 0,
+      binary
+    })
+  }
+
+  const files: GitCommitFile[] = []
+  const nameParts = nameStatus.split('\0')
+  for (let i = 0; i < nameParts.length; i++) {
+    const status = nameParts[i]
+    if (!status) continue
+    const letter = status[0]
+    let oldPath: string | undefined
+    let path: string
+    if (letter === 'R' || letter === 'C') {
+      oldPath = nameParts[i + 1] ?? ''
+      path = nameParts[i + 2] ?? ''
+      i += 2
+    } else {
+      path = nameParts[i + 1] ?? ''
+      i += 1
+    }
+    const c = counts.get(path) ?? { additions: 0, deletions: 0, binary: false }
+    files.push({ path, oldPath, state: mapNameStatus(letter), ...c })
+  }
+  return files
+}
+
+/** A commit's full message plus what it changed, with per-file line counts. */
+async function commitDetail(repoPath: string, hash: string): Promise<GitCommitDetail> {
+  const [full, ...parents] = await commitParents(repoPath, hash)
+  const body = (await run(repoPath, ['show', '-s', '--format=%B', full, '--'])).replace(/\s+$/, '')
+  const range = changeRange(full, parents)
+  const nameStatus = await run(repoPath, ['diff-tree', '-r', '-M', '-z', '--no-commit-id', '--name-status', ...range, '--'])
+  const numstat = await run(repoPath, ['diff-tree', '-r', '-M', '-z', '--no-commit-id', '--numstat', ...range, '--'])
+  return { hash: full, body, files: parseCommitFiles(nameStatus, numstat) }
+}
+
+/**
+ * One file's diff as a commit changed it. `oldPath` (a rename's source) joins
+ * the pathspec so git can still pair the two sides; both spellings go through
+ * the same containment gate as every other renderer-supplied path.
+ */
+async function commitDiff(repoPath: string, hash: string, path: string, oldPath?: string): Promise<FileDiff> {
+  resolveInRepo(repoPath, path)
+  if (oldPath) resolveInRepo(repoPath, oldPath)
+  const [full, ...parents] = await commitParents(repoPath, hash)
+  const raw = await run(repoPath, [
+    'diff-tree',
+    '-p',
+    '-r',
+    '-M',
+    '--no-commit-id',
+    '--unified=3',
+    ...changeRange(full, parents),
+    '--',
+    path,
+    ...(oldPath ? [oldPath] : [])
+  ])
+  return parseDiff(path, raw)
+}
+
 export const git = {
   isRepo,
   currentBranch,
@@ -1100,6 +1294,9 @@ export const git = {
   fetch,
   checkout,
   diff,
+  log,
+  commitDetail,
+  commitDiff,
   fileTree,
   listDir,
   readFile,

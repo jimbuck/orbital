@@ -20,6 +20,7 @@ import NewWorktree from './NewWorktree'
 import EditTask from './EditTask'
 import About from './About'
 import Workspaces from './Workspaces'
+import CommitHistory from './CommitHistory'
 
 /* ============================================================================
  * Shared modal primitives
@@ -328,6 +329,7 @@ export default function ModalRoot(): React.JSX.Element | null {
           {entry.type === 'board' && <FullBoard />}
           {entry.type === 'about' && <About />}
           {entry.type === 'workspaces' && <Workspaces />}
+          {entry.type === 'commitHistory' && <CommitHistory />}
         </div>
       ))}
     </>

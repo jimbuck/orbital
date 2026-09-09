@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, RefreshCw, Save, X } from 'lucide-react'
 import { marked } from 'marked'
-import type { BundledLanguage } from 'shiki'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { useFileTree } from '@renderer/lib/fileTree'
@@ -11,11 +10,8 @@ import { clampMenuPos, type MenuPos } from '../rail/menu'
 import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
 import EditorContextMenu, { EDITOR_MENU_HEIGHT, EDITOR_MENU_WIDTH, type EditorAction } from './EditorContextMenu'
 import { fireAndForget } from '@renderer/lib/bridge'
-
-/** Shiki bundled theme id for each resolved app theme. */
-function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
-  return theme === 'light' ? 'github-light-default' : 'github-dark-default'
-}
+import { HIGHLIGHT_MAX, langFor, shikiTheme } from '@renderer/lib/highlight'
+import DiffView from './DiffView'
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
@@ -54,54 +50,6 @@ function previewKind(path: string): PreviewKind {
 }
 
 /* ---- Syntax highlighting (shiki, loaded lazily) -------------------------- */
-
-/** Extension -> shiki grammar id, for the cases where they differ. */
-const EXT_LANG: Record<string, string> = {
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  md: 'markdown',
-  markdown: 'markdown',
-  yml: 'yaml',
-  sh: 'bash',
-  zsh: 'bash',
-  ps1: 'powershell',
-  psm1: 'powershell',
-  py: 'python',
-  rb: 'ruby',
-  rs: 'rust',
-  kt: 'kotlin',
-  cs: 'csharp',
-  htm: 'html',
-  svg: 'xml',
-  patch: 'diff',
-  gitignore: 'ini',
-  env: 'ini',
-  conf: 'ini'
-}
-
-/** Grammars we accept by their own name (extension === shiki id). */
-const SELF_LANGS = new Set([
-  'tsx', 'jsx', 'json', 'jsonc', 'json5', 'css', 'scss', 'less', 'html', 'xml', 'vue', 'svelte',
-  'yaml', 'toml', 'ini', 'bash', 'bat', 'powershell', 'python', 'ruby', 'go', 'rust', 'java',
-  'kotlin', 'swift', 'c', 'cpp', 'csharp', 'php', 'lua', 'sql', 'graphql', 'diff', 'docker',
-  'markdown', 'mdx', 'typescript', 'javascript'
-])
-
-function langFor(path: string): string | null {
-  const name = (path.split('/').pop() ?? '').toLowerCase()
-  if (name === 'dockerfile') return 'docker'
-  const ext = extOf(path)
-  if (EXT_LANG[ext]) return EXT_LANG[ext]
-  if (SELF_LANGS.has(ext)) return ext
-  return null
-}
-
-/** Above this size highlighting is skipped — a plain <pre> keeps huge files snappy. */
-const HIGHLIGHT_MAX = 300_000
 
 /**
  * Editable source view with live syntax highlighting: a transparent-text
@@ -1050,111 +998,5 @@ function TreeNode({
       )}
       <span className="truncate font-mono text-[11.5px]">{node.name}</span>
     </button>
-  )
-}
-
-/* ---- Diff view ---------------------------------------------------------- */
-
-/** Strip a leading +/-/space that the diff producer may already include. */
-function stripSign(line: { type: string; text: string }): string {
-  const { type, text } = line
-  if (type === 'add' && text.startsWith('+')) return text.slice(1)
-  if (type === 'del' && text.startsWith('-')) return text.slice(1)
-  if (type === 'context' && text.startsWith(' ')) return text.slice(1)
-  return text
-}
-
-/** A shiki-themed token line: colored spans reassembled per diff line. */
-type TokenLine = { content: string; color?: string }[]
-
-/**
- * Tokenize the diff's code lines in one shiki pass (hunk/meta lines become
- * blank placeholders so indices stay aligned). Null while loading, for unknown
- * grammars, and for oversized diffs — callers fall back to flat coloring.
- */
-function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
-  const [tokens, setTokens] = useState<TokenLine[] | null>(null)
-  const theme = useResolvedTheme()
-
-  const code = useMemo(
-    () =>
-      diff.lines
-        .map((l) => (l.type === 'add' || l.type === 'del' || l.type === 'context' ? stripSign(l) : ''))
-        .join('\n'),
-    [diff]
-  )
-
-  useEffect(() => {
-    let alive = true
-    setTokens(null)
-    const lang = langFor(path)
-    if (!lang || diff.binary || code.length > HIGHLIGHT_MAX) return
-    void import('shiki')
-      .then(({ codeToTokens }) => codeToTokens(code, { lang: lang as BundledLanguage, theme: shikiTheme(theme) }))
-      .then((r) => {
-        if (alive) setTokens(r.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))))
-      })
-      .catch((err) => {
-        // Unknown grammar / load failure — flat coloring stays up.
-        console.warn(`shiki diff highlight failed for ${path}:`, err)
-      })
-    return () => {
-      alive = false
-    }
-    // theme is a dep so diff syntax colors follow the app theme.
-  }, [code, path, diff.binary, theme])
-
-  return tokens
-}
-
-function DiffView({ diff, path }: { diff: FileDiff; path: string }): JSX.Element {
-  const tokens = useDiffTokens(diff, path)
-
-  if (diff.binary) {
-    return <div className="px-4 py-3 font-mono text-[11px] text-faint">Binary file not shown</div>
-  }
-  return (
-    <div className="font-mono text-[11px] leading-[1.7]">
-      {diff.lines.map((line, i) => {
-        if (line.type === 'hunk') {
-          return (
-            <div key={i} className="flex bg-diff-hunk/8 text-diff-hunk">
-              <span className="w-[62px] flex-none pr-3 text-right text-faint">@@</span>
-              <span className="whitespace-pre">{line.text}</span>
-            </div>
-          )
-        }
-        const rowBg = line.type === 'add' ? 'bg-green/10' : line.type === 'del' ? 'bg-red/10' : ''
-        const signCls =
-          line.type === 'add'
-            ? 'text-diff-add'
-            : line.type === 'del'
-              ? 'text-diff-del'
-              : line.type === 'meta'
-                ? 'text-faint'
-                : 'text-text-3'
-        const sign = line.type === 'add' ? '+' : line.type === 'del' ? '−' : ' '
-        const isCode = line.type === 'add' || line.type === 'del' || line.type === 'context'
-        const lineTokens = isCode && tokens ? tokens[i] : null
-        return (
-          <div key={i} className={`flex ${rowBg}`}>
-            <span className="w-[30px] flex-none pr-1.5 text-right text-faint">{line.oldNo ?? ''}</span>
-            <span className="w-[30px] flex-none pr-3 text-right text-faint">{line.newNo ?? ''}</span>
-            <span className={`whitespace-pre ${signCls}`}>
-              {sign}{' '}
-              {lineTokens && lineTokens.length > 0 ? (
-                lineTokens.map((t, j) => (
-                  <span key={j} style={t.color ? { color: t.color } : undefined}>
-                    {t.content}
-                  </span>
-                ))
-              ) : (
-                stripSign(line)
-              )}
-            </span>
-          </div>
-        )
-      })}
-    </div>
   )
 }

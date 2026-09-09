@@ -106,6 +106,7 @@ export default function TitleBar(): JSX.Element {
       label: 'View',
       items: [
         { label: 'All Tasks…', onClick: () => openModal('board') },
+        { label: 'Commit History…', onClick: () => openModal('commitHistory'), disabled: !activeWorktreeId },
         { label: 'Reload', onClick: () => window.location.reload() },
         { label: 'Toggle Developer Tools', onClick: () => window.orbital.toggleDevTools() },
         { sep: true, label: '' },

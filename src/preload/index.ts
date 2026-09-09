@@ -28,6 +28,8 @@ import {
   type GitStatus,
   type BranchInfo,
   type FileDiff,
+  type GitLogPage,
+  type GitCommitDetail,
   type FileNode,
   type TerminalDataEvent,
   type TerminalExitEvent,
@@ -156,6 +158,12 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.gitCheckout, worktreeId, branch, create) as Promise<void>,
   gitDiff: (worktreeId: string, path: string, staged: boolean) =>
     ipcRenderer.invoke(IPC.gitDiff, worktreeId, path, staged) as Promise<FileDiff>,
+  gitLog: (worktreeId: string, skip: number, limit: number) =>
+    ipcRenderer.invoke(IPC.gitLog, worktreeId, skip, limit) as Promise<GitLogPage>,
+  gitCommitDetail: (worktreeId: string, hash: string) =>
+    ipcRenderer.invoke(IPC.gitCommitDetail, worktreeId, hash) as Promise<GitCommitDetail>,
+  gitCommitDiff: (worktreeId: string, hash: string, path: string, oldPath?: string) =>
+    ipcRenderer.invoke(IPC.gitCommitDiff, worktreeId, hash, path, oldPath) as Promise<FileDiff>,
   fileTree: (worktreeId: string) => ipcRenderer.invoke(IPC.fileTree, worktreeId) as Promise<FileNode[]>,
   listDir: (worktreeId: string, path: string) =>
     ipcRenderer.invoke(IPC.listDir, worktreeId, path) as Promise<FileNode[]>,

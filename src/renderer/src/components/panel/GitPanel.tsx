@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   GitBranch,
+  History,
   Loader2,
   Minus,
   Plus,
@@ -623,6 +624,13 @@ export default function GitPanel(): JSX.Element {
             className="text-faint hover:text-text-2"
           >
             <RefreshCw size={12} strokeWidth={1.5} className={busy === 'refresh' ? 'animate-spin' : ''} />
+          </IconBtn>
+          <IconBtn
+            title="Commit history"
+            onClick={() => openModal('commitHistory')}
+            className="text-faint hover:text-text-2"
+          >
+            <History size={12} strokeWidth={1.5} />
           </IconBtn>
         </div>
       </div>

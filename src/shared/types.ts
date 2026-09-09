@@ -571,6 +571,51 @@ export interface FileDiff {
   binary: boolean
 }
 
+/** One commit in the current branch's history (the list view's row). */
+export interface GitCommit {
+  /** Full hash. */
+  hash: string
+  /** Parent hashes, first parent first; more than one means a merge. */
+  parents: string[]
+  author: string
+  email: string
+  /** Author date, unix seconds. */
+  timestamp: number
+  /** First line of the message. */
+  subject: string
+  /**
+   * Branches and tags pointing here, as git decorates them (`main`,
+   * `origin/main`, `tag: v1.2.0`), with the HEAD marker lifted into `isHead`.
+   */
+  refs: string[]
+  isHead: boolean
+}
+
+/** A page of history: `hasMore` says whether asking with a larger skip yields more. */
+export interface GitLogPage {
+  commits: GitCommit[]
+  hasMore: boolean
+}
+
+/** One file as a commit changed it. */
+export interface GitCommitFile {
+  path: string
+  /** Set for renames/copies: where the file came from. */
+  oldPath?: string
+  state: GitFileState
+  additions: number
+  deletions: number
+  binary: boolean
+}
+
+/** A selected commit's full message and change list. */
+export interface GitCommitDetail {
+  hash: string
+  /** The whole message, subject line included, trailing whitespace trimmed. */
+  body: string
+  files: GitCommitFile[]
+}
+
 export interface FileNode {
   name: string
   path: string
@@ -810,6 +855,9 @@ export const IPC = {
   gitFetch: 'orbital:gitFetch',
   gitCheckout: 'orbital:gitCheckout',
   gitDiff: 'orbital:gitDiff',
+  gitLog: 'orbital:gitLog',
+  gitCommitDetail: 'orbital:gitCommitDetail',
+  gitCommitDiff: 'orbital:gitCommitDiff',
   fileTree: 'orbital:fileTree',
   listDir: 'orbital:listDir',
   readFile: 'orbital:readFile',
@@ -983,6 +1031,12 @@ export interface OrbitalApi {
   /** Switch to `branch` (`create` forks it from HEAD first). Root Worktrees only. */
   gitCheckout(worktreeId: string, branch: string, create?: boolean): Promise<void>
   gitDiff(worktreeId: string, path: string, staged: boolean): Promise<FileDiff>
+  /** A page of the current branch's history, newest first: `limit` commits after skipping `skip`. */
+  gitLog(worktreeId: string, skip: number, limit: number): Promise<GitLogPage>
+  /** Full message + changed files for one commit (`hash` may be abbreviated). */
+  gitCommitDetail(worktreeId: string, hash: string): Promise<GitCommitDetail>
+  /** One file's diff as `hash` changed it; `oldPath` is a rename's source. */
+  gitCommitDiff(worktreeId: string, hash: string, path: string, oldPath?: string): Promise<FileDiff>
   fileTree(worktreeId: string): Promise<FileNode[]>
   /*
    * `path` on every file call below is CHECKOUT-RELATIVE, and main refuses any

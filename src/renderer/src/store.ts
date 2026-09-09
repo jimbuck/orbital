@@ -9,6 +9,7 @@ export type ModalType =
   | 'about'
   | 'editTask'
   | 'workspaces'
+  | 'commitHistory'
   | null
 
 interface UIState {

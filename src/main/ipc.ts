@@ -1002,6 +1002,18 @@ export function registerIpc(): void {
   h(IPC.gitDiff, (_e, worktreeId: string, path: string, staged: boolean) =>
     git.diff(worktreeRepoPath(worktreeId), path, staged)
   )
+  // History: `hash` is renderer-supplied and reaches git as a positional
+  // argument, so the git service hex-checks it (see checkHash) the way paths go
+  // through the containment gate.
+  h(IPC.gitLog, (_e, worktreeId: string, skip: number, limit: number) =>
+    git.log(worktreeRepoPath(worktreeId), skip, limit)
+  )
+  h(IPC.gitCommitDetail, (_e, worktreeId: string, hash: string) =>
+    git.commitDetail(worktreeRepoPath(worktreeId), hash)
+  )
+  h(IPC.gitCommitDiff, (_e, worktreeId: string, hash: string, path: string, oldPath?: string) =>
+    git.commitDiff(worktreeRepoPath(worktreeId), hash, path, oldPath)
+  )
   h(IPC.fileTree, (_e, worktreeId: string) => git.fileTree(worktreeRepoPath(worktreeId)))
   // Every handler from here down is given a checkout-relative path chosen by
   // the renderer, and every one of them resolves it through the git service's

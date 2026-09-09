@@ -22,7 +22,7 @@ const trashItem = hoisted.trashItem
 // git.ts reaches Electron's shell for `trashItem` (the delete path).
 vi.mock('electron', () => ({ shell: { trashItem: hoisted.trashItem } }))
 
-import { checkEntryName, git, resolveInRepo } from './git'
+import { checkEntryName, git, parseCommitFiles, parseLog, resolveInRepo } from './git'
 
 const onWindows = process.platform === 'win32'
 
@@ -679,5 +679,165 @@ describe('real-path containment', () => {
     const handedToTheOs = resolveInRepo(repo, 'escape/secret.txt')
     expect(handedToTheOs).toBe(join(repo, 'escape', 'secret.txt'))
     expect(realpathSync(handedToTheOs)).toBe(join(realpathSync(outside), 'secret.txt'))
+  })
+})
+
+/* ---- History --------------------------------------------------------------
+ *
+ * `log` / `commitDetail` / `commitDiff` run against a real repository built
+ * in the scratch checkout, so what is asserted is git's own output shape (the
+ * -z record formats, rename pairs, root commits) rather than a transcript.
+ * ------------------------------------------------------------------------- */
+
+/** Run git in the scratch repo, returning stdout. */
+function gitOut(...args: string[]): string {
+  return execFileSync('git', args, { cwd: repo, encoding: 'utf8' })
+}
+
+/** Overwrite src/existing.ts and commit it with `message`. */
+function commitExisting(content: string, message: string): void {
+  writeFileSync(join(repo, 'src', 'existing.ts'), content)
+  gitOut('commit', '-q', '-am', message)
+}
+
+describe('git.log', () => {
+  it('lists commits newest first with parents, refs and a HEAD flag', async () => {
+    gitInit()
+    commitExisting('export const a = 2\n', 'second')
+    gitOut('tag', 'v1')
+    const page = await git.log(repo, 0, 10)
+    expect(page.hasMore).toBe(false)
+    expect(page.commits.map((c) => c.subject)).toEqual(['second', 'init'])
+    const [head, root] = page.commits
+    expect(head.isHead).toBe(true)
+    expect(head.parents).toEqual([root.hash])
+    expect(head.refs).toContain('tag: v1')
+    expect(head.author).toBe('Test')
+    expect(head.email).toBe('test@example.com')
+    expect(head.timestamp).toBeGreaterThan(1_600_000_000)
+    expect(root.parents).toEqual([])
+    expect(root.isHead).toBe(false)
+  })
+
+  it('pages with skip/limit and reports whether more remain', async () => {
+    gitInit()
+    for (const n of [2, 3, 4]) commitExisting(`export const a = ${n}\n`, `change ${n}`)
+    const first = await git.log(repo, 0, 2)
+    expect(first.commits.map((c) => c.subject)).toEqual(['change 4', 'change 3'])
+    expect(first.hasMore).toBe(true)
+    const rest = await git.log(repo, 2, 2)
+    expect(rest.commits.map((c) => c.subject)).toEqual(['change 2', 'init'])
+    expect(rest.hasMore).toBe(false)
+  })
+
+  it('treats an unborn branch as an empty page rather than an error', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'ignore' })
+    expect(await git.log(repo, 0, 10)).toEqual({ commits: [], hasMore: false })
+  })
+})
+
+describe('git.commitDetail', () => {
+  it('returns the full message and the changed files with states and counts', async () => {
+    gitInit()
+    writeFileSync(join(repo, 'src', 'existing.ts'), 'export const a = 2\nexport const b = 3\n')
+    writeFileSync(join(repo, 'src', 'fresh.ts'), 'one\n')
+    gitOut('add', '.')
+    gitOut('commit', '-q', '-m', 'subject line\n\nbody paragraph\n')
+    const head = (await git.log(repo, 0, 1)).commits[0]
+    // An abbreviated hash is accepted and expanded.
+    const d = await git.commitDetail(repo, head.hash.slice(0, 8))
+    expect(d.hash).toBe(head.hash)
+    expect(d.body).toBe('subject line\n\nbody paragraph')
+    expect(d.files).toEqual([
+      { path: 'src/existing.ts', oldPath: undefined, state: 'modified', additions: 2, deletions: 1, binary: false },
+      { path: 'src/fresh.ts', oldPath: undefined, state: 'added', additions: 1, deletions: 0, binary: false }
+    ])
+  })
+
+  it('reports a rename with its old path, and diffs it as a rename', async () => {
+    gitInit()
+    gitOut('mv', 'src/existing.ts', 'src/moved.ts')
+    gitOut('commit', '-q', '-m', 'move')
+    const head = (await git.log(repo, 0, 1)).commits[0]
+    const d = await git.commitDetail(repo, head.hash)
+    expect(d.files).toEqual([
+      { path: 'src/moved.ts', oldPath: 'src/existing.ts', state: 'renamed', additions: 0, deletions: 0, binary: false }
+    ])
+    const diff = await git.commitDiff(repo, head.hash, 'src/moved.ts', 'src/existing.ts')
+    expect(diff.lines.some((l) => l.text.startsWith('rename from src/existing.ts'))).toBe(true)
+  })
+
+  it('describes the root commit against the empty tree', async () => {
+    gitInit()
+    const root = (await git.log(repo, 0, 1)).commits[0]
+    const d = await git.commitDetail(repo, root.hash)
+    expect(d.files.length).toBeGreaterThan(0)
+    expect(d.files.every((f) => f.state === 'added')).toBe(true)
+    expect(d.files.map((f) => f.path)).toContain('src/existing.ts')
+  })
+
+  it('refuses anything that is not a hash', async () => {
+    gitInit()
+    await expect(git.commitDetail(repo, '--output=x')).rejects.toThrow(/not a commit hash/)
+    await expect(git.commitDetail(repo, 'HEAD')).rejects.toThrow(/not a commit hash/)
+    await expect(git.commitDetail(repo, 'HEAD..main')).rejects.toThrow(/not a commit hash/)
+  })
+})
+
+describe('git.commitDiff', () => {
+  it('diffs one file as the commit changed it', async () => {
+    gitInit()
+    commitExisting('export const a = 2\n', 'bump')
+    const head = (await git.log(repo, 0, 1)).commits[0]
+    const diff = await git.commitDiff(repo, head.hash, 'src/existing.ts')
+    expect(diff.additions).toBe(1)
+    expect(diff.deletions).toBe(1)
+    expect(diff.lines.find((l) => l.type === 'add')?.text).toBe('export const a = 2')
+    // --no-commit-id: the first line is the diff header, not the hash.
+    expect(diff.lines[0].text.startsWith('diff --git')).toBe(true)
+  })
+
+  it('applies the containment gate to both paths and the hash check to the ref', async () => {
+    gitInit()
+    const head = (await git.log(repo, 0, 1)).commits[0]
+    await expect(git.commitDiff(repo, head.hash, '../outside/secret.txt')).rejects.toThrow(/escapes/)
+    await expect(git.commitDiff(repo, head.hash, 'src/existing.ts', join(outside, 'secret.txt'))).rejects.toThrow(
+      /not a path inside/
+    )
+    await expect(git.commitDiff(repo, 'HEAD', 'src/existing.ts')).rejects.toThrow(/not a commit hash/)
+  })
+})
+
+describe('parseLog / parseCommitFiles', () => {
+  it('parses NUL-separated records and lifts the HEAD marker out of the decorations', () => {
+    const rec = ['abc', 'p1 p2', 'Ann', 'ann@x', '1700000000', 'subject', 'HEAD -> main, origin/main, tag: v1'].join(
+      '\x1f'
+    )
+    const [c] = parseLog(rec + '\0')
+    expect(c).toEqual({
+      hash: 'abc',
+      parents: ['p1', 'p2'],
+      author: 'Ann',
+      email: 'ann@x',
+      timestamp: 1700000000,
+      subject: 'subject',
+      refs: ['main', 'origin/main', 'tag: v1'],
+      isHead: true
+    })
+    // A detached HEAD decorates as a bare "HEAD".
+    expect(parseLog(['abc', '', 'A', 'a', '1', 's', 'HEAD'].join('\x1f') + '\0')[0]).toMatchObject({
+      refs: [],
+      isHead: true
+    })
+  })
+
+  it('joins name-status and numstat, including -z rename records and binaries', () => {
+    const names = ['M', 'a.ts', 'R090', 'old.ts', 'new.ts', 'A', 'img.png'].join('\0') + '\0'
+    const stats = ['3\t1\ta.ts', '2\t2\t', 'old.ts', 'new.ts', '-\t-\timg.png'].join('\0') + '\0'
+    expect(parseCommitFiles(names, stats)).toEqual([
+      { path: 'a.ts', oldPath: undefined, state: 'modified', additions: 3, deletions: 1, binary: false },
+      { path: 'new.ts', oldPath: 'old.ts', state: 'renamed', additions: 2, deletions: 2, binary: false },
+      { path: 'img.png', oldPath: undefined, state: 'added', additions: 0, deletions: 0, binary: true }
+    ])
   })
 })

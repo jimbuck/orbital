@@ -25,6 +25,22 @@ header. Staged files diff against the index.
 
 ![A syntax-highlighted diff opened from the git panel](../../../assets/screenshots/07-diff-view.png)
 
+## Commit history
+
+The clock button in the panel header (or **View ▸ Commit History…**) opens the
+current branch's history as a full-size modal, like the task board.
+
+- **Left:** a lane graph and the commit list, newest first — subject, branch
+  and tag badges, a `HEAD` marker, short hash, author, and how long ago. Merges
+  draw as hollow nodes with their second parent forking into its own lane.
+  Scroll to the bottom for **Load more**; ↑/↓ walk the list.
+- **Right:** the selected commit's full message, author and date, its hash
+  (click to copy), and every file it changed with `+N −N` counts. The first
+  file's diff opens straight away; click another file to switch.
+
+The list follows the checkout: a commit, pull, or checkout made anywhere
+(the panel, a terminal, an agent) moves the tip and the history reloads.
+
 ## Always current
 
 Filesystem watchers cover every checkout — the repo root *and* each linked
