@@ -429,6 +429,22 @@ function confirmation(req: ControlRequest, data: unknown): string {
 
 /* --------------------------------------------------------------- transport - */
 
+/** How long to wait for the pipe to accept the connection at all. */
+const CONNECT_TIMEOUT_MS = 3000
+
+/**
+ * How long to wait for the app's answer once connected. Most commands are a
+ * DB round-trip; the two that do real work (a `git worktree add` plus env
+ * sync, a file copy) get budgets matching main's own git ceilings. One timer
+ * for the whole exchange used to report "not connected" after 3 s while the
+ * worktree was still being created — so the agent retried and made a second.
+ */
+const DEFAULT_RESPONSE_TIMEOUT_MS = 30_000
+const RESPONSE_TIMEOUT_MS: Partial<Record<ControlCommand, number>> = {
+  'worktree-new': 10 * 60_000,
+  'worktree-sync': 5 * 60_000
+}
+
 /** Connect to the control pipe, send the request, print the single response. */
 function send(req: ControlRequest): void {
   // ORBITAL_SOCKET pins the exact pipe per terminal; fall back to the well-known path.
@@ -438,6 +454,7 @@ function send(req: ControlRequest): void {
 
   let settled = false
   let buffer = ''
+  let timer: NodeJS.Timeout | undefined
 
   const finish = (fn: () => void): void => {
     if (settled) return
@@ -453,9 +470,21 @@ function send(req: ControlRequest): void {
     process.exit(1)
   }
 
-  const timer = setTimeout(() => finish(notConnected), 3000)
+  const responseBudget = RESPONSE_TIMEOUT_MS[req.cmd] ?? DEFAULT_RESPONSE_TIMEOUT_MS
+  const timedOut = (): never => {
+    // Exit 2, distinct from a plain failure: the command was accepted and may
+    // well have completed — a caller must look before retrying.
+    process.stderr.write(
+      `orbital: no answer from Orbital after ${Math.round(responseBudget / 1000)}s — \`${req.cmd}\` was sent and may still be running or already done; check the cockpit before retrying\n`
+    )
+    process.exit(2)
+  }
+
+  timer = setTimeout(() => finish(notConnected), CONNECT_TIMEOUT_MS)
 
   socket.on('connect', () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => finish(timedOut), responseBudget)
     socket.write(JSON.stringify(req) + '\n')
   })
 

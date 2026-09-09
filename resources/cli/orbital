@@ -1,2 +1,14 @@
 #!/bin/sh
-exec node "$(dirname "$0")/orbital.js" "$@"
+# Run the bundled CLI on the app's own Electron binary as plain Node
+# (ELECTRON_RUN_AS_NODE): a packaged install has no guarantee of a system
+# `node`, and the Claude hooks call this shim by absolute path from every
+# session. macOS: Orbital.app/Contents/Resources/cli -> ../../MacOS/Orbital;
+# Linux: <install>/resources/cli -> ../../orbital. From a source checkout
+# neither exists, so fall back to node from PATH.
+dir="$(cd "$(dirname "$0")" && pwd)"
+for bin in "$dir/../../MacOS/Orbital" "$dir/../../orbital"; do
+  if [ -x "$bin" ]; then
+    ELECTRON_RUN_AS_NODE=1 exec "$bin" "$dir/orbital.js" "$@"
+  fi
+done
+exec node "$dir/orbital.js" "$@"
