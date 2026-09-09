@@ -13,6 +13,7 @@ import {
   X
 } from 'lucide-react'
 import { useStore, activeWorktree, activeProject, activePaneId } from '@renderer/store'
+import { cleanIpcError } from '@renderer/lib/ipcError'
 import { ContextMenu, type MenuPos } from '../rail/menu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
 
@@ -45,11 +46,6 @@ type GitOp =
 /** Stable empty list so the memoised trees don't rebuild while status is null. */
 const NO_FILES: GitFileStatus[] = []
 
-/** Strip Electron's IPC-rejection wrapper so the banner shows git's actual stderr. */
-function cleanError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '').trim()
-}
 
 /** Map a git file state to its single-letter badge + tint (M amber, A green, D red, ? muted). */
 function stateBadge(state: GitFileState): { letter: string; className: string } {
@@ -380,7 +376,7 @@ export default function GitPanel(): JSX.Element {
       if (req !== statusReq.current) return
       // Keep the last good list rather than painting a "clean" tree with green
       // zeros: a failed status is not an empty one. The banner says why.
-      setError(cleanError(err))
+      setError(cleanIpcError(err))
     }
   }, [worktreeId])
 
@@ -459,7 +455,7 @@ export default function GitPanel(): JSX.Element {
     try {
       await fn()
     } catch (err) {
-      setError(cleanError(err))
+      setError(cleanIpcError(err))
     } finally {
       setBusy(null)
     }

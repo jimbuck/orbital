@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { Check, Copy, GitBranch, Loader2, RefreshCw, Tag, X } from 'lucide-react'
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
+import { cleanIpcError } from '@renderer/lib/ipcError'
 import type { FileDiff, GitCommit, GitCommitDetail, GitCommitFile, GitFileState } from '@shared/types'
 import { GRAPH_COLOR_COUNT, layoutGraph, type GraphRow } from '@renderer/lib/commitGraph'
 import DiffView from '../body/DiffView'
@@ -29,11 +30,6 @@ const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /* ---- Helpers ------------------------------------------------------------- */
 
-/** Strip Electron's IPC-rejection wrapper so the banner shows git's actual stderr. */
-function cleanError(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, '').trim()
-}
 
 /** "just now" / "12m ago" / "3d ago" — coarse on purpose; the detail pane has the full date. */
 export function relativeTime(ts: number, now = Date.now()): string {
@@ -278,7 +274,7 @@ export default function CommitHistory(): JSX.Element {
       // user's pick if it is still in the (refreshed) list.
       setSelected((cur) => (cur && page.commits.some((c) => c.hash === cur) ? cur : (page.commits[0]?.hash ?? null)))
     } catch (err) {
-      if (req === listReq.current) setError(cleanError(err))
+      if (req === listReq.current) setError(cleanIpcError(err))
     } finally {
       if (req === listReq.current) setLoading(false)
     }
@@ -294,7 +290,7 @@ export default function CommitHistory(): JSX.Element {
       setCommits((cur) => [...cur, ...page.commits])
       setHasMore(page.hasMore)
     } catch (err) {
-      if (req === listReq.current) setError(cleanError(err))
+      if (req === listReq.current) setError(cleanIpcError(err))
     } finally {
       if (req === listReq.current) setLoading(false)
     }
@@ -348,7 +344,7 @@ export default function CommitHistory(): JSX.Element {
         setFile(d.files[0] ?? null)
       })
       .catch((err) => {
-        if (req === detailReq.current) setDetailError(cleanError(err))
+        if (req === detailReq.current) setDetailError(cleanIpcError(err))
       })
   }, [worktreeId, selected])
 
@@ -364,7 +360,7 @@ export default function CommitHistory(): JSX.Element {
         if (req === diffReq.current) setDiff(d)
       })
       .catch((err) => {
-        if (req === diffReq.current) setDetailError(cleanError(err))
+        if (req === diffReq.current) setDetailError(cleanIpcError(err))
       })
       .finally(() => {
         if (req === diffReq.current) setDiffLoading(false)

@@ -86,6 +86,35 @@ function gitEnv(nonInteractive: boolean | undefined): NodeJS.ProcessEnv {
 /** Git understands `/dev/null` as the empty file even on Windows. */
 const NULL_DEVICE = '/dev/null'
 
+/**
+ * Ceilings on what the editor will pull across the bridge. The editor is a
+ * controlled <textarea> over a highlighted mirror, not a viewer for
+ * lockfile-scale text, and an image becomes a base64 data: URL held in React
+ * state — so a click on a 60 MB log or a video in `public/` used to read the
+ * whole thing into main, clone it into the renderer and freeze the window.
+ * Over the cap the read is refused up front with a message the tab can show.
+ */
+export const MAX_TEXT_FILE_BYTES = 4 * 1024 * 1024
+export const MAX_BINARY_FILE_BYTES = 20 * 1024 * 1024
+/** A diff bigger than this (a regenerated lockfile, a bundle) is refused rather than parsed line by line. */
+export const MAX_DIFF_BYTES = 8 * 1024 * 1024
+
+function humanSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${bytes} B`
+}
+
+/** Throw a readable error when `full` is over `limit` bytes; the size check is one stat, not a read. */
+async function refuseOversize(full: string, limit: number, what: string): Promise<void> {
+  const st = await fsStat(full)
+  if (st.size > limit) {
+    throw new Error(
+      `${what} is ${humanSize(st.size)}; Orbital opens ${what.toLowerCase()}s up to ${humanSize(limit)}. Open it externally instead.`
+    )
+  }
+}
+
 type ExecError = Error & {
   code?: number | string
   stdout?: string
@@ -391,6 +420,11 @@ async function checkout(repoPath: string, branch: string, create?: boolean): Pro
 
 /** Parse unified-diff text into a structured FileDiff, tracking old/new line numbers. */
 function parseDiff(path: string, raw: string): FileDiff {
+  if (raw.length > MAX_DIFF_BYTES) {
+    throw new Error(
+      `Diff is ${humanSize(raw.length)}; Orbital shows diffs up to ${humanSize(MAX_DIFF_BYTES)}. Use git directly for this one.`
+    )
+  }
   const lines: DiffLine[] = []
   let additions = 0
   let deletions = 0
@@ -1021,12 +1055,16 @@ async function listDir(repoPath: string, relPath: string): Promise<FileNode[]> {
 }
 
 async function readFile(repoPath: string, relPath: string): Promise<string> {
-  return fsReadFile(resolveInRepo(repoPath, relPath), 'utf8')
+  const full = resolveInRepo(repoPath, relPath)
+  await refuseOversize(full, MAX_TEXT_FILE_BYTES, 'File')
+  return fsReadFile(full, 'utf8')
 }
 
 /** Raw file bytes as base64 — lets the renderer display binary content (images). */
 async function readFileBase64(repoPath: string, relPath: string): Promise<string> {
-  const buf = await fsReadFile(resolveInRepo(repoPath, relPath))
+  const full = resolveInRepo(repoPath, relPath)
+  await refuseOversize(full, MAX_BINARY_FILE_BYTES, 'Image')
+  const buf = await fsReadFile(full)
   return buf.toString('base64')
 }
 

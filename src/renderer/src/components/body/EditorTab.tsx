@@ -10,6 +10,7 @@ import { clampMenuPos, type MenuPos } from '../rail/menu'
 import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
 import EditorContextMenu, { EDITOR_MENU_HEIGHT, EDITOR_MENU_WIDTH, type EditorAction } from './EditorContextMenu'
 import { fireAndForget } from '@renderer/lib/bridge'
+import { cleanIpcError } from '@renderer/lib/ipcError'
 import { HIGHLIGHT_MAX, langFor, shikiTheme } from '@renderer/lib/highlight'
 import DiffView from './DiffView'
 
@@ -550,6 +551,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   const [imageData, setImageData] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  /** Why the last content/diff/image fetch failed (main's message, e.g. the size cap), if it did. */
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ node: FileNode; pos: MenuPos } | null>(null)
   const reqRef = useRef(0)
 
@@ -665,6 +668,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     if (!needDiff && !needImage && !needContent) return
     const id = ++reqRef.current
     setLoading(true)
+    setLoadError(null)
     void (async () => {
       try {
         if (needDiff) {
@@ -682,9 +686,11 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             setDraft(c)
           }
         }
-      } catch {
-        // Unreadable (e.g. a deleted file opened in File mode) — the body shows
-        // a notice; content stays null and this effect doesn't re-run.
+      } catch (err) {
+        // Unreadable (deleted since the tree was fetched, over the size cap,
+        // ...) — the body shows the reason; content stays null and this effect
+        // doesn't re-run.
+        if (reqRef.current === id) setLoadError(cleanIpcError(err))
       } finally {
         if (reqRef.current === id) setLoading(false)
       }
@@ -861,6 +867,12 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             <div className="min-h-0 flex-1 overflow-auto">
               {loading ? (
                 <div className="px-4 py-3 font-mono text-[11px] text-faint">Loading…</div>
+              ) : loadError ? (
+                <div className="allow-select px-4 py-3 font-mono text-[11px] leading-relaxed text-faint">
+                  {isImage ? 'Image' : mode === 'diff' ? 'Diff' : 'File'} could not be read
+                  {selected.gitState === 'deleted' ? ' (deleted)' : ''}.
+                  <div className="mt-1 break-words text-red-2">{loadError}</div>
+                </div>
               ) : mode === 'diff' ? (
                 diff && <DiffView diff={diff} path={selected.path} />
               ) : isImage ? (

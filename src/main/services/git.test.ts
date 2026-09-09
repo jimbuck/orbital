@@ -22,7 +22,7 @@ const trashItem = hoisted.trashItem
 // git.ts reaches Electron's shell for `trashItem` (the delete path).
 vi.mock('electron', () => ({ shell: { trashItem: hoisted.trashItem } }))
 
-import { checkEntryName, git, parseCommitFiles, parseLog, resolveInRepo } from './git'
+import { MAX_TEXT_FILE_BYTES, checkEntryName, git, parseCommitFiles, parseLog, resolveInRepo } from './git'
 
 const onWindows = process.platform === 'win32'
 
@@ -355,6 +355,14 @@ describe('git.trashPath', () => {
  * ------------------------------------------------------------------------- */
 
 describe('git.readFile', () => {
+  it('refuses a file over the size cap with a message naming both sizes, without reading it', async () => {
+    writeFileSync(join(repo, 'big.log'), Buffer.alloc(MAX_TEXT_FILE_BYTES + 1, 0x61))
+    await expect(git.readFile(repo, 'big.log')).rejects.toThrow(/File is 4\.0 MB; Orbital opens files up to 4\.0 MB/)
+    // The cap is a stat, so a file one byte under it still reads normally.
+    writeFileSync(join(repo, 'fits.log'), Buffer.alloc(MAX_TEXT_FILE_BYTES - 1, 0x61))
+    expect((await git.readFile(repo, 'fits.log')).length).toBe(MAX_TEXT_FILE_BYTES - 1)
+  })
+
   it('reads a nested file inside the checkout', async () => {
     expect(await git.readFile(repo, 'src/existing.ts')).toBe('export const a = 1\n')
   })
