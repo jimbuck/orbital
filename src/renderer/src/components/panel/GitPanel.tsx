@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type JSX, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import {
   Check,
   ChevronDown,
@@ -41,6 +41,9 @@ type GitOp =
   | 'discard'
   | 'discardAll'
   | 'refresh'
+
+/** Stable empty list so the memoised trees don't rebuild while status is null. */
+const NO_FILES: GitFileStatus[] = []
 
 /** Strip Electron's IPC-rejection wrapper so the banner shows git's actual stderr. */
 function cleanError(err: unknown): string {
@@ -358,15 +361,26 @@ export default function GitPanel(): JSX.Element {
 
   const worktreeId = worktree?.id ?? null
 
+  // Monotonic request id. Every action below pairs `worktree.id` with paths
+  // taken from `status`, so a slow status for the PREVIOUS Worktree landing
+  // after the current one's would have Discard/Stage run against the wrong
+  // checkout with the wrong files. Only the newest request may write.
+  const statusReq = useRef(0)
   const refresh = useCallback(async (): Promise<void> => {
+    const req = ++statusReq.current
     if (!worktreeId) {
       setStatus(null)
       return
     }
     try {
-      setStatus(await window.orbital.gitStatus(worktreeId))
-    } catch {
-      setStatus(null)
+      const next = await window.orbital.gitStatus(worktreeId)
+      if (req !== statusReq.current) return
+      setStatus(next)
+    } catch (err) {
+      if (req !== statusReq.current) return
+      // Keep the last good list rather than painting a "clean" tree with green
+      // zeros: a failed status is not an empty one. The banner says why.
+      setError(cleanError(err))
     }
   }, [worktreeId])
 
@@ -385,8 +399,11 @@ export default function GitPanel(): JSX.Element {
     [worktreeId, refresh]
   )
 
-  // Draft message / amend / confirmations / picker are per-Worktree state; drop them on switch.
+  // Draft message / amend / confirmations / picker are per-Worktree state; drop
+  // them on switch — and the status list too, so the new Worktree never shows
+  // the old one's files while its own status loads.
   useEffect(() => {
+    setStatus(null)
     setMessage('')
     setAmend(false)
     setArmed(null)
@@ -411,6 +428,13 @@ export default function GitPanel(): JSX.Element {
     return () => clearTimeout(t)
   }, [armed])
 
+  // Rebuilt only when the lists change, not on every keystroke in the commit
+  // box (hooks, so they sit above the no-Worktree early return).
+  const staged = status?.staged ?? NO_FILES
+  const unstaged = status?.unstaged ?? NO_FILES
+  const stagedTree = useMemo(() => buildFileTree(staged), [staged])
+  const unstagedTree = useMemo(() => buildFileTree(unstaged), [unstaged])
+
   if (!worktree) {
     return (
       <div className="border-b border-soft px-[15px] py-4">
@@ -420,10 +444,6 @@ export default function GitPanel(): JSX.Element {
     )
   }
 
-  const staged = status?.staged ?? []
-  const unstaged = status?.unstaged ?? []
-  const stagedTree = buildFileTree(staged)
-  const unstagedTree = buildFileTree(unstaged)
   const ahead = status?.ahead ?? 0
   const behind = status?.behind ?? 0
   const branch = status?.branch ?? worktree.branch
@@ -505,8 +525,10 @@ export default function GitPanel(): JSX.Element {
     setAmend(next)
     // Amending with an empty box almost always means "reuse the last message".
     if (next && !message.trim()) {
-      const last = await window.orbital.gitLastCommitMessage(worktree.id).catch(() => '')
-      if (last) setMessage(last)
+      const forWorktree = worktree.id
+      const last = await window.orbital.gitLastCommitMessage(forWorktree).catch(() => '')
+      // The user may have switched Worktrees mid-await; that message is not ours.
+      if (last && useStore.getState().activeWorktreeId === forWorktree) setMessage(last)
     }
   }
 

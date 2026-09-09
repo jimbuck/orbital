@@ -230,8 +230,11 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
             </div>
           )
         })}
+        {/* Keyed like the editors: BrowserTab seeds its address from the tab's
+            config once, so without a key a second browser tab in the same pane
+            reused the first one's instance and kept showing its page. */}
         {activeTab && activeTab.type === 'browser' && (
-          <div className="absolute inset-0">
+          <div key={activeTab.id} className="absolute inset-0">
             <BrowserTab tab={activeTab} />
           </div>
         )}
