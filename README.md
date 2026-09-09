@@ -51,11 +51,11 @@ at launch; Codex support is planned.** The full product spec lives in
   checkout, and can spawn **linked worktrees** — each is a real `git worktree`
   on its own branch, created in one click (with a base-ref picker), so agents
   never trample each other's changes.
-- Your `.env` files (and any glob patterns you configure) are **synced into new
-  worktrees automatically** and kept in sync while you work — checkouts are
-  runnable immediately. The root checkout is the source of truth: a sync always
-  **overwrites** the worktree copy, so edit synced files at the root, not in a
-  linked worktree.
+- Your `.env` files (and any glob patterns you configure) are **copied into new
+  worktrees automatically**, so checkouts are runnable immediately. The copy
+  happens once, at creation; after that a worktree's files are its own. Changed
+  something at the root? **Sync env files from root** on the worktree's menu (or
+  `orbital worktree sync`) copies again, **overwriting** the worktree's copies.
 - Worktrees are laid out as **split panes**: drag a tab to any edge to split
   horizontally or vertically, drag dividers to resize, nest as deep as you like.
   Layouts persist across restarts.

@@ -3,7 +3,6 @@ import { TerminalManager } from './services/terminals'
 import { GitWatcher, git } from './services/git'
 import { ControlChannel } from './services/control-channel'
 import { AlertManager } from './services/alerts'
-import { EnvSyncWatcher } from './services/env-sync'
 import * as repo from './db/repositories'
 import { deleteBriefing } from './services/agents/briefing'
 import { getSettings } from './services/settings'
@@ -24,8 +23,6 @@ class Runtime {
   readonly gitWatcher = new GitWatcher()
   readonly control = new ControlChannel()
   alerts!: AlertManager
-  /** One env-sync watcher per project, watching its root checkout. */
-  readonly envWatchers = new Map<string, EnvSyncWatcher>()
   /** Live dev servers per worktree (from `orbital server add`) — runtime-only state. */
   private readonly devServers = new Map<string, Set<string>>()
   /** Worktrees still doing background setup (node_modules copy) — runtime-only. */
@@ -222,32 +219,6 @@ class Runtime {
   }
 
   /** Ensure an env-sync watcher exists & is running for a project (patterns are a workspace setting). */
-  ensureEnvWatcher(projectId: string): void {
-    const project = repo.projects.get(projectId)
-    if (!project) return
-    const patterns = getSettings().envSyncPatterns
-    let w = this.envWatchers.get(projectId)
-    if (!w) {
-      w = new EnvSyncWatcher(project.repoPath, patterns)
-      this.envWatchers.set(projectId, w)
-      w.start()
-    } else {
-      w.updatePatterns(patterns)
-    }
-    // (Re)register every linked Worktree of this project.
-    for (const wt of repo.worktrees.list()) {
-      if (wt.projectId === projectId && wt.kind === 'linked') w.register(wt.path)
-    }
-  }
-
-  removeEnvWatcher(projectId: string): void {
-    const w = this.envWatchers.get(projectId)
-    if (w) {
-      w.stop()
-      this.envWatchers.delete(projectId)
-    }
-  }
-
   /**
    * Start/stop the background `git fetch` scheduler to match the `periodicFetch`
    * setting. Idempotent — safe to call at startup and again on every settings save.
@@ -299,8 +270,6 @@ class Runtime {
     this.terminals.killAll()
     this.gitWatcher.stop()
     this.control.stop()
-    for (const w of this.envWatchers.values()) w.stop()
-    this.envWatchers.clear()
   }
 }
 

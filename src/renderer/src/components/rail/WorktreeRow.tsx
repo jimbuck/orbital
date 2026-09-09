@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { Pencil, CircleOff, FolderOpen, Terminal, FolderX, Trash2 } from 'lucide-react'
+import { Pencil, CircleOff, FolderOpen, RefreshCw, Terminal, FolderX, Trash2 } from 'lucide-react'
 import type { Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
@@ -7,6 +7,14 @@ import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '
 import { fireAndForget } from '@renderer/lib/bridge'
 
 type DeleteMode = 'none' | 'confirm' | 'force'
+
+/**
+ * The env-file resync's in-menu steps. It overwrites files the user may have
+ * edited locally, so it confirms first; `done` keeps the count on screen until
+ * the menu is dismissed, since a copy that closed the menu would be
+ * indistinguishable from a click that missed.
+ */
+type SyncStep = { kind: 'none' } | { kind: 'confirm' } | { kind: 'busy' } | { kind: 'done'; copied: number }
 
 /**
  * A single linked Worktree entry inside an expanded project (the root Worktree
@@ -29,6 +37,7 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
   // Set while a remove is in flight — `git worktree remove` takes a few seconds,
   // so the row shows a spinner and the confirm button locks.
   const [removing, setRemoving] = useState<'closing' | 'deleting' | null>(null)
+  const [sync, setSync] = useState<SyncStep>({ kind: 'none' })
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -37,9 +46,10 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
 
   const closeMenu = (): void => {
     // Keep the menu up while a remove runs, so its result (or the force step) lands somewhere.
-    if (removing) return
+    if (removing || sync.kind === 'busy') return
     setMenu(null)
     setDel('none')
+    setSync({ kind: 'none' })
     setError(null)
   }
 
@@ -47,8 +57,28 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
     e.preventDefault()
     e.stopPropagation()
     setDel('none')
+    setSync({ kind: 'none' })
     setError(null)
     setMenu(clampMenuPos(e, 200, 200))
+  }
+
+  /**
+   * Copy the root checkout's env files into this worktree again. The only way
+   * a worktree's synced files change after creation — there is no watcher, on
+   * purpose (see main/services/env-sync.ts) — so this is where "the root's
+   * .env changed" gets acted on. Overwrites, hence the confirm step.
+   */
+  const syncEnv = async (): Promise<void> => {
+    if (sync.kind === 'busy') return
+    setSync({ kind: 'busy' })
+    setError(null)
+    try {
+      const { copied } = await window.orbital.syncWorktreeEnv(worktree.id)
+      setSync({ kind: 'done', copied: copied.length })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to sync env files.')
+      setSync({ kind: 'confirm' })
+    }
   }
 
   const startRename = (): void => {
@@ -180,7 +210,32 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
             </div>
           )}
 
-          {del === 'none' && !removing && (
+          {del === 'none' && !removing && (sync.kind === 'confirm' || sync.kind === 'busy') && (
+            <MenuConfirm
+              message="Copy env files from the root checkout?"
+              hint="Files matching the sync patterns are overwritten with the root's copies."
+              confirmLabel="Sync"
+              danger={false}
+              busy={sync.kind === 'busy'}
+              busyLabel="Syncing…"
+              error={error}
+              onConfirm={() => void syncEnv()}
+              onCancel={() => {
+                setSync({ kind: 'none' })
+                setError(null)
+              }}
+            />
+          )}
+
+          {del === 'none' && !removing && sync.kind === 'done' && (
+            <div className="px-2 py-2 text-[11.5px] text-text-3">
+              {sync.copied === 0
+                ? 'No env files matched the sync patterns.'
+                : `Copied ${sync.copied} env file${sync.copied === 1 ? '' : 's'} from the root checkout.`}
+            </div>
+          )}
+
+          {del === 'none' && !removing && sync.kind === 'none' && (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
               <MenuItem
@@ -205,6 +260,12 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
                   fireAndForget(window.orbital.openInTerminal(worktree.id, ''))
                   closeMenu()
                 }}
+              />
+              <MenuItem
+                icon={<RefreshCw size={13} strokeWidth={1.5} />}
+                label="Sync env files from root"
+                hint="overwrites"
+                onClick={() => setSync({ kind: 'confirm' })}
               />
               <MenuItem
                 icon={<FolderX size={13} strokeWidth={1.5} />}

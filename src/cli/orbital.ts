@@ -29,6 +29,7 @@ Usage:
   orbital whoami
   orbital worktrees
   orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [name]
+  orbital worktree sync
   orbital tab new <terminal|browser|editor|agent> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all] [--status <status>] [--tag <tag>]
@@ -50,6 +51,7 @@ Examples:
   orbital whoami --json
   orbital worktree new --worktree feature/login "Login flow"
   orbital worktree new --existing-branch origin/pr-42
+  orbital worktree sync
   orbital tab new browser http://localhost:5173
   orbital tab new agent "Claude (work)"
   orbital task add "Write tests" --description "cover the parser" --tags test
@@ -177,6 +179,8 @@ function buildRequest(argv: string[]): ControlRequest {
     // `flight` is a hidden backward-compat alias for `worktree`.
     case 'worktree':
     case 'flight': {
+      // `sync` copies the root checkout's env files into THIS worktree again.
+      if (rest[0] === 'sync') return request('worktree-sync', {})
       if (rest[0] !== 'new') usageError()
       return worktreeNewRequest(rest.slice(1))
     }
@@ -395,6 +399,12 @@ function confirmation(req: ControlRequest, data: unknown): string {
         `worktree created${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}` +
         (task ? ` — task #${task.seq} started here` : '')
       )
+    }
+    case 'worktree-sync': {
+      const copied = Array.isArray(d.copied) ? d.copied : []
+      if (copied.length === 0) return 'no env files matched the sync patterns — nothing copied'
+      return `synced ${copied.length} env file${copied.length === 1 ? '' : 's'} from the root checkout:\n` +
+        copied.map((f) => `  ${String(f)}`).join('\n')
     }
     case 'tab-new':
       return `opened ${String(req.args.type ?? '')} tab`

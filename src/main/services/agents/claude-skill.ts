@@ -131,11 +131,15 @@ orbital worktree new --worktree feat/login "Login flow"
 orbital worktree new --existing-branch origin/pr-42 # check an existing branch out into a worktree
 orbital worktree new --worktree feat/x --base main  # fork the new branch from a ref other than HEAD
 orbital task start 12                               # worktree from task #12, branch named after it, task linked
+orbital worktree sync                               # copy the root checkout's env files into this worktree again
 \`\`\`
 
-A new worktree gets the project's env files synced in automatically. \`task start\`
-is the scriptable form of the cockpit's play button: it creates the worktree,
-links the task to it, and moves the task to \`in-progress\`.
+A new worktree gets the project's env files (\`.env\`, agent config dirs) copied in
+when it is created — once. They are not kept in sync afterwards, so if the root
+checkout's copies have changed, \`orbital worktree sync\` copies them again
+(overwriting this worktree's). \`task start\` is the scriptable form of the
+cockpit's play button: it creates the worktree, links the task to it, and moves
+the task to \`in-progress\`.
 
 ## Tabs and dev servers
 

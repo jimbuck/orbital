@@ -75,6 +75,8 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.removeWorktree, worktreeId, opts) as Promise<void>,
   renameWorktree: (worktreeId: string, name: string) =>
     ipcRenderer.invoke(IPC.renameWorktree, worktreeId, name) as Promise<void>,
+  syncWorktreeEnv: (worktreeId: string) =>
+    ipcRenderer.invoke(IPC.syncWorktreeEnv, worktreeId) as Promise<{ copied: string[] }>,
   clearWorktreeStatus: (worktreeId: string) =>
     ipcRenderer.invoke(IPC.clearWorktreeStatus, worktreeId) as Promise<void>,
   listBranches: (projectId: string) =>

@@ -31,7 +31,7 @@ import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree } from './services/worktree'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
-import { copyNodeModulesTree, hasIncompleteCopy, targetsNodeModules } from './services/env-sync'
+import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
 import { splitAt, removePane, setRatio, edgeToSplit } from './services/layout'
 import { cliDir } from './services/agents/paths'
 import { getProvider } from './services/agents/provider'
@@ -106,6 +106,28 @@ function beginWorktreeSetup(worktree: Worktree, repoPath: string): void {
 
 /** How long a running node_modules copy may go without copying a file before the log says so. */
 const COPY_STALL_SECONDS = 60
+
+/**
+ * Copy the root checkout's env files into a linked Worktree again — the same
+ * one-shot sync a fresh worktree gets at creation, on request. This is the
+ * ONLY way a worktree's synced files change after creation (see env-sync.ts
+ * for why there is no watcher), and it overwrites: the root is the source of
+ * truth whenever the user asks it to be. node_modules is not part of it — that
+ * is a one-time bulk copy, and a package install in the worktree is how it
+ * catches up.
+ */
+async function syncWorktreeEnv(worktreeId: string): Promise<{ copied: string[] }> {
+  const worktree = repo.worktrees.get(worktreeId)
+  if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
+  if (worktree.kind !== 'linked') throw new Error('the root checkout is what env files are synced from')
+  const project = repo.projects.get(worktree.projectId)
+  if (!project) throw new Error(`project ${worktree.projectId} not found`)
+  const copied = await syncEnvFiles(project.repoPath, worktree.path, getSettings().envSyncPatterns)
+  logger.info('env files synced from root', { worktree: worktree.name, copied: copied.length })
+  // The editor's file tree refetches on a state broadcast.
+  runtime.broadcastState()
+  return { copied }
+}
 
 function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> {
   const path = `${cliDir()}${PATH_DELIM}${process.env.PATH ?? ''}`
@@ -274,7 +296,6 @@ async function registerProject(repoPath: string): Promise<Worktree | null> {
   const existing = repo.projects.getByPath(repoPath)
   if (existing) {
     runtime.gitWatcher.watch(repoPath)
-    runtime.ensureEnvWatcher(existing.id)
     ensureWorktreesWatcher(existing)
     return repo.worktrees.list().find((w) => w.projectId === existing.id && w.kind === 'root') ?? null
   }
@@ -289,7 +310,6 @@ async function registerProject(repoPath: string): Promise<Worktree | null> {
     branch
   })
   runtime.gitWatcher.watch(repoPath)
-  runtime.ensureEnvWatcher(project.id)
   ensureWorktreesWatcher(project)
   return root
 }
@@ -324,7 +344,6 @@ function releaseWorktreeRuntime(worktree: Worktree): void {
   runtime.clearDevServers(worktree.id)
   if (worktree.kind === 'linked') {
     runtime.gitWatcher.unwatch(worktree.path)
-    runtime.envWatchers.get(worktree.projectId)?.unregister(worktree.path)
   }
   for (const pane of worktree.panes) {
     for (const tab of pane.tabs) if (tab.type === 'agent') deleteBriefing(worktree.id, tab.id)
@@ -378,8 +397,6 @@ export async function reconcileProjectWorktrees(projectId: string): Promise<void
     repo.worktrees.create({ projectId, kind: 'linked', name: a.name, path: a.path, branch: a.branch })
     runtime.gitWatcher.watch(a.path)
   }
-  // Registers every linked checkout (including the just-adopted) for env sync.
-  if (plan.adopt.length > 0) runtime.ensureEnvWatcher(projectId)
   for (const row of plan.remove) {
     releaseWorktreeRuntime(row)
     repo.worktrees.remove(row.id)
@@ -530,16 +547,12 @@ export function registerIpc(): void {
     // behind the facade, leaving every key the renderer did not send untouched.
     const s = setSettings(patch)
     // Each side effect is gated on the key that actually drives it. Patches are
-    // now single-key and frequent — a theme click sends { theme }, an untouched
-    // Save sends {} — and running all three unconditionally meant every one of
-    // those stopped and restarted the FS watcher of every project
-    // (ensureEnvWatcher -> updatePatterns) to re-apply patterns that had not
-    // changed.
+    // single-key and frequent — a theme click sends { theme }, an untouched Save
+    // sends {} — so nothing here may run for a key the patch did not name.
+    // (envSyncPatterns has no side effect: the patterns are read fresh at each
+    // worktree creation and each explicit resync, and there is no watcher to
+    // reconfigure.)
     //
-    // Env-sync patterns are a workspace setting — refresh every project's watcher.
-    if (patchTouches(patch, 'envSyncPatterns')) {
-      for (const project of repo.projects.list()) runtime.ensureEnvWatcher(project.id)
-    }
     // Toggling periodicFetch starts/stops the background fetcher live.
     if (patchTouches(patch, 'periodicFetch')) runtime.configureFetch()
     // Toggling debug logging takes effect immediately (no restart needed). Gated
@@ -662,7 +675,6 @@ export function registerIpc(): void {
       if (w.projectId === projectId) releaseWorktreeRuntime(w)
     }
     runtime.gitWatcher.unwatch(project.repoPath)
-    runtime.removeEnvWatcher(projectId)
     removeWorktreesWatcher(projectId)
     repo.projects.remove(projectId)
     broadcastAll()
@@ -692,7 +704,6 @@ export function registerIpc(): void {
     // drops out of the "unlinked tasks" picker).
     if (opts.taskId) repo.tasks.setWorktree(opts.taskId, worktree.id)
     runtime.gitWatcher.watch(worktree.path)
-    runtime.ensureEnvWatcher(projectId)
     beginWorktreeSetup(worktree, project.repoPath)
     broadcastAll()
     return repo.worktrees.get(worktree.id)!
@@ -715,7 +726,6 @@ export function registerIpc(): void {
         // deletes it — on Windows a PTY cwd'd there (or a directory watcher)
         // locks the folder and makes the removal fail on the first attempt.
         runtime.gitWatcher.unwatch(worktree.path)
-        runtime.envWatchers.get(project.id)?.unregister(worktree.path)
         killWorktreeTerminals(worktreeId)
         try {
           await removeWorktree(project.repoPath, worktree.path, opts.force)
@@ -723,7 +733,6 @@ export function registerIpc(): void {
           // Removal still failed — restore the Worktree to a usable state
           // (watchers back on, fresh PTYs) before surfacing the error.
           runtime.gitWatcher.watch(worktree.path)
-          runtime.ensureEnvWatcher(project.id)
           for (const pane of worktree.panes) {
             for (const tab of pane.tabs) if (isPtyTabType(tab.type)) startPtyTab(worktree, tab)
           }
@@ -748,6 +757,8 @@ export function registerIpc(): void {
     repo.worktrees.rename(worktreeId, trimmed)
     broadcast()
   })
+
+  h(IPC.syncWorktreeEnv, (_e, worktreeId: string) => syncWorktreeEnv(worktreeId))
 
   h(IPC.clearWorktreeStatus, (_e, worktreeId: string) => {
     const worktree = repo.worktrees.get(worktreeId)
@@ -1374,7 +1385,6 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
           }
         }
         runtime.gitWatcher.watch(worktree.path)
-        runtime.ensureEnvWatcher(project.id)
         beginWorktreeSetup(worktree, project.repoPath)
         runtime.broadcastState()
         return {
@@ -1386,6 +1396,14 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
             path: worktree.path,
             task: task ? { seq: task.seq, title: task.title } : null
           }
+        }
+      }
+      case 'worktree-sync': {
+        if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
+        try {
+          return { ok: true, data: await syncWorktreeEnv(req.worktreeId) }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
         }
       }
       case 'tab-new': {
@@ -1559,7 +1577,6 @@ export function resumeProjects(): void {
   const checkouts = new Set<string>()
   for (const project of repo.projects.list()) {
     runtime.gitWatcher.watch(project.repoPath)
-    runtime.ensureEnvWatcher(project.id)
     ensureWorktreesWatcher(project)
     checkouts.add(project.repoPath)
   }

@@ -13,7 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { COPY_IN_PROGRESS_MARKER, copyNodeModulesTree, hasIncompleteCopy, targetsNodeModules } from './env-sync'
+import { COPY_IN_PROGRESS_MARKER, copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './env-sync'
 
 const onWindows = process.platform === 'win32'
 
@@ -212,5 +212,64 @@ describe('copyNodeModulesTree', () => {
     } finally {
       rmSync(store, { recursive: true, force: true })
     }
+  })
+})
+
+describe('syncEnvFiles', () => {
+  /** A root with env files at several depths, an agent config dir, and noise. */
+  function seedEnv(): void {
+    writeFileSync(join(root, '.env'), 'ROOT=1')
+    mkdirSync(join(root, 'apps', 'web'), { recursive: true })
+    writeFileSync(join(root, 'apps', 'web', '.env.local'), 'WEB=1')
+    mkdirSync(join(root, '.claude'), { recursive: true })
+    writeFileSync(join(root, '.claude', 'settings.local.json'), '{}')
+    writeFileSync(join(root, 'README.md'), 'not synced')
+    mkdirSync(join(root, '.git'), { recursive: true })
+    writeFileSync(join(root, '.git', '.env'), 'never')
+  }
+  const patterns = ['**/.env', '**/.env.*', '.claude/**']
+
+  it('copies every match at its relative path and reports what it copied', async () => {
+    seedEnv()
+    const copied = await syncEnvFiles(root, worktree, patterns)
+    expect(copied.sort()).toEqual(['.claude/settings.local.json', '.env', 'apps/web/.env.local'])
+    expect(readFileSync(join(worktree, '.env'), 'utf8')).toBe('ROOT=1')
+    expect(readFileSync(join(worktree, 'apps', 'web', '.env.local'), 'utf8')).toBe('WEB=1')
+    expect(existsSync(join(worktree, 'README.md'))).toBe(false)
+    expect(existsSync(join(worktree, '.git'))).toBe(false)
+  })
+
+  it('overwrites the worktree copy — the root is the source of truth when asked', async () => {
+    // This is what the explicit resync relies on, and what the old watcher did
+    // behind the user's back. It is only ever run on request now.
+    seedEnv()
+    await syncEnvFiles(root, worktree, patterns)
+    writeFileSync(join(worktree, '.env'), 'EDITED_LOCALLY=1')
+    writeFileSync(join(root, '.env'), 'ROOT=2')
+    await syncEnvFiles(root, worktree, patterns)
+    expect(readFileSync(join(worktree, '.env'), 'utf8')).toBe('ROOT=2')
+  })
+
+  it('leaves the worktree alone between runs — a deleted file stays deleted', async () => {
+    seedEnv()
+    await syncEnvFiles(root, worktree, patterns)
+    rmSync(join(worktree, '.env'))
+    // The root changing is precisely what used to resurrect it.
+    writeFileSync(join(root, '.env'), 'ROOT=3')
+    expect(existsSync(join(worktree, '.env'))).toBe(false)
+  })
+
+  it('never walks node_modules, even for a pattern that names it', async () => {
+    seedEnv()
+    seedNodeModules()
+    const copied = await syncEnvFiles(root, worktree, [...patterns, 'node_modules/**'])
+    expect(copied.some((p) => p.startsWith('node_modules/'))).toBe(false)
+    expect(existsSync(join(worktree, 'node_modules'))).toBe(false)
+  })
+
+  it('copies nothing for an empty pattern list', async () => {
+    seedEnv()
+    expect(await syncEnvFiles(root, worktree, [])).toEqual([])
+    expect(existsSync(join(worktree, '.env'))).toBe(false)
   })
 })

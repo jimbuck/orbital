@@ -763,6 +763,7 @@ export const IPC = {
   createWorktree: 'orbital:createWorktree',
   removeWorktree: 'orbital:removeWorktree',
   renameWorktree: 'orbital:renameWorktree',
+  syncWorktreeEnv: 'orbital:syncWorktreeEnv',
   clearWorktreeStatus: 'orbital:clearWorktreeStatus',
   listBranches: 'orbital:listBranches',
   setProjectAgent: 'orbital:setProjectAgent',
@@ -890,6 +891,11 @@ export interface OrbitalApi {
   createWorktree(projectId: string, opts: CreateWorktreeOptions): Promise<Worktree>
   removeWorktree(worktreeId: string, opts: RemoveWorktreeOptions): Promise<void>
   renameWorktree(worktreeId: string, name: string): Promise<void>
+  /**
+   * Copy the root checkout's env files into a linked Worktree again, overwriting
+   * its copies. Resolves with the checkout-relative paths that were copied.
+   */
+  syncWorktreeEnv(worktreeId: string): Promise<{ copied: string[] }>
   /** Force-reset a Worktree's terminals (and its aggregate) to idle when the status is out of sync. */
   clearWorktreeStatus(worktreeId: string): Promise<void>
   /** Branches of a project's repo + what HEAD points at (for the New Worktree base-ref picker). */
@@ -1133,6 +1139,7 @@ export type ControlCommand =
   | 'whoami'
   | 'worktrees'
   | 'worktree-new'
+  | 'worktree-sync'
   | 'tab-new'
   | 'task-add'
   | 'task-list'

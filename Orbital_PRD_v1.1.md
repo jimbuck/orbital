@@ -78,7 +78,7 @@ Single user: the author, who runs several Claude Code (and sometimes Codex) inst
 - **Terminal status** (agent-activity signal, per terminal): `idle`, `working`, `needs attention`, `error`, `done`. Set by the agent in that terminal via the CLI or its hooks, or by the user. Default `idle`.
 - **Flight status** (aggregate): derived from the Flight's terminal statuses by precedence (needs attention > error > working > idle > done), so the Flight surfaces its most attention-worthy terminal. Drives the left-rail badges.
 - **Task status** (tracker state): `todo`, `in progress`, `ready for review`, `done`. Always set manually by the user.
-- **Env sync.** A user-editable list of wildcard patterns per workspace; files matching them are synced from the root checkout into each worktree, so gitignored local config (`.env` and friends) is present in worktree Flights.
+- **Env sync.** A user-editable list of wildcard patterns per workspace; files matching them are copied from the root checkout into a worktree when it is created (and again on demand), so gitignored local config (`.env` and friends) is present in worktree Flights.
 - **Orbital CLI.** A small `orbital` command available inside Flight terminals that lets an agent (or the user) act on Orbital: set the current terminal's status, list/create Flights in the current workspace, open tabs, and add a task.
 
 Two distinct status concepts, kept deliberately separate: **terminal status** (rolled up into the Flight aggregate) is live agent activity; **task status** is tracker state. The CLI touches terminal status; the user touches task status.
@@ -95,7 +95,7 @@ A Flight is the cockpit unit. It binds a working directory to a set of tabs and 
 - **Status.** Each terminal in a Flight has its own status; the Flight's status is the aggregate of them, by precedence (needs attention > error > working > idle > done), so the Flight surfaces its most attention-worthy terminal. Statuses are set per terminal by the agent through the CLI or its hooks, or by the user. The left rail renders the Flight aggregate, and needs-attention Flights are surfaced prominently so nothing is buried across many running agents.
 - **Lifecycle.** Creating a worktree creates its Flight and syncs env files into it (below). On closing or completing a Flight, Orbital prompts to remove its worktree, guarding against unpushed work. The root Flight cannot be removed while its workspace is open. Agents and their terminals keep running while the app window is minimized; quitting the app (closing it) stops them.
 
-**Environment file sync.** A fresh worktree lacks gitignored local files like `.env`, which a dev server needs. Orbital syncs them: each workspace has a user-editable list of wildcard patterns (for example `.env`, `.env.*`, `**/.env.local`), and files matching them are copied from the root checkout into every worktree Flight on creation and kept in sync as the source changes. This mirrors Pane's approach; the pattern list is edited in workspace settings. (Overwrite/conflict behavior when a worktree's own copy is edited locally is an open question, §16.)
+**Environment file sync.** A fresh worktree lacks gitignored local files like `.env`, which a dev server needs. Orbital syncs them: each workspace has a user-editable list of wildcard patterns (for example `.env`, `.env.*`, `**/.env.local`), and files matching them are copied from the root checkout into a worktree Flight when it is created, and again on demand (a menu action on the worktree, or `orbital worktree sync`). There is deliberately no live mirroring: once created, a worktree's copies are its own until the user asks for a resync, which overwrites them. This mirrors Pane's approach; the pattern list is edited in workspace settings.
 
 ---
 
@@ -177,7 +177,7 @@ Keyboard-first navigation throughout (switch Flights, switch/split tabs, run git
 - **Git.** A fast git path (libgit2 bindings, or `git` shelled out with caching) plus filesystem watching so branch/status updates are reactive rather than slow polls (another Pane pain point).
 - **Editor.** Monaco (the VS Code editor component) for the editor tab: file tree with git status, diff view, and light inline edits with save.
 - **CLI control channel.** A local named pipe / loopback IPC the app listens on; the `orbital` CLI is a thin client using the injected env vars. No external network surface.
-- **Env sync.** A per-workspace wildcard list; a filesystem watcher copies matching files from the root checkout into worktrees on creation and on change (§5).
+- **Env sync.** A per-workspace wildcard list; matching files are copied from the root checkout into a worktree on creation and on an explicit resync (§5).
 - **State.** SQLite (workspaces, Flights and their tab layouts, tasks, env-sync patterns) in the app data directory.
 - **Process model.** Agents and their PTYs keep running while the app runs, including when the window is minimized; quitting the app stops them. There is no persistence beyond the app's lifetime in v1.
 
@@ -219,7 +219,7 @@ Terminal status (rolled up into the Flight aggregate) and task status are separa
 
 Most prior questions are now decided (Electron; per-terminal status with a Flight aggregate; minimize keeps running and close stops; prompt to remove worktree; terminals start fresh; editor allows inline edits; status set adds error/done; branch named from the task; CLI adds `task add`; needs-attention surfaced via indicator, sound, and taskbar badge). What remains:
 
-1. **Env-sync conflict behavior.** Files are copied from the root into worktrees and kept in sync as the source changes. Decide what happens when a worktree's own copy is edited locally: overwrite on next sync, skip if modified, or warn. A per-pattern or per-file rule may be needed.
+1. **Env-sync conflict behavior.** *Resolved.* There is no live sync, so a worktree's local edits (or deletions) are never overwritten behind the user's back. An explicit resync overwrites, and the action says so.
 2. **Flight aggregate precedence.** Confirm the order `needs attention > error > working > idle > done`, and the corner case where some terminals are `done` and others `idle` (does the Flight read idle, done, or a mixed state?).
 3. **CLI scope creep.** `task add` is in; attaching a branch/PR to a Flight or posting a note from the agent are possible later additions, deferred until there is a clear need.
 4. **Done-terminal semantics.** When a terminal finishes its agent and goes `done`, should its tab auto-close, stay for scrollback, or be reused? Relatedly, whether `done` should ever roll up to the Flight badge or be treated as quiet.

@@ -627,8 +627,9 @@ export default function Settings(): React.JSX.Element {
       {/* Environment file sync */}
       <div className={sectionLabel}>Environment file sync</div>
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
-        Files matching these patterns are copied from the root checkout into every Worktree and kept in sync.
-        Applies to all projects.
+        Files matching these patterns are copied from the root checkout into a Worktree when it is created.
+        Copy them again any time from the Worktree&apos;s menu or with <code>orbital worktree sync</code>. Applies
+        to all projects.
       </p>
       <div className="mt-3 flex flex-wrap gap-[7px]">
         {patterns.map((p) => (
