@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.29.0](https://github.com/jimbuck/orbital/compare/v1.28.0...v1.29.0) (2026-09-09)
+
+
+### Features
+
+* **agent:** resume Claude sessions when a tab is respawned ([46453e2](https://github.com/jimbuck/orbital/commit/46453e2877acdb11662657e8a1a3f94657d6d6d9)), closes [#68](https://github.com/jimbuck/orbital/issues/68)
+
 # [1.28.0](https://github.com/jimbuck/orbital/compare/v1.27.0...v1.28.0) (2026-09-09)
 
 
