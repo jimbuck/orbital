@@ -1,5 +1,6 @@
 import { shell, webContents } from 'electron'
 import { IPC } from '@shared/types'
+import { isOpenableExternalUrl } from '@shared/urls'
 import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
 import { logger } from '../services/logger'
@@ -12,7 +13,11 @@ import { projectRepoPath, worktreeRepoPath } from './resolve'
 export function register(): void {
   const h = handle
   // ---- browser / window ----
-  h(IPC.openExternal, (_e, url: string) => shell.openExternal(url))
+  // Renderer-supplied and OS-launched: only schemes a browser handles (see urls.ts).
+  h(IPC.openExternal, (_e, url: string) => {
+    if (!isOpenableExternalUrl(url)) throw new Error(`refusing to open ${JSON.stringify(url)}: not a web or mail link`)
+    return shell.openExternal(url)
+  })
   // A <webview>'s popups (Ctrl/Cmd-click, target=_blank, window.open) can only be
   // intercepted on the guest's webContents in main. Route them to a NEW internal
   // browser tab in the same worktree/pane and deny the real popup window.

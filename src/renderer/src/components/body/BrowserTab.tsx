@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FC, HTMLAttributes, Ref } from 'react'
 import { ArrowLeft, ArrowRight, RotateCw, ExternalLink } from 'lucide-react'
 import type { Tab } from '@shared/types'
+import { fireAndForget } from '@renderer/lib/bridge'
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
@@ -96,7 +97,8 @@ export default function BrowserTab({ tab }: { tab: Tab }): JSX.Element {
             // Open the live page URL, not the stale `url` state (which only tracks
             // manual address-bar navigation, not in-page navigation).
             const current = webviewRef.current?.getURL?.() || input || url
-            if (current) void window.orbital.openExternal(current)
+            // A refused scheme (main allow-lists them) has no line here to land on.
+            if (current) fireAndForget(window.orbital.openExternal(current))
           }}
           aria-label="Open in External Browser"
           title="Open in External Browser"

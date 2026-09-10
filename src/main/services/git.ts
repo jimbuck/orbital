@@ -408,8 +408,28 @@ async function fetch(repoPath: string, opts: { background?: boolean } = {}): Pro
   await run(repoPath, ['fetch'], { timeoutMs: NETWORK_TIMEOUT_MS, nonInteractive: opts.background })
 }
 
+/**
+ * A branch or ref name is renderer-/CLI-supplied and reaches git as a
+ * POSITIONAL argument, so `--detach` or `-c` would be parsed as an option.
+ * Refuse anything option-shaped or unprintable outright, then let git itself
+ * rule on the name (`check-ref-format --branch` knows every other rule).
+ */
+async function assertBranchName(repoPath: string, name: string): Promise<void> {
+  checkRefArg(name)
+  const r = await capture(repoPath, ['check-ref-format', '--branch', name])
+  if (r.code !== 0) throw new Error(`'${name}' is not a valid branch name`)
+}
+
+/** The cheap half of assertBranchName, for refs git resolves rather than creates (a base ref). */
+function checkRefArg(name: string): void {
+  if (!name || name.startsWith('-')) throw new Error(`'${name}' is not a valid ref name`)
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(name)) throw new Error('ref names cannot contain control characters')
+}
+
 /** Switch the checkout to `branch`; `create` forks a new branch from HEAD first. */
 async function checkout(repoPath: string, branch: string, create?: boolean): Promise<void> {
+  await assertBranchName(repoPath, branch)
   const args = create ? ['switch', '-c', branch] : ['switch', branch]
   await run(repoPath, args)
 }
@@ -1096,6 +1116,8 @@ async function worktreeAdd(
   repoPath: string,
   opts: { branch: string; worktreePath: string; baseRef?: string; newBranch?: boolean; track?: boolean }
 ): Promise<void> {
+  await assertBranchName(repoPath, opts.branch)
+  if (opts.baseRef) checkRefArg(opts.baseRef)
   if (opts.newBranch) {
     // Create a fresh branch forked from baseRef (or HEAD) in the new worktree.
     // `track` sets the baseRef (a remote-tracking branch) as upstream.

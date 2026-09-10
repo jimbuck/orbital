@@ -354,6 +354,21 @@ describe('git.trashPath', () => {
  * `repo-evil`) caught — the case a prefix comparison waves through.
  * ------------------------------------------------------------------------- */
 
+describe('git.checkout', () => {
+  it('refuses option-shaped and malformed branch names before git sees them', async () => {
+    await expect(git.checkout(repo, '--detach')).rejects.toThrow(/not a valid/)
+    await expect(git.checkout(repo, '-c')).rejects.toThrow(/not a valid/)
+    await expect(git.checkout(repo, 'has space', true)).rejects.toThrow(/not a valid branch name/)
+    await expect(git.checkout(repo, 'a..b', true)).rejects.toThrow(/not a valid branch name/)
+  })
+
+  it('still creates and switches to a well-formed branch', async () => {
+    gitInit()
+    await git.checkout(repo, 'feature/ok-1', true)
+    expect(await git.currentBranch(repo)).toBe('feature/ok-1')
+  })
+})
+
 describe('git.readFile', () => {
   it('refuses a file over the size cap with a message naming both sizes, without reading it', async () => {
     writeFileSync(join(repo, 'big.log'), Buffer.alloc(MAX_TEXT_FILE_BYTES + 1, 0x61))
