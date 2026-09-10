@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
+import { logger } from '../services/logger'
 import { DEFAULT_ENV_SYNC_PATTERNS, WORKSPACE_SETTING_KEYS } from '@shared/types'
 
 let db: Database.Database | null = null
@@ -31,8 +32,46 @@ export function getDb(): Database.Database {
   // Several instances (one per workspace) share this DB — wait out, rather than
   // throw on, another process's in-flight write.
   db.pragma('busy_timeout = 5000')
+  // With WAL, NORMAL still survives an app crash (the WAL is fsynced at
+  // checkpoint); only a power loss can lose the last few commits. It halves
+  // the fsyncs per hook event (two autocommits each), which matters on slow
+  // or encrypted volumes.
+  db.pragma('synchronous = NORMAL')
   migrate(db)
   return db
+}
+
+/**
+ * Run `fn` as one IMMEDIATE write transaction. Every repository mutation that
+ * issues more than one statement goes through here, so a crash between them
+ * can no longer leave (say) a worktree without its first pane. IMMEDIATE takes
+ * the write lock up front: with several instances on this DB, a transaction
+ * that reads before it writes then waits its turn (busy_timeout) instead of
+ * failing at once with SQLITE_BUSY_SNAPSHOT because another process wrote in
+ * between. Nesting inside an outer transaction becomes a savepoint.
+ */
+export function writeTx<T>(fn: () => T): T {
+  return getDb().transaction(fn).immediate()
+}
+
+/**
+ * Run a DB write that nothing awaits and nothing can show — a terminal-exit
+ * handler, the git watcher, boot-time resume. A throw there (SQLITE_BUSY once
+ * busy_timeout runs out while another instance migrates, a checkpoint stall)
+ * would otherwise surface as an uncaughtException, which exits the whole app.
+ * Log it and carry on: the next event re-derives the same state. Returns
+ * whether `fn` completed.
+ */
+export function safeWrite(label: string, fn: () => void): boolean {
+  try {
+    fn()
+    return true
+  } catch (err) {
+    const e = err as Error & { code?: string }
+    logger.error(`db write failed: ${label}`, { code: e.code, message: e.message })
+    console.error(`[db] ${label} failed:`, e.message)
+    return false
+  }
 }
 
 export function closeDb(): void {
@@ -222,7 +261,7 @@ function scopeProjectsToWorkspaces(d: Database.Database, defaultWorkspaceId: str
     `)
   })
   try {
-    tx()
+    tx.immediate()
   } finally {
     d.pragma('foreign_keys = ON')
   }
@@ -263,7 +302,7 @@ function renameLegacySchema(d: Database.Database): void {
     // WorktreeKind: 'root' | 'linked' (was 'root' | 'worktree').
     d.exec("UPDATE worktrees SET kind = 'linked' WHERE kind = 'worktree'")
   })
-  tx()
+  tx.immediate()
 }
 
 /**
@@ -297,7 +336,7 @@ function backfillTaskSeqs(d: Database.Database): void {
     const update = d.prepare('UPDATE tasks SET seq = ? WHERE id = ?')
     for (const r of rows) update.run(next++, r.id)
   })
-  tx()
+  tx.immediate()
 }
 
 function tableExists(d: Database.Database, name: string): boolean {

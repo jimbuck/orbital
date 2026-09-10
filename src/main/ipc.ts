@@ -28,6 +28,7 @@ import {
   type ControlResponse
 } from '@shared/types'
 import { runtime, repo } from './runtime'
+import { safeWrite, writeTx } from './db/database'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree } from './services/worktree'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
@@ -998,8 +999,11 @@ export function registerIpc(): void {
   h(IPC.splitPane, (_e, worktreeId: string, paneId: string, dir: SplitDirection, where: SplitWhere) => {
     const worktree = repo.worktrees.get(worktreeId)
     if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
-    const pane = repo.panes.create(worktreeId)
-    repo.worktrees.setLayout(worktreeId, splitAt(worktree.layout, paneId, dir, where, pane.id))
+    const pane = writeTx(() => {
+      const created = repo.panes.create(worktreeId)
+      repo.worktrees.setLayout(worktreeId, splitAt(worktree.layout, paneId, dir, where, created.id))
+      return created
+    })
     broadcast()
     return pane
   })
@@ -1026,9 +1030,12 @@ export function registerIpc(): void {
     assertPaneInWorktree(tab, targetPaneId)
     const source = tab.paneId
     const { dir, where } = edgeToSplit(edge)
-    const pane = repo.panes.create(worktree.id)
-    repo.worktrees.setLayout(worktree.id, splitAt(worktree.layout, targetPaneId, dir, where, pane.id))
-    repo.tabs.move(tabId, pane.id)
+    // New pane, layout and tab move land together or not at all.
+    writeTx(() => {
+      const pane = repo.panes.create(worktree.id)
+      repo.worktrees.setLayout(worktree.id, splitAt(worktree.layout, targetPaneId, dir, where, pane.id))
+      repo.tabs.move(tabId, pane.id)
+    })
     collapseIfEmpty(worktree.id, source)
     broadcast()
   })
@@ -1771,8 +1778,8 @@ export function resumeTerminals(): void {
     for (const pane of worktree.panes) {
       for (const tab of pane.tabs) {
         if (!isPtyTabType(tab.type)) continue
-        repo.tabs.updateStatus(tab.id, 'idle')
         try {
+          repo.tabs.updateStatus(tab.id, 'idle')
           // spawnAgent owns its own error handling; spawnTerminal can throw synchronously.
           startPtyTab(worktree, tab)
         } catch (err) {
@@ -1780,7 +1787,8 @@ export function resumeTerminals(): void {
         }
       }
     }
-    repo.worktrees.recomputeStatus(worktree.id)
+    // Boot must not die on one worktree's status write (see safeWrite).
+    safeWrite('resume recompute status', () => repo.worktrees.recomputeStatus(worktree.id))
   }
   // Drop briefing files left behind by tabs/worktrees removed while the app was closed.
   pruneBriefings(keepBriefings)

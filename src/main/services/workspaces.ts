@@ -194,6 +194,6 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
       )
     }
   })
-  tx()
+  tx.immediate()
   return workspaces.get(workspaceId)!
 }

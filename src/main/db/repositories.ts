@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { getDb } from './database'
+import { getDb, writeTx } from './database'
 import {
   type Project,
   type Worktree,
@@ -203,11 +203,13 @@ export const projects = {
     getDb().prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, pid)
   },
   updateAgent(pid: string, patch: { defaultAgentId?: string; agentExecPath?: string }): void {
-    const cur = projects.get(pid)
-    if (!cur) return
-    getDb()
-      .prepare('UPDATE projects SET default_agent_id = ?, agent_exec_path = ? WHERE id = ?')
-      .run(patch.defaultAgentId ?? cur.defaultAgentId, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
+    writeTx(() => {
+      const cur = projects.get(pid)
+      if (!cur) return
+      getDb()
+        .prepare('UPDATE projects SET default_agent_id = ?, agent_exec_path = ? WHERE id = ?')
+        .run(patch.defaultAgentId ?? cur.defaultAgentId, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
+    })
   }
 }
 
@@ -317,16 +319,20 @@ export const worktrees = {
     taskId?: string | null
   }): Worktree {
     const wid = id()
-    getDb()
-      .prepare(
-        `INSERT INTO worktrees (id, project_id, kind, name, path, branch, status, task_id, split_direction, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
-      )
-      .run(wid, input.projectId, input.kind, input.name, input.path, input.branch, input.taskId ?? null, now())
-    // Every Worktree starts with one empty pane (a single-leaf layout) for its first tab.
-    const pane = panes.create(wid)
-    worktrees.setLayout(wid, leaf(pane.id))
-    return worktrees.get(wid)!
+    // One transaction: a worktree row without its first pane would hydrate to
+    // a layout leaf pointing at a pane that does not exist.
+    return writeTx(() => {
+      getDb()
+        .prepare(
+          `INSERT INTO worktrees (id, project_id, kind, name, path, branch, status, task_id, split_direction, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
+        )
+        .run(wid, input.projectId, input.kind, input.name, input.path, input.branch, input.taskId ?? null, now())
+      // Every Worktree starts with one empty pane (a single-leaf layout) for its first tab.
+      const pane = panes.create(wid)
+      worktrees.setLayout(wid, leaf(pane.id))
+      return worktrees.get(wid)!
+    })
   },
   remove(wid: string): void {
     getDb().prepare('DELETE FROM worktrees WHERE id = ?').run(wid)
@@ -368,23 +374,32 @@ export const worktrees = {
   },
   /** Recompute and persist the aggregate status from a Worktree's terminal tabs. */
   recomputeStatus(wid: string): TerminalStatus {
-    const statuses = getDb()
-      .prepare("SELECT status FROM tabs WHERE worktree_id = ? AND type IN ('terminal', 'agent') AND status IS NOT NULL")
-      .all(wid)
-      .map((r: any) => r.status as TerminalStatus)
-    const agg = aggregateStatus(statuses)
-    worktrees.updateStatus(wid, agg)
-    return agg
+    return writeTx(() => {
+      const statuses = getDb()
+        .prepare(
+          "SELECT status FROM tabs WHERE worktree_id = ? AND type IN ('terminal', 'agent') AND status IS NOT NULL"
+        )
+        .all(wid)
+        .map((r: any) => r.status as TerminalStatus)
+      const agg = aggregateStatus(statuses)
+      worktrees.updateStatus(wid, agg)
+      return agg
+    })
   }
 }
 
 export const panes = {
   create(worktreeId: string): Pane {
     const pid = id()
-    const pos =
-      (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM panes WHERE worktree_id = ?').get(worktreeId) as any)
-        .m + 1
-    getDb().prepare('INSERT INTO panes (id, worktree_id, position, flex) VALUES (?, ?, ?, 1)').run(pid, worktreeId, pos)
+    writeTx(() => {
+      const pos =
+        (
+          getDb()
+            .prepare('SELECT COALESCE(MAX(position), -1) AS m FROM panes WHERE worktree_id = ?')
+            .get(worktreeId) as any
+        ).m + 1
+      getDb().prepare('INSERT INTO panes (id, worktree_id, position, flex) VALUES (?, ?, ?, 1)').run(pid, worktreeId, pos)
+    })
     return { id: pid, worktreeId, activeTabId: null, tabs: [] }
   },
   remove(pid: string): void {
@@ -414,25 +429,32 @@ export const tabs = {
     config?: TabConfig
   }): Tab {
     const tid = id()
-    const pos =
-      (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?').get(input.paneId) as any)
-        .m + 1
-    const status = isPtyTabType(input.type) ? (input.status ?? 'idle') : null
-    getDb()
-      .prepare(
-        'INSERT INTO tabs (id, worktree_id, pane_id, type, status, position, active, config) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
-      )
-      .run(tid, input.worktreeId, input.paneId, input.type, status, pos, JSON.stringify(input.config ?? {}))
-    tabs.setActive(input.paneId, tid)
-    return tabs.get(tid)!
+    return writeTx(() => {
+      const pos =
+        (
+          getDb()
+            .prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?')
+            .get(input.paneId) as any
+        ).m + 1
+      const status = isPtyTabType(input.type) ? (input.status ?? 'idle') : null
+      getDb()
+        .prepare(
+          'INSERT INTO tabs (id, worktree_id, pane_id, type, status, position, active, config) VALUES (?, ?, ?, ?, ?, ?, 0, ?)'
+        )
+        .run(tid, input.worktreeId, input.paneId, input.type, status, pos, JSON.stringify(input.config ?? {}))
+      tabs.setActive(input.paneId, tid)
+      return tabs.get(tid)!
+    })
   },
   remove(tid: string): void {
     getDb().prepare('DELETE FROM tabs WHERE id = ?').run(tid)
   },
   setActive(paneId: string, tabId: string): void {
-    const d = getDb()
-    d.prepare('UPDATE tabs SET active = 0 WHERE pane_id = ?').run(paneId)
-    d.prepare('UPDATE tabs SET active = 1 WHERE id = ?').run(tabId)
+    writeTx(() => {
+      const d = getDb()
+      d.prepare('UPDATE tabs SET active = 0 WHERE pane_id = ?').run(paneId)
+      d.prepare('UPDATE tabs SET active = 1 WHERE id = ?').run(tabId)
+    })
   },
   updateStatus(tid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE tabs SET status = ? WHERE id = ?').run(status, tid)
@@ -441,11 +463,16 @@ export const tabs = {
     getDb().prepare('UPDATE tabs SET config = ? WHERE id = ?').run(JSON.stringify(config), tid)
   },
   move(tid: string, targetPaneId: string): void {
-    const pos =
-      (getDb().prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?').get(targetPaneId) as any)
-        .m + 1
-    getDb().prepare('UPDATE tabs SET pane_id = ?, position = ? WHERE id = ?').run(targetPaneId, pos, tid)
-    tabs.setActive(targetPaneId, tid)
+    writeTx(() => {
+      const pos =
+        (
+          getDb()
+            .prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?')
+            .get(targetPaneId) as any
+        ).m + 1
+      getDb().prepare('UPDATE tabs SET pane_id = ?, position = ? WHERE id = ?').run(targetPaneId, pos, tid)
+      tabs.setActive(targetPaneId, tid)
+    })
   },
   inPane(paneId: string): Tab[] {
     return getDb().prepare('SELECT * FROM tabs WHERE pane_id = ? ORDER BY position').all(paneId).map(mapTab)
@@ -512,22 +539,26 @@ export const tasks = {
     return tasks.get(tid)!
   },
   update(tid: string, patch: TaskPatch): Task {
-    const cur = tasks.get(tid)
-    if (!cur) throw new Error(`task ${tid} not found`)
-    getDb()
-      .prepare(
-        'UPDATE tasks SET title = ?, description = ?, tags = ?, status = ?, project_id = ?, updated_at = ? WHERE id = ?'
-      )
-      .run(
-        patch.title ?? cur.title,
-        patch.description ?? cur.description,
-        JSON.stringify(patch.tags ?? cur.tags),
-        patch.status ?? cur.status,
-        patch.projectId ?? cur.projectId,
-        now(),
-        tid
-      )
-    return tasks.get(tid)!
+    // Read-modify-write under the write lock, so two instances patching
+    // different fields of one task cannot lose each other's change.
+    return writeTx(() => {
+      const cur = tasks.get(tid)
+      if (!cur) throw new Error(`task ${tid} not found`)
+      getDb()
+        .prepare(
+          'UPDATE tasks SET title = ?, description = ?, tags = ?, status = ?, project_id = ?, updated_at = ? WHERE id = ?'
+        )
+        .run(
+          patch.title ?? cur.title,
+          patch.description ?? cur.description,
+          JSON.stringify(patch.tags ?? cur.tags),
+          patch.status ?? cur.status,
+          patch.projectId ?? cur.projectId,
+          now(),
+          tid
+        )
+      return tasks.get(tid)!
+    })
   },
   setWorktree(tid: string, worktreeId: string | null): void {
     getDb().prepare('UPDATE tasks SET worktree_id = ?, updated_at = ? WHERE id = ?').run(worktreeId, now(), tid)
