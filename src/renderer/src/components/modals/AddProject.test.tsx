@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { Project } from '@shared/types'
-import type { GithubContext, GithubCreateRepoOptions, GithubRepoSummary } from '@shared/github'
+import type { GithubAccountRef, GithubContext, GithubCreateRepoOptions, GithubRepoSummary } from '@shared/github'
 import { useStore } from '@renderer/store'
 
 import AddProject from './AddProject'
@@ -22,12 +22,27 @@ const project: Project = {
   addedAt: 0
 }
 
+const personal: GithubAccountRef = { host: 'github.com', login: 'jimbuck' }
+const work: GithubAccountRef = { host: 'github.com', login: 'jimbuckrda' }
+
 const ctx: GithubContext = {
+  accounts: [
+    { ...personal, active: true },
+    { ...work, active: false }
+  ],
+  account: personal,
   user: 'jimbuck',
   owners: ['jimbuck', 'acme'],
   licenses: [{ key: 'mit', name: 'MIT License' }],
   gitignoreTemplates: ['Node', 'C++']
 }
+
+/** The same gh install seen as the work account: its own login and org. */
+const workCtx: GithubContext = { ...ctx, account: work, user: 'jimbuckrda', owners: ['jimbuckrda', 'RDACorp'] }
+
+/** What main does with an account ref: describe that account, else the active one. */
+const contextFor = async (account?: GithubAccountRef): Promise<GithubContext> =>
+  account?.login === work.login ? workCtx : ctx
 
 const repos: GithubRepoSummary[] = [
   {
@@ -56,7 +71,7 @@ const repos: GithubRepoSummary[] = [
 
 const addProject = vi.fn(async (): Promise<Project | null> => project)
 const pickDirectory = vi.fn(async (): Promise<string | null> => 'D:\\Code')
-const githubContext = vi.fn(async (): Promise<GithubContext> => ctx)
+const githubContext = vi.fn(contextFor)
 const githubListRepos = vi.fn(async (_owner: string) => repos)
 const githubCheckRepoName = vi.fn(async (_owner: string, _name: string) => ({ ok: true }))
 const githubCreateRepo = vi.fn(async (opts: GithubCreateRepoOptions) => ({
@@ -98,7 +113,7 @@ beforeEach(() => {
   // consumed would otherwise fire in the next one.
   addProject.mockReset().mockImplementation(async () => project)
   pickDirectory.mockReset().mockImplementation(async () => 'D:\\Code')
-  githubContext.mockReset().mockImplementation(async () => ctx)
+  githubContext.mockReset().mockImplementation(contextFor)
   githubListRepos.mockReset().mockImplementation(async () => repos)
   githubCheckRepoName.mockReset().mockImplementation(async () => ({ ok: true }))
   githubCreateRepo.mockReset().mockImplementation(async (opts: GithubCreateRepoOptions) => ({
@@ -181,7 +196,7 @@ describe('AddProject — new GitHub repo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use my-app?' }))
     expect((name as HTMLInputElement).value).toBe('my-app')
 
-    await waitFor(() => expect(githubCheckRepoName).toHaveBeenCalledWith('jimbuck', 'my-app'), { timeout: 2000 })
+    await waitFor(() => expect(githubCheckRepoName).toHaveBeenCalledWith('jimbuck', 'my-app', personal), { timeout: 2000 })
     await waitFor(() => expect(screen.getByText(/is available\./)).toBeTruthy())
   })
 
@@ -246,7 +261,7 @@ describe('AddProject — new GitHub repo', () => {
       template: undefined,
       team: undefined
     })
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/demo', 'D:\\Code'))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/demo', 'D:\\Code', personal))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -297,7 +312,7 @@ describe('AddProject — new GitHub repo', () => {
 describe('AddProject — clone from GitHub', () => {
   it('lists the owner\u2019s repositories with their visibility and filters as you type', async () => {
     await open('clone')
-    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuck'))
+    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuck', personal))
     const list = screen.getByRole('listbox', { name: 'Repositories' })
     await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(2))
     expect(within(list).getByRole('option', { name: /orbital.*Public/ })).toBeTruthy()
@@ -309,9 +324,9 @@ describe('AddProject — clone from GitHub', () => {
 
   it('reloads the list when the owner changes', async () => {
     await open('clone')
-    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuck'))
+    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuck', personal))
     fireEvent.change(screen.getByLabelText('Owner'), { target: { value: 'acme' } })
-    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('acme'))
+    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('acme', personal))
   })
 
   it('clones the selected repository into the chosen folder', async () => {
@@ -330,7 +345,7 @@ describe('AddProject — clone from GitHub', () => {
     expect(screen.getByText(`${parent}\\orbital`)).toBeTruthy()
     fireEvent.click(clone)
 
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', parent))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', parent, personal))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -341,7 +356,7 @@ describe('AddProject — clone from GitHub', () => {
     fireEvent.click(within(list).getByRole('option', { name: /cli\/cli/ }))
     const parent = (screen.getByLabelText(/Local folder/) as HTMLInputElement).value
     fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('cli/cli', parent))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('cli/cli', parent, personal))
   })
 
   it('surfaces a clone failure and stays open', async () => {
@@ -355,6 +370,57 @@ describe('AddProject — clone from GitHub', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe('D:\\x\\orbital already exists and is not empty.')
     expect(useStore.getState().modal).toBe('addProject')
+  })
+})
+
+describe('AddProject — GitHub account picker', () => {
+  it('lists every signed-in account, defaulting to the active one, and hides itself with only one', async () => {
+    await open('create')
+    const picker = screen.getByLabelText(/GitHub account/) as HTMLSelectElement
+    expect(picker.value).toBe('github.com/jimbuck')
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual(['jimbuck (active)', 'jimbuckrda'])
+    // The first load asks for gh's own active account, not a specific one.
+    expect(githubContext).toHaveBeenCalledWith(undefined)
+    cleanup()
+
+    githubContext.mockImplementation(async () => ({ ...ctx, accounts: [{ ...personal, active: true }] }))
+    await open('create')
+    expect(screen.queryByLabelText(/GitHub account/)).toBeNull()
+  })
+
+  it('reloads the context as the chosen account and acts as it from then on', async () => {
+    await open('create')
+    fireEvent.change(screen.getByLabelText(/GitHub account/), { target: { value: 'github.com/jimbuckrda' } })
+
+    await waitFor(() => expect(githubContext).toHaveBeenLastCalledWith(work))
+    // Owners now belong to the work account; the picker keeps its choice.
+    await waitFor(() => expect((screen.getByLabelText('Owner') as HTMLSelectElement).value).toBe('jimbuckrda'))
+    expect(screen.getByRole('option', { name: 'RDACorp' })).toBeTruthy()
+    expect((screen.getByLabelText(/GitHub account/) as HTMLSelectElement).value).toBe('github.com/jimbuckrda')
+
+    fireEvent.change(screen.getByLabelText('Repository name'), { target: { value: 'demo' } })
+    await waitFor(() => expect(githubCheckRepoName).toHaveBeenCalledWith('jimbuckrda', 'demo', work), {
+      timeout: 2000
+    })
+    await waitFor(() => expect(screen.getByText(/is available\./)).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Create repository' }))
+
+    await waitFor(() => expect(githubCreateRepo).toHaveBeenCalledTimes(1))
+    expect(githubCreateRepo.mock.calls[0][0]).toMatchObject({ account: work, owner: 'jimbuckrda', name: 'demo' })
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuckrda/demo', expect.any(String), work))
+  })
+
+  it('keeps the account across the two GitHub modes and re-lists repositories as it', async () => {
+    await open('clone')
+    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuck', personal))
+    fireEvent.change(screen.getByLabelText(/GitHub account/), { target: { value: 'github.com/jimbuckrda' } })
+    await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuckrda', work))
+
+    fireEvent.click(sourceRadio('New GitHub repo'))
+    await waitFor(() => expect((screen.getByLabelText('Owner') as HTMLSelectElement).value).toBe('jimbuckrda'))
+    expect((screen.getByLabelText(/GitHub account/) as HTMLSelectElement).value).toBe('github.com/jimbuckrda')
+    // One load per account, not one per mode.
+    expect(githubContext).toHaveBeenCalledTimes(2)
   })
 })
 

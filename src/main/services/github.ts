@@ -16,6 +16,8 @@ import {
   isValidOwner,
   parseNameWithOwner,
   validateRepoName,
+  type GithubAccount,
+  type GithubAccountRef,
   type GithubContext,
   type GithubCreateRepoOptions,
   type GithubCreatedRepo,
@@ -58,8 +60,11 @@ function ghExe(): Promise<ExeResolution> {
   return resolved
 }
 
-/** Environment for every gh spawn: no prompts, no pager, no colour, no update nag. */
-export function ghEnv(): NodeJS.ProcessEnv {
+/**
+ * Environment for every gh spawn: no prompts, no pager, no colour, no update
+ * nag. `extra` carries the per-account token (see `accountEnv`).
+ */
+export function ghEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     ...process.env,
     GH_PROMPT_DISABLED: '1',
@@ -67,8 +72,16 @@ export function ghEnv(): NodeJS.ProcessEnv {
     GH_PAGER: 'cat',
     NO_COLOR: '1',
     CLICOLOR: '0',
-    GIT_TERMINAL_PROMPT: '0'
+    GIT_TERMINAL_PROMPT: '0',
+    ...extra
   }
+}
+
+interface RunOptions {
+  cwd?: string
+  timeoutMs?: number
+  /** Extra environment — the account token, so this call acts as that account. */
+  env?: NodeJS.ProcessEnv
 }
 
 type ExecError = Error & {
@@ -94,7 +107,7 @@ export function cleanGhError(stderr: string): string {
   return (usage === -1 ? text : text.slice(0, usage)).trim()
 }
 
-async function capture(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}): Promise<GhResult> {
+async function capture(args: string[], opts: RunOptions = {}): Promise<GhResult> {
   const { file, prefixArgs } = await ghExe()
   const timeout = opts.timeoutMs ?? API_TIMEOUT_MS
   try {
@@ -103,7 +116,7 @@ async function capture(args: string[], opts: { cwd?: string; timeoutMs?: number 
       maxBuffer: MAX_BUFFER,
       windowsHide: true,
       timeout,
-      env: ghEnv()
+      env: ghEnv(opts.env)
     })
     return { stdout: stdout as string, stderr: stderr as string, code: 0 }
   } catch (err) {
@@ -121,10 +134,94 @@ async function capture(args: string[], opts: { cwd?: string; timeoutMs?: number 
 }
 
 /** Run gh, throwing a cleaned `Error(stderr)` on any non-zero exit. */
-async function run(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}): Promise<string> {
+async function run(args: string[], opts: RunOptions = {}): Promise<string> {
   const { stdout, stderr, code } = await capture(args, opts)
   if (code !== 0) throw new Error(cleanGhError(stderr) || stdout.trim() || `gh ${args.join(' ')} failed`)
   return stdout
+}
+
+/* ----------------------------------------------------------------------------
+ * Accounts: gh can hold several logins per host; act as one without switching
+ * -------------------------------------------------------------------------- */
+
+/**
+ * The accounts `gh auth status` reports, active ones first. gh prints one
+ * block per host, and inside it one "Logged in to HOST account LOGIN" line per
+ * account followed by an "Active account: true|false" line; accounts whose
+ * token no longer works show as "Failed to log in" and are left out, since a
+ * call as them would only fail later with a worse message.
+ */
+export function parseAuthStatus(text: string): GithubAccount[] {
+  const accounts: GithubAccount[] = []
+  let current: GithubAccount | null = null
+  for (const raw of text.replace(/\r\n/g, '\n').split('\n')) {
+    const line = raw.trim()
+    const login = line.match(/^(?:✓|√|\*)?\s*Logged in to (\S+) account (\S+)/)
+    if (login) {
+      current = { host: login[1], login: login[2], active: false }
+      accounts.push(current)
+      continue
+    }
+    if (/Failed to log in/.test(line)) {
+      current = null
+      continue
+    }
+    const active = line.match(/^-?\s*Active account:\s*(true|false)/)
+    if (active && current) current.active = active[1] === 'true'
+  }
+  return accounts.sort((a, b) => Number(b.active) - Number(a.active))
+}
+
+/**
+ * Every signed-in account. `gh auth status` exits non-zero when any account
+ * has gone bad but still lists the good ones, so the output is parsed either
+ * way; only an empty list is an error, and gh's own sign-in hint is the text.
+ */
+async function listAccounts(): Promise<GithubAccount[]> {
+  const { stdout, stderr, code } = await capture(['auth', 'status'])
+  const accounts = parseAuthStatus(`${stdout}\n${stderr}`)
+  if (accounts.length === 0) {
+    const hint = cleanGhError(stderr) || cleanGhError(stdout)
+    throw new Error(
+      code === 0 || !hint ? 'gh reports no signed-in GitHub account. Run `gh auth login` and try again.' : hint
+    )
+  }
+  return accounts
+}
+
+/** Cached per-account tokens: keyring reads are not free, and the name check runs on every pause in typing. */
+const tokenCache = new Map<string, { token: string; at: number }>()
+const TOKEN_TTL_MS = 60_000
+
+function accountKey(ref: GithubAccountRef): string {
+  return `${ref.host}/${ref.login}`
+}
+
+/**
+ * The environment that makes gh act as `ref` for one call, without touching
+ * the globally active account (which every other terminal on the machine
+ * shares). gh honours `GH_TOKEN` for github.com and `GH_ENTERPRISE_TOKEN` for
+ * a GHES host — both for API calls and for the git credential helper it wires
+ * into `gh repo clone` — and `GH_HOST` points commands at the right host. The
+ * token never leaves this process: it goes into a child's environment and
+ * nowhere else.
+ */
+async function accountEnv(ref: GithubAccountRef | undefined): Promise<NodeJS.ProcessEnv> {
+  if (!ref) return {}
+  if (!/^[A-Za-z0-9.-]+$/.test(ref.host) || !isValidOwner(ref.login)) {
+    throw new Error('That GitHub account is not one gh is signed in to.')
+  }
+  const key = accountKey(ref)
+  const cached = tokenCache.get(key)
+  let token = cached && Date.now() - cached.at < TOKEN_TTL_MS ? cached.token : ''
+  if (!token) {
+    token = (await run(['auth', 'token', '--hostname', ref.host, '--user', ref.login])).trim()
+    if (!token) {
+      throw new Error(`gh has no token for ${ref.login} on ${ref.host}. Run \`gh auth login\` for that account.`)
+    }
+    tokenCache.set(key, { token, at: Date.now() })
+  }
+  return { GH_HOST: ref.host, GH_TOKEN: token, GH_ENTERPRISE_TOKEN: token }
 }
 
 /* ----------------------------------------------------------------------------
@@ -157,21 +254,35 @@ function parseLines(out: string): string[] {
  * form shows. The template lists degrade to empty so a flaky secondary call
  * never blocks creating a repository.
  */
-async function getContext(): Promise<GithubContext> {
+async function getContext(account?: GithubAccountRef): Promise<GithubContext> {
+  const accounts = await listAccounts()
+  // An unknown ref (an account signed out since the form loaded) falls back
+  // to the active one rather than acting as a token gh no longer has.
+  const chosen = account && accounts.find((a) => accountKey(a) === accountKey(account))
+  const acting = chosen ?? accounts[0]
+  const ref: GithubAccountRef = { host: acting.host, login: acting.login }
+  const env = await accountEnv(ref)
   const [user, orgs, licenses, gitignores] = await Promise.all([
-    run(['api', 'user', '--jq', '.login']).then((s) => s.trim()),
-    run(['api', 'user/orgs', '--paginate', '--jq', '.[].login'])
+    run(['api', 'user', '--jq', '.login'], { env }).then((s) => s.trim()),
+    run(['api', 'user/orgs', '--paginate', '--jq', '.[].login'], { env })
       .then(parseLines)
       .catch(() => [] as string[]),
-    run(['api', 'licenses', '--jq', '.[] | [.key, .name] | @tsv'])
+    run(['api', 'licenses', '--jq', '.[] | [.key, .name] | @tsv'], { env })
       .then(parseLicenses)
       .catch(() => [] as GithubLicense[]),
-    run(['api', 'gitignore/templates', '--jq', '.[]'])
+    run(['api', 'gitignore/templates', '--jq', '.[]'], { env })
       .then(parseLines)
       .catch(() => [] as string[])
   ])
   if (!user) throw new Error('gh returned no signed-in user. Run `gh auth login` and try again.')
-  return { user, owners: [user, ...orgs.filter((o) => o !== user)], licenses, gitignoreTemplates: gitignores }
+  return {
+    accounts,
+    account: ref,
+    user,
+    owners: [user, ...orgs.filter((o) => o !== user)],
+    licenses,
+    gitignoreTemplates: gitignores
+  }
 }
 
 /* ----------------------------------------------------------------------------
@@ -220,10 +331,11 @@ export function parseRepoList(json: string): GithubRepoSummary[] {
 }
 
 /** Repositories under `owner` the signed-in user can see, most recently pushed first. */
-async function listRepos(owner: string): Promise<GithubRepoSummary[]> {
+async function listRepos(owner: string, account?: GithubAccountRef): Promise<GithubRepoSummary[]> {
   if (!isValidOwner(owner)) throw new Error(`"${owner}" is not a valid GitHub owner.`)
-  const out = await run(['repo', 'list', owner, '--limit', String(LIST_LIMIT), '--json', LIST_FIELDS.join(',')])
-  return parseRepoList(out)
+  const env = await accountEnv(account)
+  const args = ['repo', 'list', owner, '--limit', String(LIST_LIMIT), '--json', LIST_FIELDS.join(',')]
+  return parseRepoList(await run(args, { env }))
 }
 
 /**
@@ -231,11 +343,16 @@ async function listRepos(owner: string): Promise<GithubRepoSummary[]> {
  * lookup that distinguishes "does not exist" (good) from any other failure,
  * which is rethrown so a network problem is not mistaken for a free name.
  */
-async function checkRepoName(owner: string, name: string): Promise<GithubRepoNameCheck> {
+async function checkRepoName(
+  owner: string,
+  name: string,
+  account?: GithubAccountRef
+): Promise<GithubRepoNameCheck> {
   if (!isValidOwner(owner)) return { ok: false, reason: `"${owner}" is not a valid GitHub owner.` }
   const invalid = validateRepoName(name)
   if (invalid) return { ok: false, reason: invalid }
-  const { stderr, code } = await capture(['repo', 'view', `${owner}/${name}`, '--json', 'name'])
+  const env = await accountEnv(account)
+  const { stderr, code } = await capture(['repo', 'view', `${owner}/${name}`, '--json', 'name'], { env })
   if (code === 0) return { ok: false, reason: `${owner}/${name} already exists on GitHub.` }
   if (/could not resolve to a repository/i.test(stderr)) return { ok: true }
   throw new Error(cleanGhError(stderr) || 'Could not check the repository name.')
@@ -293,7 +410,8 @@ export function validateCreateRepoOptions(opts: GithubCreateRepoOptions): string
 async function createRepo(opts: GithubCreateRepoOptions): Promise<GithubCreatedRepo> {
   const invalid = validateCreateRepoOptions(opts)
   if (invalid) throw new Error(invalid)
-  const out = await run(buildCreateRepoArgs(opts), { timeoutMs: CREATE_TIMEOUT_MS })
+  const env = await accountEnv(opts.account)
+  const out = await run(buildCreateRepoArgs(opts), { timeoutMs: CREATE_TIMEOUT_MS, env })
   const nameWithOwner = `${opts.owner}/${opts.name}`
   // gh prints the new repository's URL on its own line.
   const url = out.match(/https?:\/\/\S+/)?.[0] ?? `https://github.com/${nameWithOwner}`
@@ -328,13 +446,15 @@ export function resolveCloneTarget(parentDir: string, dirName: string): string {
  * `git_protocol` setting and supplies credentials, so a private repository
  * clones without any extra setup on Orbital's side.
  */
-async function cloneRepo(nameWithOwner: string, dest: string): Promise<void> {
+async function cloneRepo(nameWithOwner: string, dest: string, account?: GithubAccountRef): Promise<void> {
   const parsed = parseNameWithOwner(nameWithOwner)
   if (!parsed) throw new Error('Repository must be written as owner/repository.')
-  await run(['repo', 'clone', `${parsed.owner}/${parsed.name}`, dest], { timeoutMs: CLONE_TIMEOUT_MS })
+  const env = await accountEnv(account)
+  await run(['repo', 'clone', `${parsed.owner}/${parsed.name}`, dest], { timeoutMs: CLONE_TIMEOUT_MS, env })
 }
 
 export const github = {
+  listAccounts,
   getContext,
   listRepos,
   checkRepoName,

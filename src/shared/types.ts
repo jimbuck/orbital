@@ -8,6 +8,7 @@
  */
 
 import type {
+  GithubAccountRef,
   GithubContext,
   GithubCreateRepoOptions,
   GithubCreatedRepo,
@@ -975,19 +976,24 @@ export interface OrbitalApi {
   pickDirectory(title?: string): Promise<string | null>
 
   // github (via the gh CLI)
-  /** The signed-in gh user, their orgs, and the license / gitignore template lists. Rejects when gh is missing or signed out. */
-  githubContext(): Promise<GithubContext>
-  /** Repositories under `owner` the signed-in user can see, most recently pushed first. */
-  githubListRepos(owner: string): Promise<GithubRepoSummary[]>
+  /**
+   * Every account gh is signed in as, plus the user / orgs / template lists for
+   * `account` (gh's active account when omitted). Rejects when gh is missing
+   * or signed out. Every other github* call takes the same `account` so the
+   * whole flow acts as one login without switching gh's active account.
+   */
+  githubContext(account?: GithubAccountRef): Promise<GithubContext>
+  /** Repositories under `owner` that `account` can see, most recently pushed first. */
+  githubListRepos(owner: string, account?: GithubAccountRef): Promise<GithubRepoSummary[]>
   /** Whether `owner/name` is well-formed and not already taken. */
-  githubCheckRepoName(owner: string, name: string): Promise<GithubRepoNameCheck>
-  /** Create a repository on GitHub. Nothing is cloned. */
+  githubCheckRepoName(owner: string, name: string, account?: GithubAccountRef): Promise<GithubRepoNameCheck>
+  /** Create a repository on GitHub as `opts.account`. Nothing is cloned. */
   githubCreateRepo(opts: GithubCreateRepoOptions): Promise<GithubCreatedRepo>
   /**
-   * Clone `owner/repo` into `<parentDir>/<repo>` and register it as a project,
-   * like `addProject` does for a folder picked by hand.
+   * Clone `owner/repo` into `<parentDir>/<repo>` as `account` and register it
+   * as a project, like `addProject` does for a folder picked by hand.
    */
-  githubCloneRepo(nameWithOwner: string, parentDir: string): Promise<Project>
+  githubCloneRepo(nameWithOwner: string, parentDir: string, account?: GithubAccountRef): Promise<Project>
 
   // worktrees / panes / tabs
   createWorktree(projectId: string, opts: CreateWorktreeOptions): Promise<Worktree>

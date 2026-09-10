@@ -19,6 +19,8 @@ import {
   parseNameWithOwner,
   suggestRepoName,
   validateRepoName,
+  type GithubAccount,
+  type GithubAccountRef,
   type GithubContext,
   type GithubCreatedRepo,
   type GithubRepoSummary,
@@ -43,35 +45,58 @@ export type GithubLoad =
 export interface GithubState {
   load: GithubLoad
   reload: () => void
+  /**
+   * Every account gh is signed in as, kept from the last successful load so
+   * the picker stays put while a switch reloads the rest of the context.
+   */
+  accounts: GithubAccount[]
+  /** The account the forms act as; `null` until the user picks one (gh's active account). */
+  account: GithubAccountRef | null
+  setAccount: (account: GithubAccountRef) => void
+}
+
+export function accountKey(ref: GithubAccountRef): string {
+  return `${ref.host}/${ref.login}`
 }
 
 /**
- * Fetches the gh context the first time `enabled` is true and keeps it for the
- * dialog's lifetime. A failure (gh missing, signed out, offline) is held as a
- * message with a retry, since the fix is usually a `gh auth login` in another
- * window followed by "try again" here.
+ * Fetches the gh context the first time `enabled` is true, again whenever the
+ * chosen account changes, and keeps it for the dialog's lifetime. A failure
+ * (gh missing, signed out, offline) is held as a message with a retry, since
+ * the fix is usually a `gh auth login` in another window followed by "try
+ * again" here.
  */
 export function useGithubContext(enabled: boolean): GithubState {
   const [load, setLoad] = useState<GithubLoad>({ status: 'idle' })
+  const [accounts, setAccounts] = useState<GithubAccount[]>([])
+  const [account, setAccount] = useState<GithubAccountRef | null>(null)
   const [attempt, setAttempt] = useState(0)
-  const started = useRef(-1)
+  const started = useRef('')
 
+  const key = account ? accountKey(account) : ''
   useEffect(() => {
-    if (!enabled || started.current === attempt) return
-    started.current = attempt
+    const runKey = `${attempt}:${key}`
+    if (!enabled || started.current === runKey) return
+    started.current = runKey
     let alive = true
     setLoad({ status: 'loading' })
     window.orbital
-      .githubContext()
-      .then((ctx) => alive && setLoad({ status: 'ready', ctx }))
+      .githubContext(account ?? undefined)
+      .then((ctx) => {
+        if (!alive) return
+        setAccounts(ctx.accounts)
+        setLoad({ status: 'ready', ctx })
+      })
       .catch((e) => alive && setLoad({ status: 'error', error: cleanIpcError(e) }))
     return () => {
       alive = false
     }
-  }, [enabled, attempt])
+    // `account` is folded into `key`; the object identity does not matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, attempt, key])
 
   const reload = useCallback(() => setAttempt((n) => n + 1), [])
-  return { load, reload }
+  return { load, reload, accounts, account, setAccount }
 }
 
 /* ============================================================================
@@ -154,6 +179,41 @@ function GithubStatus({ state }: { state: GithubState }): React.JSX.Element | nu
     <div className="mb-4 flex items-center gap-2 text-[11.5px] text-dim">
       <Loader2 size={13} strokeWidth={1.5} className="animate-spin text-faint" />
       Checking GitHub CLI sign-in…
+    </div>
+  )
+}
+
+/**
+ * Which signed-in gh account the form acts as. Only shown once there is a
+ * choice to make; with one account the owner picker already says who you are.
+ */
+function AccountPicker({ state, id, disabled }: { state: GithubState; id: string; disabled?: boolean }): React.JSX.Element | null {
+  const { accounts, account, setAccount } = state
+  if (accounts.length < 2) return null
+  const current = account ?? accounts.find((a) => a.active) ?? accounts[0]
+  const onlyOneHost = accounts.every((a) => a.host === accounts[0].host)
+  return (
+    <div className="mb-4">
+      <label className={fieldLabel} htmlFor={id}>
+        GitHub account <span className="font-normal text-faint">· acts as this login without switching gh</span>
+      </label>
+      <Select
+        id={id}
+        value={accountKey(current)}
+        onChange={(v) => {
+          const next = accounts.find((a) => accountKey(a) === v)
+          if (next) setAccount({ host: next.host, login: next.login })
+        }}
+        mono
+        disabled={disabled}
+      >
+        {accounts.map((a) => (
+          <option key={accountKey(a)} value={accountKey(a)}>
+            {onlyOneHost ? a.login : `${a.login} · ${a.host}`}
+            {a.active ? ' (active)' : ''}
+          </option>
+        ))}
+      </Select>
     </div>
   )
 }
@@ -283,6 +343,8 @@ type RepoLoad =
 
 export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): React.JSX.Element {
   const ctx = github.load.status === 'ready' ? github.load.ctx : null
+  const account = ctx?.account
+  const acting = account ? accountKey(account) : ''
   const defaultParent = useDefaultParentDir()
 
   const [owner, setOwner] = useState('')
@@ -296,18 +358,27 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
   // The owner picker defaults to the signed-in user once the context lands.
   const effectiveOwner = owner || ctx?.user || ''
 
+  // A different account has different owners and sees different repos: drop
+  // the picks made under the previous one.
   useEffect(() => {
-    if (!effectiveOwner) return
+    setOwner('')
+    setSelected('')
+  }, [acting])
+
+  useEffect(() => {
+    if (!effectiveOwner || !account) return
     let alive = true
     setRepos({ status: 'loading' })
     window.orbital
-      .githubListRepos(effectiveOwner)
+      .githubListRepos(effectiveOwner, account)
       .then((list) => alive && setRepos({ status: 'ready', repos: list }))
       .catch((e) => alive && setRepos({ status: 'error', error: cleanIpcError(e) }))
     return () => {
       alive = false
     }
-  }, [effectiveOwner])
+    // `account` is folded into `acting`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveOwner, acting])
 
   const q = query.trim().toLowerCase()
   const visible = useMemo(() => {
@@ -332,7 +403,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
     setBusy(true)
     setError(null)
     try {
-      await window.orbital.githubCloneRepo(selected, parentDir.trim())
+      await window.orbital.githubCloneRepo(selected, parentDir.trim(), account ?? undefined)
       rememberedParentDir = parentDir.trim()
       onDone()
     } catch (e) {
@@ -368,6 +439,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
     >
       {modeSwitch}
       <GithubStatus state={github} />
+      <AccountPicker state={github} id="gh-clone-account" disabled={busy} />
 
       <div className="flex gap-3">
         <div className="w-[190px] flex-none">
@@ -544,6 +616,8 @@ const NAME_CHECK_DEBOUNCE_MS = 450
 
 export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React.JSX.Element {
   const ctx = github.load.status === 'ready' ? github.load.ctx : null
+  const account = ctx?.account
+  const acting = account ? accountKey(account) : ''
   const defaultParent = useDefaultParentDir()
 
   const [owner, setOwner] = useState('')
@@ -569,6 +643,8 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
 
   const effectiveOwner = owner || ctx?.user || ''
   const ownerIsOrg = Boolean(ctx && effectiveOwner && effectiveOwner !== ctx.user)
+  // The previous account's owner (its own login, or an org it belongs to) means nothing to this one.
+  useEffect(() => setOwner(''), [acting])
   const visibilities = ownerIsOrg ? VISIBILITIES : USER_VISIBILITIES
   // Switching from an org back to yourself drops `internal`.
   useEffect(() => {
@@ -593,11 +669,11 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
       setCheck({ state: 'invalid', reason: invalid })
       return
     }
-    if (!effectiveOwner) return
+    if (!effectiveOwner || !account) return
     setCheck({ state: 'checking' })
     const timer = window.setTimeout(() => {
       window.orbital
-        .githubCheckRepoName(effectiveOwner, trimmedName)
+        .githubCheckRepoName(effectiveOwner, trimmedName, account)
         .then((r) => {
           if (seq !== checkSeq.current) return
           setCheck(r.ok ? { state: 'ok' } : { state: 'taken', reason: r.reason ?? 'That name is taken.' })
@@ -607,7 +683,9 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
         })
     }, NAME_CHECK_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
-  }, [effectiveOwner, trimmedName])
+    // `account` is folded into `acting`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveOwner, trimmedName, acting])
 
   const busy = phase !== 'idle'
   const nameUsable = check.state === 'ok' || check.state === 'unknown'
@@ -623,6 +701,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
       if (!repo) {
         setPhase('creating')
         repo = await window.orbital.githubCreateRepo({
+          account: account ?? undefined,
           owner: effectiveOwner,
           name: trimmedName,
           visibility,
@@ -640,7 +719,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
         setCreated(repo)
       }
       setPhase('cloning')
-      await window.orbital.githubCloneRepo(repo.nameWithOwner, parentDir.trim())
+      await window.orbital.githubCloneRepo(repo.nameWithOwner, parentDir.trim(), account ?? undefined)
       rememberedParentDir = parentDir.trim()
       onDone()
     } catch (e) {
@@ -681,6 +760,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
     >
       {modeSwitch}
       <GithubStatus state={github} />
+      <AccountPicker state={github} id="gh-account" disabled={frozen} />
 
       <div className="flex gap-3">
         <div className="w-[190px] flex-none">

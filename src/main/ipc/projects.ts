@@ -3,7 +3,7 @@ import { IPC, type ProjectAgentPatch } from '@shared/types'
 import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
 import { github } from '../services/github'
-import type { GithubCreateRepoOptions } from '@shared/github'
+import type { GithubAccountRef, GithubCreateRepoOptions } from '@shared/github'
 import { registerProject, reconcileProjectWorktrees, releaseWorktreeRuntime, removeWorktreesWatcher } from '../worktree-lifecycle'
 import { handle, broadcast, broadcastAll } from './handle'
 
@@ -43,17 +43,19 @@ export function register(): void {
   })
 
   // ---- github (gh CLI) ----
-  h(IPC.githubContext, () => github.getContext())
-  h(IPC.githubListRepos, (_e, owner: string) => github.listRepos(owner))
-  h(IPC.githubCheckRepoName, (_e, owner: string, name: string) => github.checkRepoName(owner, name))
+  h(IPC.githubContext, (_e, account?: GithubAccountRef) => github.getContext(account))
+  h(IPC.githubListRepos, (_e, owner: string, account?: GithubAccountRef) => github.listRepos(owner, account))
+  h(IPC.githubCheckRepoName, (_e, owner: string, name: string, account?: GithubAccountRef) =>
+    github.checkRepoName(owner, name, account)
+  )
   h(IPC.githubCreateRepo, (_e, opts: GithubCreateRepoOptions) => github.createRepo(opts))
 
   // Clone into <parentDir>/<repo>, then register it exactly as addProject does
   // for a folder picked by hand.
-  h(IPC.githubCloneRepo, async (_e, nameWithOwner: string, parentDir: string) => {
+  h(IPC.githubCloneRepo, async (_e, nameWithOwner: string, parentDir: string, account?: GithubAccountRef) => {
     const repoName = String(nameWithOwner).split('/').pop() ?? ''
     const dest = github.resolveCloneTarget(String(parentDir), repoName)
-    await github.cloneRepo(String(nameWithOwner), dest)
+    await github.cloneRepo(String(nameWithOwner), dest, account)
     if (!(await git.isRepo(dest))) {
       throw new Error(`Cloned ${nameWithOwner}, but ${dest} is not a git repository.`)
     }

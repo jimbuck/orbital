@@ -13,9 +13,27 @@ export interface GithubLicense {
   name: string
 }
 
+/** One account `gh` is signed in as. A user can hold several per host. */
+export interface GithubAccount {
+  host: string
+  login: string
+  /** The one `gh` would use on its own (`gh auth switch`). */
+  active: boolean
+}
+
+/** Which signed-in account a GitHub call should act as; omitted means gh's active one. */
+export interface GithubAccountRef {
+  host: string
+  login: string
+}
+
 /** Everything the New GitHub Repo form needs before it can render its pickers. */
 export interface GithubContext {
-  /** Login of the account `gh` is signed in as. */
+  /** Every account `gh` is signed in as, across hosts, active first. */
+  accounts: GithubAccount[]
+  /** The account this context describes and every follow-up call should act as. */
+  account: GithubAccountRef
+  /** Login of `account` — the default owner. */
   user: string
   /** Owners a repository can be created under: the user first, then their organizations. */
   owners: string[]
@@ -40,6 +58,8 @@ export interface GithubRepoSummary {
 
 /** Mirrors the flags of `gh repo create`. */
 export interface GithubCreateRepoOptions {
+  /** Act as this signed-in account; omitted means gh's active one. */
+  account?: GithubAccountRef
   owner: string
   name: string
   visibility: GithubVisibility

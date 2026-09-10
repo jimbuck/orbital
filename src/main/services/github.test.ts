@@ -7,6 +7,7 @@ import {
   cleanGhError,
   ghEnv,
   github,
+  parseAuthStatus,
   parseLicenses,
   parseRepoList,
   validateCreateRepoOptions
@@ -174,6 +175,65 @@ describe('ghEnv', () => {
     expect(env.GH_PAGER).toBe('cat')
     expect(env.GIT_TERMINAL_PROMPT).toBe('0')
     expect(env.NO_COLOR).toBe('1')
+  })
+
+  it('layers the per-account token on top', () => {
+    const env = ghEnv({ GH_HOST: 'github.com', GH_TOKEN: 't' })
+    expect(env.GH_TOKEN).toBe('t')
+    expect(env.GH_HOST).toBe('github.com')
+    expect(env.GH_PROMPT_DISABLED).toBe('1')
+  })
+})
+
+describe('parseAuthStatus', () => {
+  const twoAccounts = [
+    'github.com',
+    '  ✓ Logged in to github.com account jimbuck (keyring)',
+    '  - Active account: true',
+    '  - Git operations protocol: https',
+    "  - Token: gho_************************************",
+    "  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'",
+    '',
+    '  ✓ Logged in to github.com account jimbuckrda (keyring)',
+    '  - Active account: false',
+    '  - Git operations protocol: https',
+    ''
+  ].join('\r\n')
+
+  it('reads every signed-in account and which one is active', () => {
+    expect(parseAuthStatus(twoAccounts)).toEqual([
+      { host: 'github.com', login: 'jimbuck', active: true },
+      { host: 'github.com', login: 'jimbuckrda', active: false }
+    ])
+  })
+
+  it('puts the active account first regardless of print order', () => {
+    const flipped = twoAccounts.replace('Active account: true', 'Active account: X').replace('Active account: false', 'Active account: true').replace('Active account: X', 'Active account: false')
+    expect(parseAuthStatus(flipped).map((a) => a.login)).toEqual(['jimbuckrda', 'jimbuck'])
+  })
+
+  it('keeps hosts apart and skips accounts whose token failed', () => {
+    const text = [
+      'github.com',
+      '  ✓ Logged in to github.com account me (keyring)',
+      '  - Active account: true',
+      '',
+      '  X Failed to log in to github.com account stale (keyring)',
+      '  - Active account: false',
+      '  - The token in keyring is invalid.',
+      '',
+      'ghe.example.com',
+      '  ✓ Logged in to ghe.example.com account me-work (keyring)',
+      '  - Active account: true'
+    ].join('\n')
+    expect(parseAuthStatus(text)).toEqual([
+      { host: 'github.com', login: 'me', active: true },
+      { host: 'ghe.example.com', login: 'me-work', active: true }
+    ])
+  })
+
+  it('returns nothing for the signed-out message', () => {
+    expect(parseAuthStatus('You are not logged into any GitHub hosts. To log in, run: gh auth login\n')).toEqual([])
   })
 })
 

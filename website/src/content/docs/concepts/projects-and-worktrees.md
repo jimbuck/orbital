@@ -26,6 +26,13 @@ needs to be installed and signed in with `gh auth login`. Cloning goes through
 `gh repo clone`, which picks HTTPS or SSH from your `gh` configuration and
 supplies credentials, so private repositories work without extra setup.
 
+If `gh` is signed in to more than one account (a personal and a work login,
+say), a **GitHub account** picker appears above the form. It defaults to gh's
+active account, and choosing another one reloads the owners and repositories
+as that login. Orbital acts as the chosen account for that dialog only, by
+handing `gh` the account's token for each call, so it never runs
+`gh auth switch` and your terminals keep whichever account they had.
+
 ## Worktrees
 
 A **worktree** is a working surface bound to one working directory:
