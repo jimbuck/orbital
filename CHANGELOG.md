@@ -2,6 +2,14 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.31.0](https://github.com/jimbuck/orbital/compare/v1.30.1...v1.31.0) (2026-09-10)
+
+
+### Features
+
+* **projects:** clone or create a GitHub repository from the Add Project dialog ([4ad3b61](https://github.com/jimbuck/orbital/commit/4ad3b610851c036edab7c61632199e4b9ca0ae42)), closes [#75](https://github.com/jimbuck/orbital/issues/75)
+* **projects:** pick which signed-in GitHub account the Add Project dialog acts as ([47b3a47](https://github.com/jimbuck/orbital/commit/47b3a479b5b3418d023ae3c42e52ab24e96388c4))
+
 ## [1.30.1](https://github.com/jimbuck/orbital/compare/v1.30.0...v1.30.1) (2026-09-10)
 
 
