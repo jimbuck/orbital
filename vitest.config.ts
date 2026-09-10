@@ -14,6 +14,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.{test,spec}.{ts,tsx}']
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // The SQLite-backed suites need Electron's Node — `npm run test:db`.
+    exclude: ['**/node_modules/**', '**/*.electron.test.ts']
   }
 })

@@ -21,6 +21,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db": "node scripts/test-db.mjs",
     "lint": "eslint .",
     "make": "npm run build && electron-builder"
   },
