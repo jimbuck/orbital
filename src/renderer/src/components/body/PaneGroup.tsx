@@ -4,6 +4,7 @@ import type { Worktree, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@
 import { defaultAgentConfigs } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
 import { useStore, activeWorktree } from '@renderer/store'
+import { fireAndForget } from '@renderer/lib/bridge'
 import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
 import EditorTab from './EditorTab'
@@ -59,9 +60,15 @@ function SplitView({
   worktree: Worktree
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
-  const [dragRatio, setDragRatio] = useState<number | null>(null)
+  // While dragging, the ratio is written straight to the two panels' flexGrow:
+  // a setState per mousemove re-rendered both subtrees (every terminal and
+  // editor in them) at frame rate. React sees only the start/stop of a drag,
+  // and the persisted ratio comes back through the store on mouseup.
+  const aRef = useRef<HTMLDivElement>(null)
+  const bRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState(false)
   const isRow = node.dir === 'row'
-  const ratio = dragRatio ?? node.ratio
+  const ratio = node.ratio
 
   // Detach an in-flight drag's window listeners if the split unmounts mid-drag.
   const dragCleanup = useRef<(() => void) | null>(null)
@@ -76,18 +83,24 @@ function SplitView({
       const r = isRow ? (clientX - rect.left) / rect.width : (clientY - rect.top) / rect.height
       return Math.min(0.9, Math.max(0.1, r))
     }
-    const move = (ev: MouseEvent): void => setDragRatio(fracAt(ev.clientX, ev.clientY))
+    const apply = (r: number): void => {
+      if (aRef.current) aRef.current.style.flexGrow = String(r)
+      if (bRef.current) bRef.current.style.flexGrow = String(1 - r)
+    }
+    const move = (ev: MouseEvent): void => apply(fracAt(ev.clientX, ev.clientY))
     const stop = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
       dragCleanup.current = null
+      setDragging(false)
     }
     const up = (ev: MouseEvent): void => {
       stop()
       const final = fracAt(ev.clientX, ev.clientY)
-      setDragRatio(null)
-      void window.orbital.setSplitRatio(worktree.id, node.id, final)
+      apply(final)
+      fireAndForget(window.orbital.setSplitRatio(worktree.id, node.id, final))
     }
+    setDragging(true)
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
     dragCleanup.current = stop
@@ -95,7 +108,7 @@ function SplitView({
 
   return (
     <div ref={ref} className={`flex min-h-0 min-w-0 flex-1 ${isRow ? 'flex-row' : 'flex-col'}`}>
-      <div className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: ratio, flexBasis: 0 }}>
+      <div ref={aRef} className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: ratio, flexBasis: 0 }}>
         <LayoutView node={node.a} worktree={worktree} />
       </div>
       <div
@@ -104,9 +117,9 @@ function SplitView({
         aria-orientation={isRow ? 'vertical' : 'horizontal'}
         className={`group relative z-10 flex-none bg-line transition-colors hover:bg-accent/50 ${
           isRow ? 'w-1 cursor-col-resize' : 'h-1 cursor-row-resize'
-        } ${dragRatio !== null ? 'bg-accent/60' : ''}`}
+        } ${dragging ? 'bg-accent/60' : ''}`}
       />
-      <div className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: 1 - ratio, flexBasis: 0 }}>
+      <div ref={bRef} className="flex min-h-0 min-w-0 overflow-hidden" style={{ flexGrow: 1 - ratio, flexBasis: 0 }}>
         <LayoutView node={node.b} worktree={worktree} />
       </div>
     </div>

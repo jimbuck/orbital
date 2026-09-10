@@ -8,8 +8,12 @@ import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { registerTerminal } from '@renderer/lib/editActions'
 import { decodeOsc52 } from '@renderer/lib/terminalClipboard'
 import { fireAndForget } from '@renderer/lib/bridge'
+import { onTerminalData, onTerminalExit } from '@renderer/lib/terminalStream'
 
 /** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
+/** Trailing delay before a refit's cols/rows are pushed to the PTY (see fitAndReport). */
+const RESIZE_REPORT_MS = 40
+
 const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
   dark: {
     background: '#0d1118',
@@ -155,17 +159,15 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     // then flush ONLY queued chunks past the snapshot's seq cut-point, then go live.
     const queue: { data: string; seq: number }[] = []
     let live = false
-    const unsubscribe = window.orbital.onTerminalData((evt) => {
-      if (evt.tabId !== tab.id) return
+    const unsubscribe = onTerminalData(tab.id, (evt) => {
       if (live) term.write(evt.data)
       else queue.push({ data: evt.data, seq: evt.seq })
     })
-    const exitUnsub = window.orbital.onTerminalExit((evt) => {
-      if (evt.tabId !== tab.id) return
+    const exitUnsub = onTerminalExit(tab.id, (evt) => {
       term.write(`\r\n\x1b[2m[process exited${evt.exitCode ? ` with code ${evt.exitCode}` : ''}]\x1b[0m\r\n`)
     })
 
-    void window.orbital.terminalBuffer(tab.id).then((buffer) => {
+    const goLive = (buffer: { data: string; seq: number }): void => {
       if (disposed) return
       if (buffer.data) term.write(buffer.data)
       for (const chunk of queue) {
@@ -173,7 +175,13 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       }
       queue.length = 0
       live = true
-    })
+    }
+    window.orbital
+      .terminalBuffer(tab.id)
+      .then(goLive)
+      // No snapshot (main mid-teardown, say): go live with what was queued
+      // rather than queueing every later chunk forever and showing none.
+      .catch(() => goLive({ data: '', seq: -1 }))
 
     // Copy the current selection to the system clipboard, then clear it, so a
     // following Ctrl+C is an interrupt again rather than a second identical copy
@@ -289,6 +297,20 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
 
     const inputDisposable = term.onData((data) => window.orbital.terminalInput(tab.id, data))
 
+    // The PTY learns a new size on a short trailing delay: xterm itself refits
+    // at once (so the view is right), but during a split drag the observer
+    // fires every frame and a ConPTY resize repaints the whole program. Only
+    // a changed cols/rows is ever reported. Reset to -1 whenever a resize is
+    // reported (never on a skip) so a size withheld while hidden lands later.
+    let reported = { cols: -1, rows: -1 }
+    let reportTimer: ReturnType<typeof setTimeout> | undefined
+    const report = (): void => {
+      reportTimer = undefined
+      if (disposed) return
+      if (term.cols === reported.cols && term.rows === reported.rows) return
+      reported = { cols: term.cols, rows: term.rows }
+      window.orbital.terminalResize(tab.id, term.cols, term.rows)
+    }
     const fitAndReport = (): void => {
       if (disposed) return
       // Skip while hidden (display:none) — clientWidth/Height collapse to 0.
@@ -298,7 +320,9 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       } catch {
         return
       }
-      window.orbital.terminalResize(tab.id, term.cols, term.rows)
+      // The very first size goes straight out: a deferred PTY spawns on it.
+      if (reported.cols === -1) report()
+      else if (!reportTimer) reportTimer = setTimeout(report, RESIZE_REPORT_MS)
     }
 
     const resizeObserver = new ResizeObserver(() => fitAndReport())
@@ -309,6 +333,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     return () => {
       disposed = true
       cancelAnimationFrame(raf)
+      clearTimeout(reportTimer)
       unsubscribe()
       exitUnsub()
       container.removeEventListener('paste', suppressNativePaste, true)

@@ -14,6 +14,15 @@ import type { TerminalBuffer } from '@shared/types'
 const MAX_BUFFER = 200_000
 
 /**
+ * How long output is coalesced before one 'data' event per tab goes out.
+ * node-pty hands over many small reads under load (a build, `cat` of a big
+ * file); forwarding each as its own IPC message cost a structured clone and a
+ * renderer wake-up per read. A few milliseconds is below anything a person can
+ * see and turns thousands of messages a second into ~100.
+ */
+const FLUSH_MS = 8
+
+/**
  * How long a prepared PTY waits for the renderer to report its real size before
  * spawning at the 80×24 default anyway. The common case (a visible tab) reports
  * within a frame or two, well under this; the fallback only elapses for a tab
@@ -35,9 +44,19 @@ export interface SpawnOptions {
 /** Internal per-tab record: the live PTY (null for a static notice) plus its scrollback. */
 interface TerminalEntry {
   proc: pty.IPty | null
-  buf: string
+  /**
+   * Scrollback as the chunks that arrived, oldest first, kept to about
+   * MAX_BUFFER characters by dropping whole leading chunks. A single string
+   * would cost a fresh MAX_BUFFER-sized copy on every read once full.
+   */
+  chunks: string[]
+  /** Characters currently held in `chunks`. */
+  bufLen: number
   /** Cumulative bytes ever emitted (monotonic; survives ring trimming). */
   total: number
+  /** Last size pushed to the PTY, so an unchanged report is not a ConPTY resize. */
+  cols: number
+  rows: number
 }
 
 /**
@@ -55,6 +74,9 @@ export class TerminalManager extends EventEmitter {
   private readonly deferredTimers = new Map<string, NodeJS.Timeout>()
   /** A size reported before its spawn was prepared (async agent lookup still running). */
   private readonly firstSize = new Map<string, { cols: number; rows: number }>()
+  /** Output received since the last flush, per tab, with the seq of its last chunk. */
+  private readonly pending = new Map<string, { data: string; seq: number }>()
+  private flushTimer: NodeJS.Timeout | null = null
 
   /**
    * Register a PTY to spawn once the renderer reports the tab's real size, then
@@ -125,19 +147,30 @@ export class TerminalManager extends EventEmitter {
       useConpty: true
     })
 
-    const entry: TerminalEntry = { proc, buf: '', total: 0 }
+    const entry: TerminalEntry = {
+      proc,
+      chunks: [],
+      bufLen: 0,
+      total: 0,
+      cols: opts.cols || 80,
+      rows: opts.rows || 24
+    }
     this.terminals.set(opts.tabId, entry)
 
     proc.onData((data) => {
       // Ignore trailing output from a PTY that has already been replaced.
       if (this.terminals.get(opts.tabId) !== entry) return
-      // Append to the ring buffer, trimming the oldest overflow.
-      entry.buf += data
-      if (entry.buf.length > MAX_BUFFER) {
-        entry.buf = entry.buf.slice(entry.buf.length - MAX_BUFFER)
-      }
+      entry.chunks.push(data)
+      entry.bufLen += data.length
       entry.total += data.length
-      this.emit('data', { tabId: opts.tabId, data, seq: entry.total })
+      // Trim by whole chunks, and only once comfortably over, so trimming is
+      // amortised rather than a shift per read.
+      if (entry.bufLen > MAX_BUFFER * 2) {
+        while (entry.chunks.length > 1 && entry.bufLen - entry.chunks[0].length >= MAX_BUFFER) {
+          entry.bufLen -= entry.chunks.shift()!.length
+        }
+      }
+      this.queue(opts.tabId, data, entry.total)
     })
 
     proc.onExit(({ exitCode }) => {
@@ -158,9 +191,40 @@ export class TerminalManager extends EventEmitter {
     this.clearDeferred(tabId)
     this.firstSize.delete(tabId)
     if (this.terminals.has(tabId)) this.kill(tabId)
-    const entry: TerminalEntry = { proc: null, buf: message, total: message.length }
+    const entry: TerminalEntry = {
+      proc: null,
+      chunks: [message],
+      bufLen: message.length,
+      total: message.length,
+      cols: 0,
+      rows: 0
+    }
     this.terminals.set(tabId, entry)
     this.emit('data', { tabId, data: message, seq: entry.total })
+  }
+
+  /** Coalesce a chunk into the tab's pending batch; the flush timer sends it. */
+  private queue(tabId: string, data: string, seq: number): void {
+    const cur = this.pending.get(tabId)
+    if (cur) {
+      cur.data += data
+      cur.seq = seq
+    } else {
+      this.pending.set(tabId, { data, seq })
+    }
+    if (!this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), FLUSH_MS)
+  }
+
+  /** Emit every pending batch now (one 'data' event per tab). */
+  private flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (this.pending.size === 0) return
+    const batches = [...this.pending]
+    this.pending.clear()
+    for (const [tabId, { data, seq }] of batches) this.emit('data', { tabId, data, seq })
   }
 
   /** Forward keystrokes / input to the terminal, if it has a live PTY. */
@@ -172,6 +236,11 @@ export class TerminalManager extends EventEmitter {
   resize(tabId: string, cols: number, rows: number): void {
     const entry = this.terminals.get(tabId)
     if (entry?.proc) {
+      // A ConPTY resize makes every full-screen program repaint; skip the
+      // no-ops a drag's ResizeObserver produces at frame rate.
+      if (entry.cols === cols && entry.rows === rows) return
+      entry.cols = cols
+      entry.rows = rows
       entry.proc.resize(cols, rows)
       return
     }
@@ -186,16 +255,30 @@ export class TerminalManager extends EventEmitter {
     return !!this.terminals.get(tabId)?.proc
   }
 
-  /** Current scrollback + sequence cut-point for replay; empty if unknown. */
+  /**
+   * Current scrollback + sequence cut-point for replay; empty if unknown.
+   *
+   * Pending batches are flushed FIRST. A batch's seq is that of its last chunk,
+   * and the renderer replays a queued batch only when its seq lies past the
+   * snapshot's — so a batch must never straddle the cut-point, which it would
+   * if a chunk arrived between this snapshot and the timer. The flush goes out
+   * ahead of the reply on the same ordered channel.
+   */
   buffer(tabId: string): TerminalBuffer {
+    this.flush()
     const entry = this.terminals.get(tabId)
-    return entry ? { data: entry.buf, seq: entry.total } : { data: '', seq: 0 }
+    if (!entry) return { data: '', seq: 0 }
+    const data = entry.chunks.join('')
+    return { data: data.length > MAX_BUFFER ? data.slice(data.length - MAX_BUFFER) : data, seq: entry.total }
   }
 
   /** Kill and drop the terminal for `tabId`, including any pending deferred spawn. */
   kill(tabId: string): void {
     this.clearDeferred(tabId)
     this.firstSize.delete(tabId)
+    // Output still queued for a PTY being replaced under this id would land
+    // on its successor with a seq from the wrong lifetime.
+    this.pending.delete(tabId)
     const entry = this.terminals.get(tabId)
     if (!entry) return
     this.terminals.delete(tabId)
@@ -212,5 +295,10 @@ export class TerminalManager extends EventEmitter {
       this.clearDeferred(tabId)
     }
     this.firstSize.clear()
+    this.pending.clear()
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
   }
 }
