@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, type JSX } from 'react'
-import type { BundledLanguage } from 'shiki'
 import type { FileDiff } from '@shared/types'
 import { useResolvedTheme } from '@renderer/lib/theme'
-import { HIGHLIGHT_MAX, langFor, shikiTheme } from '@renderer/lib/highlight'
+import { HIGHLIGHT_MAX, highlightTokens, langFor } from '@renderer/lib/highlight'
 
 /**
  * Unified diff renderer shared by the editor tab (working-tree and staged
@@ -45,10 +44,9 @@ function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
     setTokens(null)
     const lang = langFor(path)
     if (!lang || diff.binary || code.length > HIGHLIGHT_MAX) return
-    void import('shiki')
-      .then(({ codeToTokens }) => codeToTokens(code, { lang: lang as BundledLanguage, theme: shikiTheme(theme) }))
-      .then((r) => {
-        if (alive) setTokens(r.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))))
+    void highlightTokens(code, lang, theme)
+      .then((tokens) => {
+        if (alive) setTokens(tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))))
       })
       .catch((err) => {
         // Unknown grammar / load failure — flat coloring stays up.

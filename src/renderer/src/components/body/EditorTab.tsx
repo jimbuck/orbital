@@ -11,7 +11,7 @@ import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileConte
 import EditorContextMenu, { EDITOR_MENU_HEIGHT, EDITOR_MENU_WIDTH, type EditorAction } from './EditorContextMenu'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { cleanIpcError } from '@renderer/lib/ipcError'
-import { HIGHLIGHT_MAX, langFor, shikiTheme } from '@renderer/lib/highlight'
+import { HIGHLIGHT_MAX, highlightHtml, langFor } from '@renderer/lib/highlight'
 import DiffView from './DiffView'
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
@@ -100,10 +100,9 @@ export function CodeEditor({
     let alive = true
     // Tiny debounce so fast typing doesn't queue a highlight per keystroke.
     const t = setTimeout(() => {
-      void import('shiki')
-        // The trailing newline keeps the mirror's height in step with the
-        // textarea when the draft ends mid-newline.
-        .then(({ codeToHtml }) => codeToHtml(value + '\n', { lang, theme: shikiTheme(theme) }))
+      // The trailing newline keeps the mirror's height in step with the
+      // textarea when the draft ends mid-newline.
+      void highlightHtml(value + '\n', lang, theme)
         .then((h) => {
           if (alive) setHtml(h)
         })
