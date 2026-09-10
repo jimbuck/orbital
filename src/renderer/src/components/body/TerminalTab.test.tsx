@@ -70,6 +70,7 @@ vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: FakeWebLinksAddon }))
 vi.mock('@xterm/addon-webgl', () => ({
   WebglAddon: class {
     dispose = (): void => {}
+    onContextLoss = (): { dispose: () => void } => ({ dispose: () => {} })
   }
 }))
 

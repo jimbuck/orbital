@@ -14,6 +14,30 @@ import { onTerminalData, onTerminalExit } from '@renderer/lib/terminalStream'
 /** Trailing delay before a refit's cols/rows are pushed to the PTY (see fitAndReport). */
 const RESIZE_REPORT_MS = 40
 
+/** Attach the WebGL renderer, falling back (and staying) on the DOM renderer when the GPU says no. */
+function attachWebgl(term: Terminal, ref: { current: WebglAddon | null }): void {
+  if (ref.current) return
+  try {
+    const addon = new WebglAddon()
+    addon.onContextLoss(() => dropWebgl(ref))
+    term.loadAddon(addon)
+    ref.current = addon
+  } catch {
+    // WebGL unavailable (e.g. blacklisted GPU) — the canvas/DOM renderer stays.
+    ref.current = null
+  }
+}
+
+function dropWebgl(ref: { current: WebglAddon | null }): void {
+  const addon = ref.current
+  ref.current = null
+  try {
+    addon?.dispose()
+  } catch {
+    // ignore — the GL context may already be gone.
+  }
+}
+
 const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
   dark: {
     background: '#0d1118',
@@ -110,6 +134,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const themeRef = useRef(theme)
   themeRef.current = theme
   const termRef = useRef<Terminal | null>(null)
+  const webglRef = useRef<WebglAddon | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -144,15 +169,6 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     )
 
     term.open(container)
-
-    let webgl: WebglAddon | null = null
-    try {
-      webgl = new WebglAddon()
-      term.loadAddon(webgl)
-    } catch {
-      // WebGL unavailable (e.g. blacklisted GPU) — fall back to the canvas renderer.
-      webgl = null
-    }
 
     // Replay safely without duplication: queue live chunks (each tagged with a
     // cumulative seq) while we fetch the scrollback snapshot, write the snapshot,
@@ -342,16 +358,26 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       resizeObserver.disconnect()
       inputDisposable.dispose()
       osc52Disposable.dispose()
-      try {
-        webgl?.dispose()
-      } catch {
-        // ignore — the GL context may already be gone.
-      }
+      dropWebgl(webglRef)
       term.dispose()
       termRef.current = null
     }
     // Re-create only when the tab identity changes; paneId moves use the ref above.
   }, [tab.id])
+
+  // The GPU renderer only while the tab is showing. Every PTY tab stays mounted
+  // (hidden ones included), and Chromium caps live WebGL contexts per page at
+  // around sixteen — past that the OLDEST contexts are dropped, so a Worktree
+  // with many terminals silently blanked its first ones. A hidden terminal has
+  // nothing to draw, so it holds no context; on reveal the addon is attached
+  // again and xterm repaints from its buffer. A lost context (GPU reset, driver
+  // update, sleep/resume) falls back to the DOM renderer instead of going blank.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    if (active) attachWebgl(term, webglRef)
+    else dropWebgl(webglRef)
+  }, [active, tab.id])
 
   // Repaint an already-open terminal when the theme changes — updating
   // .options.theme keeps scrollback intact (recreating the Terminal would drop it).
