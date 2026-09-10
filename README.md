@@ -197,8 +197,9 @@ npm run rebuild    # compile node-pty + better-sqlite3 against Electron's ABI
 npm start          # build the CLI, then launch the app (electron-vite dev)
 ```
 
-Then click **+** in the left rail, pick a local git repo, and you have a root
-worktree with a live terminal. Run `claude` (or any agent) in it — or create an
+Then click **+** in the left rail and pick a local git repo — or clone one of
+your GitHub repos, or create a new one on GitHub via the `gh` CLI — and you have
+a root worktree with a live terminal. Run `claude` (or any agent) in it — or create an
 **agent tab** and let Orbital boot it for you.
 
 ### Native build notes (Windows)

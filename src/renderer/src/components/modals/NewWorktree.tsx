@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, ChevronDown, FolderGit2 } from 'lucide-react'
+import { Check, FolderGit2 } from 'lucide-react'
 import { useStore, activeProject, tasksForProject } from '@renderer/store'
 import type { Project, Task, BranchInfo } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
+import { Select } from './Select'
 
 /** Where the Worktree's branch comes from. Hoisted so the options array is a
  *  stable reference rather than a fresh one on every keystroke in this form. */
@@ -28,39 +29,6 @@ function toBranch(input: string): string {
     .replace(/[^a-z0-9/_-]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^[-/]+|[-/]+$/g, '')
-}
-
-/** Shared dark-styled <select> with a chevron affordance. */
-function Select({
-  value,
-  onChange,
-  children,
-  id,
-  mono
-}: {
-  value: string
-  onChange: (v: string) => void
-  children: React.ReactNode
-  id?: string
-  mono?: boolean
-}): React.JSX.Element {
-  return (
-    <div className="relative mt-1.5">
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={`${inputBase} ${mono ? 'font-mono' : ''} cursor-pointer appearance-none pr-8 [&_option]:bg-elev [&_option]:text-text`}
-      >
-        {children}
-      </select>
-      <ChevronDown
-        size={14}
-        strokeWidth={1.5}
-        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-faint"
-      />
-    </div>
-  )
 }
 
 export default function NewWorktree(): React.JSX.Element {

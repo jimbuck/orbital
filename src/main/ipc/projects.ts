@@ -2,6 +2,8 @@ import { dialog, BrowserWindow } from 'electron'
 import { IPC, type ProjectAgentPatch } from '@shared/types'
 import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
+import { github } from '../services/github'
+import type { GithubCreateRepoOptions } from '@shared/github'
 import { registerProject, reconcileProjectWorktrees, releaseWorktreeRuntime, removeWorktreesWatcher } from '../worktree-lifecycle'
 import { handle, broadcast, broadcastAll } from './handle'
 
@@ -27,6 +29,36 @@ export function register(): void {
     await registerProject(dir)
     const project = repo.projects.getByPath(dir)!
     // Adopt any worktrees the repo already has — they show up immediately.
+    await reconcileProjectWorktrees(project.id)
+    broadcastAll()
+    return project
+  })
+
+  h(IPC.pickDirectory, async (_e, title?: string) => {
+    const win = runtime.window ?? undefined
+    const opts = { properties: ['openDirectory' as const], title: title || 'Choose a folder' }
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  // ---- github (gh CLI) ----
+  h(IPC.githubContext, () => github.getContext())
+  h(IPC.githubListRepos, (_e, owner: string) => github.listRepos(owner))
+  h(IPC.githubCheckRepoName, (_e, owner: string, name: string) => github.checkRepoName(owner, name))
+  h(IPC.githubCreateRepo, (_e, opts: GithubCreateRepoOptions) => github.createRepo(opts))
+
+  // Clone into <parentDir>/<repo>, then register it exactly as addProject does
+  // for a folder picked by hand.
+  h(IPC.githubCloneRepo, async (_e, nameWithOwner: string, parentDir: string) => {
+    const repoName = String(nameWithOwner).split('/').pop() ?? ''
+    const dest = github.resolveCloneTarget(String(parentDir), repoName)
+    await github.cloneRepo(String(nameWithOwner), dest)
+    if (!(await git.isRepo(dest))) {
+      throw new Error(`Cloned ${nameWithOwner}, but ${dest} is not a git repository.`)
+    }
+    await registerProject(dest)
+    const project = repo.projects.getByPath(dest)!
     await reconcileProjectWorktrees(project.id)
     broadcastAll()
     return project

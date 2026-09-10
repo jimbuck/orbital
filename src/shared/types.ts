@@ -7,6 +7,14 @@
  * this file. Nothing here imports Node or Electron, so it is safe everywhere.
  */
 
+import type {
+  GithubContext,
+  GithubCreateRepoOptions,
+  GithubCreatedRepo,
+  GithubRepoNameCheck,
+  GithubRepoSummary
+} from './github'
+
 /* ============================================================================
  * Domain enums
  * ========================================================================== */
@@ -825,6 +833,13 @@ export const IPC = {
   addProject: 'orbital:addProject',
   removeProject: 'orbital:removeProject',
   renameProject: 'orbital:renameProject',
+  pickDirectory: 'orbital:pickDirectory',
+  // github (via the gh CLI)
+  githubContext: 'orbital:githubContext',
+  githubListRepos: 'orbital:githubListRepos',
+  githubCheckRepoName: 'orbital:githubCheckRepoName',
+  githubCreateRepo: 'orbital:githubCreateRepo',
+  githubCloneRepo: 'orbital:githubCloneRepo',
   // worktrees / panes / tabs
   createWorktree: 'orbital:createWorktree',
   removeWorktree: 'orbital:removeWorktree',
@@ -956,6 +971,23 @@ export interface OrbitalApi {
   addProject(): Promise<Project | null>
   removeProject(projectId: string): Promise<void>
   renameProject(projectId: string, name: string): Promise<void>
+  /** Native folder picker; `null` when cancelled. */
+  pickDirectory(title?: string): Promise<string | null>
+
+  // github (via the gh CLI)
+  /** The signed-in gh user, their orgs, and the license / gitignore template lists. Rejects when gh is missing or signed out. */
+  githubContext(): Promise<GithubContext>
+  /** Repositories under `owner` the signed-in user can see, most recently pushed first. */
+  githubListRepos(owner: string): Promise<GithubRepoSummary[]>
+  /** Whether `owner/name` is well-formed and not already taken. */
+  githubCheckRepoName(owner: string, name: string): Promise<GithubRepoNameCheck>
+  /** Create a repository on GitHub. Nothing is cloned. */
+  githubCreateRepo(opts: GithubCreateRepoOptions): Promise<GithubCreatedRepo>
+  /**
+   * Clone `owner/repo` into `<parentDir>/<repo>` and register it as a project,
+   * like `addProject` does for a folder picked by hand.
+   */
+  githubCloneRepo(nameWithOwner: string, parentDir: string): Promise<Project>
 
   // worktrees / panes / tabs
   createWorktree(projectId: string, opts: CreateWorktreeOptions): Promise<Worktree>

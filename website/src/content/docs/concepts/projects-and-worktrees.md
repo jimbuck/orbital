@@ -10,6 +10,22 @@ every project with an aggregate status dot and its worktrees. Add one with the
 **+** button; remove one from Orbital by right-clicking its header (the repo and
 its worktrees stay on disk).
 
+The **Add project** dialog has three sources:
+
+- **Local folder** — pick a folder that is already a git repository.
+- **Clone from GitHub** — pick one of your repositories (or type `owner/repo`)
+  and clone it into a folder of your choosing.
+- **New GitHub repo** — create a repository on GitHub and clone it in one go.
+  The form mirrors `gh repo create`: owner (you or one of your organizations),
+  a name with a live availability check, visibility, description, and under
+  *More options* a README, `.gitignore` template, license, template repository,
+  homepage, issues/wiki toggles and an org team.
+
+The GitHub sources use the [GitHub CLI](https://cli.github.com) (`gh`), so it
+needs to be installed and signed in with `gh auth login`. Cloning goes through
+`gh repo clone`, which picks HTTPS or SSH from your `gh` configuration and
+supplies credentials, so private repositories work without extra setup.
+
 ## Worktrees
 
 A **worktree** is a working surface bound to one working directory:

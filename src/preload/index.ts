@@ -39,6 +39,13 @@ import {
   type UpdateStatus,
   type WorkspaceInfo
 } from '@shared/types'
+import type {
+  GithubContext,
+  GithubCreateRepoOptions,
+  GithubCreatedRepo,
+  GithubRepoNameCheck,
+  GithubRepoSummary
+} from '@shared/github'
 
 /** Subscribe to a main->renderer push channel; returns an unsubscribe fn. */
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -70,6 +77,18 @@ const api: OrbitalApi = {
   removeProject: (id: string) => ipcRenderer.invoke(IPC.removeProject, id) as Promise<void>,
   renameProject: (id: string, name: string) =>
     ipcRenderer.invoke(IPC.renameProject, id, name) as Promise<void>,
+  pickDirectory: (title?: string) => ipcRenderer.invoke(IPC.pickDirectory, title) as Promise<string | null>,
+
+  // github (via the gh CLI)
+  githubContext: () => ipcRenderer.invoke(IPC.githubContext) as Promise<GithubContext>,
+  githubListRepos: (owner: string) =>
+    ipcRenderer.invoke(IPC.githubListRepos, owner) as Promise<GithubRepoSummary[]>,
+  githubCheckRepoName: (owner: string, name: string) =>
+    ipcRenderer.invoke(IPC.githubCheckRepoName, owner, name) as Promise<GithubRepoNameCheck>,
+  githubCreateRepo: (opts: GithubCreateRepoOptions) =>
+    ipcRenderer.invoke(IPC.githubCreateRepo, opts) as Promise<GithubCreatedRepo>,
+  githubCloneRepo: (nameWithOwner: string, parentDir: string) =>
+    ipcRenderer.invoke(IPC.githubCloneRepo, nameWithOwner, parentDir) as Promise<Project>,
 
   // worktrees / panes / tabs
   createWorktree: (projectId: string, opts: CreateWorktreeOptions) =>
