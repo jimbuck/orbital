@@ -2,6 +2,27 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.30.1](https://github.com/jimbuck/orbital/compare/v1.30.0...v1.30.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **cli:** run on the app's own Electron binary; split connect and response timeouts ([0f86f1f](https://github.com/jimbuck/orbital/commit/0f86f1f952f8c16b35cd7ba38621b39080273f3d))
+* **db:** transactional multi-statement writes, IMMEDIATE locking, guarded event-path writes ([ab9de05](https://github.com/jimbuck/orbital/commit/ab9de0534a369dd0893653b2cfd5ec75620630a3))
+* **editor:** refuse oversize file reads and diffs up front, and say why ([6709fb2](https://github.com/jimbuck/orbital/commit/6709fb2cd499ee9b3f4a1d491d7cc8a6087e5bc9))
+* **git:** bound every git spawn with a timeout and refuse terminal prompts ([f74ce6a](https://github.com/jimbuck/orbital/commit/f74ce6af4368f4a99510b97a7148d1516c532536))
+* **main:** allow-list openExternal schemes and validate branch names before git sees them ([4f9a07f](https://github.com/jimbuck/orbital/commit/4f9a07fff9a18f07ac52a6396b635e95a23135a8))
+* **renderer:** guard git status against stale replies; key browser tabs ([d8d679a](https://github.com/jimbuck/orbital/commit/d8d679aef444242fb0c462c74eae7244a7115579))
+* **renderer:** keep a modal open when a control inside it consumed the Escape ([b256e88](https://github.com/jimbuck/orbital/commit/b256e8825b01e2d12c88409ccf3eeec20144dd1f))
+* **terminal:** hold a WebGL context only while a terminal is showing; survive context loss ([561c401](https://github.com/jimbuck/orbital/commit/561c401f6341cb3b480b80d8251e3e71937c7a66))
+
+
+### Performance Improvements
+
+* dedicated git-changed push and structural sharing in applyState ([3668a89](https://github.com/jimbuck/orbital/commit/3668a8985704195dd1f4d6b2e874949184d5c879))
+* **editor:** load only the grammars the app maps, on the JavaScript regex engine ([8b00873](https://github.com/jimbuck/orbital/commit/8b0087395b4396f414ba332a6d6c2fc684ffe55b))
+* **terminal:** coalesce PTY output, chunked ring buffer, deduped resizes, DOM-driven split drags ([7c69ddc](https://github.com/jimbuck/orbital/commit/7c69ddc96c4da75cda2631c2ef9533a022932556))
+
 # [1.30.0](https://github.com/jimbuck/orbital/compare/v1.29.0...v1.30.0) (2026-09-09)
 
 
