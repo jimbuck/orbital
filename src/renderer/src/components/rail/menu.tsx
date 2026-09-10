@@ -27,6 +27,18 @@ export function ContextMenu({
   onClose: () => void
   children: ReactNode
 }): JSX.Element {
+  // Escape closes the menu — and only the menu: a menu open over a modal
+  // (a task card's, on the board) must not take the modal down with it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <>
       <div

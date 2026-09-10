@@ -129,6 +129,8 @@ export function AccentPicker({
             e.preventDefault()
             commitDraft()
           } else if (e.key === 'Escape') {
+            // Reverts the hex draft only — not the Settings modal around it.
+            e.preventDefault()
             setDraft(current ?? '')
           }
         }}

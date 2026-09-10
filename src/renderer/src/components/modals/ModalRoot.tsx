@@ -84,6 +84,8 @@ export function ModalShell({
 }: ModalShellProps): React.JSX.Element {
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{ width, minHeight, maxWidth: '94vw', animation: 'panelIn .16s ease-out' }}
       className="flex max-h-[84vh] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal elev-modal"
     >
@@ -297,11 +299,14 @@ export default function ModalRoot(): React.JSX.Element | null {
   const closeModal = useStore((s) => s.closeModal)
 
   // Dismiss on Escape while any modal is open — closeModal() pops just the top
-  // layer, so Escape peels the stack back one at a time (task → board → gone).
+  // layer, so Escape peels the stack back one at a time (task → board — gone).
+  // A control inside the modal that handles Escape itself (an inline input
+  // cancelling its edit, a menu closing) calls preventDefault, and that press
+  // must not ALSO close the modal underneath it and drop every unsaved edit.
   useEffect(() => {
     if (modalStack.length === 0) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeModal()
+      if (e.key === 'Escape' && !e.defaultPrevented) closeModal()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

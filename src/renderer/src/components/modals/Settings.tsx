@@ -654,6 +654,8 @@ export default function Settings(): React.JSX.Element {
             onKeyDown={(e) => {
               if (e.key === 'Enter') commitDraft()
               else if (e.key === 'Escape') {
+                // Cancels the add only — not the whole Settings modal (see ModalRoot).
+                e.preventDefault()
                 setDraft('')
                 setAdding(false)
               }
