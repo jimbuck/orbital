@@ -15,7 +15,7 @@ import { Spinner } from '@renderer/lib/status'
 import { useStore, activeWorktree, activeProject, activePaneId } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import { ContextMenu, type MenuPos } from '../rail/menu'
-import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
+import type { GitFileState, GitFileStatus, GitStatus, Pane, Tab } from '@shared/types'
 
 /* Secondary button recipe (design guide: "// secondary"). */
 const SECONDARY =
@@ -469,23 +469,27 @@ export default function GitPanel(): JSX.Element {
   ): Promise<void> => files.reduce((p, f) => p.then(() => op(f.path)), Promise.resolve())
 
   /**
-   * Open (or re-focus) an editor tab showing this file's staged/unstaged diff.
-   * A new tab goes to the pane the user last worked in, not the layout's first
-   * pane — the panel sits beside the pane area, so "where I was looking" is the
-   * pane they just clicked out of. Null (nothing recorded yet) is main's "first
-   * pane" default.
+   * Show this file's staged/unstaged diff in the editor the user is already
+   * looking at: the active pane's active tab if it is an editor, else another
+   * editor in that pane, else any editor in the worktree — an editor holds
+   * many files, so a click here adds to it rather than spawning a tab per
+   * file. Only when there is no editor at all does one get created, in the
+   * pane the user last worked in (null = main's "first pane" default).
    */
   const openDiff = (f: GitFileStatus): void => {
-    for (const pane of worktree.panes) {
-      const existing = pane.tabs.find(
-        (t) => t.type === 'editor' && t.config.filePath === f.path && !!t.config.diffStaged === f.staged
-      )
-      if (existing) {
-        void window.orbital.setActiveTab(pane.id, existing.id)
-        return
-      }
+    const s = useStore.getState()
+    const paneId = activePaneId(s, worktree.id)
+    const editorIn = (pane: Pane): Tab | undefined => {
+      const active = pane.tabs.find((t) => t.id === pane.activeTabId)
+      return active?.type === 'editor' ? active : pane.tabs.find((t) => t.type === 'editor')
     }
-    const paneId = activePaneId(useStore.getState(), worktree.id)
+    const panes = [...worktree.panes].sort((a, b) => (a.id === paneId ? -1 : b.id === paneId ? 1 : 0))
+    const editor = panes.map(editorIn).find((t): t is Tab => !!t)
+    if (editor) {
+      void window.orbital.setActiveTab(editor.paneId, editor.id)
+      s.openInEditor(editor.id, f.path, f.staged, f.state)
+      return
+    }
     void window.orbital.createTab(worktree.id, paneId, 'editor', { filePath: f.path, diffStaged: f.staged })
   }
 

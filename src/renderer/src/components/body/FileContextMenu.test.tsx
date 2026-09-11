@@ -332,7 +332,7 @@ describe('delete confirm copy', () => {
         worktreeId="w1"
         node={node}
         pos={{ x: 10, y: 10 }}
-        unsavedPath={unsavedPath}
+        unsavedPaths={[unsavedPath]}
         onClose={() => {}}
         onMutated={() => {}}
       />

@@ -30,21 +30,29 @@ export default function BrowserTab({ tab }: { tab: Tab }): JSX.Element {
   // Electron's <webview> exposes goBack/goForward/reload at runtime; type loosely.
   const webviewRef = useRef<any>(null)
 
-  // Keep the address bar in sync as the webview navigates on its own.
+  // Keep the address bar in sync as the webview navigates on its own, and
+  // remember each page that actually loads: the tab strip titles the tab by
+  // it (plain "Browser" until then) and a restart reopens it.
   useEffect(() => {
     const wv = webviewRef.current
     if (!wv) return
     const onNav = (e: { url?: string }): void => {
       if (e.url) setInput(e.url)
     }
-    wv.addEventListener('did-navigate', onNav)
+    const onLoaded = (e: { url?: string }): void => {
+      onNav(e)
+      if (e.url && e.url !== tab.config.url && !e.url.startsWith('about:')) {
+        fireAndForget(window.orbital.updateTabConfig(tab.id, { url: e.url }))
+      }
+    }
+    wv.addEventListener('did-navigate', onLoaded)
     wv.addEventListener('did-navigate-in-page', onNav)
     return () => {
-      wv.removeEventListener('did-navigate', onNav)
+      wv.removeEventListener('did-navigate', onLoaded)
       wv.removeEventListener('did-navigate-in-page', onNav)
     }
     // Re-bind when the webview first mounts (url goes '' -> non-empty).
-  }, [url])
+  }, [url, tab.id, tab.config.url])
 
   // Once the guest is ready, register it with main so its popups (Ctrl/Cmd-click,
   // target=_blank, window.open) open a new internal browser tab instead of a real

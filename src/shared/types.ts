@@ -865,6 +865,7 @@ export const IPC = {
   createTab: 'orbital:createTab',
   closeTab: 'orbital:closeTab',
   renameTab: 'orbital:renameTab',
+  updateTabConfig: 'orbital:updateTabConfig',
   setActiveTab: 'orbital:setActiveTab',
   moveTab: 'orbital:moveTab',
   splitPane: 'orbital:splitPane',
@@ -1047,6 +1048,8 @@ export interface OrbitalApi {
   closeTab(tabId: string): Promise<void>
   /** Set a tab's explicit title override; an empty title reverts to the derived one. */
   renameTab(tabId: string, title: string): Promise<void>
+  /** Merge fields into a tab's persisted config (e.g. the browser's current URL). */
+  updateTabConfig(tabId: string, patch: Partial<TabConfig>): Promise<void>
   setActiveTab(paneId: string, tabId: string): Promise<void>
   moveTab(tabId: string, targetPaneId: string): Promise<void>
   /** Split `paneId` in `dir`, putting a new empty pane on the `where` side. */

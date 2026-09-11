@@ -69,16 +69,18 @@ function tabAgent(tab: Tab, agents: AgentConfig[], defaultAgentId?: string): Age
   return resolveAgentRef(agents, tab.config.agentId, tab.config.agentProvider, defaultAgentId)
 }
 
-/** Display title: explicit override, else something derived from the config. */
-function tabTitle(tab: Tab, agent?: AgentConfig): string {
+/**
+ * Display title: explicit override, else something derived from the config.
+ * An editor is always "Editor" — it holds many files, and the one it was
+ * opened with is just the first of them. A browser is "Browser" until it has
+ * loaded a page, then that page's host.
+ */
+export function tabTitle(tab: Tab, agent?: AgentConfig): string {
   if (tab.config.title) return tab.config.title
-  if (tab.type === 'editor') {
-    const p = tab.config.filePath
-    return p ? p.split('/').pop() || p : 'editor'
-  }
+  if (tab.type === 'editor') return 'Editor'
   if (tab.type === 'browser') {
     const u = tab.config.url
-    if (!u) return 'browser'
+    if (!u) return 'Browser'
     try {
       return new URL(u).hostname || u
     } catch {
@@ -89,7 +91,7 @@ function tabTitle(tab: Tab, agent?: AgentConfig): string {
     // A profile that has since been removed leaves only its reference to show.
     return agent?.name ?? providerLabel(tab.config.agentId || tab.config.agentProvider || 'claude')
   }
-  return 'terminal'
+  return 'Terminal'
 }
 
 /**
@@ -257,7 +259,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
               />
             ) : (
               <span
-                className={`text-xs ${isActive ? 'font-semibold' : 'font-medium'} ${tab.type === 'editor' ? 'font-mono' : ''}`}
+                className={`text-xs ${isActive ? 'font-semibold' : 'font-medium'}`}
               >
                 {tabTitle(tab, tabAgent(tab, agents, defaultAgentId))}
               </span>

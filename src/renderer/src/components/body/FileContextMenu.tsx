@@ -78,11 +78,19 @@ function parentDirOf(node: FileNode): string {
  *
  * The owning tree holds the open/position state and renders this when set.
  */
+/** `"a.ts"`, `"a.ts" and "b.ts"`, or `"a.ts" and 2 other files` — for the delete hint. */
+function namesOf(paths: string[]): string {
+  const names = paths.map((p) => `"${p.split('/').pop()}"`)
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+  return `${names[0]} and ${names.length - 1} other files`
+}
+
 export default function FileContextMenu({
   worktreeId,
   node,
   pos,
-  unsavedPath = null,
+  unsavedPaths = [],
   onClose,
   onMutated
 }: {
@@ -90,11 +98,11 @@ export default function FileContextMenu({
   node: FileNode
   pos: MenuPos
   /**
-   * Path of the file open in the editor with edits not yet saved, if any. The
-   * delete confirm says so when the row (or a folder containing it) is that
-   * file — binning it keeps only what was last saved.
+   * Paths of the files open in the editor with edits not yet saved. The delete
+   * confirm says so when the row is one of them, or a folder containing any —
+   * binning it keeps only what was last saved.
    */
-  unsavedPath?: string | null
+  unsavedPaths?: string[]
   onClose: () => void
   onMutated: (mutation: FileMutation) => void
 }): JSX.Element {
@@ -105,8 +113,8 @@ export default function FileContextMenu({
   const isDir = node.type === 'dir'
   const parentDir = parentDirOf(node)
   const label = isDir ? 'folder' : 'file'
-  const losesEdits =
-    unsavedPath !== null && (unsavedPath === node.path || unsavedPath.startsWith(`${node.path}/`))
+  const unsavedInside = unsavedPaths.filter((p) => p === node.path || p.startsWith(`${node.path}/`))
+  const losesEdits = unsavedInside.length > 0
 
   /**
    * Run one bridge call with busy/error bookkeeping. On success the menu
@@ -205,7 +213,7 @@ export default function FileContextMenu({
             `Moved to the recycle bin${isDir ? ', with everything inside it' : ''} — you can restore it from there.` +
             (losesEdits
               ? isDir
-                ? ` Your unsaved edits to "${unsavedPath.split('/').pop()}" will be lost.`
+                ? ` Your unsaved edits to ${namesOf(unsavedInside)} will be lost.`
                 : ' Your unsaved edits will be lost.'
               : '')
           }

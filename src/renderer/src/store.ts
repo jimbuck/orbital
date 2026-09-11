@@ -1,5 +1,14 @@
 import { create } from 'zustand'
-import type { AppState, Project, Worktree, Task, Settings, UpdateStatus, WorkspaceInfo } from '@shared/types'
+import type {
+  AppState,
+  GitFileState,
+  Project,
+  Worktree,
+  Task,
+  Settings,
+  UpdateStatus,
+  WorkspaceInfo
+} from '@shared/types'
 
 export type ModalType =
   | 'settings'
@@ -35,10 +44,27 @@ interface UIState {
    * `activePaneId` selector.
    */
   activePaneIds: Record<string, string>
+  /**
+   * The latest ask, from outside the pane area (the git panel's change list),
+   * for an editor tab to show a file. Editor tabs keep their open files in
+   * component state, so this is how an already-open editor is handed a new
+   * one; `seq` makes a repeat of the same file a fresh request. Renderer-only.
+   */
+  editorOpen: EditorOpenRequest | null
   /** Count of Worktrees currently needing attention (drives the title-bar banner). */
   alertCount: number
   /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
   updateStatus: UpdateStatus
+}
+
+export interface EditorOpenRequest {
+  tabId: string
+  path: string
+  /** Show the staged (index) side of the diff rather than the working tree. */
+  staged: boolean
+  /** What git says about the file, so the editor opens straight onto its diff. */
+  gitState?: GitFileState
+  seq: number
 }
 
 interface Data {
@@ -63,6 +89,8 @@ interface Actions {
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
   setActivePane: (worktreeId: string, paneId: string) => void
+  /** Ask editor `tabId` to show `path` (see `editorOpen`). */
+  openInEditor: (tabId: string, path: string, staged: boolean, gitState?: GitFileState) => void
 }
 
 export type Store = Data & UIState & Actions
@@ -143,6 +171,7 @@ export const useStore = create<Store>((set, get) => ({
   modalData: null,
   modalStack: [],
   activePaneIds: {},
+  editorOpen: null,
   alertCount: 0,
   updateStatus: { phase: 'idle' },
 
@@ -247,6 +276,10 @@ export const useStore = create<Store>((set, get) => ({
     // a fresh object here would re-render every subscriber on each keystroke.
     if (get().activePaneIds[worktreeId] === paneId) return
     set((s) => ({ activePaneIds: { ...s.activePaneIds, [worktreeId]: paneId } }))
+  },
+
+  openInEditor(tabId, path, staged, gitState) {
+    set((s) => ({ editorOpen: { tabId, path, staged, gitState, seq: (s.editorOpen?.seq ?? 0) + 1 } }))
   }
 }))
 

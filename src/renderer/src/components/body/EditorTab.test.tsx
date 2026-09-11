@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { FileNode, Tab, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { __resetFileTreeRegistry, __setFileTreeBridge } from '@renderer/lib/fileTree'
@@ -594,18 +594,23 @@ describe('EditorTab file mutations', () => {
     await flush()
   }
 
+  /** A row in the file tree (the open-file pills show the same names). */
+  const treeRow = (name: string): HTMLElement => within(screen.getByTestId('file-tree')).getByText(name)
+  /** The pill for an open file, by its full path. */
+  const pill = (path: string): HTMLElement => screen.getByRole('tab', { name: path })
+
   /** Mount, expand `src`, and open src/notes.txt. */
   async function openNotes(): Promise<void> {
     await mount()
-    fireEvent.click(screen.getByText('src'))
-    fireEvent.click(screen.getByText('notes.txt'))
+    fireEvent.click(treeRow('src'))
+    fireEvent.click(treeRow('notes.txt'))
     await flush()
-    expect(screen.getByText('src/notes.txt')).toBeTruthy() // the header
+    expect(pill('src/notes.txt')).toBeTruthy()
   }
 
   /** Right-click a tree row and pick a menu item. */
   function menu(row: string, item: string): void {
-    fireEvent.contextMenu(screen.getByText(row))
+    fireEvent.contextMenu(treeRow(row))
     fireEvent.click(screen.getByText(item))
   }
 
@@ -626,8 +631,8 @@ describe('EditorTab file mutations', () => {
     await flush()
 
     expect(bridge.renamePath).toHaveBeenCalledWith('w1', 'src/notes.txt', 'renamed.txt')
-    expect(screen.getByText('src/renamed.txt')).toBeTruthy()
-    expect(screen.queryByText('src/notes.txt')).toBeNull()
+    expect(pill('src/renamed.txt')).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'src/notes.txt' })).toBeNull()
   })
 
   it('follows the open file when an ancestor folder is renamed, and keeps that folder open', async () => {
@@ -639,10 +644,10 @@ describe('EditorTab file mutations', () => {
     submitPrompt('Rename folder', 'lib')
     await flush()
 
-    expect(screen.getByText('lib/notes.txt')).toBeTruthy()
+    expect(pill('lib/notes.txt')).toBeTruthy()
     // The folder was expanded under its old key; the key moved with it. Before
     // this, a renamed folder snapped shut and its children vanished from view.
-    expect(screen.getByText('notes.txt')).toBeTruthy()
+    expect(treeRow('notes.txt')).toBeTruthy()
   })
 
   it('closes the open file when it is deleted', async () => {
@@ -677,7 +682,7 @@ describe('EditorTab file mutations', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     await flush()
 
-    expect(screen.getByText('src/notes.txt')).toBeTruthy()
+    expect(pill('src/notes.txt')).toBeTruthy()
   })
 
   it('opens a file it just created and expands the folder it landed in', async () => {
@@ -691,8 +696,8 @@ describe('EditorTab file mutations', () => {
     await flush()
 
     expect(bridge.createFile).toHaveBeenCalledWith('w1', 'src', 'fresh.txt')
-    expect(screen.getByText('src/fresh.txt')).toBeTruthy() // opened
-    expect(screen.getByText('notes.txt')).toBeTruthy() // folder expanded
+    expect(pill('src/fresh.txt')).toBeTruthy() // opened
+    expect(treeRow('notes.txt')).toBeTruthy() // folder expanded
     expect(bridge.readFile).toHaveBeenCalledWith('w1', 'src/fresh.txt')
   })
 
@@ -706,7 +711,7 @@ describe('EditorTab file mutations', () => {
 
     expect(bridge.createDirectory).toHaveBeenCalledWith('w1', 'src', 'sub')
     expect(screen.getByText('Select a file')).toBeTruthy()
-    expect(screen.getByText('notes.txt')).toBeTruthy()
+    expect(treeRow('notes.txt')).toBeTruthy()
     expect(bridge.readFile).not.toHaveBeenCalled()
   })
 
@@ -722,5 +727,297 @@ describe('EditorTab file mutations', () => {
     await openNotes()
     menu('notes.txt', 'Delete')
     expect(screen.queryByText(/unsaved edits/)).toBeNull()
+  })
+})
+
+/* ---- Open-file pills --------------------------------------------------------
+ *
+ * The header is the strip of open files. Each keeps its own buffer, so an
+ * unsaved draft survives a switch to another pill; closing a dirty one asks
+ * whether to save or discard; Ctrl+S saves the active one.
+ * -------------------------------------------------------------------------- */
+
+describe('EditorTab open-file pills', () => {
+  let bridge: Record<string, ReturnType<typeof vi.fn>>
+  /** What each path reads back as — a save updates it, like a real disk would. */
+  let disk: Record<string, string>
+
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    disk = { 'a.txt': 'alpha\n', 'b.txt': 'beta\n', 'c.txt': 'gamma\n' }
+    __resetFileTreeRegistry()
+    __setFileTreeBridge({
+      fileTree: async () => Object.keys(disk).map((p) => ({ name: p, path: p, type: 'file' as const })),
+      onGitChanged: () => () => {}
+    })
+    bridge = {
+      readFile: vi.fn(async (_w: string, path: string) => disk[path]),
+      readFileBase64: vi.fn(async () => ''),
+      gitDiff: vi.fn(async () => null),
+      listDir: vi.fn(async () => []),
+      writeFile: vi.fn(async (_w: string, path: string, text: string) => {
+        disk[path] = text
+      })
+    }
+    vi.stubGlobal('orbital', bridge)
+    useStore.setState({
+      projects: [{ id: 'p1' }],
+      worktrees: [worktree('w1')],
+      activeProjectId: 'p1',
+      activeWorktreeId: 'w1'
+    } as unknown as Parameters<typeof useStore.setState>[0])
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    __setFileTreeBridge(null)
+    __resetFileTreeRegistry()
+  })
+
+  const treeRow = (name: string): HTMLElement => within(screen.getByTestId('file-tree')).getByText(name)
+  const pills = (): HTMLElement[] => screen.queryAllByRole('tab')
+  const pill = (path: string): HTMLElement => screen.getByRole('tab', { name: path })
+  const pillPaths = (): (string | null)[] => pills().map((p) => p.getAttribute('aria-label'))
+  const activePill = (): string | undefined =>
+    pills()
+      .find((p) => p.getAttribute('aria-selected') === 'true')
+      ?.getAttribute('aria-label') ?? undefined
+  const editor = (): HTMLTextAreaElement => screen.getByRole('textbox') as HTMLTextAreaElement
+  const type = (text: string): void => fireEvent.change(editor(), { target: { value: text } })
+  const dialog = (): HTMLElement | null => screen.queryByRole('dialog')
+  const closeBtn = (name: string, dirty = false): HTMLElement =>
+    screen.getByRole('button', { name: dirty ? `Close ${name} (unsaved changes)` : `Close ${name}` })
+
+  /** Mount with nothing open and open the given files from the tree, in order. */
+  async function open(...paths: string[]): Promise<void> {
+    render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
+    await flush()
+    for (const p of paths) {
+      fireEvent.click(treeRow(p))
+      await flush()
+    }
+  }
+
+  it('adds a pill per opened file and shows the newest', async () => {
+    await open('a.txt', 'b.txt')
+    expect(pillPaths()).toEqual(['a.txt', 'b.txt'])
+    expect(activePill()).toBe('b.txt')
+    expect(editor().value).toBe('beta\n')
+    // The old header buttons are gone: saving is Ctrl+S, discarding is closing.
+    expect(screen.queryByText('Save')).toBeNull()
+    expect(screen.queryByText('Cancel')).toBeNull()
+  })
+
+  it('re-opening a file selects its pill instead of adding another', async () => {
+    await open('a.txt', 'b.txt', 'a.txt')
+    expect(pills()).toHaveLength(2)
+    expect(activePill()).toBe('a.txt')
+    // Its buffer was kept, so nothing was re-read.
+    expect(bridge.readFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps each file own draft across a switch and marks the edited one', async () => {
+    await open('a.txt', 'b.txt')
+    type('beta, edited\n')
+    expect(pill('b.txt').dataset.dirty).toBe('true')
+    expect(pill('a.txt').dataset.dirty).toBeUndefined()
+
+    fireEvent.click(pill('a.txt'))
+    expect(editor().value).toBe('alpha\n')
+    fireEvent.click(pill('b.txt'))
+    expect(editor().value).toBe('beta, edited\n')
+  })
+
+  it('closes a clean file at once and moves to the pill after it, then before', async () => {
+    await open('a.txt', 'b.txt', 'c.txt')
+    fireEvent.click(pill('b.txt'))
+    fireEvent.click(closeBtn('b.txt'))
+    expect(dialog()).toBeNull()
+    expect(pillPaths()).toEqual(['a.txt', 'c.txt'])
+    expect(activePill()).toBe('c.txt')
+
+    fireEvent.click(closeBtn('c.txt'))
+    expect(activePill()).toBe('a.txt')
+
+    fireEvent.click(closeBtn('a.txt'))
+    expect(pills()).toHaveLength(0)
+    expect(screen.getByText('Select a file')).toBeTruthy()
+  })
+
+  it('closing an inactive pill leaves the active one alone', async () => {
+    await open('a.txt', 'b.txt')
+    fireEvent.click(closeBtn('a.txt'))
+    expect(pillPaths()).toEqual(['b.txt'])
+    expect(activePill()).toBe('b.txt')
+  })
+
+  it('middle-click closes a pill', async () => {
+    await open('a.txt', 'b.txt')
+    fireEvent(pill('a.txt'), new MouseEvent('auxclick', { button: 1, bubbles: true }))
+    expect(pillPaths()).toEqual(['b.txt'])
+  })
+
+  it('asks before closing a file with unsaved edits, and Cancel keeps it', async () => {
+    await open('a.txt')
+    type('alpha, edited\n')
+    fireEvent.click(closeBtn('a.txt', true))
+
+    expect(dialog()).toBeTruthy()
+    expect(screen.getByText(/Save changes to/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(dialog()).toBeNull()
+    expect(pills()).toHaveLength(1)
+    expect(editor().value).toBe('alpha, edited\n')
+    expect(bridge.writeFile).not.toHaveBeenCalled()
+  })
+
+  it('Escape is Cancel', async () => {
+    await open('a.txt')
+    type('alpha, edited\n')
+    fireEvent.click(closeBtn('a.txt', true))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(dialog()).toBeNull()
+    expect(pills()).toHaveLength(1)
+  })
+
+  it("Don't Save closes without writing", async () => {
+    await open('a.txt', 'b.txt')
+    type('beta, edited\n')
+    fireEvent.click(closeBtn('b.txt', true))
+    fireEvent.click(screen.getByRole('button', { name: "Don't Save" }))
+
+    expect(dialog()).toBeNull()
+    expect(bridge.writeFile).not.toHaveBeenCalled()
+    expect(pillPaths()).toEqual(['a.txt'])
+    expect(activePill()).toBe('a.txt')
+  })
+
+  it('Save writes the draft and then closes', async () => {
+    await open('a.txt', 'b.txt')
+    type('beta, edited\n')
+    fireEvent.click(closeBtn('b.txt', true))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await flush()
+
+    expect(bridge.writeFile).toHaveBeenCalledWith('w1', 'b.txt', 'beta, edited\n')
+    expect(dialog()).toBeNull()
+    expect(pillPaths()).toEqual(['a.txt'])
+  })
+
+  it('keeps the prompt open, with the reason, when the save fails', async () => {
+    await open('a.txt')
+    type('alpha, edited\n')
+    bridge.writeFile.mockRejectedValueOnce(new Error('EACCES: permission denied'))
+    fireEvent.click(closeBtn('a.txt', true))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await flush()
+
+    expect(dialog()).toBeTruthy()
+    expect(within(dialog()!).getByText(/permission denied/)).toBeTruthy()
+    expect(pills()).toHaveLength(1)
+  })
+
+  it('Ctrl+S saves the active file and clears its unsaved mark', async () => {
+    await open('a.txt')
+    type('alpha, edited\n')
+    expect(pill('a.txt').dataset.dirty).toBe('true')
+
+    fireEvent.keyDown(editor(), { key: 's', ctrlKey: true })
+    await flush()
+
+    expect(bridge.writeFile).toHaveBeenCalledWith('w1', 'a.txt', 'alpha, edited\n')
+    expect(pill('a.txt').dataset.dirty).toBeUndefined()
+    expect(editor().value).toBe('alpha, edited\n')
+  })
+
+  it('Ctrl+S on a clean file writes nothing', async () => {
+    await open('a.txt')
+    fireEvent.keyDown(editor(), { key: 's', ctrlKey: true })
+    await flush()
+    expect(bridge.writeFile).not.toHaveBeenCalled()
+  })
+
+  /** The git panel's ask, as the store carries it (see store.openInEditor). */
+  const askToOpen = (tabId: string, path: string, staged = false): void =>
+    act(() => useStore.getState().openInEditor(tabId, path, staged, 'modified'))
+
+  it('opens a file the git panel asks for, straight onto its diff', async () => {
+    await open('a.txt')
+    askToOpen('E1', 'b.txt')
+    await flush()
+
+    expect(pillPaths()).toEqual(['a.txt', 'b.txt'])
+    expect(activePill()).toBe('b.txt')
+    // Diff mode: the Diff toggle is offered (the request carried the git state,
+    // the tree has no changes yet) and no editor is on screen.
+    expect(screen.getByText('Diff')).toBeTruthy()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(bridge.gitDiff).toHaveBeenCalledWith('w1', 'b.txt', false)
+  })
+
+  it('brings an already-open file back and refetches its diff, keeping its draft', async () => {
+    await open('a.txt', 'b.txt')
+    type('beta, edited\n')
+    fireEvent.click(pill('a.txt'))
+    askToOpen('E1', 'b.txt')
+    await flush()
+
+    expect(pills()).toHaveLength(2)
+    expect(activePill()).toBe('b.txt')
+    expect(bridge.gitDiff).toHaveBeenCalledWith('w1', 'b.txt', false)
+    // Back to File mode: the edit is still there.
+    fireEvent.click(screen.getByText('File'))
+    expect(editor().value).toBe('beta, edited\n')
+  })
+
+  it('answers the same file twice — the second ask is not swallowed as a no-op', async () => {
+    await open('a.txt')
+    askToOpen('E1', 'b.txt')
+    await flush()
+    fireEvent.click(pill('a.txt'))
+    expect(activePill()).toBe('a.txt')
+
+    askToOpen('E1', 'b.txt')
+    await flush()
+    expect(activePill()).toBe('b.txt')
+  })
+
+  it('ignores asks addressed to another editor tab', async () => {
+    await open('a.txt')
+    askToOpen('E2', 'b.txt')
+    await flush()
+    expect(pillPaths()).toEqual(['a.txt'])
+  })
+
+  it('shows the active file path as a breadcrumb', async () => {
+    disk['src/deep/x.txt'] = 'x\n'
+    __setFileTreeBridge({
+      fileTree: async () => [
+        {
+          name: 'src',
+          path: 'src',
+          type: 'dir',
+          children: [
+            {
+              name: 'deep',
+              path: 'src/deep',
+              type: 'dir',
+              children: [{ name: 'x.txt', path: 'src/deep/x.txt', type: 'file' }]
+            }
+          ]
+        }
+      ],
+      onGitChanged: () => () => {}
+    })
+    render(<EditorTab tab={{ ...editorTab('w1'), config: { filePath: 'src/deep/x.txt' } }} active />)
+    await flush()
+    expect(pill('src/deep/x.txt')).toBeTruthy()
+    // `deep` is collapsed in the tree, so the only "deep" on screen is the crumb.
+    expect(screen.getByText('deep')).toBeTruthy()
   })
 })

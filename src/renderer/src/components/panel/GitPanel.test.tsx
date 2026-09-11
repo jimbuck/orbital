@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
-import type { GitStatus, Worktree } from '@shared/types'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { GitStatus, Tab, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 import GitPanel from './GitPanel'
@@ -113,5 +113,92 @@ describe('GitPanel status requests', () => {
     expect(screen.getByText('kept.ts')).toBeTruthy()
     expect(screen.getByText('fatal: index.lock exists')).toBeTruthy()
     expect(screen.queryByText('Working tree clean')).toBeNull()
+  })
+})
+
+/* ---- Opening a change ------------------------------------------------------
+ *
+ * A click on a changed file shows it in the editor the user is already
+ * looking at. Editors hold many files, so the old "one editor tab per file"
+ * behaviour — and its blind spot, where a click on the file an editor was
+ * opened with did nothing — is gone.
+ * -------------------------------------------------------------------------- */
+
+describe('GitPanel opening a change', () => {
+  const tabIn = (paneId: string, id: string, type: 'editor' | 'terminal'): Tab => ({
+    id,
+    worktreeId: 'A',
+    paneId,
+    type,
+    status: null,
+    position: 0,
+    config: {}
+  })
+
+  /** Worktree A with two panes, each holding the given tabs (first tab active). */
+  function twoPanes(left: Tab[], right: Tab[]): void {
+    const w = worktree('A')
+    w.panes = [
+      { id: 'A-left', worktreeId: 'A', activeTabId: left[0]?.id ?? null, tabs: left },
+      { id: 'A-right', worktreeId: 'A', activeTabId: right[0]?.id ?? null, tabs: right }
+    ]
+    useStore.setState({ worktrees: [w], editorOpen: null } as unknown as Parameters<typeof useStore.setState>[0])
+  }
+
+  let setActiveTab: ReturnType<typeof vi.fn>
+  let createTab: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    setActiveTab = vi.fn(async () => undefined)
+    createTab = vi.fn(async () => undefined)
+    Object.assign(window.orbital, { setActiveTab, createTab })
+  })
+
+  async function clickChange(): Promise<void> {
+    render(<GitPanel />)
+    await settle('A', statusWith('src/a.ts'))
+    fireEvent.click(screen.getByTitle('Open diff — src/a.ts'))
+  }
+
+  it('hands the file to the active editor of the pane the user last worked in', async () => {
+    twoPanes([tabIn('A-left', 'E-left', 'editor')], [tabIn('A-right', 'E-right', 'editor')])
+    useStore.getState().setActivePane('A', 'A-right')
+    await clickChange()
+
+    expect(setActiveTab).toHaveBeenCalledWith('A-right', 'E-right')
+    expect(useStore.getState().editorOpen).toMatchObject({
+      tabId: 'E-right',
+      path: 'src/a.ts',
+      staged: false,
+      gitState: 'modified'
+    })
+    expect(createTab).not.toHaveBeenCalled()
+  })
+
+  it('reaches for an editor behind the active terminal before opening a new one', async () => {
+    twoPanes([tabIn('A-left', 'T1', 'terminal'), tabIn('A-left', 'E1', 'editor')], [])
+    await clickChange()
+
+    expect(setActiveTab).toHaveBeenCalledWith('A-left', 'E1')
+    expect(useStore.getState().editorOpen?.tabId).toBe('E1')
+    expect(createTab).not.toHaveBeenCalled()
+  })
+
+  it('uses an editor in another pane when the active pane has none', async () => {
+    twoPanes([tabIn('A-left', 'T1', 'terminal')], [tabIn('A-right', 'E2', 'editor')])
+    useStore.getState().setActivePane('A', 'A-left')
+    await clickChange()
+
+    expect(setActiveTab).toHaveBeenCalledWith('A-right', 'E2')
+    expect(createTab).not.toHaveBeenCalled()
+  })
+
+  it('opens a new editor, on the file, only when the worktree has none', async () => {
+    twoPanes([tabIn('A-left', 'T1', 'terminal')], [])
+    useStore.getState().setActivePane('A', 'A-left')
+    await clickChange()
+
+    expect(createTab).toHaveBeenCalledWith('A', 'A-left', 'editor', { filePath: 'src/a.ts', diffStaged: false })
+    expect(setActiveTab).not.toHaveBeenCalled()
+    expect(useStore.getState().editorOpen).toBeNull()
   })
 })

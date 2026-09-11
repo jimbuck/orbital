@@ -130,3 +130,19 @@ describe('applyState structural sharing', () => {
     expect(after.settings).toBe(before.settings)
   })
 })
+
+describe('openInEditor', () => {
+  it('records the request and numbers each one, so a repeat of the same file is new', () => {
+    useStore.setState({ editorOpen: null })
+    useStore.getState().openInEditor('E1', 'src/a.ts', false, 'modified')
+    expect(useStore.getState().editorOpen).toEqual({
+      tabId: 'E1',
+      path: 'src/a.ts',
+      staged: false,
+      gitState: 'modified',
+      seq: 1
+    })
+    useStore.getState().openInEditor('E1', 'src/a.ts', false, 'modified')
+    expect(useStore.getState().editorOpen?.seq).toBe(2)
+  })
+})

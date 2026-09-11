@@ -45,6 +45,13 @@ export function register(): void {
     broadcast()
   })
 
+  h(IPC.updateTabConfig, (_e, tabId: string, patch: Partial<TabConfig>) => {
+    const tab = repo.tabs.get(tabId)
+    if (!tab) return
+    repo.tabs.updateConfig(tabId, { ...tab.config, ...patch })
+    broadcast()
+  })
+
   h(IPC.setActiveTab, (_e, paneId: string, tabId: string) => {
     repo.tabs.setActive(paneId, tabId)
     broadcast()
