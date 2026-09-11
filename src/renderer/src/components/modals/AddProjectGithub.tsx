@@ -8,11 +8,11 @@ import {
   FolderDown,
   FolderOpen,
   Globe,
-  Loader2,
   Lock,
   RefreshCw,
   Search
 } from 'lucide-react'
+import { Spinner } from '@renderer/lib/status'
 import { useStore } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import {
@@ -177,7 +177,7 @@ function GithubStatus({ state }: { state: GithubState }): React.JSX.Element | nu
   }
   return (
     <div className="mb-4 flex items-center gap-2 text-[11.5px] text-dim">
-      <Loader2 size={13} strokeWidth={1.5} className="animate-spin text-faint" />
+      <Spinner className="text-[13px] text-faint" />
       Checking GitHub CLI sign-in…
     </div>
   )
@@ -264,7 +264,7 @@ function ParentDirField({
           aria-label="Browse for a folder"
         >
           {picking ? (
-            <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />
+            <Spinner className="text-[14px]" />
           ) : (
             <FolderOpen size={14} strokeWidth={1.5} />
           )}
@@ -431,7 +431,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
             Cancel
           </button>
           <button type="button" className={primaryBtn} onClick={submit} disabled={!canSubmit}>
-            {busy && <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />}
+            {busy && <Spinner className="text-[14px]" />}
             {busy ? 'Cloning…' : 'Clone repository'}
           </button>
         </>
@@ -495,7 +495,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
         )}
         {repos.status === 'loading' && (
           <div className="flex items-center gap-2 px-3 py-3 text-[11.5px] text-dim">
-            <Loader2 size={13} strokeWidth={1.5} className="animate-spin text-faint" />
+            <Spinner className="text-[13px] text-faint" />
             Loading repositories…
           </div>
         )}
@@ -752,7 +752,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
             Cancel
           </button>
           <button type="button" className={primaryBtn} onClick={submit} disabled={!canSubmit}>
-            {busy && <Loader2 size={14} strokeWidth={1.5} className="animate-spin" />}
+            {busy && <Spinner className="text-[14px]" />}
             {primaryLabel}
           </button>
         </>
@@ -992,7 +992,7 @@ function NameStatus({
     case 'checking':
       return (
         <div id={id} className={`${base} text-dim`}>
-          <Loader2 size={12} strokeWidth={1.5} className="animate-spin text-faint" />
+          <Spinner className="text-[12px] text-faint" />
           Checking <span className="font-mono">{owner}/{name}</span> on GitHub…
         </div>
       )

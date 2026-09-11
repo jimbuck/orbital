@@ -41,6 +41,10 @@
   --color-red-2: #ff9a9a;
   --color-purple: #c4a7f0;
   --color-purple-2: #d6c2f7;
+  /* The "working" status blue. Deliberately NOT --color-accent / --color-blue:
+     those follow the workspace accent (lib/accent.ts), and a green, red or
+     amber accent would make the spinner read as done, error or needs-you. */
+  --color-working: #4f8cff;
 
   /* diff */
   --color-diff-add: #9fe9c6;
@@ -68,6 +72,11 @@
 
   /* motion */
   --animate-pulse-dot: pulseDot 1.6s ease-in-out infinite;
+  /* Status-dot motion (see lib/status.tsx). All three share the needs-you
+     cadence so the rail breathes at one tempo; the error core runs slower. */
+  --animate-beacon: beacon 1.6s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+  --animate-glow-ring: glowRing 1.6s ease-in-out infinite;
+  --animate-hot-core: hotCore 2.4s ease-in-out infinite;
 }
 
 /* ============================================================================
@@ -143,6 +152,7 @@
   --color-red-2: #b91c1c;
   --color-purple: #7c3aed;
   --color-purple-2: #6d28d9;
+  --color-working: #2f6fe0;
 
   /* diff */
   --color-diff-add: #1a7f4b;
@@ -175,6 +185,38 @@
   50% {
     transform: scale(1.55);
     opacity: 0.45;
+  }
+}
+/* needs-you: a ring radiates out from the amber dot and fades, like a beacon. */
+@keyframes beacon {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  80%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+/* done: the green ring holds still while a soft halo fades in and out. */
+@keyframes glowRing {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-green) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 6px 1px color-mix(in srgb, var(--color-green) 45%, transparent);
+  }
+}
+/* error: the red core glows slowly, like something hot. */
+@keyframes hotCore {
+  0%,
+  100% {
+    box-shadow: 0 0 3px 0 color-mix(in srgb, var(--color-red) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 7px 1px color-mix(in srgb, var(--color-red) 75%, transparent);
   }
 }
 @keyframes overlayIn {
@@ -255,6 +297,47 @@
   }
   .elev-modal {
     box-shadow: var(--shadow-modal);
+  }
+
+  /* The comet: Orbital's one loading spinner (lib/status.tsx <Spinner>). A
+     bright head with a tail that fades out behind it, sized by font-size and
+     coloured by `color`, so `text-[11px] text-accent` is the whole recipe.
+     The tail is a conic gradient cut into a ring by a radial mask; the head is
+     a dot pinned at 12 o'clock, centred on the ring's stroke so the comet keeps
+     the same outer diameter as the other status marks. Tailwind's animate-spin
+     turns the whole thing. */
+  .spinner {
+    position: relative;
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    flex: none;
+  }
+  .spinner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0 25%,
+      color-mix(in srgb, currentColor 12%, transparent) 40%,
+      currentColor 100%
+    );
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 0.15em), #000 calc(100% - 0.15em + 0.5px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 0.15em), #000 calc(100% - 0.15em + 0.5px));
+  }
+  .spinner::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0.075em;
+    width: 0.3em;
+    height: 0.3em;
+    border-radius: 9999px;
+    background: currentColor;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0.2em color-mix(in srgb, currentColor 70%, transparent);
   }
 }
 

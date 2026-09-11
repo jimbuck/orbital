@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import { FolderOpen, GitBranch, Loader2 } from 'lucide-react'
+import { FolderOpen, GitBranch } from 'lucide-react'
+import { Spinner } from '@renderer/lib/status'
 import { useStore } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import { ModalShell, ghostBtn } from './ModalRoot'
@@ -93,7 +94,7 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
         className="mt-4 flex w-full items-center justify-center gap-2.5 rounded-btn bg-accent px-4 py-3 text-[13px] font-bold text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
       >
         {busy ? (
-          <Loader2 size={16} strokeWidth={1.5} className="animate-spin" />
+          <Spinner className="text-[16px]" />
         ) : (
           <FolderOpen size={16} strokeWidth={1.5} />
         )}

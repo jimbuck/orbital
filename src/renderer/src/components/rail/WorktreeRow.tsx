@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react
 import { Pencil, CircleOff, FolderOpen, RefreshCw, Terminal, FolderX, Trash2 } from 'lucide-react'
 import type { Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
-import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
+import { Spinner, StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 import { fireAndForget } from '@renderer/lib/bridge'
 
@@ -143,7 +143,7 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
       >
         <span className="flex w-[11px] flex-none items-center justify-center">
           {settingUp || removing ? (
-            <span className="inline-block size-[11px] rounded-full border-[1.6px] border-accent border-t-transparent animate-spin" />
+            <Spinner className="text-[10px] text-working" />
           ) : (
             <StatusDot status={worktree.status} />
           )}
@@ -205,7 +205,7 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
           {/* The Close path runs without a confirm step, so it gets its own busy line. */}
           {del === 'none' && removing && (
             <div className="flex items-center gap-2 px-2 py-2 text-[11.5px] font-semibold text-text-3">
-              <span className="inline-block size-[11px] flex-none animate-spin rounded-full border-[1.6px] border-accent border-t-transparent" />
+              <Spinner className="text-[10px] text-working" />
               Closing worktree…
             </div>
           )}

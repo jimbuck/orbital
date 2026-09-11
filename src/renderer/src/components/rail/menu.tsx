@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
+import { Spinner } from '@renderer/lib/status'
 
 /**
  * Shared right-click context-menu primitives (rail WorktreeRow/Project rows,
@@ -142,7 +143,7 @@ export function MenuConfirm({
           className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-red/15 px-2 py-1.5 text-[11.5px] font-semibold text-red-2 outline-none hover:bg-red/25 focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-red/15"
         >
           {busy && (
-            <span className="inline-block size-[10px] flex-none animate-spin rounded-full border-[1.5px] border-red-2 border-t-transparent" />
+            <Spinner className="text-[10px]" />
           )}
           {busy ? busyLabel || 'Working…' : confirmLabel}
         </button>
@@ -233,7 +234,7 @@ export function MenuPrompt({
           className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-accent/15 px-2 py-1.5 text-[11.5px] font-semibold text-blue outline-none hover:bg-accent/25 focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-accent/15"
         >
           {busy && (
-            <span className="inline-block size-[10px] flex-none animate-spin rounded-full border-[1.5px] border-blue border-t-transparent" />
+            <Spinner className="text-[10px]" />
           )}
           {confirmLabel}
         </button>

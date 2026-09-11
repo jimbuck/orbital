@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { Check, Copy, GitBranch, Loader2, RefreshCw, Tag, X } from 'lucide-react'
+import { Check, Copy, GitBranch, RefreshCw, Tag, X } from 'lucide-react'
+import { Spinner } from '@renderer/lib/status'
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import type { FileDiff, GitCommit, GitCommitDetail, GitCommitFile, GitFileState } from '@shared/types'
@@ -481,7 +482,7 @@ export default function CommitHistory(): JSX.Element {
               onClick={() => void loadMore()}
               className={`mx-3 my-2 inline-flex items-center justify-center gap-1.5 rounded-[7px] border border-line-2 bg-hover py-[7px] text-[11.5px] font-semibold text-text-2 hover:bg-panel-2 transition-colors disabled:opacity-60 ${FOCUS}`}
             >
-              {loading && <Loader2 size={12} strokeWidth={2} className="animate-spin" />}
+              {loading && <Spinner className="text-[12px]" />}
               {loading ? 'Loading…' : `Load ${PAGE} more`}
             </button>
           )}
@@ -538,7 +539,7 @@ export default function CommitHistory(): JSX.Element {
               <div className="flex-none max-h-[34%] overflow-y-auto border-b border-soft px-[10px] py-2">
                 {!detail && !detailError && (
                   <div className="flex items-center gap-2 px-2 py-1 text-[11px] text-faint">
-                    <Loader2 size={12} strokeWidth={2} className="animate-spin" /> Loading changes…
+                    <Spinner className="text-[12px]" /> Loading changes…
                   </div>
                 )}
                 {detail && detail.files.length === 0 && (
@@ -564,7 +565,7 @@ export default function CommitHistory(): JSX.Element {
                         <span className="text-red-2">−{diff.deletions}</span>
                       </span>
                     )}
-                    {diffLoading && <Loader2 size={11} strokeWidth={2} className="flex-none animate-spin text-faint" />}
+                    {diffLoading && <Spinner className="text-[11px] text-faint" />}
                   </div>
                 )}
                 {diff && file && (

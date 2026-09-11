@@ -5,13 +5,13 @@ import {
   ChevronRight,
   GitBranch,
   History,
-  Loader2,
   Minus,
   Plus,
   RefreshCw,
   Undo2,
   X
 } from 'lucide-react'
+import { Spinner } from '@renderer/lib/status'
 import { useStore, activeWorktree, activeProject, activePaneId } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import { ContextMenu, type MenuPos } from '../rail/menu'
@@ -530,7 +530,7 @@ export default function GitPanel(): JSX.Element {
 
   const commitDisabled = !!busy || !message.trim() || (staged.length === 0 && !amend)
 
-  const spinner = <Loader2 size={12} strokeWidth={2} className="flex-none animate-spin" />
+  const spinner = <Spinner className="text-[12px]" />
 
   // Hover-revealed folder action span shared by both sections; mirrors the file
   // row's action strip (same wrapper opacity + focus behaviour).
@@ -621,7 +621,7 @@ export default function GitPanel(): JSX.Element {
               <GitBranch size={12} strokeWidth={1.5} className="flex-none" />
               <span className="truncate">{branch}</span>
               {busy === 'checkout' ? (
-                <Loader2 size={11} strokeWidth={2} className="flex-none animate-spin" />
+                <Spinner className="text-[11px]" />
               ) : (
                 <ChevronDown size={11} strokeWidth={1.5} className="flex-none text-faint" />
               )}

@@ -39,34 +39,51 @@ export function worktreeStatusTextClass(s: TerminalStatus): string {
 }
 
 /**
- * The glanceable status dot for a Worktree or terminal, rendered exactly as the
- * design's legend specifies (pulsing amber, accent spinner, red glow, hollow
- * green ring, dim dot).
+ * Orbital's loading spinner: a comet, a bright head trailing a tail that fades
+ * out behind it (the `.spinner` recipe in app.css). Sized by font-size and
+ * coloured by the current text colour, so pass `text-[11px] text-accent` or
+ * let it inherit the button's ink. Replaces the generic three-quarter ring
+ * everywhere something is in flight.
+ */
+export function Spinner({ className = '' }: { className?: string }): JSX.Element {
+  return <span aria-hidden className={`spinner animate-spin ${className}`} />
+}
+
+/**
+ * The glanceable status dot for a Worktree or terminal. One small orbital
+ * legend: a comet while working, an amber beacon radiating a ring when it
+ * needs you, a slowly glowing red core inside an exclusion ring on error, a
+ * heavy green ring with a soft halo when done, and a thin grey ring at rest.
+ *
+ * Every variant is drawn inside the same 10px box with the same outer
+ * diameter, so the marks line up down the rail and across the tab strip and
+ * only their weight, colour and motion differ. Anything that reaches past the
+ * box (the beacon's ring, the glows) is absolutely positioned and overflows
+ * without shifting layout.
  */
 export function StatusDot({ status, className = '' }: { status: TerminalStatus; className?: string }): JSX.Element {
+  const box = `relative inline-block size-[10px] flex-none rounded-full ${className}`
   switch (status) {
     case 'needs_attention':
       return (
-        <span className={`relative inline-block size-2 ${className}`}>
-          <span className="absolute inset-0 rounded-full bg-amber animate-pulse-dot" />
+        <span className={`${box} bg-amber`}>
+          <span className="absolute -inset-px rounded-full border-[1.5px] border-amber animate-beacon" />
         </span>
       )
     case 'working':
-      return (
-        <span
-          className={`inline-block size-[11px] rounded-full border-[1.6px] border-accent border-t-transparent animate-spin ${className}`}
-        />
-      )
+      // text-working, not text-accent: the workspace accent can be green, red
+      // or amber, which would make "working" read as another status.
+      return <Spinner className={`text-[10px] text-working ${className}`} />
     case 'error':
       return (
-        <span
-          className={`inline-block size-2 rounded-full bg-red shadow-[0_0_7px_rgba(255,107,107,.5)] ${className}`}
-        />
+        <span className={`${box} border border-red/55`}>
+          <span className="absolute inset-[2px] rounded-full bg-red animate-hot-core" />
+        </span>
       )
     case 'done':
-      return <span className={`inline-block size-[9px] rounded-full border-[1.6px] border-green ${className}`} />
+      return <span className={`${box} border-[2.4px] border-green animate-glow-ring`} />
     default:
-      return <span className={`inline-block size-[7px] rounded-full bg-dim ${className}`} />
+      return <span className={`${box} border border-dim`} />
   }
 }
 
