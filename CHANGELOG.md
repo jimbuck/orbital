@@ -2,6 +2,14 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.32.0](https://github.com/jimbuck/orbital/compare/v1.31.0...v1.32.0) (2026-09-11)
+
+
+### Features
+
+* **editor:** open files as pills, reuse the editor from the git panel ([418595c](https://github.com/jimbuck/orbital/commit/418595c0c17e18bcdfb3b3e0bcfbd371850bd8c2))
+* **status:** orbital-themed status dots and a shared comet spinner ([1221bcb](https://github.com/jimbuck/orbital/commit/1221bcbf084032c55c4fd053a5e53f00989db41f))
+
 # [1.31.0](https://github.com/jimbuck/orbital/compare/v1.30.1...v1.31.0) (2026-09-10)
 
 
