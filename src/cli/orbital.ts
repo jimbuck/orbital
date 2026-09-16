@@ -372,8 +372,15 @@ function printTaskDetail(data: unknown): void {
     ['title', String(o.title ?? '')],
     ['description', String(o.description ?? '') || '(none)'],
     ['tags', Array.isArray(o.tags) && o.tags.length > 0 ? o.tags.join(', ') : '(none)'],
-    ['worktree', o.worktreeId ? String(o.worktreeId) : '(not linked)']
+    ['worktree', o.worktreeId ? String(o.worktreeId) : '(not linked)'],
+    ['created', `${formatWhen(o.createdAt)}${o.createdBy ? ` by ${String(o.createdBy)}` : ''}`],
+    ['updated', formatWhen(o.updatedAt)]
   ])
+}
+
+/** A unix-ms timestamp as local date and time, or '(unknown)' when absent. */
+function formatWhen(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? new Date(value).toLocaleString() : '(unknown)'
 }
 
 function printServers(data: unknown): void {

@@ -98,6 +98,10 @@ orbital task delete <number|id>
   #13  todo         Fix cart badge count
   ```
 
+- `task show` prints every field, including who filed the task (`user` from
+  the cockpit UI, `agent` from this CLI) and when it was created and last
+  updated; `--json` carries them as `createdBy`, `createdAt` and `updatedAt`
+  (unix milliseconds).
 - Every command that takes a task accepts its **number** (`12` or `#12`) or a
   **unique id prefix** — `f907` works.
 - Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or

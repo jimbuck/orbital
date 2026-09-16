@@ -425,6 +425,12 @@ export interface Worktree {
   panes: Pane[]
 }
 
+/**
+ * Who filed a task: a person in the cockpit UI, or an agent through the
+ * `orbital` CLI's control channel.
+ */
+export type TaskCreator = 'user' | 'agent'
+
 export interface Task {
   id: string
   /** Human-facing task number: globally unique, assigned in creation order, never reused. */
@@ -436,7 +442,11 @@ export interface Task {
   status: TaskStatus
   /** Linked Worktree once "start a Worktree from this task" has been used. */
   worktreeId: string | null
+  /** Who filed it; null for tasks that predate provenance tracking. */
+  createdBy: TaskCreator | null
+  /** Unix ms. */
   createdAt: number
+  /** Unix ms; bumped by every field edit, status change and worktree link. */
   updatedAt: number
 }
 

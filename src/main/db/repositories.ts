@@ -12,6 +12,7 @@ import {
   type TabConfig,
   type TerminalStatus,
   type TaskStatus,
+  type TaskCreator,
   type LayoutNode,
   type TaskPatch,
   type WorkspaceInfo,
@@ -59,6 +60,7 @@ function mapTask(r: any): Task {
     tags: JSON.parse(r.tags || '[]') as string[],
     status: r.status as TaskStatus,
     worktreeId: r.worktree_id ?? null,
+    createdBy: r.created_by === 'user' || r.created_by === 'agent' ? (r.created_by as TaskCreator) : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at
   }
@@ -514,7 +516,14 @@ export const tasks = {
     const r = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(tid)
     return r ? mapTask(r) : undefined
   },
-  create(input: { projectId: string; title: string; description?: string; tags?: string[] }): Task {
+  create(input: {
+    projectId: string
+    title: string
+    description?: string
+    tags?: string[]
+    /** Who is filing it — the cockpit UI or an agent on the CLI. */
+    createdBy: TaskCreator
+  }): Task {
     const tid = id()
     const t = now()
     const db = getDb()
@@ -523,7 +532,7 @@ export const tasks = {
     // processes the same number.
     db.transaction(() => {
       db.prepare(
-        'INSERT INTO tasks (id, seq, project_id, title, description, tags, status, worktree_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)'
+        'INSERT INTO tasks (id, seq, project_id, title, description, tags, status, worktree_id, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
       ).run(
         tid,
         nextTaskSeq(db),
@@ -532,6 +541,7 @@ export const tasks = {
         input.description ?? '',
         JSON.stringify(input.tags ?? []),
         'todo',
+        input.createdBy,
         t,
         t
       )

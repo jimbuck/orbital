@@ -193,7 +193,10 @@ const handlers: Record<ControlCommand, Handler> = {
       projectId: req.projectId,
       title,
       description: req.args.description ? String(req.args.description) : undefined,
-      tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined
+      tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined,
+      // The control pipe is the agents' door into the cockpit; a person files
+      // tasks through the UI, which goes through IPC instead.
+      createdBy: 'agent'
     })
     runtime.broadcastState()
     return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }

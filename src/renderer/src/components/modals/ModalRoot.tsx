@@ -10,7 +10,7 @@ import {
 } from '@renderer/lib/status'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import TaskTitleButton from '../panel/TaskTitleButton'
-import { TaskTagsDisplay } from '../panel/TaskMeta'
+import { TaskCreatorMark, TaskTagsDisplay } from '../panel/TaskMeta'
 import TaskCardContextMenu from '../panel/TaskCardContextMenu'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import AddTaskCard from '../panel/AddTaskCard'
@@ -147,6 +147,7 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         <div className="min-w-0 flex-1">
           <TaskTitleButton task={task} className="block text-[12.5px] font-semibold text-text-2" />
         </div>
+        <TaskCreatorMark task={task} />
         <span className={`flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${taskChipClass(task.status)}`}>
           {taskStatusLabel(task.status)}
         </span>

@@ -3,6 +3,7 @@ import { Plus, X } from 'lucide-react'
 import { marked } from 'marked'
 import { useStore } from '@renderer/store'
 import { TASK_STATUSES, taskStatusLabel, taskColumnDot, taskColumnHeadClass } from '@renderer/lib/status'
+import { formatTaskTime, taskCreatorLabel } from '@renderer/components/panel/TaskMeta'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 
@@ -220,6 +221,13 @@ export default function EditTask(): JSX.Element {
           aria-invalid={Boolean(error && !title.trim())}
           className={`mt-1.5 ${inputBase}`}
         />
+        {/* Provenance: who filed the task and when, and when it last changed.
+            Read-only — these are captured by the create/update paths, never edited. */}
+        <div className="mt-1.5 text-[11px] text-faint" data-testid="task-provenance">
+          Filed by {taskCreatorLabel(task.createdBy)} · {formatTaskTime(task.createdAt)}
+          <span className="mx-1.5">·</span>
+          Updated {formatTaskTime(task.updatedAt)}
+        </div>
 
         <div className={`${fieldLabel} mt-4`}>Status</div>
         <div className="mt-1.5 flex flex-wrap gap-1.5">

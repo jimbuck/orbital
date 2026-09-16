@@ -47,6 +47,9 @@ export function taskDto(t: Task): Record<string, unknown> {
     title: t.title,
     description: t.description,
     tags: t.tags,
-    worktreeId: t.worktreeId
+    worktreeId: t.worktreeId,
+    createdBy: t.createdBy,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt
   }
 }

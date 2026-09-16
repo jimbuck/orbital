@@ -184,11 +184,26 @@ describe('repositories', () => {
   })
 
   it('numbers tasks monotonically and never reuses a deleted number', () => {
-    const a = repo.tasks.create({ projectId, title: 'a' })
-    const b = repo.tasks.create({ projectId, title: 'b' })
+    const a = repo.tasks.create({ projectId, title: 'a', createdBy: 'user' })
+    const b = repo.tasks.create({ projectId, title: 'b', createdBy: 'user' })
     expect([a.seq, b.seq]).toEqual([1, 2])
     repo.tasks.remove(b.id)
-    expect(repo.tasks.create({ projectId, title: 'c' }).seq).toBe(3)
+    expect(repo.tasks.create({ projectId, title: 'c', createdBy: 'user' }).seq).toBe(3)
+  })
+
+  it('records who filed a task and when, and bumps updated_at on edits', () => {
+    const before = Date.now()
+    const t = repo.tasks.create({ projectId, title: 'from the cli', createdBy: 'agent' })
+    expect(t.createdBy).toBe('agent')
+    expect(t.createdAt).toBeGreaterThanOrEqual(before)
+    expect(t.updatedAt).toBe(t.createdAt)
+    // A row from before provenance tracking has no creator.
+    getDb().prepare("UPDATE tasks SET created_by = '' WHERE id = ?").run(t.id)
+    expect(repo.tasks.get(t.id)!.createdBy).toBeNull()
+    getDb().prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(t.createdAt - 60_000, t.id)
+    const edited = repo.tasks.update(t.id, { title: 'renamed' })
+    expect(edited.updatedAt).toBeGreaterThanOrEqual(t.createdAt)
+    expect(edited.createdAt).toBe(t.createdAt)
   })
 
   it('makes a new tab the active one in its pane and moves it with its activation', () => {

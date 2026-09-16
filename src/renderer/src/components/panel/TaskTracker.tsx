@@ -5,7 +5,7 @@ import { useStore, activeProject, tasksForProject } from '@renderer/store'
 import { taskChipClass, taskStatusLabel } from '@renderer/lib/status'
 import type { Task } from '@shared/types'
 import TaskTitleButton from './TaskTitleButton'
-import { TaskTagsDisplay } from './TaskMeta'
+import { TaskCreatorMark, TaskTagsDisplay } from './TaskMeta'
 import TaskCardContextMenu from './TaskCardContextMenu'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 
@@ -127,6 +127,7 @@ export default function TaskTracker(): JSX.Element {
                     }`}
                   />
                 </div>
+                <TaskCreatorMark task={task} />
                 <span
                   className={`flex-none inline-flex items-center px-[7px] py-[2px] rounded-chip text-[9.5px] font-bold uppercase tracking-[0.3px] whitespace-nowrap ${taskChipClass(
                     task.status

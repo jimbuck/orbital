@@ -7,7 +7,7 @@ export function register(): void {
   const h = handle
   // ---- tasks ----
   h(IPC.createTask, (_e, projectId: string, title: string, description?: string, tags?: string[]) => {
-    const t = repo.tasks.create({ projectId, title, description, tags })
+    const t = repo.tasks.create({ projectId, title, description, tags, createdBy: 'user' })
     broadcast()
     return t
   })

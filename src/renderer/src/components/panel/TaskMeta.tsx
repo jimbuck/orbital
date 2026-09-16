@@ -1,5 +1,44 @@
 import type { JSX } from 'react'
-import type { Task } from '@shared/types'
+import { Bot } from 'lucide-react'
+import type { Task, TaskCreator } from '@shared/types'
+
+/** Human wording for who filed a task. */
+export function taskCreatorLabel(createdBy: TaskCreator | null): string {
+  return createdBy === 'agent' ? 'an agent' : createdBy === 'user' ? 'you' : 'unknown'
+}
+
+/** A unix-ms timestamp in the user's locale, date and time. */
+export function formatTaskTime(ms: number): string {
+  return new Date(ms).toLocaleString()
+}
+
+/**
+ * The provenance line for a task: who filed it and when, and when it last
+ * changed. Rendered as plain text so the edit modal and tooltips share one
+ * wording.
+ */
+export function taskProvenance(task: Task): string {
+  return `Filed by ${taskCreatorLabel(task.createdBy)} · ${formatTaskTime(task.createdAt)} · updated ${formatTaskTime(task.updatedAt)}`
+}
+
+/**
+ * A small robot mark on cards for tasks an agent filed from the CLI, so a
+ * glance at the tracker tells apart work the human queued from work the agents
+ * queued for the human. User-filed (and legacy, untracked) tasks show nothing.
+ */
+export function TaskCreatorMark({ task }: { task: Task }): JSX.Element | null {
+  if (task.createdBy !== 'agent') return null
+  return (
+    <span
+      className="flex-none inline-flex items-center text-faint"
+      title={taskProvenance(task)}
+      aria-label="Filed by an agent"
+      role="img"
+    >
+      <Bot size={12} strokeWidth={2} />
+    </span>
+  )
+}
 
 /**
  * Read-only tag chips shown on a task card. Editing tags (and every other task

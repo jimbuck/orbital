@@ -156,6 +156,7 @@ function migrate(d: Database.Database): void {
       tags         TEXT NOT NULL DEFAULT '[]',
       status       TEXT NOT NULL DEFAULT 'todo',
       worktree_id  TEXT,
+      created_by   TEXT NOT NULL DEFAULT '',
       created_at   INTEGER NOT NULL,
       updated_at   INTEGER NOT NULL
     );
@@ -173,6 +174,9 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'projects', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
   addColumnIfMissing(d, 'tasks', 'seq', 'INTEGER')
+  // '' (not NULL) so the column can be NOT NULL; mapTask reads it back as null:
+  // tasks from before provenance tracking have no known creator.
+  addColumnIfMissing(d, 'tasks', 'created_by', "TEXT NOT NULL DEFAULT ''")
   backfillTaskSeqs(d)
   d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')
   const defaultWorkspaceId = ensureDefaultWorkspace(d)
