@@ -2,6 +2,15 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.33.0](https://github.com/jimbuck/orbital/compare/v1.32.0...v1.33.0) (2026-09-16)
+
+
+### Features
+
+* **editor:** mermaid diagrams and syntax-coloured fences in markdown previews ([9bfe463](https://github.com/jimbuck/orbital/commit/9bfe463ead77383c8f17e958d662b15078e99ec0)), closes [#97](https://github.com/jimbuck/orbital/issues/97)
+* **tasks:** record who filed a task and surface created / updated times ([a976ce5](https://github.com/jimbuck/orbital/commit/a976ce52e98bf18285451a4dc530c5de198c5ee8)), closes [#89](https://github.com/jimbuck/orbital/issues/89)
+* **view:** zoom the UI in and out from the View menu and Ctrl +/-/0 ([96728df](https://github.com/jimbuck/orbital/commit/96728dfa866326e3f54855784412149c777307a3)), closes [#96](https://github.com/jimbuck/orbital/issues/96)
+
 # [1.32.0](https://github.com/jimbuck/orbital/compare/v1.31.0...v1.32.0) (2026-09-11)
 
 
