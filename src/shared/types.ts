@@ -934,6 +934,10 @@ export const IPC = {
   windowMaximize: 'orbital:windowMaximize',
   windowClose: 'orbital:windowClose',
   toggleDevTools: 'orbital:toggleDevTools',
+  zoomIn: 'orbital:zoomIn',
+  zoomOut: 'orbital:zoomOut',
+  zoomReset: 'orbital:zoomReset',
+  getZoomFactor: 'orbital:getZoomFactor',
   // updates
   getVersion: 'orbital:getVersion',
   updateStatus: 'orbital:updateStatus',
@@ -945,7 +949,8 @@ export const IPC = {
   evtTerminalExit: 'orbital:evt:terminalExit',
   evtAlert: 'orbital:evt:alert',
   evtUpdate: 'orbital:evt:update',
-  evtGitChanged: 'orbital:evt:gitChanged'
+  evtGitChanged: 'orbital:evt:gitChanged',
+  evtZoomChanged: 'orbital:evt:zoomChanged'
 } as const
 
 /* ============================================================================
@@ -1229,6 +1234,16 @@ export interface OrbitalApi {
   windowMaximize(): void
   windowClose(): void
   toggleDevTools(): void
+  /**
+   * UI zoom (View ▸ Zoom, Ctrl +/-/0). Main owns the level — it is applied to
+   * the window's webContents and persisted per machine — and reports the
+   * resulting factor through onZoomChanged.
+   */
+  zoomIn(): void
+  zoomOut(): void
+  zoomReset(): void
+  /** The current zoom factor (1 = 100%), for seeding the store. */
+  getZoomFactor(): Promise<number>
 
   // updates
   /** The running app's version (package.json version of the packaged build). */
@@ -1247,6 +1262,8 @@ export interface OrbitalApi {
   onAlert(cb: (evt: AlertEvent) => void): () => void
   onUpdateStatus(cb: (status: UpdateStatus) => void): () => void
   onGitChanged(cb: (evt: GitChangedEvent) => void): () => void
+  /** The window's zoom factor changed (a shortcut, a menu action, or the persisted level applied on load). */
+  onZoomChanged(cb: (factor: number) => void): () => void
 }
 
 /* ============================================================================

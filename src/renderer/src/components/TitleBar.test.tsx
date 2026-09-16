@@ -51,6 +51,7 @@ function seed(theme: ThemeMode): void {
     activeWorktreeId: null,
     alertCount: 0,
     updateStatus: { phase: 'idle' },
+    zoomFactor: 1,
     settings: makeSettings(theme)
   } as unknown as Parameters<typeof useStore.setState>[0])
 }
@@ -69,7 +70,14 @@ function themeItem(menu: HTMLElement, label: 'System' | 'Light' | 'Dark'): HTMLE
 beforeEach(() => {
   setSettings.mockClear()
   stubSystemDark(false)
-  vi.stubGlobal('orbital', { setSettings, toggleDevTools: vi.fn(), windowClose: vi.fn() })
+  vi.stubGlobal('orbital', {
+    setSettings,
+    toggleDevTools: vi.fn(),
+    windowClose: vi.fn(),
+    zoomIn: vi.fn(),
+    zoomOut: vi.fn(),
+    zoomReset: vi.fn()
+  })
 })
 
 afterEach(() => {
@@ -167,5 +175,31 @@ describe('TitleBar View menu — theme', () => {
     const reload = within(openViewMenu()).getByRole('menuitem', { name: 'Reload' })
 
     expect(reload.getAttribute('aria-checked')).toBeNull()
+  })
+})
+
+describe('TitleBar View menu — zoom', () => {
+  it('offers Zoom In / Out / Reset, each handed to main over the bridge', () => {
+    seed('dark')
+    useStore.setState({ zoomFactor: 1.2 } as Parameters<typeof useStore.setState>[0])
+    render(<TitleBar />)
+    const menu = openViewMenu()
+
+    // The heading reports the current scale, so the menu doubles as the indicator.
+    expect(within(menu).getByText('Zoom · 120%')).toBeTruthy()
+
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^Zoom In/ }))
+    expect(window.orbital.zoomIn).toHaveBeenCalledTimes(1)
+    fireEvent.click(within(openViewMenu()).getByRole('menuitem', { name: /^Zoom Out/ }))
+    expect(window.orbital.zoomOut).toHaveBeenCalledTimes(1)
+    fireEvent.click(within(openViewMenu()).getByRole('menuitem', { name: /^Reset Zoom/ }))
+    expect(window.orbital.zoomReset).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables Reset Zoom at 100%, where it would be a no-op', () => {
+    seed('dark')
+    render(<TitleBar />)
+    const reset = within(openViewMenu()).getByRole('menuitem', { name: /^Reset Zoom/ })
+    expect((reset as HTMLButtonElement).disabled).toBe(true)
   })
 })

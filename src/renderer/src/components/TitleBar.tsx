@@ -42,6 +42,7 @@ export default function TitleBar(): JSX.Element {
   const workspaceName = useStore((s) => (s.workspace && s.workspace.name !== 'Default' ? s.workspace.name : null))
   const alertCount = useStore((s) => s.alertCount)
   const updateStatus = useStore((s) => s.updateStatus)
+  const zoomFactor = useStore((s) => s.zoomFactor)
   const openModal = useStore((s) => s.openModal)
   const project = useStore(activeProject)
 
@@ -109,6 +110,14 @@ export default function TitleBar(): JSX.Element {
         { label: 'Commit History…', onClick: () => openModal('commitHistory'), disabled: !activeWorktreeId },
         { label: 'Reload', onClick: () => window.location.reload() },
         { label: 'Toggle Developer Tools', onClick: () => window.orbital.toggleDevTools() },
+        { sep: true, label: '' },
+        // The heading carries the current scale so the menu answers "how zoomed
+        // am I?" without a separate indicator; the shortcuts also work with
+        // focus in a terminal (they are handled in main, not here).
+        { label: `Zoom · ${Math.round(zoomFactor * 100)}%`, heading: true },
+        { label: 'Zoom In', hint: 'Ctrl +', onClick: () => window.orbital.zoomIn() },
+        { label: 'Zoom Out', hint: 'Ctrl −', onClick: () => window.orbital.zoomOut() },
+        { label: 'Reset Zoom', hint: 'Ctrl 0', disabled: zoomFactor === 1, onClick: () => window.orbital.zoomReset() },
         { sep: true, label: '' },
         { label: 'Theme', heading: true },
         // Applies (and persists) on click through the same path the Settings

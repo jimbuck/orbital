@@ -55,6 +55,8 @@ interface UIState {
   alertCount: number
   /** Auto-updater state (drives the "restart to update" pill and the About dialog). */
   updateStatus: UpdateStatus
+  /** The window's UI zoom factor (1 = 100%), mirrored from main for the View menu. */
+  zoomFactor: number
 }
 
 export interface EditorOpenRequest {
@@ -174,6 +176,7 @@ export const useStore = create<Store>((set, get) => ({
   editorOpen: null,
   alertCount: 0,
   updateStatus: { phase: 'idle' },
+  zoomFactor: 1,
 
   async init() {
     if (initStarted) return
@@ -183,12 +186,14 @@ export const useStore = create<Store>((set, get) => ({
     // with a state broadcast); the chime listens to onAlert in App.tsx.
     window.orbital.onStateChanged((s) => get().applyState(s))
     window.orbital.onUpdateStatus((status) => set({ updateStatus: status }))
+    window.orbital.onZoomChanged((zoomFactor) => set({ zoomFactor }))
     const state = await window.orbital.getState()
     get().applyState(state)
     set({ ready: true })
     // Seed with whatever the updater already knows (events fired before this
     // renderer loaded — e.g. an update that finished downloading — are gone).
     set({ updateStatus: await window.orbital.updateStatus() })
+    set({ zoomFactor: await window.orbital.getZoomFactor() })
   },
 
   applyState(s) {

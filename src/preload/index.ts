@@ -234,6 +234,10 @@ const api: OrbitalApi = {
   windowMaximize: () => ipcRenderer.send(IPC.windowMaximize),
   windowClose: () => ipcRenderer.send(IPC.windowClose),
   toggleDevTools: () => ipcRenderer.send(IPC.toggleDevTools),
+  zoomIn: () => ipcRenderer.send(IPC.zoomIn),
+  zoomOut: () => ipcRenderer.send(IPC.zoomOut),
+  zoomReset: () => ipcRenderer.send(IPC.zoomReset),
+  getZoomFactor: () => ipcRenderer.invoke(IPC.getZoomFactor) as Promise<number>,
 
   // updates
   getVersion: () => ipcRenderer.invoke(IPC.getVersion) as Promise<string>,
@@ -247,7 +251,8 @@ const api: OrbitalApi = {
   onTerminalExit: (cb: (evt: TerminalExitEvent) => void) => on<TerminalExitEvent>(IPC.evtTerminalExit, cb),
   onAlert: (cb: (evt: AlertEvent) => void) => on<AlertEvent>(IPC.evtAlert, cb),
   onUpdateStatus: (cb: (status: UpdateStatus) => void) => on<UpdateStatus>(IPC.evtUpdate, cb),
-  onGitChanged: (cb: (evt: GitChangedEvent) => void) => on<GitChangedEvent>(IPC.evtGitChanged, cb)
+  onGitChanged: (cb: (evt: GitChangedEvent) => void) => on<GitChangedEvent>(IPC.evtGitChanged, cb),
+  onZoomChanged: (cb: (factor: number) => void) => on<number>(IPC.evtZoomChanged, cb)
 }
 
 contextBridge.exposeInMainWorld('orbital', api)

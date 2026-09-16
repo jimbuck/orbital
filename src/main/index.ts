@@ -11,6 +11,7 @@ import {
 } from './services/workspaces'
 import { getSettings } from './services/settings'
 import { refreshJumpList } from './services/jump-list'
+import { zoom } from './services/zoom'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -60,12 +61,18 @@ function createWindow(): BrowserWindow {
   // runtime.refreshWindowTitle().
   win.on('page-title-updated', (e) => e.preventDefault())
 
-  // Push the initial state once the renderer is live.
-  win.webContents.on('did-finish-load', () => runtime.broadcastState())
+  // Push the initial state once the renderer is live, and restore the
+  // persisted UI zoom (a reload resets Chromium's level for the document).
+  win.webContents.on('did-finish-load', () => {
+    zoom.apply(win)
+    runtime.broadcastState()
+  })
 
   // Ctrl+Shift+R reloads the window. Handled in the main process (not a renderer
   // keydown listener) so it still fires when the renderer itself is wedged —
-  // which is exactly when a reload is most useful.
+  // which is exactly when a reload is most useful. The zoom shortcuts
+  // (Ctrl +/-/0) live here too, so they work with focus in a terminal, where
+  // xterm would otherwise swallow the keystroke.
   win.webContents.on('before-input-event', (event, input) => {
     if (
       input.type === 'keyDown' &&
@@ -77,7 +84,9 @@ function createWindow(): BrowserWindow {
     ) {
       event.preventDefault()
       win.webContents.reloadIgnoringCache()
+      return
     }
+    if (zoom.handleInput(win, input)) event.preventDefault()
   })
 
   // Dev diagnostics: surface renderer console + load/crash failures in the terminal.
