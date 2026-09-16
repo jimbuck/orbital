@@ -46,7 +46,10 @@ opened from the git panel land here directly.
 
 ## Preview mode
 
-- **Markdown** renders with theme-matched styles.
+- **Markdown** renders with theme-matched styles. Fenced code blocks tagged
+  with a language (```ts, ```sh, ```rust …) get the same syntax highlighting
+  as File mode, and ```mermaid fences render as diagrams in the app theme;
+  a diagram that does not parse shows mermaid's error above its source.
 - **HTML** renders in a sandboxed frame (no scripts, no app access — repo
   content can never reach Orbital's internals).
 - **SVG** renders as an image, with the source still available in File mode.

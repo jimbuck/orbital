@@ -1,9 +1,11 @@
-import { useMemo, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useMemo, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react'
 import { Plus, X } from 'lucide-react'
 import { marked } from 'marked'
 import { useStore } from '@renderer/store'
 import { TASK_STATUSES, taskStatusLabel, taskColumnDot, taskColumnHeadClass } from '@renderer/lib/status'
 import { formatTaskTime, taskCreatorLabel } from '@renderer/components/panel/TaskMeta'
+import { enhanceMarkdownCode } from '@renderer/lib/markdownCode'
+import { useResolvedTheme } from '@renderer/lib/theme'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 
@@ -35,6 +37,27 @@ export default function EditTask(): JSX.Element {
   // Description is stored as raw markdown; this toggles between the raw editor
   // and a rendered preview so users can author markdown and see it formatted.
   const [descMode, setDescMode] = useState<'write' | 'preview'>('write')
+  // The rendered description. Fenced code is rewritten asynchronously
+  // (diagrams, syntax colour), so the preview is state fed by an effect rather
+  // than computed inline; the guard drops a slow render that lands after a
+  // newer one.
+  const theme = useResolvedTheme()
+  const [previewHtml, setPreviewHtml] = useState('')
+  useEffect(() => {
+    if (descMode !== 'preview' || !description.trim()) return
+    let live = true
+    const body = marked.parse(description, { async: false }) as string
+    setPreviewHtml(body)
+    void enhanceMarkdownCode(body, theme).then(
+      (html) => {
+        if (live) setPreviewHtml(html)
+      },
+      () => {}
+    )
+    return () => {
+      live = false
+    }
+  }, [descMode, description, theme])
   const [tags, setTags] = useState<string[]>(task?.tags ?? [])
   const [tagDraft, setTagDraft] = useState('')
   const [deleteArmed, setDeleteArmed] = useState(false)
@@ -291,7 +314,7 @@ export default function EditTask(): JSX.Element {
           <div
             onClick={onPreviewClick}
             className="task-md mt-1.5 min-h-[120px] flex-1 overflow-auto rounded-btn border border-line-2 bg-bg px-3 py-2 text-[12.5px] leading-snug text-text-2"
-            dangerouslySetInnerHTML={{ __html: marked.parse(description, { async: false }) as string }}
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
           />
         ) : (
           <div className="mt-1.5 flex min-h-[120px] flex-1 items-center justify-center rounded-btn border border-line-2 bg-bg px-3 py-2 text-[12px] text-faint">
@@ -330,6 +353,14 @@ export default function EditTask(): JSX.Element {
             border-radius: 6px; padding: 0.6em 0.75em; margin: 0.6em 0; overflow: auto;
           }
           .task-md pre code { background: none; border: none; padding: 0; }
+          .task-md pre.shiki { background: var(--color-panel-2) !important; }
+          .task-md .mermaid-diagram { margin: 0.6em 0; text-align: center; overflow: auto; }
+          .task-md .mermaid-diagram svg { max-width: 100%; height: auto; }
+          .task-md .mermaid-error {
+            margin: 0.6em 0; border: 1px solid var(--color-red-2); border-radius: 6px; overflow: hidden;
+          }
+          .task-md .mermaid-error-title { padding: 0.3em 0.75em; color: var(--color-red-2); font-weight: 600; }
+          .task-md .mermaid-error pre { margin: 0; border: 0; border-radius: 0; }
           .task-md blockquote {
             border-left: 3px solid var(--color-line-2); margin: 0.6em 0;
             padding: 0.1em 0.8em; color: var(--color-text-3);

@@ -59,6 +59,32 @@ export function langFor(path: string): string | null {
   return null
 }
 
+/** Fence tags people write that are neither an extension nor a shiki id. */
+const FENCE_ALIASES: Record<string, string> = {
+  shell: 'bash',
+  console: 'bash',
+  pwsh: 'powershell',
+  golang: 'go',
+  'c++': 'cpp',
+  'c#': 'csharp',
+  dockerfile: 'docker',
+  jsonl: 'json',
+  node: 'javascript'
+}
+
+/**
+ * The shiki grammar for a markdown fence tag (```ts, ```sh, ```c++ …), or null
+ * for an unknown tag and the plain-text ones (```text, ```txt).
+ */
+export function langForFence(tag: string): string | null {
+  const t = tag.trim().toLowerCase()
+  if (!t) return null
+  if (FENCE_ALIASES[t]) return FENCE_ALIASES[t]
+  if (EXT_LANG[t]) return EXT_LANG[t]
+  if (SELF_LANGS.has(t)) return t
+  return null
+}
+
 /** Above this size highlighting is skipped — a plain <pre> keeps huge files snappy. */
 export const HIGHLIGHT_MAX = 300_000
 
@@ -146,7 +172,10 @@ async function withLang(lang: string): Promise<HighlighterCore> {
   const loader = LANG_LOADERS[lang]
   if (!loader) throw new Error(`no grammar for ${lang}`)
   const h = await getHighlighter()
-  if (!h.getLoadedLanguages().includes(lang)) h.loadLanguage((await loader()).default)
+  // loadLanguage registers the grammar only after its own await: without
+  // awaiting it here the first codeToHtml for a language throws "not found"
+  // and only a retry (the editor's next keystroke) ever sees it.
+  if (!h.getLoadedLanguages().includes(lang)) await h.loadLanguage((await loader()).default)
   return h
 }
 

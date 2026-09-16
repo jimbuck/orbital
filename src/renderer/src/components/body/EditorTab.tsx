@@ -5,6 +5,7 @@ import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
 import { useFileTree } from '@renderer/lib/fileTree'
 import { extOf, imageMime, resolveMarkdownImages } from '@renderer/lib/markdownAssets'
+import { enhanceMarkdownCode, hasTaggedFences } from '@renderer/lib/markdownCode'
 import { editCopy, editCut, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import FileContextMenu, { FILE_MENU_WIDTH, type FileMutation } from './FileContextMenu'
@@ -253,7 +254,8 @@ function mdCss(theme: ResolvedTheme): string {
           quote: '#667085',
           quoteBar: 'rgba(0,0,0,.16)',
           cellLine: 'rgba(0,0,0,.12)',
-          thBg: 'rgba(0,0,0,.04)'
+          thBg: 'rgba(0,0,0,.04)',
+          error: '#c2410c'
         }
       : {
           scheme: 'dark',
@@ -268,7 +270,8 @@ function mdCss(theme: ResolvedTheme): string {
           quote: '#8b95a6',
           quoteBar: 'rgba(255,255,255,.14)',
           cellLine: 'rgba(255,255,255,.1)',
-          thBg: 'rgba(255,255,255,.04)'
+          thBg: 'rgba(255,255,255,.04)',
+          error: '#f0883e'
         }
   return `
   :root { color-scheme: ${c.scheme}; }
@@ -283,6 +286,13 @@ function mdCss(theme: ResolvedTheme): string {
   pre { background: ${c.preBg}; border: 1px solid ${c.preLine}; border-radius: 8px;
         padding: 12px 14px; overflow: auto; }
   pre code { background: transparent; padding: 0; }
+  /* shiki paints its theme's page background inline; keep the app's block chrome. */
+  pre.shiki { background: ${c.preBg} !important; }
+  .mermaid-diagram { margin: 1em 0; text-align: center; overflow: auto; }
+  .mermaid-diagram svg { max-width: 100%; height: auto; }
+  .mermaid-error { margin: 1em 0; border: 1px solid ${c.error}; border-radius: 8px; overflow: hidden; }
+  .mermaid-error-title { padding: 6px 14px; color: ${c.error}; font-weight: 600; }
+  .mermaid-error pre { margin: 0; border: 0; border-radius: 0; }
   blockquote { margin: 0; padding: 0 1em; color: ${c.quote}; border-left: 3px solid ${c.quoteBar}; }
   table { border-collapse: collapse; }
   th, td { border: 1px solid ${c.cellLine}; padding: 5px 10px; }
@@ -366,7 +376,8 @@ export function Preview({
       const body = marked.parse(source, { async: false }) as string
       const wrap = (b: string): string =>
         `<!doctype html><meta charset="utf-8"><style>${mdCss(theme)}</style><body>${b}</body>`
-      if (!worktreeId) {
+      const fenced = hasTaggedFences(body)
+      if (!worktreeId && !fenced) {
         show(wrap(body))
         return
       }
@@ -374,6 +385,9 @@ export function Preview({
       // Local images become data: URLs *before* the frame is written, so the
       // preview never flashes broken images and is only rebuilt once. Cached
       // images resolve in a microtask, which keeps typing and theme flips smooth.
+      // Tagged code fences are rewritten first, on the same parsed-fragment
+      // terms: mermaid diagrams rendered to SVG here (the frame runs no scripts),
+      // other fences syntax-coloured.
       //
       // That still leaves a window (first render of a file, cold cache, slow IPC)
       // in which the frame holds the previous render. Whether that is acceptable
@@ -392,13 +406,24 @@ export function Preview({
         setDoc('')
       }
 
-      void resolveMarkdownImages(body, { worktreeId, mdPath: path })
-        .then((resolved) => show(wrap(resolved)))
-        .catch(() => {
-          // Resolution as a whole failed (it shouldn't — individual images already
-          // degrade on their own). Show the unresolved markdown rather than nothing.
-          show(wrap(body))
-        })
+      const finish = (html: string): void => {
+        if (!worktreeId) {
+          show(wrap(html))
+          return
+        }
+        void resolveMarkdownImages(html, { worktreeId, mdPath: path })
+          .then((resolved) => show(wrap(resolved)))
+          .catch(() => {
+            // Resolution as a whole failed (it shouldn't — individual images already
+            // degrade on their own). Show the unresolved markdown rather than nothing.
+            show(wrap(html))
+          })
+      }
+      // A document without tagged fences stays on the synchronous path: its
+      // image reads are issued in this very call, which the typing debounce
+      // and the staleness guard above both rely on.
+      if (fenced) void enhanceMarkdownCode(body, theme).then(finish, () => finish(body))
+      else finish(body)
     }
 
     // The same document, in the same theme, is already on screen: the only
