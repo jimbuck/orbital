@@ -390,9 +390,23 @@ export function isThemeId(value: unknown): value is ThemeId {
   return typeof value === 'string' && BY_ID.has(value)
 }
 
-/** The built-in theme for an appearance — what 'system' resolves to. */
+/** The built-in theme for an appearance — the default half of the system pair. */
 export function builtinTheme(appearance: ThemeAppearance): ThemeId {
   return appearance === 'light' ? 'light' : 'dark'
+}
+
+/**
+ * Coerce a stored "what system means on a {light,dark} OS" value to a theme of
+ * THAT appearance, falling back to the built-in.
+ *
+ * The appearance check is the point, not a formality. Storage is shared with
+ * hand edits, imports and other builds, and a dark-OS slot holding a light
+ * theme would make System do the one thing it exists to avoid: hand you a white
+ * window at night. An id this build does not ship falls back the same way.
+ */
+export function normalizeSystemTheme(value: unknown, appearance: ThemeAppearance): ThemeId {
+  const spec = typeof value === 'string' ? BY_ID.get(value) : undefined
+  return spec && spec.appearance === appearance ? spec.id : builtinTheme(appearance)
 }
 
 /* ---- Accent tokens --------------------------------------------------------- */

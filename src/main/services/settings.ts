@@ -10,6 +10,7 @@ import {
   type SettingsPatch,
   type WorkspaceSettings
 } from '@shared/types'
+import { normalizeSystemTheme } from '@shared/themes'
 import { getDb } from '../db/database'
 import { requireWorkspaceId, workspaces } from '../db/repositories'
 
@@ -33,6 +34,10 @@ const DEFAULT_SETTINGS: Settings = {
   // Existing installs merge over this default, so they stay dark and keep the
   // current look; only an explicit change opts a user into light/system.
   theme: 'dark',
+  // The pair 'system' resolves to. Orbital's own themes until the user says
+  // otherwise, which is exactly what 'system' meant before it was a pair.
+  systemDarkTheme: 'dark',
+  systemLightTheme: 'light',
   // Right pane by default: something opened from the palette or the git panel
   // lands beside what you were doing rather than on top of it.
   defaultOpenAction: 'right',
@@ -51,6 +56,8 @@ const GLOBAL_SETTING_KEYS = Object.keys({
   alerts: true,
   debugLogging: true,
   theme: true,
+  systemDarkTheme: true,
+  systemLightTheme: true,
   defaultOpenAction: true
 } satisfies Record<keyof GlobalSettings, true>) as readonly (keyof GlobalSettings)[]
 
@@ -167,6 +174,11 @@ export function getSettings(): Settings {
   // and other builds, and an unknown placement would leave the renderer unable
   // to resolve a target pane at all.
   merged.defaultOpenAction = normalizeOpenAction(merged.defaultOpenAction) ?? DEFAULT_SETTINGS.defaultOpenAction
+  // Likewise the system pair, with the extra rule that each half has to name a
+  // theme of its own appearance — a dark-OS slot holding a light theme would
+  // defeat the whole feature rather than merely look odd.
+  merged.systemDarkTheme = normalizeSystemTheme(merged.systemDarkTheme, 'dark')
+  merged.systemLightTheme = normalizeSystemTheme(merged.systemLightTheme, 'light')
   return merged
 }
 

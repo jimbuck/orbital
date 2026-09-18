@@ -515,6 +515,20 @@ export interface Settings {
   /** App color theme: 'system' follows the OS, else a theme id. Defaults to 'dark'. */
   theme: ThemeMode
   /**
+   * What `theme: 'system'` resolves to on a dark and on a light OS.
+   *
+   * Two fields rather than one, because following the OS is a choice of PAIR:
+   * the whole point is that the window changes when the OS does, and a single
+   * "system theme" could only ever be right half the time. Kept separate from
+   * `theme` so pinning a theme for an afternoon and switching back to System
+   * does not lose the pair — and so setting the light half is possible without
+   * first switching to it and being blinded.
+   *
+   * Each must name a theme OF ITS OWN APPEARANCE; see normalizeSystemTheme.
+   */
+  systemDarkTheme: ThemeId
+  systemLightTheme: ThemeId
+  /**
    * Where a tab opened from outside the pane area lands (command palette, git
    * panel, dev-server link). Defaults to `right`, so an opened file sits beside
    * what you were doing rather than on top of it.

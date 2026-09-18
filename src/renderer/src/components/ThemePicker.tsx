@@ -1,8 +1,16 @@
 import { useRef, type JSX, type KeyboardEvent } from 'react'
-import { Check } from 'lucide-react'
+import { Check, ChevronDown, Moon, Sun } from 'lucide-react'
 import type { ThemeMode } from '@shared/types'
-import { themeById, themeTokens, type ThemeSpec } from '@shared/themes'
-import { DARK_THEMES, LIGHT_THEMES, setThemeMode, useSystemTheme, useThemeMode } from '@renderer/lib/theme'
+import { themeById, themeTokens, type ThemeAppearance, type ThemeId, type ThemeSpec } from '@shared/themes'
+import {
+  DARK_THEMES,
+  LIGHT_THEMES,
+  setSystemTheme,
+  setThemeMode,
+  useSystemPair,
+  useSystemTheme,
+  useThemeMode
+} from '@renderer/lib/theme'
 
 /**
  * The theme gallery: every theme as a miniature of the window it makes, so the
@@ -120,6 +128,42 @@ export function nextTileIndex(key: string, current: number, count: number, colum
   }
 }
 
+/**
+ * One half of the system pair. A plain select rather than another gallery: this
+ * is a setting about the theme you are NOT looking at, and a second grid of
+ * twenty swatches under the first would read as a second choice of theme.
+ */
+function PairSelect({ appearance, value }: { appearance: ThemeAppearance; value: ThemeId }): JSX.Element {
+  const dark = appearance === 'dark'
+  const Icon = dark ? Moon : Sun
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {/* The moon/sun says which OS state this select answers for; the select's
+          aria-label says it in words, since an icon is not a label. */}
+      <Icon size={12} strokeWidth={1.5} className="flex-none text-faint" />
+      <span className="relative">
+        <select
+          value={value}
+          onChange={(e) => setSystemTheme(appearance, e.target.value as ThemeId)}
+          aria-label={dark ? 'Theme on a dark system' : 'Theme on a light system'}
+          className="appearance-none rounded-btn border border-line-2 bg-bg py-[5px] pl-2.5 pr-7 text-[11.5px] text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+        >
+          {(dark ? DARK_THEMES : LIGHT_THEMES).map((t) => (
+            <option key={t.id} value={t.id} className="bg-panel text-text-2">
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={12}
+          strokeWidth={1.5}
+          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-faint"
+        />
+      </span>
+    </span>
+  )
+}
+
 export default function ThemePicker({
   describedBy,
   className = ''
@@ -130,6 +174,7 @@ export default function ThemePicker({
 }): JSX.Element {
   const mode = useThemeMode()
   const systemTheme = useSystemTheme()
+  const pair = useSystemPair()
   // Arrowing moves DOM focus itself, so the tiles are kept by value; cleared
   // per option on unmount so a changed list cannot pin a detached node.
   const nodes = useRef(new Map<ThemeMode, HTMLButtonElement>())
@@ -178,28 +223,43 @@ export default function ThemePicker({
   )
 
   return (
-    <div
-      role="radiogroup"
-      aria-label="Theme"
-      aria-describedby={describedBy}
-      className={`grid grid-cols-3 gap-2 ${className}`}
-    >
-      {tile(
-        'system',
-        'System',
-        // What System would mean right now — the reason someone hovers this
-        // tile at all is to decide whether to hand the choice back to the OS.
-        systemTheme,
-        <div className="flex">
-          {/* Both halves, because System is not one look: it is whichever of
-              the two built-ins the OS is asking for at the time. */}
-          <ThemeSwatch theme={themeById('dark')} className="w-1/2" />
-          <ThemeSwatch theme={themeById('light')} className="w-1/2" />
+    <>
+      <div
+        role="radiogroup"
+        aria-label="Theme"
+        aria-describedby={describedBy}
+        className={`grid grid-cols-3 gap-2 ${className}`}
+      >
+        {tile(
+          'system',
+          'System',
+          // What System would mean right now — the reason someone opens this
+          // tile at all is to decide whether to hand the choice back to the OS.
+          themeById(pair[systemTheme]).name,
+          <div className="flex">
+            {/* Both halves, because System is not one look: it is whichever of
+                the pair the OS is asking for at the time. Showing the chosen
+                pair rather than a fixed pair of built-ins is the whole point —
+                the tile has to look like what picking it would do. */}
+            <ThemeSwatch theme={themeById(pair.dark)} className="w-1/2" />
+            <ThemeSwatch theme={themeById(pair.light)} className="w-1/2" />
+          </div>
+        )}
+        <div aria-hidden className="col-span-2" />
+        {group('Dark', DARK_THEMES)}
+        {group('Light', LIGHT_THEMES)}
+      </div>
+
+      {/* Only while System is the choice. These two are meaningless with a
+          theme pinned, and a permanent row of controls that do nothing is a
+          worse answer than a row that appears when it starts to matter. */}
+      {mode === 'system' && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[9px] border border-line-2 bg-bg px-3 py-2.5 text-[11.5px] text-text-3">
+          <span>System uses</span>
+          <PairSelect appearance="dark" value={pair.dark} />
+          <PairSelect appearance="light" value={pair.light} />
         </div>
       )}
-      <div aria-hidden className="col-span-2" />
-      {group('Dark', DARK_THEMES)}
-      {group('Light', LIGHT_THEMES)}
-    </div>
+    </>
   )
 }

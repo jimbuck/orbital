@@ -33,8 +33,15 @@ from the root checkout — `.env` and `.env.*` by default. Add patterns like
 Twenty themes, light and dark — Orbital's own pair, the ones the editors ship
 (VS Code Dark+/Light+, Darcula, IntelliJ Light, One Dark/Light, Monokai) and the
 community classics (Dracula, Nord, Tokyo Night, Catppuccin, GitHub, Gruvbox,
-Solarized). **System** follows the OS and resolves to Orbital Dark or Orbital
-Light; picking any other theme pins it.
+Solarized). Picking one pins it; **System** hands the choice back to the OS.
+
+**System** is a *pair* — the theme for a dark OS and the theme for a light one —
+so following the OS doesn't mean giving up your theme. Choose System and two
+selects appear beneath the gallery: Dracula at night, GitHub Light by day, and
+the window changes with the OS. They default to Orbital Dark and Orbital Light.
+Setting a half doesn't switch to it; the View menu and the palette name the half
+your OS is asking for right now, so you can see what System would give before
+you pick it.
 
 A theme colours the whole window, not just the chrome: the terminal's ANSI
 palette, the editor's syntax highlighting and the markdown preview all follow it.

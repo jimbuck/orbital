@@ -28,7 +28,13 @@ function stubSystemDark(dark: boolean): void {
   }))
 }
 
-function makeSettings(theme: ThemeMode): Settings {
+/** What 'system' resolves to, when a test cares which half it lands on. */
+interface SystemPair {
+  systemDarkTheme: string
+  systemLightTheme: string
+}
+
+function makeSettings(theme: ThemeMode, pair?: SystemPair): Settings {
   return {
     defaultShell: 'pwsh.exe',
     alerts: { indicator: true, sound: true, taskbarBadge: false, taskbarFlash: false },
@@ -36,11 +42,12 @@ function makeSettings(theme: ThemeMode): Settings {
     periodicFetch: true,
     debugLogging: false,
     agents: [],
-    theme
+    theme,
+    ...pair
   } as unknown as Settings
 }
 
-function seed(theme: ThemeMode): void {
+function seed(theme: ThemeMode, pair?: SystemPair): void {
   useStore.setState({
     projects: [],
     worktrees: [],
@@ -52,7 +59,7 @@ function seed(theme: ThemeMode): void {
     alertCount: 0,
     updateStatus: { phase: 'idle' },
     zoomFactor: 1,
-    settings: makeSettings(theme)
+    settings: makeSettings(theme, pair)
   } as unknown as Parameters<typeof useStore.setState>[0])
 }
 
@@ -122,38 +129,47 @@ describe('TitleBar View menu — theme', () => {
     expect(themeItem(menu, 'Orbital Light').getAttribute('aria-checked')).toBe('false')
   })
 
-  it('annotates System with the OS preference', () => {
+  it('annotates System with the theme the OS preference would select', () => {
+    // Not the word "dark"/"light" but the theme itself: System is a pair now,
+    // and the row has to say which half this OS is asking for.
     stubSystemDark(true)
-    seed('system')
+    seed('system', { systemDarkTheme: 'dracula', systemLightTheme: 'github-light' })
     render(<TitleBar />)
-    expect(themeItem(openViewMenu(), 'System').textContent).toContain('dark')
+    expect(themeItem(openViewMenu(), 'System').textContent).toContain('Dracula')
 
     cleanup()
     stubSystemDark(false)
-    seed('system')
+    seed('system', { systemDarkTheme: 'dracula', systemLightTheme: 'github-light' })
     render(<TitleBar />)
-    expect(themeItem(openViewMenu(), 'System').textContent).toContain('light')
+    expect(themeItem(openViewMenu(), 'System').textContent).toContain('GitHub Light')
   })
 
-  it('keeps the System hint on the OS preference when a mode is pinned', () => {
+  it('falls back to the built-ins when the pair has never been set', () => {
+    stubSystemDark(true)
+    seed('system')
+    render(<TitleBar />)
+    expect(themeItem(openViewMenu(), 'System').textContent).toContain('Orbital Dark')
+  })
+
+  it('keeps the System hint on the OS preference when a theme is pinned', () => {
     // The case the hint exists for, and the one seeding only 'system' can never
-    // catch: with a mode pinned, "what the app is showing" and "what the OS
+    // catch: with a theme pinned, "what the app is showing" and "what the OS
     // wants" disagree, and the hint must report the OS. A hint sourced from the
     // applied theme reads back the user's own pin — telling someone on a light
-    // OS who pinned Dark that switching to System means dark, which is exactly
-    // backwards, and wrong precisely when they are asking.
+    // OS who pinned Dracula that switching to System means Dracula, which is
+    // exactly backwards, and wrong precisely when they are asking.
     stubSystemDark(false)
-    seed('dark')
+    seed('dracula', { systemDarkTheme: 'dracula', systemLightTheme: 'github-light' })
     render(<TitleBar />)
     const hinted = themeItem(openViewMenu(), 'System').textContent
-    expect(hinted).toContain('light')
-    expect(hinted).not.toContain('dark')
+    expect(hinted).toContain('GitHub Light')
+    expect(hinted).not.toContain('Dracula')
 
     cleanup()
     stubSystemDark(true)
-    seed('light')
+    seed('light', { systemDarkTheme: 'nord', systemLightTheme: 'light' })
     render(<TitleBar />)
-    expect(themeItem(openViewMenu(), 'System').textContent).toContain('dark')
+    expect(themeItem(openViewMenu(), 'System').textContent).toContain('Nord')
   })
 
   it('persists the picked mode through the settings bridge, leaving the rest intact', () => {

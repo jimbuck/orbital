@@ -6,7 +6,7 @@ import { openTab } from '@renderer/lib/openTab'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { OrbitalMark } from './icons'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode } from '@renderer/lib/theme'
+import { setThemeMode, themeModeLabel, useSystemThemeId, useThemeMode } from '@renderer/lib/theme'
 
 interface MenuItem {
   label: string
@@ -52,13 +52,14 @@ export default function TitleBar(): JSX.Element {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [devMenu, setDevMenu] = useState(false)
 
-  // The picked mode drives the check mark. The 'System' row's hint is the OS
-  // preference itself — NOT the theme currently applied — because the question
-  // that row answers is "what would I get if I switched to System?". Someone on
-  // a light OS who has pinned Dark is exactly who opens this menu to decide, and
-  // echoing their pinned theme back would tell them the opposite of the truth.
+  // The picked mode drives the check mark. The 'System' row's hint is the theme
+  // the OS preference would select right now — NOT the theme currently applied —
+  // because the question that row answers is "what would I get if I switched to
+  // System?". Someone on a light OS who has pinned a dark theme is exactly who
+  // opens this menu to decide, and echoing their pin back would tell them the
+  // opposite of the truth.
   const themeMode = useThemeMode()
-  const systemTheme = useSystemTheme()
+  const systemThemeId = useSystemThemeId()
 
   const activeWorktreeId = useStore((s) => s.activeWorktreeId)
   const servers = useStore((s) => (s.activeWorktreeId ? s.devServers[s.activeWorktreeId] : undefined)) ?? []
@@ -136,7 +137,7 @@ export default function TitleBar(): JSX.Element {
         ...(['system', 'dark', 'light'] as const).map<MenuItem>((mode) => ({
           label: themeModeLabel(mode),
           checked: themeMode === mode,
-          hint: mode === 'system' ? systemTheme : undefined,
+          hint: mode === 'system' ? themeModeLabel(systemThemeId) : undefined,
           onClick: () => setThemeMode(mode)
         })),
         { label: 'More Themes…', onClick: () => openModal('settings') }

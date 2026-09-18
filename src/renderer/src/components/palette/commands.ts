@@ -41,7 +41,7 @@ import { useStore, activePaneId, type Store } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { openTab } from '@renderer/lib/openTab'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, themeModeLabel } from '@renderer/lib/theme'
+import { setThemeMode, systemThemeId, themeModeLabel } from '@renderer/lib/theme'
 import { THEMES } from '@shared/themes'
 
 /**
@@ -414,6 +414,9 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       label: `Theme: ${themeModeLabel(mode)}`,
       keywords: `appearance colour color ${spec ? spec.appearance : 'dark light os'}`,
       icon: Sun,
+      // System names the half of the pair it would pick, so the row is not a
+      // blind choice; which half is a question for the OS, not the settings.
+      hint: spec ? undefined : themeModeLabel(systemThemeId()),
       checked: (s.settings?.theme ?? 'dark') === mode,
       run: () => setThemeMode(mode)
     })

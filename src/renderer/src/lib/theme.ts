@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { ThemeMode } from '@shared/types'
+import type { Settings, SettingsPatch, ThemeMode } from '@shared/types'
 import {
   DEFAULT_THEME_ID,
   THEMES,
-  builtinTheme,
   isThemeId,
+  normalizeSystemTheme,
   themeById,
   themeStyleSheet,
   type ThemeAppearance,
@@ -44,19 +44,19 @@ export function useThemeMode(): ThemeMode {
 }
 
 /**
- * Persist a new theme.
+ * Persist ONE theme setting, applying it immediately.
  *
- * Sends `theme` and nothing else. The theme lives in the machine-global slice
- * that every workspace instance shares, so writing a whole Settings object here
- * would push this window's snapshot of defaultShell / alerts / debugLogging over
- * whatever another instance had just changed — a one-click control writing five
- * unrelated fields is exactly how a lost update happens. Every theme control
- * funnels through here, so the View menu, the Settings modal and the palette
- * cannot drift apart: there is only one write path.
+ * Sends that key and nothing else. These fields live in the machine-global
+ * slice that every workspace instance shares, so writing a whole Settings
+ * object here would push this window's snapshot of defaultShell / alerts /
+ * debugLogging over whatever another instance had just changed — a one-click
+ * control writing five unrelated fields is exactly how a lost update happens.
+ * Every theme control funnels through here, so the View menu, the Settings
+ * modal and the palette cannot drift apart: there is only one write path.
  *
- * The store is still updated optimistically: the write round-trips through the
- * main process before the state broadcast that would normally update it lands,
- * and re-theming the whole app should track the click rather than lag an IPC hop
+ * The store is updated optimistically: the write round-trips through the main
+ * process before the state broadcast that would normally update it lands, and
+ * re-theming the whole app should track the click rather than lag an IPC hop
  * behind it. The broadcast then overwrites this with the authoritative value.
  *
  * No-ops until settings have loaded — with nothing to update optimistically the
@@ -77,22 +77,42 @@ export function useThemeMode(): ThemeMode {
  *   a failure that needs the settings row to be locked by another process for
  *   several seconds. The console line is for whoever is debugging that case.
  *
- * The rollback is conditional: if the store has since moved to some other theme
- * (a later click, or a broadcast carrying another instance's change), that value
- * is newer than what this call knows and is left alone.
+ * The rollback is conditional: if the store has since moved on (a later click,
+ * or a broadcast carrying another instance's change), that value is newer than
+ * what this call knows and is left alone.
  */
-export function setThemeMode(mode: ThemeMode): void {
+function persistThemeSetting<K extends 'theme' | 'systemDarkTheme' | 'systemLightTheme'>(
+  key: K,
+  value: Settings[K]
+): void {
   const settings = useStore.getState().settings
-  if (!settings || settings.theme === mode) return
-  const previous = settings.theme
-  useStore.setState({ settings: { ...settings, theme: mode } })
-  void window.orbital.setSettings({ theme: mode }).catch((err: unknown) => {
+  if (!settings || settings[key] === value) return
+  const previous = settings[key]
+  useStore.setState({ settings: { ...settings, [key]: value } })
+  void window.orbital.setSettings({ [key]: value } as SettingsPatch).catch((err: unknown) => {
     const current = useStore.getState().settings
-    if (current && current.theme === mode) {
-      useStore.setState({ settings: { ...current, theme: previous } })
+    if (current && current[key] === value) {
+      useStore.setState({ settings: { ...current, [key]: previous } })
     }
     console.error("Couldn't save the theme — it has been reverted.", err)
   })
+}
+
+/** Pin a theme, or hand the choice back to the OS with 'system'. */
+export function setThemeMode(mode: ThemeMode): void {
+  persistThemeSetting('theme', mode)
+}
+
+/**
+ * Set the half of the system pair for `appearance` — what 'system' will mean
+ * on a dark, or on a light, OS.
+ *
+ * Setting a half does NOT switch to System. Someone on a dark OS choosing
+ * their light theme is configuring what happens at sunrise, and flipping the
+ * window white to acknowledge the click would be a poor way to say so.
+ */
+export function setSystemTheme(appearance: ThemeAppearance, theme: ThemeId): void {
+  persistThemeSetting(appearance === 'dark' ? 'systemDarkTheme' : 'systemLightTheme', theme)
 }
 
 /**
@@ -124,18 +144,61 @@ export function useSystemTheme(): ResolvedTheme {
 }
 
 /**
+ * The pair 'system' resolves to: the theme for a dark OS, and the one for a
+ * light OS. Normalized on the way out for the same reasons main normalizes it
+ * on the way in — the renderer can be handed a stale broadcast from a build
+ * that shipped a theme this one does not, and a half naming the wrong
+ * appearance must not survive that far.
+ */
+export function useSystemPair(): Record<ThemeAppearance, ThemeId> {
+  const dark = useStore((s) => s.settings?.systemDarkTheme)
+  const light = useStore((s) => s.settings?.systemLightTheme)
+  return { dark: normalizeSystemTheme(dark, 'dark'), light: normalizeSystemTheme(light, 'light') }
+}
+
+/**
+ * What 'system' would give right now, read once rather than subscribed to.
+ *
+ * For the callers that are not components: the palette builds its command list
+ * from a store snapshot, so it cannot use the hooks, and the System row there
+ * still has to name the theme it would apply. matchMedia is optional-chained
+ * because this runs outside a React render and can be reached in environments
+ * (jsdom, a test harness) that have no media queries at all.
+ */
+export function systemThemeId(): ThemeId {
+  const dark = typeof window !== 'undefined' && !!window.matchMedia?.(DARK_QUERY)?.matches
+  const settings = useStore.getState().settings
+  return dark
+    ? normalizeSystemTheme(settings?.systemDarkTheme, 'dark')
+    : normalizeSystemTheme(settings?.systemLightTheme, 'light')
+}
+
+/**
+ * What 'system' would give right now — the pair's half for the CURRENT OS
+ * preference, whatever theme happens to be pinned.
+ *
+ * Separate from {@link useThemeId} because that is the question the controls
+ * ask: the System row in the View menu annotates itself with this, and the
+ * person reading it is deciding whether to un-pin. Answering with the applied
+ * theme would tell them what they already have.
+ */
+export function useSystemThemeId(): ThemeId {
+  return useSystemPair()[useSystemTheme()]
+}
+
+/**
  * The theme id actually applied to the DOM.
  *
- * 'system' tracks the OS preference live and resolves to the BUILT-IN theme for
- * it, so toggling the OS theme re-themes the app without a reload; any other
- * value is a pinned theme and simply wins. Layered over useSystemTheme so there
- * is exactly one matchMedia subscription concept in the app, and no second place
- * for its listener cleanup to be wrong.
+ * 'system' tracks the OS preference live and resolves to the user's chosen
+ * theme for it, so toggling the OS theme re-themes the app without a reload;
+ * any other value is a pinned theme and simply wins. Layered over
+ * useSystemTheme so there is exactly one matchMedia subscription concept in the
+ * app, and no second place for its listener cleanup to be wrong.
  */
 export function useThemeId(): ThemeId {
   const mode = useThemeMode()
-  const systemTheme = useSystemTheme()
-  return mode === 'system' ? builtinTheme(systemTheme) : mode
+  const systemThemeId = useSystemThemeId()
+  return mode === 'system' ? systemThemeId : mode
 }
 
 /** The full spec of the applied theme — its seed colours, and its code theme. */

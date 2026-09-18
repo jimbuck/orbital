@@ -15,7 +15,13 @@ import Settings from './Settings'
 /** The settings-bridge call every theme selection is expected to make. */
 const setSettings = vi.fn(async (patch: SettingsPatch) => patch as SettingsModel)
 
-function makeSettings(theme: ThemeMode): SettingsModel {
+/** What 'system' resolves to, when a test cares which half it lands on. */
+interface SystemPair {
+  systemDarkTheme: string
+  systemLightTheme: string
+}
+
+function makeSettings(theme: ThemeMode, pair?: SystemPair): SettingsModel {
   return {
     defaultShell: 'pwsh.exe',
     alerts: { indicator: true, sound: true, taskbarBadge: false, taskbarFlash: false },
@@ -26,19 +32,20 @@ function makeSettings(theme: ThemeMode): SettingsModel {
     // test is about the Appearance section.
     agents: [],
     theme,
+    ...pair,
     defaultOpenAction: 'right',
     accentColor: null
   } as unknown as SettingsModel
 }
 
-function seed(theme: ThemeMode): void {
+function seed(theme: ThemeMode, pair?: SystemPair): void {
   useStore.setState({
     projects: [],
     worktrees: [],
     activeProjectId: null,
     activeWorktreeId: null,
     workspace: null,
-    settings: makeSettings(theme)
+    settings: makeSettings(theme, pair)
   } as unknown as Parameters<typeof useStore.setState>[0])
 }
 
@@ -143,6 +150,56 @@ describe('Settings — theme control', () => {
     expect(themeRadios()[0].getAttribute('aria-checked')).toBe('true')
     expect(logged).toHaveBeenCalled()
     logged.mockRestore()
+  })
+
+  it('offers the system pair only while System is the choice', () => {
+    // Two selects that decide nothing are worse than two that appear when they
+    // start to matter — with a theme pinned, neither half is ever consulted.
+    seed('dark')
+    render(<Settings />)
+    expect(screen.queryByLabelText('Theme on a dark system')).toBeNull()
+
+    cleanup()
+    seed('system')
+    render(<Settings />)
+    expect(screen.getByLabelText('Theme on a dark system')).toBeTruthy()
+    expect(screen.getByLabelText('Theme on a light system')).toBeTruthy()
+  })
+
+  it('only offers themes of the matching appearance in each half', () => {
+    // A light theme in the dark-OS slot is the one outcome System must never
+    // produce, so it is not offered in the first place.
+    seed('system')
+    render(<Settings />)
+
+    const options = (label: string): string[] =>
+      Array.from((screen.getByLabelText(label) as HTMLSelectElement).options).map((o) => o.value)
+    expect(options('Theme on a dark system')).toContain('dracula')
+    expect(options('Theme on a dark system')).not.toContain('github-light')
+    expect(options('Theme on a light system')).toContain('github-light')
+    expect(options('Theme on a light system')).not.toContain('dracula')
+  })
+
+  it('persists one half without switching away from System', () => {
+    seed('system')
+    render(<Settings />)
+    fireEvent.change(screen.getByLabelText('Theme on a dark system'), { target: { value: 'dracula' } })
+
+    expect(setSettings).toHaveBeenCalledTimes(1)
+    expect(setSettings.mock.calls[0][0]).toEqual({ systemDarkTheme: 'dracula' })
+    // Still System: the user configured what the OS will get, they did not pin
+    // a theme. (matchMedia is stubbed dark here, so this half is the live one.)
+    expect(useStore.getState().settings?.theme).toBe('system')
+    expect(screen.getByRole('radio', { name: 'System' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('shows the System tile the pair it would actually apply', () => {
+    // The tile has to look like what picking it would do; annotating it with a
+    // fixed "Orbital Dark" while the pair says Dracula is just a lie.
+    seed('system', { systemDarkTheme: 'dracula', systemLightTheme: 'github-light' })
+    render(<Settings />)
+
+    expect(screen.getByRole('radio', { name: 'System' }).textContent).toContain('Dracula')
   })
 
   it('says the theme applies immediately, next to the control and to assistive tech', () => {

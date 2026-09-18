@@ -326,3 +326,31 @@ describe('accentColor', () => {
     expect(getSettings().accentColor).toBe('#f06a8a')
   })
 })
+
+describe('the system theme pair', () => {
+  it('defaults to the built-ins and lives in the global slice', () => {
+    expect(getSettings().systemDarkTheme).toBe('dark')
+    expect(getSettings().systemLightTheme).toBe('light')
+
+    setSettings({ systemDarkTheme: 'dracula' })
+    expect(getSettings().systemDarkTheme).toBe('dracula')
+    // Global, not per-workspace: 'system' meaning Dracula at night is a fact
+    // about this machine, like the theme itself.
+    expect(storedGlobalKeys()).toEqual(['systemDarkTheme'])
+    expect(workspaceWrites).toBe(0)
+  })
+
+  it('rejects a stored half that names a theme of the wrong appearance', () => {
+    // The failure this guards: a dark-OS slot holding a light theme would make
+    // System hand you a white window at night — the one thing it exists to
+    // avoid. A hand edit, an import or another build can all produce it.
+    globalRow = JSON.stringify({ systemDarkTheme: 'github-light', systemLightTheme: 'nord' })
+    expect(getSettings().systemDarkTheme).toBe('dark')
+    expect(getSettings().systemLightTheme).toBe('light')
+  })
+
+  it('falls back for an id this build does not ship', () => {
+    globalRow = JSON.stringify({ systemDarkTheme: 'a-newer-builds-theme' })
+    expect(getSettings().systemDarkTheme).toBe('dark')
+  })
+})
