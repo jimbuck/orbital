@@ -72,6 +72,30 @@ function openMenu(worktrees: Worktree[]): void {
   fireEvent.contextMenu(screen.getByText(project.name))
 }
 
+/** A linked Worktree in `status`, for the group-summary tests. */
+function linked(id: string, status: Worktree['status']): Worktree {
+  return { ...rootWorktree, id, kind: 'linked', name: id, status }
+}
+
+/** Render the header with `worktrees` seeded, and the project expanded or not. */
+function renderHeader(worktrees: Worktree[], expanded = false): void {
+  useStore.setState({
+    projects: [project],
+    worktrees,
+    tasks: [],
+    activeProjectId: project.id,
+    activeWorktreeId: null,
+    expanded: expanded ? { [project.id]: true } : {}
+  } as unknown as Parameters<typeof useStore.setState>[0])
+  render(<Project project={project} />)
+}
+
+/** The chevron's className — where the group summary is painted. */
+function chevronClass(): string {
+  const button = screen.getByRole('button', { name: /project/ })
+  return button.querySelector('svg')?.getAttribute('class') ?? ''
+}
+
 /** Menu item labels, in rendered order. */
 function items(): string[] {
   return screen.getAllByRole('menuitem').map((el) => el.textContent ?? '')
@@ -122,5 +146,58 @@ describe('project context menu', () => {
     openMenu([rootWorktree])
     fireEvent.click(screen.getByText('Clear Status'))
     expect(bridge.clearWorktreeStatus).toHaveBeenCalledWith(rootWorktree.id)
+  })
+})
+
+describe('project header — whose status is whose', () => {
+  it('shows the ROOT Worktree\'s status on the header dot, not the whole project\'s', () => {
+    // The bug: one agent working in one linked Worktree painted a spinner on
+    // that row AND on the project header, which reads as two things running.
+    // The header row IS the root Worktree, so it reports the root and nothing
+    // else — here the root is idle while a child works.
+    renderHeader([rootWorktree, linked('w-a', 'working')])
+
+    expect(screen.getByTitle('idle')).toBeTruthy()
+    expect(screen.queryByTitle('working')).toBeNull()
+  })
+
+  it('summarises the hidden Worktrees on the chevron instead', () => {
+    renderHeader([rootWorktree, linked('w-a', 'working')])
+    // The app's status vocabulary, not a second palette: working is blue.
+    expect(chevronClass()).toContain('text-blue')
+    expect(screen.getByRole('button', { name: 'Expand project — worktrees working' })).toBeTruthy()
+  })
+
+  it('pulses only for the states that are asking for a person', () => {
+    renderHeader([rootWorktree, linked('w-a', 'needs_attention')])
+    expect(chevronClass()).toContain('animate-pulse')
+
+    cleanup()
+    renderHeader([rootWorktree, linked('w-a', 'working')])
+    expect(chevronClass()).not.toContain('animate-pulse')
+  })
+
+  it('stops pulsing once the rows it was standing in for are on screen', () => {
+    // Expanded, every child shows its own dot; a second animation over the top
+    // of them is noise. The tint stays, because it still summarises.
+    renderHeader([rootWorktree, linked('w-a', 'needs_attention')], true)
+
+    expect(chevronClass()).not.toContain('animate-pulse')
+    expect(chevronClass()).toContain('text-amber-2')
+  })
+
+  it('leaves the chevron plain when nothing is hidden behind it', () => {
+    renderHeader([rootWorktree, linked('w-a', 'idle')])
+
+    expect(chevronClass()).toContain('text-faint')
+    expect(screen.getByRole('button', { name: 'Expand project' })).toBeTruthy()
+  })
+
+  it('counts only the hidden Worktrees in the needs-you badge', () => {
+    // A root that needs you already says so in its own dot; counting it here
+    // too would report the same agent twice on one row.
+    renderHeader([{ ...rootWorktree, status: 'needs_attention' }, linked('w-a', 'needs_attention')])
+
+    expect(screen.getByText('1')).toBeTruthy()
   })
 })

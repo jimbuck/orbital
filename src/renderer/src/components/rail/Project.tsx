@@ -1,12 +1,33 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { ChevronDown, ChevronRight, CircleOff, FolderOpen, Pencil, Plus, Terminal, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { aggregateStatus, type Project as ProjectModel } from '@shared/types'
+import { aggregateStatus, type Project as ProjectModel, type TerminalStatus } from '@shared/types'
 import { useStore } from '@renderer/store'
-import { StatusDot } from '@renderer/lib/status'
+import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import WorktreeRow from './WorktreeRow'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 import { fireAndForget } from '@renderer/lib/bridge'
+
+/**
+ * The expand/collapse chevron, carrying what the hidden Worktrees add up to.
+ *
+ * It is the control that hides them, so it is the right place to say what is
+ * behind it — and a far quieter place than the project's own status dot, which
+ * used to do this job and in doing so claimed the project itself was working
+ * when it was one linked Worktree that was.
+ *
+ * Tinted in the app's status vocabulary (lib/status.tsx), and pulsing only
+ * while COLLAPSED and only for the two states that are asking for a person.
+ * Expanded, every child row already shows its own dot; a second animation over
+ * the top of them is noise, and the tint alone still summarises the group.
+ */
+function GroupChevron({ expanded, status }: { expanded: boolean; status: TerminalStatus }): JSX.Element {
+  const Chevron = expanded ? ChevronDown : ChevronRight
+  const idleTint = expanded ? 'text-muted' : 'text-faint'
+  const tint = status === 'idle' ? idleTint : worktreeStatusTextClass(status)
+  const pulse = !expanded && (status === 'needs_attention' || status === 'error') ? 'animate-pulse' : ''
+  return <Chevron size={14} strokeWidth={1.5} className={`${tint} ${pulse}`} />
+}
 
 /**
  * A project (repo) header in the rail. The header row IS the root Worktree:
@@ -27,8 +48,21 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
   const root = worktrees.find((w) => w.kind === 'root')
   const linked = worktrees.filter((w) => w.kind !== 'root')
   const rootActive = !!root && activeWorktreeId === root.id
-  const status = aggregateStatus(worktrees.map((w) => w.status))
-  const needsAttention = worktrees.filter((w) => w.status === 'needs_attention').length
+  // The header row IS the root Worktree, so its dot is the ROOT's status and
+  // nothing else. Rolling every Worktree in the project into it meant a single
+  // agent working in one linked Worktree painted two spinners down the rail —
+  // one on the row that was working and one on a row that was not — which reads
+  // as two things running rather than one thing, in there.
+  const rootStatus = root?.status ?? 'idle'
+  // What the collapsed children add up to. This is what the chevron carries:
+  // it is the control that hides them, so it is the right place to say what is
+  // behind it. Same precedence rule as everywhere else (PRD §5), which does
+  // mean a lone 'done' beside an idle sibling reads as idle — that is the
+  // app's one aggregation rule, not a decision this row gets to relitigate.
+  const linkedStatus = aggregateStatus(linked.map((w) => w.status))
+  // Linked only, for the same reason as the dot: a root that needs you already
+  // says so in its own dot, and a badge counting it too would double-report it.
+  const needsAttention = linked.filter((w) => w.status === 'needs_attention').length
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -96,25 +130,29 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
         {linked.length > 0 ? (
           <button
             type="button"
-            aria-label={expanded ? 'Collapse project' : 'Expand project'}
+            // The tint is a colour, and colour alone is not a status. The label
+            // is where a screen reader (and the tooltip) gets the same news.
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} project${
+              linkedStatus === 'idle' ? '' : ` — worktrees ${worktreeStatusLabel(linkedStatus)}`
+            }`}
+            title={linkedStatus === 'idle' ? undefined : `Worktrees ${worktreeStatusLabel(linkedStatus)}`}
             onClick={(e) => {
               e.stopPropagation()
               toggleExpanded(project.id)
             }}
             className="flex flex-none items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           >
-            {expanded ? (
-              <ChevronDown size={14} strokeWidth={1.5} className="text-muted" />
-            ) : (
-              <ChevronRight size={14} strokeWidth={1.5} className="text-faint" />
-            )}
+            <GroupChevron expanded={expanded} status={linkedStatus} />
           </button>
         ) : (
           <span className="w-[14px] flex-none" />
         )}
 
-        <span className="flex w-[11px] flex-none items-center justify-center">
-          <StatusDot status={status} />
+        <span
+          title={worktreeStatusLabel(rootStatus)}
+          className="flex w-[11px] flex-none items-center justify-center"
+        >
+          <StatusDot status={rootStatus} />
         </span>
 
         <div className="min-w-0 flex-1">
