@@ -536,6 +536,129 @@ describe('CodeEditor', () => {
  * through the real FileContextMenu so the wiring is covered too.
  * -------------------------------------------------------------------------- */
 
+describe('CodeEditor find', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    vi.stubGlobal('orbital', { writeClipboard: vi.fn(), readClipboard: vi.fn(() => '') })
+  })
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  const TEXT = 'alpha\nbeta Alpha\ngamma'
+
+  /** Render with the find bar already asked for, and hand back the pieces. */
+  function renderFind(value = TEXT): { ta: HTMLTextAreaElement; input: HTMLInputElement } {
+    const { rerender } = render(<CodeEditor path="notes.txt" value={value} onChange={noop} findSeq={0} />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    // Bumping the counter is what Ctrl+F does — see EditorTab's key handler.
+    rerender(<CodeEditor path="notes.txt" value={value} onChange={noop} findSeq={1} />)
+    return { ta, input: screen.getByLabelText('Find in file') as HTMLInputElement }
+  }
+
+  const count = (): string => screen.getByLabelText('Find in file').parentElement?.querySelector('span')?.textContent ?? ''
+
+  it('opens on request and reports nothing until there is a query', () => {
+    renderFind()
+    expect(screen.getByLabelText('Find in file')).toBeTruthy()
+    expect(count()).toBe('')
+  })
+
+  it('counts matches and puts the first one under the caret', () => {
+    const { ta, input } = renderFind()
+    fireEvent.change(input, { target: { value: 'alpha' } })
+
+    // Case-insensitive by default, so "alpha" and "Alpha" are both hits.
+    expect(count()).toBe('1 of 2')
+    // The selection is set even with focus in the box: it is what leaves you on
+    // the match when the bar closes.
+    expect([ta.selectionStart, ta.selectionEnd]).toEqual([0, 5])
+  })
+
+  it('steps forward on Enter and back on Shift+Enter, wrapping at the ends', () => {
+    const { ta, input } = renderFind()
+    fireEvent.change(input, { target: { value: 'alpha' } })
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(count()).toBe('2 of 2')
+    expect(ta.selectionStart).toBe(11)
+
+    // Past the last match it comes back to the first rather than dead-ending.
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(count()).toBe('1 of 2')
+
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true })
+    expect(count()).toBe('2 of 2')
+  })
+
+  it('narrows to the exact case when asked', () => {
+    const { input } = renderFind()
+    fireEvent.change(input, { target: { value: 'alpha' } })
+    expect(count()).toBe('1 of 2')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Match case' }))
+    expect(count()).toBe('1 of 1')
+    expect(screen.getByRole('switch', { name: 'Match case' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('says so rather than showing a count of zero', () => {
+    const { input } = renderFind()
+    fireEvent.change(input, { target: { value: 'nothing here' } })
+    expect(count()).toBe('no results')
+    expect(screen.getByRole('button', { name: 'Next match' })).toHaveProperty('disabled', true)
+  })
+
+  it('draws a highlight per match, with the current one told apart', () => {
+    const { input } = renderFind()
+    fireEvent.change(input, { target: { value: 'alpha' } })
+
+    expect(screen.getAllByTestId('find-match-current')).toHaveLength(1)
+    expect(screen.getAllByTestId('find-match')).toHaveLength(1)
+    // Drawn in the units the text is laid out in, so they track the glyphs at
+    // any zoom: the gutter's own padding, plus the match's column in `ch`.
+    const rect = screen.getByTestId('find-match-current')
+    expect(rect.style.left).toContain('2ch + 32px')
+    expect(rect.style.width).toBe('5ch')
+    // The second match is a line down, so its box is one line-height lower.
+    expect(screen.getByTestId('find-match').style.top).toContain('1.6em')
+  })
+
+  it('closes on Escape and hands focus back to the text', () => {
+    const { ta, input } = renderFind()
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.queryByLabelText('Find in file')).toBeNull()
+    expect(document.activeElement).toBe(ta)
+  })
+
+  it('seeds the query from the selection, the way every find box does', () => {
+    const { rerender } = render(<CodeEditor path="notes.txt" value={TEXT} onChange={noop} findSeq={0} />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    ta.setSelectionRange(6, 10)
+    rerender(<CodeEditor path="notes.txt" value={TEXT} onChange={noop} findSeq={1} />)
+
+    expect((screen.getByLabelText('Find in file') as HTMLInputElement).value).toBe('beta')
+  })
+
+  it('keeps the last query when there is no selection to seed from', () => {
+    const { rerender } = render(<CodeEditor path="notes.txt" value={TEXT} onChange={noop} findSeq={1} />)
+    const input = screen.getByLabelText('Find in file') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'gamma' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    ta.setSelectionRange(0, 0)
+    // Reopened with nothing selected: what you last looked for is still there.
+    rerender(<CodeEditor path="notes.txt" value={TEXT} onChange={noop} findSeq={2} />)
+    expect((screen.getByLabelText('Find in file') as HTMLInputElement).value).toBe('gamma')
+  })
+})
+
 describe('EditorTab file mutations', () => {
   /** The tree the bridge hands back; tests reshape it to mirror a mutation. */
   let tree: FileNode[]

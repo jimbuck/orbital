@@ -1,6 +1,6 @@
 ---
 title: The editor
-description: File tree, syntax-highlighted source and diffs, previews, images, and quick edits.
+description: File tree, syntax-highlighted source and diffs, find in file, previews, images, and quick edits.
 ---
 
 An **editor tab** shows the active worktree's files: a tree on the left, the
@@ -27,6 +27,20 @@ Files are editable in place — just type. **Save** and **Cancel** light up in t
 header once the buffer differs from disk; a save writes straight to the
 worktree's working tree, and unsaved edits survive a peek at Diff or Preview.
 It's for config tweaks and small fixes, not a replacement for your IDE.
+
+### Find in file
+
+**Ctrl+F** opens a find bar over the top-right of the code, seeded with whatever
+you had selected. Every match is highlighted as you type and the current one is
+ringed; the count reads `3 of 17`.
+
+- **Enter** / **Shift+Enter** step forward and back, wrapping at the ends. So do
+  **F3** / **Shift+F3**, which keep working while you carry on typing in the file.
+- **Aa** narrows to an exact-case match.
+- **Esc** closes the bar and leaves the caret on the match you stopped at.
+
+Stepping only scrolls when the match is off screen, sideways as well as down —
+a hit past the right edge of a long line is no more found than one below the fold.
 
 ### Images
 

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
 import { fileIcon } from '@renderer/lib/fileIcons'
+import { DEFAULT_TAB_SIZE, findMatches, nextMatchIndex, parseTabSize } from '@renderer/lib/findInFile'
+import FindBar from './FindBar'
 import { marked } from 'marked'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useTheme, useThemeId } from '@renderer/lib/theme'
@@ -70,11 +72,20 @@ function previewKind(path: string): PreviewKind {
  * otherwise slide out under the numbers. It ignores the pointer, so clicks
  * there still land in the textarea.
  */
+/**
+ * Highlight rectangles are cheap but not free, and a one-character query in a
+ * large file can match thousands of times. Past this the count is still exact —
+ * it is only the painting that stops, plus the current match, which is drawn
+ * however far down the list it is.
+ */
+const MAX_HIGHLIGHTS = 1000
+
 export function CodeEditor({
   path,
   value,
   onChange,
-  reveal
+  reveal,
+  findSeq = 0
 }: {
   path: string
   value: string
@@ -84,6 +95,13 @@ export function CodeEditor({
    * lands. `seq` makes asking for the same line twice a fresh request.
    */
   reveal?: { line: number; seq: number }
+  /**
+   * Bumped to open the find bar (Ctrl+F), which is caught at the tab level so
+   * it works from the file tree too. A counter rather than a boolean for the
+   * same reason `reveal` carries one: asking twice has to mean something, here
+   * "re-select what is already in the box".
+   */
+  findSeq?: number
 }): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ pos: MenuPos; hasSelection: boolean } | null>(null)
@@ -97,6 +115,32 @@ export function CodeEditor({
   const bandLineRef = useRef<number | null>(null)
   const [banding, setBanding] = useState(false)
   const theme = useThemeId()
+  // Find state. The query and the case toggle are kept SEPARATELY from whether
+  // the bar is open, so closing it and reopening picks up what you last looked
+  // for rather than an empty box.
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findCase, setFindCase] = useState(false)
+  const [matchIndex, setMatchIndex] = useState(0)
+  const findLayerRef = useRef<HTMLDivElement>(null)
+  // A 1ch-wide probe, so the horizontal scroll can be worked out in the same
+  // unit the highlights are drawn in without measuring the font by hand.
+  const chRef = useRef<HTMLSpanElement>(null)
+  // Read off the element rather than assumed: the highlights are drawn at
+  // tab-expanded columns, and a file indented with tabs would otherwise have
+  // every rectangle on the wrong side of the screen.
+  const [tabSize, setTabSize] = useState(DEFAULT_TAB_SIZE)
+  useEffect(() => {
+    const ta = taRef.current
+    if (ta) setTabSize(parseTabSize(getComputedStyle(ta).tabSize))
+  }, [])
+
+  const matches = useMemo(
+    () => (findOpen ? findMatches(value, findQuery, { caseSensitive: findCase, tabSize }) : []),
+    [findOpen, findQuery, findCase, value, tabSize]
+  )
+  // An edit can shrink the match list under the current index.
+  const current = matches.length === 0 ? -1 : Math.min(matchIndex, matches.length - 1)
 
   // One number per line. wrap="off" on the textarea means a source line is
   // exactly one visual line, so a plain count is all the gutter needs.
@@ -171,11 +215,16 @@ export function CodeEditor({
     }
     const gutter = gutterRef.current
     if (gutter) gutter.scrollTop = ta.scrollTop
+    // The whole highlight layer moves as one transform rather than every
+    // rectangle being repositioned: a thousand style writes per scroll frame is
+    // exactly the jank the reveal band's direct-to-the-node trick avoids.
+    const layer = findLayerRef.current
+    if (layer) layer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
     positionBand()
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(syncScroll, [html, lineCount])
+  useEffect(syncScroll, [html, lineCount, matches])
 
   // Centre the requested line and flash it. Runs on `seq` so the same line can
   // be asked for again; the band clears itself after a beat.
@@ -200,6 +249,86 @@ export function CodeEditor({
     // keystroke, re-scrolling away from wherever the user had moved to.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealSeq, revealLine])
+
+  /**
+   * Put a match on screen and leave the caret on it.
+   *
+   * The selection is set even though focus is in the find box (Chromium paints
+   * no selection on an unfocused textarea, which is why the highlights are
+   * drawn by hand at all) — it is what makes closing the bar leave you at the
+   * match, ready to type over it.
+   *
+   * Scrolling only happens when the match is actually off screen. Stepping
+   * between two matches you can already see should not yank the viewport.
+   */
+  const goToMatch = (index: number): void => {
+    const ta = taRef.current
+    const match = matches[index]
+    setMatchIndex(index)
+    if (!ta || !match) return
+    ta.setSelectionRange(match.start, match.end)
+    const { lineHeight, padTop } = metrics(ta)
+    const top = padTop + (match.line - 1) * lineHeight
+    if (top < ta.scrollTop || top + lineHeight > ta.scrollTop + ta.clientHeight) {
+      ta.scrollTop = Math.max(0, top - ta.clientHeight / 2 + lineHeight / 2)
+    }
+    // Horizontally too: a match past the right edge of a long line is no more
+    // found than one below the fold. The column is in `ch`, so it needs the
+    // one number CSS will not do the arithmetic for — the glyph's advance.
+    const charWidth = chRef.current?.getBoundingClientRect().width ?? 0
+    if (charWidth > 0) {
+      const left = parseFloat(getComputedStyle(ta).paddingLeft) + match.column * charWidth
+      const right = left + match.width * charWidth
+      if (left - ta.scrollLeft < 0 || right - ta.scrollLeft > ta.clientWidth) {
+        ta.scrollLeft = Math.max(0, left - ta.clientWidth / 3)
+      }
+    }
+    syncScroll()
+  }
+
+  const step = (forward: boolean): void => {
+    const ta = taRef.current
+    // From where the caret is, so Enter carries on from wherever you were —
+    // and forward/back read from opposite ends of the selection so stepping
+    // does not land on the match you are already sitting on.
+    const caret = ta ? (forward ? ta.selectionEnd : ta.selectionStart) : 0
+    const index = nextMatchIndex(matches, caret, forward)
+    if (index !== -1) goToMatch(index)
+  }
+
+  const closeFind = (): void => {
+    setFindOpen(false)
+    taRef.current?.focus()
+  }
+
+  // Ctrl+F (caught at the tab, so it works with focus in the tree too). Seeds
+  // from the selection the way every find box does; a multi-line selection is
+  // not a query, so that one is left out and the last query stands.
+  useEffect(() => {
+    if (findSeq <= 0) return
+    const ta = taRef.current
+    const selected = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : ''
+    if (selected && !selected.includes('\n')) setFindQuery(selected)
+    setFindOpen(true)
+  }, [findSeq])
+
+  /**
+   * Find as you type: every change to the query (or the case toggle, or a
+   * fresh Ctrl+F) lands on the first match from wherever the caret is.
+   *
+   * Deliberately NOT keyed on `value`: an effect that re-selected on every
+   * keystroke in the FILE would fight the person editing it, dragging their
+   * caret back to a match each time they typed a character. Editing updates the
+   * count and the highlights and leaves the caret alone.
+   */
+  useEffect(() => {
+    if (!findOpen) return
+    const ta = taRef.current
+    const index = nextMatchIndex(matches, ta ? ta.selectionStart : 0, true)
+    if (index === -1) setMatchIndex(0)
+    else goToMatch(index)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findOpen, findQuery, findCase, findSeq])
 
   const openMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -265,6 +394,14 @@ export function CodeEditor({
           if (e.key === 'Tab') {
             e.preventDefault()
             document.execCommand('insertText', false, '  ')
+          } else if (e.key === 'F3' && findOpen) {
+            // The other half of the convention: F3 steps without the bar
+            // having to hold focus, so you can search and keep editing.
+            e.preventDefault()
+            step(!e.shiftKey)
+          } else if (e.key === 'Escape' && findOpen) {
+            e.preventDefault()
+            closeFind()
           }
         }}
         spellCheck={false}
@@ -276,6 +413,50 @@ export function CodeEditor({
             : 'text-text-2'
         } ${FOCUS}`}
       />
+      {/* Measured, not assumed — see chRef. Kept in the flow of the same font
+          context as the textarea so it reports that font's advance width. */}
+      <span ref={chRef} aria-hidden className="pointer-events-none absolute left-0 top-0 block h-0 w-[1ch] opacity-0" />
+      {findOpen && matches.length > 0 && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
+          <div ref={findLayerRef} className="absolute left-0 top-0">
+            {(current >= MAX_HIGHLIGHTS && matches[current]
+              ? [...matches.slice(0, MAX_HIGHLIGHTS), matches[current]]
+              : matches.slice(0, MAX_HIGHLIGHTS)
+            ).map((m, i) => (
+              <span
+                key={m.start}
+                data-testid={i === current ? 'find-match-current' : 'find-match'}
+                style={{
+                  position: 'absolute',
+                  // em and ch, the units the text itself is laid out in, so the
+                  // rectangles track the line height and the glyph advance at
+                  // any zoom without a second set of numbers to keep in step.
+                  top: `calc(0.75rem + ${m.line - 1} * 1.6em)`,
+                  height: '1.6em',
+                  left: `calc(${textPadLeft} + ${m.column}ch)`,
+                  width: `${m.width}ch`
+                }}
+                className={`rounded-[2px] ${
+                  i === current ? 'bg-amber/45 ring-1 ring-amber/70' : 'bg-amber/20'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {findOpen && (
+        <FindBar
+          query={findQuery}
+          onQuery={setFindQuery}
+          caseSensitive={findCase}
+          onCaseSensitive={setFindCase}
+          count={matches.length}
+          index={current}
+          focusSeq={findSeq}
+          onStep={step}
+          onClose={closeFind}
+        />
+      )}
       {banding && (
         <div
           ref={bandRef}
@@ -931,6 +1112,9 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // have actually loaded — scrolling to line 400 of an empty buffer just pins
   // it at the top, and by the time the text arrives nothing would re-scroll.
   const [reveal, setReveal] = useState<{ path: string; line: number; seq: number } | null>(null)
+  // Ctrl+F presses, counted. The editor opens its find bar when this moves; a
+  // second press with the bar already open re-selects the query.
+  const [findSeq, setFindSeq] = useState(0)
   useEffect(() => {
     if (!editorOpen || editorOpen.tabId !== tab.id || editorOpen.seq === handledSeqRef.current) return
     handledSeqRef.current = editorOpen.seq
@@ -1153,10 +1337,20 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // Ctrl+S / Cmd+S saves the active file from anywhere in the tab — the
   // textarea, the pills, the tree. Nothing else in the window claims it (there
   // is no application menu), so this is the whole binding.
+  //
+  // Ctrl+F opens the code view's find bar, caught here rather than in the
+  // editor so it works with focus in the tree or on a file pill as well. It
+  // only means anything in File mode; a preview or an image has nothing to
+  // search, and Chromium's own find has never been reachable in this window.
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+    const key = e.key.toLowerCase()
+    if (key === 's') {
       e.preventDefault()
       if (activeFile) void save(activeFile)
+    } else if (key === 'f') {
+      e.preventDefault()
+      setFindSeq((n) => n + 1)
     }
   }
 
@@ -1353,6 +1547,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                       ? { line: reveal.line, seq: reveal.seq }
                       : undefined
                   }
+                  findSeq={findSeq}
                 />
               )}
             </div>
