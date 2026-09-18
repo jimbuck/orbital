@@ -2,6 +2,29 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.34.0](https://github.com/jimbuck/orbital/compare/v1.33.0...v1.34.0) (2026-09-18)
+
+
+### Bug Fixes
+
+* **rail:** stop a project claiming its worktrees' status ([d16425e](https://github.com/jimbuck/orbital/commit/d16425e86adef7e1239c721041d066b5b952b272))
+
+
+### Features
+
+* **agents:** update an installed skill in place, and tell agents to claim tasks ([c16ef56](https://github.com/jimbuck/orbital/commit/c16ef568cb127d10102d5689a83840a5609db677))
+* **editor:** file icons that say what a file is at a glance ([f98e859](https://github.com/jimbuck/orbital/commit/f98e859303ad3ea9f5e5c5511ba8acf5b4214b56))
+* **editor:** find in file with Ctrl+F ([503b652](https://github.com/jimbuck/orbital/commit/503b652405b6e23690fdc5dc774d4fc8aef688a0))
+* **search:** a command palette, and search across files and contents ([c888ccf](https://github.com/jimbuck/orbital/commit/c888ccf96ae4767dd0f89cb1441e3395992854f0)), closes [#98](https://github.com/jimbuck/orbital/issues/98)
+* **settings:** a toggle for the mono font's code ligatures ([5d56707](https://github.com/jimbuck/orbital/commit/5d56707737e44499bc0af88a2a587672123b2292))
+* **themes:** let System follow a theme pair, not just the built-ins ([5359c8b](https://github.com/jimbuck/orbital/commit/5359c8b38b91354ea5f9c6762aa0d41befe24600))
+* **themes:** twenty light and dark themes, from VS Code to Dracula ([f57e992](https://github.com/jimbuck/orbital/commit/f57e992d4d40c4cbcc1d8e76820775706841b02b))
+
+
+### Performance Improvements
+
+* **search:** run content search on ripgrep, keeping git grep as the fallback ([7599002](https://github.com/jimbuck/orbital/commit/75990023ef7b2dd270c05b091f0a5c596f83ec95))
+
 # [1.33.0](https://github.com/jimbuck/orbital/compare/v1.32.0...v1.33.0) (2026-09-16)
 
 
