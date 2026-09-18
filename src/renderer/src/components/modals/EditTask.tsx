@@ -5,7 +5,7 @@ import { useStore } from '@renderer/store'
 import { TASK_STATUSES, taskStatusLabel, taskColumnDot, taskColumnHeadClass } from '@renderer/lib/status'
 import { formatTaskTime, taskCreatorLabel } from '@renderer/components/panel/TaskMeta'
 import { enhanceMarkdownCode } from '@renderer/lib/markdownCode'
-import { useResolvedTheme } from '@renderer/lib/theme'
+import { useThemeId } from '@renderer/lib/theme'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 
@@ -41,7 +41,7 @@ export default function EditTask(): JSX.Element {
   // (diagrams, syntax colour), so the preview is state fed by an effect rather
   // than computed inline; the guard drops a slow render that lands after a
   // newer one.
-  const theme = useResolvedTheme()
+  const theme = useThemeId()
   const [previewHtml, setPreviewHtml] = useState('')
   useEffect(() => {
     if (descMode !== 'preview' || !description.trim()) return

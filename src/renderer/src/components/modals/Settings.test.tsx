@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { Settings as SettingsModel, SettingsPatch, ThemeMode } from '@shared/types'
+import { THEMES } from '@shared/themes'
 import { useStore } from '@renderer/store'
 
 import Settings from './Settings'
 
 /**
- * Covers the theme segmented control where it actually lives, so the wiring
- * between SegmentedControl's keyboard contract and the shared setThemeMode()
- * write path is exercised end to end. SegmentedControl.test.tsx owns the ARIA
- * and key handling itself; this file owns "and it persists the right thing".
+ * Covers the theme gallery where it actually lives, so the wiring between
+ * ThemePicker's keyboard contract and the shared setThemeMode() write path is
+ * exercised end to end. This file owns "and it persists the right thing".
  */
 
 /** The settings-bridge call every theme selection is expected to make. */
@@ -42,7 +42,7 @@ function seed(theme: ThemeMode): void {
   } as unknown as Parameters<typeof useStore.setState>[0])
 }
 
-/** The Appearance theme control and its three options, in rendered order. */
+/** The Appearance theme control and its options, in rendered order. */
 function themeRadios(): HTMLElement[] {
   return within(screen.getByRole('radiogroup', { name: 'Theme' })).getAllByRole('radio')
 }
@@ -69,22 +69,31 @@ afterEach(() => {
 })
 
 describe('Settings — theme control', () => {
-  it('offers System / Light / Dark and checks the persisted mode', () => {
+  it('leads with System, then every theme, and checks the persisted one', () => {
     seed('light')
     render(<Settings />)
 
-    expect(themeRadios().map((r) => r.textContent)).toEqual(['System', 'Light', 'Dark'])
-    expect(themeRadios().map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
+    const labels = themeRadios().map((r) => r.getAttribute('aria-label'))
+    // System first, then each appearance headed by its Orbital theme.
+    expect(labels.slice(0, 3)).toEqual(['System', 'Orbital Dark', 'VS Code Dark+'])
+    expect(labels).toContain('Dracula')
+    expect(labels).toContain('Solarized Light')
+    // One tile per registry entry, plus System — none duplicated, none dropped.
+    expect(new Set(labels).size).toBe(THEMES.length + 1)
+
+    const checked = themeRadios().filter((r) => r.getAttribute('aria-checked') === 'true')
+    expect(checked.map((r) => r.getAttribute('aria-label'))).toEqual(['Orbital Light'])
   })
 
   it('gives the group a single tab stop on the checked option', () => {
     seed('dark')
     render(<Settings />)
 
-    expect(themeRadios().map((r) => r.tabIndex)).toEqual([-1, -1, 0])
+    const tabbable = themeRadios().filter((r) => r.tabIndex === 0)
+    expect(tabbable.map((r) => r.getAttribute('aria-label'))).toEqual(['Orbital Dark'])
   })
 
-  it('persists the mode an arrow key lands on, leaving the rest of settings intact', () => {
+  it('persists the theme an arrow key lands on, leaving the rest of settings intact', () => {
     seed('system')
     render(<Settings />)
     fireEvent.keyDown(themeRadios()[0], { key: 'ArrowRight' })
@@ -94,25 +103,24 @@ describe('Settings — theme control', () => {
     // workspace instance, so an arrow press that also wrote this window's copy of
     // defaultShell / alerts / debugLogging would revert whatever another window
     // had just changed in them.
-    expect(setSettings.mock.calls[0][0]).toEqual({ theme: 'light' })
+    expect(setSettings.mock.calls[0][0]).toEqual({ theme: 'dark' })
     // Applied immediately rather than at Save, so the theme previews live.
-    expect(useStore.getState().settings?.theme).toBe('light')
-    expect(themeRadios().map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
+    expect(useStore.getState().settings?.theme).toBe('dark')
   })
 
-  it('persists a clicked mode the same way', () => {
+  it('persists a clicked theme the same way', () => {
     seed('system')
     render(<Settings />)
-    fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Dracula' }))
 
     expect(setSettings).toHaveBeenCalledTimes(1)
-    expect(setSettings.mock.calls[0][0]).toEqual({ theme: 'dark' })
+    expect(setSettings.mock.calls[0][0]).toEqual({ theme: 'dracula' })
   })
 
-  it('does not re-write settings when the already-active mode is picked', () => {
+  it('does not re-write settings when the already-active theme is picked', () => {
     seed('light')
     render(<Settings />)
-    fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Orbital Light' }))
 
     expect(setSettings).not.toHaveBeenCalled()
   })
@@ -127,21 +135,21 @@ describe('Settings — theme control', () => {
     setSettings.mockRejectedValueOnce(new Error('SQLITE_BUSY | database is locked'))
     render(<Settings />)
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Dark' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Orbital Dark' }))
     // Applied first: the whole point of the optimistic write.
     expect(useStore.getState().settings?.theme).toBe('dark')
 
     await vi.waitFor(() => expect(useStore.getState().settings?.theme).toBe('system'))
-    expect(themeRadios().map((r) => r.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false'])
+    expect(themeRadios()[0].getAttribute('aria-checked')).toBe('true')
     expect(logged).toHaveBeenCalled()
     logged.mockRestore()
   })
 
   it('says the theme applies immediately, next to the control and to assistive tech', () => {
     // Every other field in this modal is committed on Save and discarded on
-    // Cancel; theme is not. Nothing about a segmented control conveys that, so
-    // the note is the only thing standing between a user and picking Dark,
-    // cancelling, and finding the app still dark.
+    // Cancel; theme is not. Nothing about a grid of swatches conveys that, so
+    // the note is the only thing standing between a user and picking Dracula,
+    // cancelling, and finding the app still purple.
     seed('dark')
     render(<Settings />)
 

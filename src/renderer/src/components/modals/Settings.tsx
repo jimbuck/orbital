@@ -8,10 +8,9 @@ import type {
   OpenAction,
   ProfileDirInfo
 } from '@shared/types'
-import { setThemeMode, themeModeLabel, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import ThemePicker from '../ThemePicker'
 import { previewAccentColor, setAccentColor, useAccentColor } from '@renderer/lib/accent'
 import { AccentPicker } from '../AccentPicker'
-import { SegmentedControl } from '../SegmentedControl'
 import {
   OPEN_ACTIONS,
   SUPPORTED_AGENTS,
@@ -422,11 +421,6 @@ export default function Settings(): React.JSX.Element {
     () => settings?.defaultOpenAction ?? 'right'
   )
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
-  // App theme is NOT a working copy: it is applied and persisted the moment it is
-  // clicked (see the control below), so it is read live from the store — that way
-  // a change made from the View menu while this modal is open shows up here, and
-  // Save can never write back a stale theme over it.
-  const theme = useThemeMode()
   // Ties the theme row's "applies immediately" note to the control via
   // aria-describedby. Generated rather than hard-coded so the id stays unique
   // even if this modal is ever rendered twice.
@@ -689,34 +683,21 @@ export default function Settings(): React.JSX.Element {
 
       {/* Appearance */}
       <div className={sectionLabel}>Appearance</div>
-      <div className="mt-2.5 flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[12.5px] text-text-2">Theme</div>
-          {/* Every other field in this modal is a working copy: committed on Save,
-              thrown away on Cancel. Theme is not, and nothing about a segmented
-              control says so — a user who previews Dark and then hits Cancel is
-              entitled to expect the old theme back, and gets Dark. The behaviour
-              is right (see the control below), so the fix is to say it, in the
-              same muted-hint treatment the alert rows use rather than a callout
-              that would shout about the quietest row on the page. */}
-          <div id={themeHintId} className="mt-px text-[11px] text-dim">
-            Applies immediately — Cancel won&apos;t undo it.
-          </div>
+      <div className="mt-2.5">
+        <div className="text-[12.5px] text-text-2">Theme</div>
+        {/* Every other field in this modal is a working copy: committed on Save,
+            thrown away on Cancel. Theme is not, and nothing about a grid of
+            swatches says so — a user who previews Dracula and then hits Cancel
+            is entitled to expect the old theme back, and gets Dracula. The
+            behaviour is right (see ThemePicker), so the fix is to say it, in the
+            same muted-hint treatment the alert rows use rather than a callout
+            that would shout about the quietest row on the page. */}
+        <div id={themeHintId} className="mt-px text-[11px] text-dim">
+          Applies immediately — Cancel won&apos;t undo it.
         </div>
-        {/* 3-way segmented control. Unlike the other fields here it applies (and
-            persists) on selection rather than on Save, because the View menu
-            offers the same three options and does the same — one shared write
-            path in lib/theme.ts keeps the two controls from ever disagreeing,
-            and a theme picker you have to Save to see is a poor preview. That
-            also makes arrow-key selection-follows-focus the right pattern here:
-            every arrow press is a real, instantly visible preview. */}
-        <SegmentedControl
-          label="Theme"
-          options={THEME_MODES.map((mode) => ({ value: mode, label: themeModeLabel(mode) }))}
-          value={theme}
-          onChange={setThemeMode}
-          describedBy={themeHintId}
-        />
+        {/* Bounded and scrollable: twenty themes is a gallery worth browsing,
+            not a reason for the Appearance section to run six screens long. */}
+        <ThemePicker describedBy={themeHintId} className="mt-2.5 max-h-[248px] overflow-y-auto pr-1" />
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

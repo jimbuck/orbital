@@ -1,47 +1,58 @@
 import { useEffect, useState } from 'react'
 import type { ThemeMode } from '@shared/types'
+import {
+  DEFAULT_THEME_ID,
+  THEMES,
+  builtinTheme,
+  isThemeId,
+  themeById,
+  themeStyleSheet,
+  type ThemeAppearance,
+  type ThemeId,
+  type ThemeSpec
+} from '@shared/themes'
 import { useStore } from '../store'
 
-/** The concrete theme actually applied to the DOM — 'system' has been resolved away. */
-export type ResolvedTheme = 'light' | 'dark'
-
-/** The three modes offered by every theme control, in the order they are shown. */
-export const THEME_MODES: readonly ThemeMode[] = ['system', 'light', 'dark']
+/** The concrete appearance actually applied to the DOM — 'system' has been resolved away. */
+export type ResolvedTheme = ThemeAppearance
 
 /**
- * Display label for a mode. Shared so the View menu and the Settings modal name
- * the same option identically — the modal used to lean on a `capitalize` class
- * over the raw value, which would diverge the moment a mode needs a label that
- * isn't just its value with a capital letter.
+ * Display label for a theme setting. Shared so the View menu, the Settings
+ * modal and the command palette name the same option identically.
  */
 export function themeModeLabel(mode: ThemeMode): string {
-  return mode === 'system' ? 'System' : mode === 'light' ? 'Light' : 'Dark'
+  return mode === 'system' ? 'System' : themeById(mode).name
 }
 
 /** Media query used to resolve the 'system' theme against the OS preference. */
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 
 /**
- * The persisted theme MODE ('system' | 'light' | 'dark'), i.e. what the user
- * picked rather than what it currently resolves to. Theme controls need this to
- * mark the active option — a 'system' install resolving to dark must still show
- * System selected, not Dark. Defaults to 'dark' before settings load, and for
- * installs predating this setting, which preserves the original dark-only look.
+ * The persisted theme SETTING — what the user picked ('system' or a theme id)
+ * rather than what it currently resolves to. Theme controls need this to mark
+ * the active option: a 'system' install resolving to dark must still show
+ * System selected, not Orbital Dark.
+ *
+ * Defaults to 'dark' before settings load, and for installs predating this
+ * setting, which preserves the original dark-only look. A stored id this build
+ * does not ship (a newer build's theme, a hand-edited config) falls back the
+ * same way rather than leaving the app with no theme at all.
  */
 export function useThemeMode(): ThemeMode {
-  return useStore((s) => s.settings?.theme) ?? 'dark'
+  const stored = useStore((s) => s.settings?.theme)
+  return stored === 'system' || isThemeId(stored) ? stored : DEFAULT_THEME_ID
 }
 
 /**
- * Persist a new theme mode.
+ * Persist a new theme.
  *
  * Sends `theme` and nothing else. The theme lives in the machine-global slice
  * that every workspace instance shares, so writing a whole Settings object here
  * would push this window's snapshot of defaultShell / alerts / debugLogging over
  * whatever another instance had just changed — a one-click control writing five
  * unrelated fields is exactly how a lost update happens. Every theme control
- * funnels through here, so the View menu and the Settings modal cannot drift
- * apart: there is only one write path.
+ * funnels through here, so the View menu, the Settings modal and the palette
+ * cannot drift apart: there is only one write path.
  *
  * The store is still updated optimistically: the write round-trips through the
  * main process before the state broadcast that would normally update it lands,
@@ -90,9 +101,9 @@ export function setThemeMode(mode: ThemeMode): void {
  * Deliberately independent of the persisted mode: this is what the OS wants,
  * not what Orbital is currently showing. A control that needs to say "System
  * would mean dark right now" has to keep asking the OS even while the user has
- * pinned Light — that annotation exists precisely for the user deciding whether
- * to un-pin, so gating the subscription on `mode === 'system'` would make it
- * report the pinned theme back at them and answer the wrong question.
+ * pinned a light theme — that annotation exists precisely for the user deciding
+ * whether to un-pin, so gating the subscription on `mode === 'system'` would
+ * make it report the pinned theme back at them and answer the wrong question.
  */
 export function useSystemTheme(): ResolvedTheme {
   const [systemDark, setSystemDark] = useState(
@@ -113,16 +124,52 @@ export function useSystemTheme(): ResolvedTheme {
 }
 
 /**
- * Resolve the persisted theme setting to a concrete 'light'|'dark' — i.e. the
- * theme actually applied to the DOM.
+ * The theme id actually applied to the DOM.
  *
- * When the mode is 'system' this tracks the OS preference live, so toggling the
- * OS theme re-themes the app without a reload; a pinned mode simply wins.
- * Layered over useSystemTheme so there is exactly one matchMedia subscription
- * concept in the app, and no second place for its listener cleanup to be wrong.
+ * 'system' tracks the OS preference live and resolves to the BUILT-IN theme for
+ * it, so toggling the OS theme re-themes the app without a reload; any other
+ * value is a pinned theme and simply wins. Layered over useSystemTheme so there
+ * is exactly one matchMedia subscription concept in the app, and no second place
+ * for its listener cleanup to be wrong.
  */
-export function useResolvedTheme(): ResolvedTheme {
+export function useThemeId(): ThemeId {
   const mode = useThemeMode()
   const systemTheme = useSystemTheme()
-  return mode === 'system' ? systemTheme : mode
+  return mode === 'system' ? builtinTheme(systemTheme) : mode
+}
+
+/** The full spec of the applied theme — its seed colours, and its code theme. */
+export function useTheme(): ThemeSpec {
+  return themeById(useThemeId())
+}
+
+/**
+ * The appearance of the applied theme, i.e. whether the window is currently
+ * light or dark. What everything outside the theme registry actually wants:
+ * mermaid's diagram theme, the image-view checkerboard, the accent derivation.
+ */
+export function useResolvedTheme(): ResolvedTheme {
+  return useTheme().appearance
+}
+
+/** The themes a picker offers, split the way someone actually chooses between them. */
+export const DARK_THEMES: readonly ThemeSpec[] = THEMES.filter((t) => t.appearance === 'dark')
+export const LIGHT_THEMES: readonly ThemeSpec[] = THEMES.filter((t) => t.appearance === 'light')
+
+/**
+ * Register the generated theme stylesheet, once.
+ *
+ * Injected at runtime rather than written into app.css because the themes are
+ * derived from their seed colours (see shared/themes.ts) — a build step that
+ * emitted forty CSS lines per theme would only be the same data, further from
+ * the eight lines that define it. Called before the first render, so a pinned
+ * theme paints on the first frame instead of flashing the built-in dark.
+ */
+export function installThemeStyles(doc: Document = document): void {
+  const id = 'orbital-themes'
+  if (doc.getElementById(id)) return
+  const style = doc.createElement('style')
+  style.id = id
+  style.textContent = themeStyleSheet()
+  doc.head.append(style)
 }

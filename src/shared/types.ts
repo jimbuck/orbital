@@ -15,6 +15,7 @@ import type {
   GithubRepoNameCheck,
   GithubRepoSummary
 } from './github'
+import type { ThemeId } from './themes'
 
 /* ============================================================================
  * Domain enums
@@ -32,8 +33,13 @@ export type TaskStatus = 'draft' | 'todo' | 'in_progress' | 'ready_for_review' |
  */
 export type WorktreeKind = 'root' | 'linked'
 
-/** App color theme. `system` follows the OS's prefers-color-scheme; the others are explicit. */
-export type ThemeMode = 'system' | 'light' | 'dark'
+/**
+ * The persisted theme setting: a theme id from the registry, or `system` to
+ * follow the OS's prefers-color-scheme (which resolves to the built-in Orbital
+ * Dark / Orbital Light). The two original values, 'light' and 'dark', are the
+ * built-ins' ids, so installs predating the registry need no migration.
+ */
+export type ThemeMode = 'system' | ThemeId
 
 /**
  * Where a tab opened from OUTSIDE the pane area lands — the command palette, a
@@ -506,7 +512,7 @@ export interface Settings {
   debugLogging: boolean
   /** Configured agent profiles: what the new-tab menus offer, plus each one's launch tweaks. */
   agents: AgentConfig[]
-  /** App color theme: 'system' follows the OS, else an explicit 'light'/'dark'. Defaults to 'dark'. */
+  /** App color theme: 'system' follows the OS, else a theme id. Defaults to 'dark'. */
   theme: ThemeMode
   /**
    * Where a tab opened from outside the pane area lands (command palette, git

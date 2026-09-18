@@ -35,13 +35,14 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react'
-import type { AgentConfig, Pane, Tab, TabType, Worktree } from '@shared/types'
+import type { AgentConfig, Pane, Tab, TabType, ThemeMode, Worktree } from '@shared/types'
 import { OPEN_ACTIONS, defaultAgentConfigs } from '@shared/types'
 import { useStore, activePaneId, type Store } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { openTab } from '@renderer/lib/openTab'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, themeModeLabel, THEME_MODES } from '@renderer/lib/theme'
+import { setThemeMode, themeModeLabel } from '@renderer/lib/theme'
+import { THEMES } from '@shared/themes'
 
 /**
  * Everything the command palette can DO, as plain records.
@@ -401,12 +402,17 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     icon: LayoutGrid,
     run: () => window.orbital.zoomReset()
   })
-  for (const mode of THEME_MODES) {
+  // Every theme gets its own command. The palette is a search box, so twenty
+  // rows cost nothing to someone who types "drac" and everything to someone who
+  // would otherwise have to remember the theme lives three modals deep.
+  const themeModes: ThemeMode[] = ['system', ...THEMES.map((t) => t.id)]
+  for (const mode of themeModes) {
+    const spec = mode === 'system' ? null : THEMES.find((t) => t.id === mode)
     add({
       id: `view.theme.${mode}`,
       group: 'View',
       label: `Theme: ${themeModeLabel(mode)}`,
-      keywords: 'appearance dark light colour color',
+      keywords: `appearance colour color ${spec ? spec.appearance : 'dark light os'}`,
       icon: Sun,
       checked: (s.settings?.theme ?? 'dark') === mode,
       run: () => setThemeMode(mode)

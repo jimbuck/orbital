@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, RefreshCw, X } from 'lucide-react'
 import { marked } from 'marked'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
-import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
+import { useTheme, useThemeId } from '@renderer/lib/theme'
+import { themeTokens, type ThemeSpec } from '@shared/themes'
 import { useFileTree } from '@renderer/lib/fileTree'
 import { extOf, imageMime, resolveMarkdownImages } from '@renderer/lib/markdownAssets'
 import { enhanceMarkdownCode, hasTaggedFences } from '@renderer/lib/markdownCode'
@@ -94,7 +95,7 @@ export function CodeEditor({
   const bandRef = useRef<HTMLDivElement>(null)
   const bandLineRef = useRef<number | null>(null)
   const [banding, setBanding] = useState(false)
-  const theme = useResolvedTheme()
+  const theme = useThemeId()
 
   // One number per line. wrap="off" on the textarea means a source line is
   // exactly one visual line, so a plain count is all the gutter needs.
@@ -270,7 +271,7 @@ export function CodeEditor({
         style={{ paddingLeft: textPadLeft }}
         className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent py-3 pr-4 font-mono text-[12px] leading-[1.6] ${
           html !== null
-            ? `text-transparent ${theme === 'light' ? 'caret-[#17202e]' : 'caret-[#e6ebf2]'}`
+            ? 'text-transparent caret-text'
             : 'text-text-2'
         } ${FOCUS}`}
       />
@@ -309,44 +310,31 @@ export function CodeEditor({
 
 /**
  * Styles injected into the markdown preview iframe to match the app theme.
- * The iframe is sandboxed (no app CSS reaches it), so the palette is inlined
- * per resolved theme rather than pulling from the design tokens.
+ *
+ * The iframe is sandboxed — no app CSS and no custom properties reach it — so
+ * the palette is inlined. It is read off the SAME derived token set the chrome
+ * uses (shared/themes.ts) rather than a second hand-written pair, which is what
+ * keeps a preview from sitting in the pane as a GitHub-dark rectangle while the
+ * window around it is Solarized Light.
  */
-function mdCss(theme: ResolvedTheme): string {
-  const c =
-    theme === 'light'
-      ? {
-          scheme: 'light',
-          text: '#2b3546',
-          heading: '#17202e',
-          line1: 'rgba(0,0,0,.12)',
-          line2: 'rgba(0,0,0,.08)',
-          link: '#2563eb',
-          codeBg: 'rgba(0,0,0,.05)',
-          preBg: '#f1f4f9',
-          preLine: 'rgba(0,0,0,.08)',
-          quote: '#667085',
-          quoteBar: 'rgba(0,0,0,.16)',
-          cellLine: 'rgba(0,0,0,.12)',
-          thBg: 'rgba(0,0,0,.04)',
-          error: '#c2410c'
-        }
-      : {
-          scheme: 'dark',
-          text: '#cfd6e2',
-          heading: '#e6ebf2',
-          line1: 'rgba(255,255,255,.09)',
-          line2: 'rgba(255,255,255,.06)',
-          link: '#4f8cff',
-          codeBg: 'rgba(255,255,255,.07)',
-          preBg: '#10141b',
-          preLine: 'rgba(255,255,255,.07)',
-          quote: '#8b95a6',
-          quoteBar: 'rgba(255,255,255,.14)',
-          cellLine: 'rgba(255,255,255,.1)',
-          thBg: 'rgba(255,255,255,.04)',
-          error: '#f0883e'
-        }
+function mdCss(theme: ThemeSpec): string {
+  const t = themeTokens(theme)
+  const c = {
+    scheme: theme.appearance,
+    text: t['--color-text-2'],
+    heading: t['--color-text'],
+    line1: t['--color-line-strong'],
+    line2: t['--color-line'],
+    link: t['--color-accent'],
+    codeBg: t['--color-soft'],
+    preBg: t['--color-panel-2'],
+    preLine: t['--color-line-2'],
+    quote: t['--color-muted'],
+    quoteBar: t['--color-line-strong'],
+    cellLine: t['--color-line-strong'],
+    thBg: t['--color-hover'],
+    error: t['--color-red']
+  }
   return `
   :root { color-scheme: ${c.scheme}; }
   body { margin: 18px 22px; font: 13px/1.65 'Hanken Grotesk', system-ui, sans-serif;
@@ -415,7 +403,7 @@ export function Preview({
   worktreeId: string | undefined
   onLink: (href: string, external: boolean) => void
 }): JSX.Element {
-  const theme = useResolvedTheme()
+  const theme = useTheme()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [doc, setDoc] = useState('')
   // Same request-id guard EditorTab uses for its loads: image resolution is
@@ -427,7 +415,7 @@ export function Preview({
   const shownRef = useRef<string | null>(null)
   // The theme that document was rendered with, so a theme flip is told apart
   // from a keystroke (see the debounce below).
-  const shownThemeRef = useRef<ResolvedTheme | null>(null)
+  const shownThemeRef = useRef<string | null>(null)
 
   useEffect(() => {
     // Identity of the thing being previewed: a file (or worktree) switch changes
@@ -439,7 +427,7 @@ export function Preview({
       const show = (html: string): void => {
         if (reqRef.current !== id) return
         shownRef.current = docId
-        shownThemeRef.current = theme
+        shownThemeRef.current = theme.id
         setDoc(html)
       }
 
@@ -496,7 +484,7 @@ export function Preview({
       // A document without tagged fences stays on the synchronous path: its
       // image reads are issued in this very call, which the typing debounce
       // and the staleness guard above both rely on.
-      if (fenced) void enhanceMarkdownCode(body, theme).then(finish, () => finish(body))
+      if (fenced) void enhanceMarkdownCode(body, theme.id).then(finish, () => finish(body))
       else finish(body)
     }
 
@@ -505,7 +493,7 @@ export function Preview({
     // Hold the last good render (see above) and re-render once typing pauses;
     // a further keystroke inside the window restarts it via the cleanup.
     // Anything else — first render, file switch, theme flip — shows at once.
-    const typing = shownRef.current === docId && shownThemeRef.current === theme
+    const typing = shownRef.current === docId && shownThemeRef.current === theme.id
     if (!typing) {
       render()
       return

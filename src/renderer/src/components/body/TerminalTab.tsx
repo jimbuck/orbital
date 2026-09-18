@@ -4,13 +4,14 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import type { Tab } from '@shared/types'
-import { useResolvedTheme, type ResolvedTheme } from '@renderer/lib/theme'
+import { useTheme } from '@renderer/lib/theme'
+import { themeTokens, type ThemeSpec } from '@shared/themes'
+import { rgba } from '@shared/color'
 import { registerTerminal } from '@renderer/lib/editActions'
 import { decodeOsc52 } from '@renderer/lib/terminalClipboard'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { onTerminalData, onTerminalExit } from '@renderer/lib/terminalStream'
 
-/** xterm color palettes, keyed by resolved theme — mirror the app's design tokens. */
 /** Trailing delay before a refit's cols/rows are pushed to the PTY (see fitAndReport). */
 const RESIZE_REPORT_MS = 40
 
@@ -38,37 +39,41 @@ function dropWebgl(ref: { current: WebglAddon | null }): void {
   }
 }
 
-const XTERM_THEMES: Record<ResolvedTheme, ITheme> = {
-  dark: {
-    background: '#0d1118',
-    foreground: '#cfd6e2',
-    cursor: '#4f8cff',
-    selectionBackground: 'rgba(79,140,255,0.3)',
-    black: '#0a0d12',
-    brightBlack: '#5b6473',
-    red: '#ff6b6b',
-    green: '#3ddc97',
-    yellow: '#e8b54a',
-    blue: '#4f8cff',
-    magenta: '#9cc0ff',
-    cyan: '#6fe6b3',
-    white: '#cfd6e2'
-  },
-  light: {
-    background: '#ffffff',
-    foreground: '#17202e',
-    cursor: '#2f6fe0',
-    selectionBackground: 'rgba(47,111,224,0.22)',
-    black: '#17202e',
-    brightBlack: '#98a2b3',
-    red: '#dc2626',
-    green: '#12915a',
-    yellow: '#b7791f',
-    blue: '#2563eb',
-    magenta: '#7c3aed',
-    cyan: '#0e7490',
-    white: '#47515f'
+/**
+ * The xterm palette for a theme, derived from the same tokens the app chrome
+ * uses so the terminal is part of the theme rather than a hole in it. Memoized
+ * per theme: the derivation is pure, and a terminal repaint should not redo it
+ * for every open tab.
+ *
+ * ANSI blue is the theme's accent and ANSI white its body text, which is what
+ * makes coloured CLI output (a prompt, a test runner's pass line) look like it
+ * belongs to the same palette as everything around it.
+ */
+const XTERM_THEMES = new Map<string, ITheme>()
+
+function xtermTheme(spec: ThemeSpec): ITheme {
+  const cached = XTERM_THEMES.get(spec.id)
+  if (cached) return cached
+  const t = themeTokens(spec)
+  const theme: ITheme = {
+    background: t['--color-pane'],
+    foreground: t['--color-text-2'],
+    cursor: t['--color-accent'],
+    // Selection sits UNDER the glyphs, so it is the one place the accent has to
+    // stay a wash rather than a colour.
+    selectionBackground: rgba(t['--color-accent'], spec.appearance === 'dark' ? 0.3 : 0.22),
+    black: t['--color-bg'],
+    brightBlack: t['--color-faint'],
+    red: t['--color-red'],
+    green: t['--color-green'],
+    yellow: t['--color-amber'],
+    blue: t['--color-accent'],
+    magenta: t['--color-purple'],
+    cyan: t['--color-cyan'],
+    white: t['--color-text-2']
   }
+  XTERM_THEMES.set(spec.id, theme)
+  return theme
 }
 
 /**
@@ -127,7 +132,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   const worktreeIdRef = useRef(tab.worktreeId)
   worktreeIdRef.current = tab.worktreeId
 
-  const theme = useResolvedTheme()
+  const theme = useTheme()
   // The terminal is created in a mount-only effect, so read the initial palette
   // through a ref (avoids re-running the effect — and dropping scrollback — on
   // theme change); a separate effect below repaints an already-open terminal.
@@ -145,7 +150,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     const term = new Terminal({
       fontFamily: 'JetBrains Mono, monospace',
       fontSize: 12,
-      theme: XTERM_THEMES[themeRef.current],
+      theme: xtermTheme(themeRef.current),
       cursorBlink: true,
       allowProposedApi: true
     })
@@ -382,7 +387,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
   // Repaint an already-open terminal when the theme changes — updating
   // .options.theme keeps scrollback intact (recreating the Terminal would drop it).
   useEffect(() => {
-    if (termRef.current) termRef.current.options.theme = XTERM_THEMES[theme]
+    if (termRef.current) termRef.current.options.theme = xtermTheme(theme)
   }, [theme])
 
   // Auto-focus, so a terminal is typeable the moment it shows without a click

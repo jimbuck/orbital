@@ -1,5 +1,5 @@
 import type { HighlighterCore, ThemedToken } from 'shiki/core'
-import type { ResolvedTheme } from './theme'
+import { themeById, type ThemeId } from '@shared/themes'
 import { extOf } from './markdownAssets'
 
 /**
@@ -7,11 +7,6 @@ import { extOf } from './markdownAssets'
  * renderer (the editor tab's and the commit-history modal's), so a file
  * highlights the same way wherever it is shown.
  */
-
-/** Shiki bundled theme id for each resolved app theme. */
-export function shikiTheme(theme: ResolvedTheme): 'github-light-default' | 'github-dark-default' {
-  return theme === 'light' ? 'github-light-default' : 'github-dark-default'
-}
 
 /** Extension -> shiki grammar id, for the cases where they differ. */
 const EXT_LANG: Record<string, string> = {
@@ -141,6 +136,45 @@ const LANG_LOADERS: Record<string, () => Promise<LangModule>> = {
   mdx: () => import('shiki/dist/langs/mdx.mjs')
 }
 
+/**
+ * Syntax themes, loaded on demand exactly like the grammars above and for the
+ * same reason: an app theme names the shiki theme that matches it (see
+ * shared/themes.ts), and shipping twenty theme JSONs in the boot chunk to use
+ * one of them would be the bundle mistake the grammar list already avoids. The
+ * two GitHub themes are the exception — the highlighter has to be created with
+ * a theme, and they are what the built-ins use.
+ */
+type ThemeModule = { default: Parameters<HighlighterCore['loadTheme']>[0] }
+
+const BUILTIN_THEMES = { dark: 'github-dark-default', light: 'github-light-default' } as const
+
+const THEME_LOADERS: Record<string, () => Promise<ThemeModule>> = {
+  'dark-plus': () => import('shiki/dist/themes/dark-plus.mjs'),
+  'light-plus': () => import('shiki/dist/themes/light-plus.mjs'),
+  'one-dark-pro': () => import('shiki/dist/themes/one-dark-pro.mjs'),
+  'one-light': () => import('shiki/dist/themes/one-light.mjs'),
+  dracula: () => import('shiki/dist/themes/dracula.mjs'),
+  nord: () => import('shiki/dist/themes/nord.mjs'),
+  'tokyo-night': () => import('shiki/dist/themes/tokyo-night.mjs'),
+  'catppuccin-mocha': () => import('shiki/dist/themes/catppuccin-mocha.mjs'),
+  'catppuccin-latte': () => import('shiki/dist/themes/catppuccin-latte.mjs'),
+  'gruvbox-dark-medium': () => import('shiki/dist/themes/gruvbox-dark-medium.mjs'),
+  'gruvbox-light-medium': () => import('shiki/dist/themes/gruvbox-light-medium.mjs'),
+  'solarized-dark': () => import('shiki/dist/themes/solarized-dark.mjs'),
+  'solarized-light': () => import('shiki/dist/themes/solarized-light.mjs'),
+  monokai: () => import('shiki/dist/themes/monokai.mjs')
+}
+
+/**
+ * The syntax themes this build can actually produce. Exported so a theme added
+ * to the registry with a shiki name that is not here fails a test rather than
+ * silently falling back to GitHub at runtime.
+ */
+export const SYNTAX_THEMES: ReadonlySet<string> = new Set([
+  ...Object.values(BUILTIN_THEMES),
+  ...Object.keys(THEME_LOADERS)
+])
+
 let highlighterPromise: Promise<HighlighterCore> | null = null
 
 function getHighlighter(): Promise<HighlighterCore> {
@@ -179,14 +213,37 @@ async function withLang(lang: string): Promise<HighlighterCore> {
   return h
 }
 
+/**
+ * The loaded shiki theme to colour code with for an app theme, loading it on
+ * first use. Falls back to the GitHub theme for the app theme's appearance:
+ * code in a dark window stays dark even if that one chunk fails to arrive,
+ * which is a far better outcome than no highlighting at all.
+ */
+async function withTheme(h: HighlighterCore, theme: ThemeId): Promise<string> {
+  const spec = themeById(theme)
+  const fallback = BUILTIN_THEMES[spec.appearance]
+  // No loader means one of the two themes the highlighter booted with.
+  const loader = THEME_LOADERS[spec.code]
+  if (!loader) return fallback
+  try {
+    // Same await-before-use rule as the grammars: loadTheme registers the theme
+    // only after its own await resolves.
+    if (!h.getLoadedThemes().includes(spec.code)) await h.loadTheme((await loader()).default)
+    return spec.code
+  } catch (err) {
+    console.warn(`shiki theme ${spec.code} failed to load:`, err)
+    return fallback
+  }
+}
+
 /** Highlighted HTML (shiki's <pre><code> markup) for a whole file. */
-export async function highlightHtml(code: string, lang: string, theme: ResolvedTheme): Promise<string> {
+export async function highlightHtml(code: string, lang: string, theme: ThemeId): Promise<string> {
   const h = await withLang(lang)
-  return h.codeToHtml(code, { lang, theme: shikiTheme(theme) })
+  return h.codeToHtml(code, { lang, theme: await withTheme(h, theme) })
 }
 
 /** Themed token lines for a diff renderer to reassemble per line. */
-export async function highlightTokens(code: string, lang: string, theme: ResolvedTheme): Promise<ThemedToken[][]> {
+export async function highlightTokens(code: string, lang: string, theme: ThemeId): Promise<ThemedToken[][]> {
   const h = await withLang(lang)
-  return h.codeToTokens(code, { lang, theme: shikiTheme(theme) }).tokens
+  return h.codeToTokens(code, { lang, theme: await withTheme(h, theme) }).tokens
 }

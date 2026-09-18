@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type JSX } from 'react'
 import type { FileDiff } from '@shared/types'
-import { useResolvedTheme } from '@renderer/lib/theme'
+import { useThemeId } from '@renderer/lib/theme'
 import { HIGHLIGHT_MAX, highlightTokens, langFor } from '@renderer/lib/highlight'
 
 /**
@@ -29,7 +29,7 @@ type TokenLine = { content: string; color?: string }[]
  */
 function useDiffTokens(diff: FileDiff, path: string): TokenLine[] | null {
   const [tokens, setTokens] = useState<TokenLine[] | null>(null)
-  const theme = useResolvedTheme()
+  const theme = useThemeId()
 
   const code = useMemo(
     () =>

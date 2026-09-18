@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from './store'
-import { useResolvedTheme } from './lib/theme'
+import { useTheme } from './lib/theme'
 import { applyAccentColor, useAccentColor } from './lib/accent'
 import TitleBar from './components/TitleBar'
 import Rail from './components/rail/Rail'
@@ -10,21 +10,24 @@ import ModalRoot from './components/modals/ModalRoot'
 import CommandPalette from './components/palette/CommandPalette'
 
 /**
- * Mirrors the resolved theme onto <html data-theme> so the light override in
- * app.css activates. Rendered once; before settings load the resolved theme is
- * 'dark', which matches the CSS defaults so there is no flash.
+ * Mirrors the applied theme's id onto <html data-theme>, which is what selects
+ * its token block — the light override in app.css for the built-ins, a rule
+ * from the generated theme stylesheet for everything else (see lib/theme.ts).
+ * Rendered once; before settings load the theme is Orbital Dark, which matches
+ * the CSS defaults so there is no flash.
  */
 function ThemeManager(): null {
-  const theme = useResolvedTheme()
+  const theme = useTheme()
   const accent = useAccentColor()
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
+    document.documentElement.dataset.theme = theme.id
+  }, [theme.id])
   // The accent overrides the theme's accent tokens inline on <html>, derived
-  // for the resolved theme (a colour that reads on dark does not on white), so
-  // it has to be recomputed on a theme flip as well as on a change of colour.
+  // against THIS theme's page background (a colour that reads on Orbital Dark
+  // does not on Solarized Light), so it has to be recomputed on a theme change
+  // as well as on a change of colour.
   useEffect(() => {
-    applyAccentColor(document.documentElement, accent, theme)
+    applyAccentColor(document.documentElement, accent, theme.appearance, theme.bg)
   }, [accent, theme])
   return null
 }

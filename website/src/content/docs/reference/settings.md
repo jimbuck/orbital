@@ -1,6 +1,6 @@
 ---
 title: Settings
-description: Shell, alerts, env-file sync, agent providers, the Claude hooks, and the orbital skill.
+description: Shell, alerts, env-file sync, themes, agent providers, the Claude hooks, and the orbital skill.
 ---
 
 Open Settings from **File → Settings…**.
@@ -25,6 +25,32 @@ The three needs-attention channels are individually toggleable:
 Glob patterns for untracked files to copy into new worktrees and keep synced
 from the root checkout — `.env` and `.env.*` by default. Add patterns like
 `.claude/settings.local.json` if your tooling keeps local config out of git.
+
+## Appearance
+
+### Theme
+
+Twenty themes, light and dark — Orbital's own pair, the ones the editors ship
+(VS Code Dark+/Light+, Darcula, IntelliJ Light, One Dark/Light, Monokai) and the
+community classics (Dracula, Nord, Tokyo Night, Catppuccin, GitHub, Gruvbox,
+Solarized). **System** follows the OS and resolves to Orbital Dark or Orbital
+Light; picking any other theme pins it.
+
+A theme colours the whole window, not just the chrome: the terminal's ANSI
+palette, the editor's syntax highlighting and the markdown preview all follow it.
+
+Picking one applies and saves it straight away, so Cancel won't put the old one
+back. The same choice is on **View ▸ Theme** (System and the two Orbital themes,
+with the rest a click further on) and in the command palette — type `theme`.
+
+The theme is machine-wide: every workspace and every window shares it.
+
+### Accent colour
+
+Per *workspace*, unlike the theme — a different accent per window is the fastest
+way to tell two workspaces apart. Pick a preset or any hex; Orbital deepens or
+lightens it as far as the current theme needs to keep it readable, and picks the
+ink that reads on top of it. **Default** means the theme's own accent.
 
 ## Agent (per project)
 

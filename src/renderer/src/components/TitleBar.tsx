@@ -6,7 +6,7 @@ import { openTab } from '@renderer/lib/openTab'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { OrbitalMark } from './icons'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
+import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode } from '@renderer/lib/theme'
 
 interface MenuItem {
   label: string
@@ -125,15 +125,21 @@ export default function TitleBar(): JSX.Element {
         { label: 'Zoom Out', hint: 'Ctrl −', onClick: () => window.orbital.zoomOut() },
         { label: 'Reset Zoom', hint: 'Ctrl 0', disabled: zoomFactor === 1, onClick: () => window.orbital.zoomReset() },
         { sep: true, label: '' },
-        { label: 'Theme', heading: true },
+        // The heading carries the current theme, the way the Zoom heading above
+        // carries the current scale — with twenty themes to choose from, the
+        // menu has to answer "what am I on?" without listing all of them. The
+        // rows are the three someone actually flips between; the rest live in
+        // the Settings gallery, one click further on.
+        { label: `Theme · ${themeModeLabel(themeMode)}`, heading: true },
         // Applies (and persists) on click through the same path the Settings
-        // modal uses, so the two controls always agree.
-        ...THEME_MODES.map<MenuItem>((mode) => ({
+        // modal and the palette use, so the three controls always agree.
+        ...(['system', 'dark', 'light'] as const).map<MenuItem>((mode) => ({
           label: themeModeLabel(mode),
           checked: themeMode === mode,
           hint: mode === 'system' ? systemTheme : undefined,
           onClick: () => setThemeMode(mode)
-        }))
+        })),
+        { label: 'More Themes…', onClick: () => openModal('settings') }
       ]
     },
     {

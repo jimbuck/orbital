@@ -63,7 +63,7 @@ function openViewMenu(): HTMLElement {
 }
 
 /** One theme row by its leading label ('System' also carries an OS-preference hint). */
-function themeItem(menu: HTMLElement, label: 'System' | 'Light' | 'Dark'): HTMLElement {
+function themeItem(menu: HTMLElement, label: 'System' | 'Orbital Light' | 'Orbital Dark'): HTMLElement {
   return within(menu).getByRole('menuitemradio', { name: new RegExp(`^${label}`) })
 }
 
@@ -86,15 +86,27 @@ afterEach(() => {
 })
 
 describe('TitleBar View menu — theme', () => {
-  it('offers exactly System / Light / Dark, in that order', () => {
+  it('offers System and the two built-ins, then a way to the rest', () => {
+    // The menu is a shortcut, not the gallery: the three someone flips between
+    // day to day, with the other themes one click away in Settings.
     seed('dark')
     render(<TitleBar />)
-    const radios = within(openViewMenu()).getAllByRole('menuitemradio')
+    const menu = openViewMenu()
+    const radios = within(menu).getAllByRole('menuitemradio')
 
     expect(radios).toHaveLength(3)
     expect(radios.map((r) => r.textContent?.startsWith('System') ?? false)).toEqual([true, false, false])
-    expect(radios[1].textContent).toContain('Light')
-    expect(radios[2].textContent).toContain('Dark')
+    expect(radios[1].textContent).toContain('Orbital Dark')
+    expect(radios[2].textContent).toContain('Orbital Light')
+    expect(within(menu).getByRole('menuitem', { name: 'More Themes…' })).toBeTruthy()
+  })
+
+  it('names the active theme in the group heading, the way Zoom names its scale', () => {
+    // With twenty themes in the gallery, a menu listing three of them has to
+    // answer "what am I on?" for the other seventeen.
+    seed('dracula')
+    render(<TitleBar />)
+    expect(within(openViewMenu()).getByText(/^Theme · Dracula$/)).toBeTruthy()
   })
 
   it('marks the persisted mode as checked, not the theme it resolves to', () => {
@@ -106,8 +118,8 @@ describe('TitleBar View menu — theme', () => {
     const menu = openViewMenu()
 
     expect(themeItem(menu, 'System').getAttribute('aria-checked')).toBe('true')
-    expect(themeItem(menu, 'Dark').getAttribute('aria-checked')).toBe('false')
-    expect(themeItem(menu, 'Light').getAttribute('aria-checked')).toBe('false')
+    expect(themeItem(menu, 'Orbital Dark').getAttribute('aria-checked')).toBe('false')
+    expect(themeItem(menu, 'Orbital Light').getAttribute('aria-checked')).toBe('false')
   })
 
   it('annotates System with the OS preference', () => {
@@ -147,7 +159,7 @@ describe('TitleBar View menu — theme', () => {
   it('persists the picked mode through the settings bridge, leaving the rest intact', () => {
     seed('dark')
     render(<TitleBar />)
-    fireEvent.click(themeItem(openViewMenu(), 'Light'))
+    fireEvent.click(themeItem(openViewMenu(), 'Orbital Light'))
 
     expect(setSettings).toHaveBeenCalledTimes(1)
     // Exactly one key: the rest of the settings are shared with every other
@@ -162,7 +174,7 @@ describe('TitleBar View menu — theme', () => {
   it('does not re-write settings when the already-active mode is picked', () => {
     seed('light')
     render(<TitleBar />)
-    fireEvent.click(themeItem(openViewMenu(), 'Light'))
+    fireEvent.click(themeItem(openViewMenu(), 'Orbital Light'))
 
     expect(setSettings).not.toHaveBeenCalled()
   })

@@ -1,3 +1,4 @@
+import { themeById, type ThemeId } from '@shared/themes'
 import type { ResolvedTheme } from './theme'
 import { highlightHtml, langForFence } from './highlight'
 
@@ -93,7 +94,7 @@ function escapeHtml(s: string): string {
  * Rewrite every tagged fence in `html` (see the module note). Resolves to the
  * input untouched when there is nothing to do.
  */
-export async function enhanceMarkdownCode(html: string, theme: ResolvedTheme): Promise<string> {
+export async function enhanceMarkdownCode(html: string, theme: ThemeId): Promise<string> {
   if (!hasTaggedFences(html)) return html
 
   const tpl = document.createElement('template')
@@ -110,7 +111,9 @@ export async function enhanceMarkdownCode(html: string, theme: ResolvedTheme): P
       if (tag === 'mermaid') {
         let replacement: string
         try {
-          replacement = `<div class="mermaid-diagram">${await renderMermaid(source, theme)}</div>`
+          // Mermaid ships one light and one dark theme, so a diagram follows
+          // the app theme's APPEARANCE where code follows the theme itself.
+          replacement = `<div class="mermaid-diagram">${await renderMermaid(source, themeById(theme).appearance)}</div>`
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           // Keep the source readable under the message, so the author can see

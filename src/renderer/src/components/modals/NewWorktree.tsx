@@ -180,10 +180,10 @@ export default function NewWorktree(): React.JSX.Element {
         className={`mt-1.5 ${inputBase}`}
       />
 
-      {/* Two-way branch source. Shares SegmentedControl with the Settings theme
-          picker: this is the same one-of-N choice, so it gets the same radio
-          semantics and the same keyboard contract. It used to be hand-rolled
-          `aria-pressed` toggles that only claimed to mirror that control. */}
+      {/* Two-way branch source. Shares SegmentedControl with the other one-of-N
+          choices in the app, so it gets the same radio semantics and the same
+          keyboard contract. It used to be hand-rolled `aria-pressed` toggles
+          that only claimed to mirror that control. */}
       <SegmentedControl
         label="Branch source"
         options={BRANCH_SOURCES}

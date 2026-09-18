@@ -41,6 +41,8 @@
   --color-red-2: #ff9a9a;
   --color-purple: #c4a7f0;
   --color-purple-2: #d6c2f7;
+  /* Unused by the chrome; the terminal's ANSI cyan reads it (TerminalTab). */
+  --color-cyan: #6fe6b3;
   /* The "working" status blue. Deliberately NOT --color-accent / --color-blue:
      those follow the workspace accent (lib/accent.ts), and a green, red or
      amber accent would make the spinner read as done, error or needs-you. */
@@ -152,6 +154,7 @@
   --color-red-2: #b91c1c;
   --color-purple: #7c3aed;
   --color-purple-2: #6d28d9;
+  --color-cyan: #0e7490;
   --color-working: #2f6fe0;
 
   /* diff */
