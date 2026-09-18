@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen, FileText, Image as ImageIcon, RefreshCw, X } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
+import { fileIcon } from '@renderer/lib/fileIcons'
 import { marked } from 'marked'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useTheme, useThemeId } from '@renderer/lib/theme'
@@ -665,7 +666,7 @@ function FilePill({
 }): JSX.Element {
   const dirty = isDirty(file)
   const name = baseName(file.path)
-  const Icon = imageMime(file.path) || extOf(file.path) === 'svg' ? ImageIcon : FileText
+  const { Icon, className: iconColor } = fileIcon(file.path)
   const ref = useRef<HTMLDivElement>(null)
   // A strip that overflows scrolls the newly active pill into view, so opening
   // a sixth file never lands on a pill you can't see. (jsdom has no scrollIntoView.)
@@ -702,7 +703,10 @@ function FilePill({
         active ? 'bg-accent/12 text-text' : 'text-muted hover:bg-hover hover:text-text-2'
       } ${FOCUS}`}
     >
-      <Icon size={12} strokeWidth={1.5} className={`flex-none ${active ? 'text-text-3' : 'text-faint'}`} />
+      {/* The type colour stays on the inactive pills too, just quieter: the
+          strip is scanned for "where did the yaml one go", and a column of
+          grey marks answers that no faster than reading every name. */}
+      <Icon size={12} strokeWidth={1.5} className={`flex-none ${iconColor} ${active ? '' : 'opacity-70'}`} />
       <span className="max-w-[180px] truncate font-mono">{name}</span>
       <button
         type="button"
@@ -1451,6 +1455,7 @@ function TreeNode({
 
   const isSelected = node.path === selectedPath
   const badge = node.gitState ? gitBadge(node.gitState) : null
+  const { Icon: NodeIcon, className: iconColor } = fileIcon(node.path)
   return (
     <button
       onClick={() => onSelect(node)}
@@ -1466,10 +1471,8 @@ function TreeNode({
         >
           {badge.letter}
         </span>
-      ) : imageMime(node.path) || extOf(node.path) === 'svg' ? (
-        <ImageIcon size={13} strokeWidth={1.5} className="flex-none text-faint" />
       ) : (
-        <FileText size={13} strokeWidth={1.5} className="flex-none text-faint" />
+        <NodeIcon size={13} strokeWidth={1.5} className={`flex-none ${iconColor}`} />
       )}
       <span className="truncate font-mono text-[11.5px]">{node.name}</span>
     </button>

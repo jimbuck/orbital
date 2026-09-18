@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX } from 'react'
-import { Check, FileText, GitBranch, Hash, Search, TextSearch } from 'lucide-react'
+import { Check, GitBranch, Hash, Search, TextSearch } from 'lucide-react'
 import type { FileSearchHit, SearchQuery, Worktree } from '@shared/types'
 import { fuzzyMatch, fuzzyMatchPath } from '@shared/fuzzy'
 import { useStore } from '@renderer/store'
@@ -9,6 +9,7 @@ import { useContentSearch } from '@renderer/lib/useContentSearch'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { Marked, positionsToRanges } from '../Marked'
 import { buildCommands, type IconType } from './commands'
+import { fileIcon } from '@renderer/lib/fileIcons'
 
 /**
  * The command palette — one place to reach Orbital's features by typing.
@@ -47,6 +48,13 @@ interface Row {
   key: string
   group: string
   Icon: IconType
+  /**
+   * Overrides the row icon's colour. File rows use it to carry their type
+   * colour (lib/fileIcons) — the point of the icon is the file's kind, and
+   * repainting it accent-on-selection would throw that away on the one row the
+   * eye is actually on.
+   */
+  iconClass?: string
   label: string
   /** `[start, end)` spans of `label` the query matched, for highlighting. */
   ranges?: [number, number][]
@@ -69,6 +77,12 @@ interface Row {
   keepOpen?: boolean
   /** Fuzzy score, for ranking within a section. */
   score: number
+}
+
+/** A row's icon fields for a path — spread into the row literal. */
+function iconOf(path: string): Pick<Row, 'Icon' | 'iconClass'> {
+  const { Icon, className } = fileIcon(path)
+  return { Icon, iconClass: className }
 }
 
 /** The view a query asks for, and the text left after its prefix. */
@@ -283,7 +297,7 @@ export default function CommandPalette(): JSX.Element | null {
       return {
         key: `file:${hit.worktreeId}:${hit.path}`,
         group: 'Files',
-        Icon: FileText,
+        ...iconOf(hit.path),
         label: name,
         ranges: positionsToRanges(positions),
         detail: dir,
@@ -304,7 +318,7 @@ export default function CommandPalette(): JSX.Element | null {
         rows.push({
           key: `hit:${file.path}:${match.line}`,
           group: 'In files',
-          Icon: FileText,
+          ...iconOf(file.path),
           // The matched LINE is the label, because that is what tells you
           // whether this is the hit you wanted; the file is the supporting
           // detail, which is the opposite of the file-name view.
@@ -511,7 +525,7 @@ export default function CommandPalette(): JSX.Element | null {
                       <row.Icon
                         size={14}
                         strokeWidth={1.5}
-                        className={`flex-none ${isSelected ? 'text-accent' : 'text-muted'}`}
+                        className={`flex-none ${row.iconClass ?? (isSelected ? 'text-accent' : 'text-muted')}`}
                       />
                     ) : (
                       <Check
