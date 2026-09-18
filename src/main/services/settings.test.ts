@@ -354,3 +354,15 @@ describe('the system theme pair', () => {
     expect(getSettings().systemDarkTheme).toBe('dark')
   })
 })
+
+describe('fontLigatures', () => {
+  it('defaults on and lives in the global slice', () => {
+    // The font's own look, and what every install has had until now.
+    expect(getSettings().fontLigatures).toBe(true)
+
+    setSettings({ fontLigatures: false })
+    expect(getSettings().fontLigatures).toBe(false)
+    expect(storedGlobalKeys()).toEqual(['fontLigatures'])
+    expect(workspaceWrites).toBe(0)
+  })
+})

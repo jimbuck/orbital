@@ -202,6 +202,21 @@ describe('Settings — theme control', () => {
     expect(screen.getByRole('radio', { name: 'System' }).textContent).toContain('Dracula')
   })
 
+  it('toggles code ligatures on the spot, writing that key alone', () => {
+    // Appearance applies on click throughout — a preference about how code
+    // LOOKS that you have to Save to see is no preference at all.
+    seed('dark')
+    render(<Settings />)
+    const toggle = screen.getByRole('switch', { name: 'Code ligatures' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(toggle)
+
+    expect(setSettings).toHaveBeenCalledTimes(1)
+    expect(setSettings.mock.calls[0][0]).toEqual({ fontLigatures: false })
+    expect(screen.getByRole('switch', { name: 'Code ligatures' }).getAttribute('aria-checked')).toBe('false')
+  })
+
   it('says the theme applies immediately, next to the control and to assistive tech', () => {
     // Every other field in this modal is committed on Save and discarded on
     // Cancel; theme is not. Nothing about a grid of swatches conveys that, so

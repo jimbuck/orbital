@@ -52,6 +52,13 @@ with the rest a click further on) and in the command palette — type `theme`.
 
 The theme is machine-wide: every workspace and every window shares it.
 
+### Code ligatures
+
+JetBrains Mono draws `!=`, `=>` and `===` as single glyphs. Some people read
+code faster that way and some want to see the characters they typed; the toggle
+covers the editor, its diffs and the terminal. Like the theme, it applies on
+click.
+
 ### Accent colour
 
 Per *workspace*, unlike the theme — a different accent per window is the fastest

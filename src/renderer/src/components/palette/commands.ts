@@ -41,7 +41,7 @@ import { useStore, activePaneId, type Store } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { openTab } from '@renderer/lib/openTab'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
-import { setThemeMode, systemThemeId, themeModeLabel } from '@renderer/lib/theme'
+import { setFontLigatures, setThemeMode, systemThemeId, themeModeLabel } from '@renderer/lib/theme'
 import { THEMES } from '@shared/themes'
 
 /**
@@ -421,6 +421,15 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       run: () => setThemeMode(mode)
     })
   }
+  add({
+    id: 'view.ligatures',
+    group: 'View',
+    label: 'Code Ligatures',
+    keywords: 'font glyph jetbrains mono arrow appearance',
+    icon: Sun,
+    checked: s.settings?.fontLigatures ?? true,
+    run: () => setFontLigatures(!(s.settings?.fontLigatures ?? true))
+  })
   for (const action of OPEN_ACTIONS) {
     add({
       id: `view.openAction.${action.value}`,

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from './store'
-import { useTheme } from './lib/theme'
+import { useFontLigatures, useTheme } from './lib/theme'
 import { applyAccentColor, useAccentColor } from './lib/accent'
 import TitleBar from './components/TitleBar'
 import Rail from './components/rail/Rail'
@@ -19,9 +19,17 @@ import CommandPalette from './components/palette/CommandPalette'
 function ThemeManager(): null {
   const theme = useTheme()
   const accent = useAccentColor()
+  const ligatures = useFontLigatures()
   useEffect(() => {
     document.documentElement.dataset.theme = theme.id
   }, [theme.id])
+  // Only the OFF state is marked. Ligatures on is the font's own behaviour, so
+  // the default needs no attribute — and the app renders correctly before this
+  // ever runs. See --code-ligatures in app.css.
+  useEffect(() => {
+    if (ligatures) delete document.documentElement.dataset.ligatures
+    else document.documentElement.dataset.ligatures = 'off'
+  }, [ligatures])
   // The accent overrides the theme's accent tokens inline on <html>, derived
   // against THIS theme's page background (a colour that reads on Orbital Dark
   // does not on Solarized Light), so it has to be recomputed on a theme change

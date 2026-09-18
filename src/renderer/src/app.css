@@ -64,6 +64,11 @@
   /* type */
   --font-sans: 'Hanken Grotesk', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  /* Tailwind v4 emits a font token's `--font-*--font-feature-settings` next to
+     its family, so every `font-mono` utility carries this without a second
+     class. Pointed at a custom property rather than a literal so the ligature
+     setting can flip it at runtime (see --code-ligatures below). */
+  --font-mono--font-feature-settings: var(--code-ligatures);
 
   /* radius */
   --radius-chip: 5px;
@@ -112,6 +117,16 @@
   /* Transparency checkerboard behind images in the editor's image view. */
   --checker-a: #1a2029;
   --checker-b: #10141b;
+
+  /* JetBrains Mono's coding ligatures — the `!=` and `=>` it draws as one
+     glyph. On by default, because that is the font's own look and what the app
+     has always shipped; Settings ▸ Appearance turns them off for anyone who
+     would rather count characters. `calt` is the feature that does the work
+     and `liga` goes with it, so both are named. */
+  --code-ligatures: normal;
+}
+:root[data-ligatures='off'] {
+  --code-ligatures: 'liga' 0, 'calt' 0;
 }
 :root[data-theme='light'] {
   color-scheme: light;
@@ -356,11 +371,16 @@
 }
 
 /* Shiki-highlighted file view: keep the pane background and app mono type;
-   shiki inlines its own theme background on the <pre>, which we discard. */
+   shiki inlines its own theme background on the <pre>, which we discard.
+   The feature settings are repeated here (and on .xterm below) because these
+   two set the family in raw CSS rather than through the `font-mono` utility
+   that carries them — and a mirror whose ligatures disagreed with the textarea
+   over it would put every glyph after a `!=` out of line. */
 .shiki-view pre {
   margin: 0;
   background: transparent !important;
   font-family: var(--font-mono);
+  font-feature-settings: var(--code-ligatures);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -369,6 +389,7 @@
 .xterm {
   height: 100%;
   padding: 8px 10px;
+  font-feature-settings: var(--code-ligatures);
 }
 .xterm .xterm-viewport {
   background-color: transparent !important;

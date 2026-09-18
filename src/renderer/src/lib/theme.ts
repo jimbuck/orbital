@@ -81,7 +81,7 @@ export function useThemeMode(): ThemeMode {
  * or a broadcast carrying another instance's change), that value is newer than
  * what this call knows and is left alone.
  */
-function persistThemeSetting<K extends 'theme' | 'systemDarkTheme' | 'systemLightTheme'>(
+function persistThemeSetting<K extends 'theme' | 'systemDarkTheme' | 'systemLightTheme' | 'fontLigatures'>(
   key: K,
   value: Settings[K]
 ): void {
@@ -113,6 +113,20 @@ export function setThemeMode(mode: ThemeMode): void {
  */
 export function setSystemTheme(appearance: ThemeAppearance, theme: ThemeId): void {
   persistThemeSetting(appearance === 'dark' ? 'systemDarkTheme' : 'systemLightTheme', theme)
+}
+
+/**
+ * Whether the mono font draws its coding ligatures. Defaults to on before
+ * settings load, and for installs predating the setting — the font's own look,
+ * and what the app has always shipped.
+ */
+export function useFontLigatures(): boolean {
+  return useStore((s) => s.settings?.fontLigatures) ?? true
+}
+
+/** Turn the coding ligatures on or off, through the same one write path. */
+export function setFontLigatures(on: boolean): void {
+  persistThemeSetting('fontLigatures', on)
 }
 
 /**

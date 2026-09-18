@@ -38,6 +38,8 @@ const DEFAULT_SETTINGS: Settings = {
   // otherwise, which is exactly what 'system' meant before it was a pair.
   systemDarkTheme: 'dark',
   systemLightTheme: 'light',
+  // The font's own default, and what every install has had until now.
+  fontLigatures: true,
   // Right pane by default: something opened from the palette or the git panel
   // lands beside what you were doing rather than on top of it.
   defaultOpenAction: 'right',
@@ -58,6 +60,7 @@ const GLOBAL_SETTING_KEYS = Object.keys({
   theme: true,
   systemDarkTheme: true,
   systemLightTheme: true,
+  fontLigatures: true,
   defaultOpenAction: true
 } satisfies Record<keyof GlobalSettings, true>) as readonly (keyof GlobalSettings)[]
 

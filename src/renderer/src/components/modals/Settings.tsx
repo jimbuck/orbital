@@ -9,6 +9,7 @@ import type {
   ProfileDirInfo
 } from '@shared/types'
 import ThemePicker from '../ThemePicker'
+import { setFontLigatures, useFontLigatures } from '@renderer/lib/theme'
 import { previewAccentColor, setAccentColor, useAccentColor } from '@renderer/lib/accent'
 import { AccentPicker } from '../AccentPicker'
 import {
@@ -421,6 +422,10 @@ export default function Settings(): React.JSX.Element {
     () => settings?.defaultOpenAction ?? 'right'
   )
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
+  // Read live from the store rather than copied into a working copy, for the
+  // same reason the theme is: it applies on click, so a Save that wrote this
+  // modal's opening snapshot back could only ever undo a later change.
+  const fontLigatures = useFontLigatures()
   // Ties the theme row's "applies immediately" note to the control via
   // aria-describedby. Generated rather than hard-coded so the id stays unique
   // even if this modal is ever rendered twice.
@@ -698,6 +703,20 @@ export default function Settings(): React.JSX.Element {
         {/* Bounded and scrollable: twenty themes is a gallery worth browsing,
             not a reason for the Appearance section to run six screens long. */}
         <ThemePicker describedBy={themeHintId} className="mt-2.5 max-h-[248px] overflow-y-auto pr-1" />
+      </div>
+
+      {/* Applied on click like the rest of Appearance, so it points at the same
+          note; a preference about how code LOOKS that you have to Save to see
+          is no preference at all. */}
+      <div className="mt-3.5 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[12.5px] text-text-2">Code ligatures</div>
+          <div className="mt-px text-[11px] text-dim">
+            Draw <span className="font-mono">!=</span> and <span className="font-mono">=&gt;</span> as one glyph,
+            in the editor and the terminal.
+          </div>
+        </div>
+        <Toggle checked={fontLigatures} onChange={setFontLigatures} label="Code ligatures" />
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

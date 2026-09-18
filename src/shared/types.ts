@@ -529,6 +529,13 @@ export interface Settings {
   systemDarkTheme: ThemeId
   systemLightTheme: ThemeId
   /**
+   * Whether the mono font draws its coding ligatures — JetBrains Mono turning
+   * `!=` and `=>` into one glyph. On by default, because that is the font's own
+   * look and what the app has always shipped. Machine-global like the theme:
+   * it is a fact about how this person reads code, not about a workspace.
+   */
+  fontLigatures: boolean
+  /**
    * Where a tab opened from outside the pane area lands (command palette, git
    * panel, dev-server link). Defaults to `right`, so an opened file sits beside
    * what you were doing rather than on top of it.
