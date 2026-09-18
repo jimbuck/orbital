@@ -27,6 +27,10 @@ extraResources:
 asarUnpack:
   - '**/node_modules/node-pty/**'
   - '**/node_modules/better-sqlite3/**'
+  # Content search spawns ripgrep, and a binary inside an asar cannot be
+  # executed. Without this it silently falls back to `git grep` in the packaged
+  # app while working fine in dev — see services/ripgrep.ts.
+  - '**/node_modules/@vscode/ripgrep-*/**'
 win:
   icon: build/icon.ico
   target:

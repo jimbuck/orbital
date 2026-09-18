@@ -6,22 +6,30 @@ import type {
   SearchScope
 } from '@shared/types'
 import { git } from './git'
+import { parseRg, rgArgs, rgPath } from './ripgrep'
+import { captureCancellable, type CancellableRun } from './spawn'
 import * as repo from '../db/repositories'
 
 /**
- * Content search across the workspace's checkouts, served by `git grep`.
+ * Content search across the workspace's checkouts, served by ripgrep where it
+ * is available and `git grep` where it is not.
  *
  * **Why a grep and not an index.** Every alternative worth considering builds
  * an inverted index, and an index has to be kept current. Orbital exists to run
  * coding agents, which rewrite files continuously and in bursts — so the index
  * would be stale most of the time and would spend the rest of it competing with
- * the agents for disk. `git grep` has nothing to invalidate. It is also already
- * here: every Worktree is a git checkout by definition, the git service already
- * owns process spawning, and `--untracked` covers exactly the tracked plus
- * untracked-but-not-ignored set that the file-name index uses, so the two
- * searches agree on which files exist. Ripgrep would be faster on a very large
- * repo and is the obvious upgrade, which is why the query and result shapes
- * here say nothing about git.
+ * the agents for disk. A grep has nothing to invalidate.
+ *
+ * **Why two backends.** `git grep` needs nothing installed — every Worktree is
+ * a git checkout by definition — and `--untracked` covers exactly the tracked
+ * plus untracked-but-not-ignored set the file-name index uses, so the two
+ * agree on which files exist. What it does not do is stay quick as a repo
+ * grows, and this runs on every keystroke. ripgrep is several times faster on
+ * a large tree and ships as a per-platform binary, so it leads; git grep stays
+ * as the answer for an architecture with no binary, or a packaging mistake
+ * that leaves one unreachable. The two are asked for the same file set (see
+ * rgArgs) and their output is normalised to the same hits, so which one ran is
+ * not something the rest of the app — or the user — can tell.
  *
  * **Cancellation is the feature that makes it usable.** The box searches as you
  * type, so most searches are obsolete before they finish. Each caller owns a
@@ -170,25 +178,26 @@ export function grepArgs(q: SearchQuery): string[] {
   return args
 }
 
+/** A backend's output, before it is grouped by file. */
+interface Hit {
+  path: string
+  line: number
+  text: string
+}
+
 /**
- * Parse `git grep -z -n` output. Records are newline-separated; within a
- * record the path, the line number and the text are NUL-separated.
+ * Group hits by file, working out which characters to paint on each line.
+ *
+ * Both backends land here, which is what keeps them indistinguishable
+ * downstream. Ripgrep can report the match offsets itself, and deliberately is
+ * not asked to: its offsets are in BYTES, so every non-ASCII line would need
+ * converting, and the highlight would then be computed one way for ripgrep and
+ * another for git. One regex over the returned line is the same answer for
+ * both.
  */
-export function parseGrep(stdout: string, worktreeId: string, re: RegExp | null): SearchFileResult[] {
+function groupHits(hits: Hit[], worktreeId: string, re: RegExp | null): SearchFileResult[] {
   const byPath = new Map<string, SearchFileResult>()
-  for (const record of stdout.split('\n')) {
-    if (!record) continue
-    const firstNul = record.indexOf('\0')
-    if (firstNul === -1) continue
-    const secondNul = record.indexOf('\0', firstNul + 1)
-    if (secondNul === -1) continue
-    const path = record.slice(0, firstNul)
-    const line = Number(record.slice(firstNul + 1, secondNul))
-    if (!Number.isFinite(line)) continue
-    let text = record.slice(secondNul + 1)
-    // The record separator is the file's own line ending, so a CRLF checkout
-    // leaves a carriage return on every line.
-    if (text.endsWith('\r')) text = text.slice(0, -1)
+  for (const { path, line, text } of hits) {
     const clipped = clip(text, rangesIn(text, re))
     const match: SearchMatch = {
       line,
@@ -204,6 +213,30 @@ export function parseGrep(stdout: string, worktreeId: string, re: RegExp | null)
     if (file.matches.length >= PER_FILE_CAP) file.truncated = true
   }
   return [...byPath.values()]
+}
+
+/**
+ * Parse `git grep -z -n` output. Records are newline-separated; within a
+ * record the path, the line number and the text are NUL-separated.
+ */
+export function parseGrep(stdout: string, worktreeId: string, re: RegExp | null): SearchFileResult[] {
+  const hits: Hit[] = []
+  for (const record of stdout.split('\n')) {
+    if (!record) continue
+    const firstNul = record.indexOf('\0')
+    if (firstNul === -1) continue
+    const secondNul = record.indexOf('\0', firstNul + 1)
+    if (secondNul === -1) continue
+    const path = record.slice(0, firstNul)
+    const line = Number(record.slice(firstNul + 1, secondNul))
+    if (!Number.isFinite(line)) continue
+    let text = record.slice(secondNul + 1)
+    // The record separator is the file's own line ending, so a CRLF checkout
+    // leaves a carriage return on every line.
+    if (text.endsWith('\r')) text = text.slice(0, -1)
+    hits.push({ path, line, text })
+  }
+  return groupHits(hits, worktreeId, re)
 }
 
 const EMPTY: SearchResults = { files: [], totalMatches: 0, truncated: false, errors: [], cancelled: false }
@@ -226,10 +259,16 @@ export async function searchContent(q: SearchQuery, searchId: string): Promise<S
   const checkouts = checkoutsFor(scope, q.worktreeId)
   if (checkouts.length === 0) return EMPTY
 
-  const args = grepArgs({ ...q, query })
+  // One decision for the whole search, not one per checkout: a workspace whose
+  // results came half from ripgrep and half from git would be a nightmare to
+  // reason about the day the two disagree about a file.
+  const rg = rgPath()
+  const args = rg ? rgArgs(q, PER_FILE_CAP) : grepArgs({ ...q, query })
   const runs = checkouts.map((w) => ({
     worktreeId: w.id,
-    run: git.captureCancellable(w.path, args, { timeoutMs: SEARCH_TIMEOUT_MS })
+    run: rg
+      ? captureCancellable(rg, w.path, args, { timeoutMs: SEARCH_TIMEOUT_MS, label: 'search' })
+      : (git.captureCancellable(w.path, args, { timeoutMs: SEARCH_TIMEOUT_MS }) as CancellableRun)
   }))
   const cancels = runs.map((r) => r.run.cancel)
   active.set(searchId, cancels)
@@ -250,15 +289,16 @@ export async function searchContent(q: SearchQuery, searchId: string): Promise<S
   let truncated = false
 
   for (const { worktreeId, res } of settled) {
-    // 0 = matches, 1 = none. Anything else is a real failure (a bad regex, a
-    // checkout whose directory has gone), and belongs in front of the user
-    // rather than silently reported as "no results".
+    // 0 = matches, 1 = none — the same two for both backends. Anything else is
+    // a real failure (a bad regex, a checkout whose directory has gone), and
+    // belongs in front of the user rather than silently reported as
+    // "no results".
     if (res.code !== 0 && res.code !== 1) {
       const message = (res.stderr || res.stdout || 'search failed').trim().split('\n')[0]
       errors.push({ worktreeId, message: message.replace(/^fatal:\s*/, '') })
       continue
     }
-    for (const file of parseGrep(res.stdout, worktreeId, re)) {
+    for (const file of rg ? groupHits(parseRg(res.stdout), worktreeId, re) : parseGrep(res.stdout, worktreeId, re)) {
       if (files.length >= FILE_CAP || totalMatches >= limit) {
         truncated = true
         break

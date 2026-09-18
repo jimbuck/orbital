@@ -2,14 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchQuery } from '@shared/types'
 
 /**
- * The content-search service, against a stand-in for git.
+ * The content-search service, against a stand-in for the processes it spawns.
  *
  * The real thing shells out per checkout, so the fake below is keyed by repo
- * path and hands back canned `git grep -z -n` output. That is enough to pin the
- * parts that actually bite: the NUL-separated record format, which checkouts a
- * scope selects, that a failing checkout does not take the others down with it,
- * and that a superseded search returns nothing rather than overwriting the
- * results its replacement is about to produce.
+ * path and hands back canned output. That is enough to pin the parts that
+ * actually bite: both backends' record formats, which checkouts a scope
+ * selects, that a failing checkout does not take the others down with it, and
+ * that a superseded search returns nothing rather than overwriting the results
+ * its replacement is about to produce.
+ *
+ * Which backend runs is pinned per test with `__setRgPath`. Left to itself the
+ * service would find this repo's real ripgrep and try to run it against the
+ * imaginary checkouts below.
  */
 
 interface FakeResult {
@@ -21,42 +25,47 @@ interface FakeResult {
 /** Canned git output per checkout path. */
 let responses: Map<string, FakeResult>
 /** Every spawn the service made, in order. */
-let spawned: { cwd: string; args: string[] }[]
+let spawned: { command: string; cwd: string; args: string[] }[]
 /** When true, runs do not settle until `settleAll()` is called. */
 let hold: boolean
 let pending: (() => void)[]
 /** Worktree rows the repository layer reports. */
 let worktreeRows: { id: string; path: string; projectId: string }[]
 
-vi.mock('./git', () => ({
-  git: {
-    captureCancellable: (cwd: string, args: string[]) => {
-      spawned.push({ cwd, args })
-      let cancelled = false
-      let settle: ((v: unknown) => void) | null = null
-      const result = new Promise((resolve) => {
-        settle = resolve
-        const finish = (): void => {
-          const r = responses.get(cwd) ?? { stdout: '', code: 1 }
-          resolve(
-            cancelled
-              ? { stdout: '', stderr: '', code: 0, cancelled: true }
-              : { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.code ?? 0 }
-          )
-        }
-        if (hold) pending.push(finish)
-        else queueMicrotask(finish)
-      })
-      return {
-        result,
-        cancel: () => {
-          cancelled = true
-          // A killed process still calls back; the service must see it settle.
-          settle?.({ stdout: '', stderr: '', code: 0, cancelled: true })
-        }
-      }
+/** One fake process, shared by both backends — they differ only in argv. */
+function fakeRun(command: string, cwd: string, args: string[]) {
+  spawned.push({ command, cwd, args })
+  let cancelled = false
+  let settle: ((v: unknown) => void) | null = null
+  const result = new Promise((resolve) => {
+    settle = resolve
+    const finish = (): void => {
+      const r = responses.get(cwd) ?? { stdout: '', code: 1 }
+      resolve(
+        cancelled
+          ? { stdout: '', stderr: '', code: 0, cancelled: true }
+          : { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.code ?? 0 }
+      )
+    }
+    if (hold) pending.push(finish)
+    else queueMicrotask(finish)
+  })
+  return {
+    result,
+    cancel: () => {
+      cancelled = true
+      // A killed process still calls back; the service must see it settle.
+      settle?.({ stdout: '', stderr: '', code: 0, cancelled: true })
     }
   }
+}
+
+vi.mock('./git', () => ({
+  git: { captureCancellable: (cwd: string, args: string[]) => fakeRun('git', cwd, args) }
+}))
+
+vi.mock('./spawn', () => ({
+  captureCancellable: (command: string, cwd: string, args: string[]) => fakeRun(command, cwd, args)
 }))
 
 vi.mock('../db/repositories', () => ({
@@ -64,6 +73,14 @@ vi.mock('../db/repositories', () => ({
 }))
 
 const { searchContent, cancelSearch, grepArgs } = await import('./search')
+const { __setRgPath } = await import('./ripgrep')
+
+/** A `rg --json` match event. */
+const rgRec = (path: string, line: number, text: string): string =>
+  JSON.stringify({
+    type: 'match',
+    data: { path: { text: path }, lines: { text: `${text}\n` }, line_number: line }
+  })
 
 /** A `git grep -z -n` record: path, line and text, NUL-separated. */
 const rec = (path: string, line: number, text: string): string => `${path}\0${line}\0${text}`
@@ -73,6 +90,9 @@ beforeEach(() => {
   spawned = []
   pending = []
   hold = false
+  // The git backend unless a test says otherwise — these cases predate ripgrep
+  // and pin the fallback, which still has to work.
+  __setRgPath(null)
   worktreeRows = [
     { id: 'w1', path: 'C:/repo/one', projectId: 'p1' },
     { id: 'w2', path: 'C:/repo/two', projectId: 'p1' },
@@ -290,5 +310,77 @@ describe('searchContent — cancellation', () => {
 
   it('cancelling an unknown slot is a no-op', () => {
     expect(() => cancelSearch('never-used')).not.toThrow()
+  })
+})
+
+describe('searchContent — ripgrep', () => {
+  const RG = 'C:/bin/rg.exe'
+
+  it('runs the ripgrep binary instead of git when it is there', async () => {
+    __setRgPath(RG)
+    responses.set('C:/repo/one', { stdout: rgRec('src/a.ts', 3, 'useStore()') })
+
+    const res = await searchContent(base, 's1')
+
+    expect(spawned.map((s) => s.command)).toEqual([RG])
+    expect(res.files[0]).toMatchObject({ path: 'src/a.ts', worktreeId: 'w1' })
+    expect(res.files[0].matches[0]).toMatchObject({ line: 3, text: 'useStore()' })
+  })
+
+  it('produces the same result shape as git grep for the same hits', async () => {
+    // The whole point of the swap being invisible: neither the renderer nor the
+    // user should be able to tell which one ran.
+    __setRgPath(RG)
+    responses.set('C:/repo/one', { stdout: `${rgRec('src/a.ts', 1, 'a useStore b')}\n` })
+    const viaRg = await searchContent(base, 's1')
+
+    __setRgPath(null)
+    responses.set('C:/repo/one', { stdout: rec('src/a.ts', 1, 'a useStore b') })
+    const viaGit = await searchContent(base, 's2')
+
+    expect(viaRg.files).toEqual(viaGit.files)
+    expect(viaRg.files[0].matches[0].ranges).toEqual([[2, 10]])
+  })
+
+  it('strips the line terminator ripgrep keeps, including a CRLF one', async () => {
+    __setRgPath(RG)
+    responses.set('C:/repo/one', {
+      stdout: JSON.stringify({
+        type: 'match',
+        data: { path: { text: 'src\\a.ts' }, lines: { text: 'useStore()\r\n' }, line_number: 2 }
+      })
+    })
+
+    const res = await searchContent(base, 's1')
+
+    expect(res.files[0].matches[0].text).toBe('useStore()')
+    // Windows separators too: everything downstream speaks POSIX paths.
+    expect(res.files[0].path).toBe('src/a.ts')
+  })
+
+  it('ignores the events that are not matches', async () => {
+    // rg --json also emits begin/end/summary, and a `context` event when asked.
+    __setRgPath(RG)
+    responses.set('C:/repo/one', {
+      stdout: [
+        JSON.stringify({ type: 'begin', data: { path: { text: 'src/a.ts' } } }),
+        rgRec('src/a.ts', 1, 'useStore'),
+        JSON.stringify({ type: 'end', data: { path: { text: 'src/a.ts' } } }),
+        'not json at all',
+        ''
+      ].join('\n')
+    })
+
+    const res = await searchContent(base, 's1')
+    expect(res.totalMatches).toBe(1)
+  })
+
+  it('still reports a checkout that failed', async () => {
+    __setRgPath(RG)
+    responses.set('C:/repo/one', { code: 2, stderr: 'regex parse error' })
+
+    const res = await searchContent(base, 's1')
+
+    expect(res.errors).toEqual([{ worktreeId: 'w1', message: 'regex parse error' }])
   })
 })
