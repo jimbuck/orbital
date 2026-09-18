@@ -46,8 +46,10 @@ variable is NOT set, ignore this section — the CLI has no cockpit to reach.
   about what you are doing. \`needs-attention\` is what makes the human look at this
   worktree, so set it when you are genuinely blocked on them.
 - \`orbital task add "<title>"\` — file follow-up work you notice instead of expanding
-  the current change; \`orbital task list\` / \`orbital task update <n> --status <s>\` to
-  see and progress the project's tasks.
+  the current change; \`orbital task list\` to see the project's open tasks.
+- \`orbital task update <n> --status in-progress\` the moment you start work on a task,
+  and \`orbital task done <n>\` when it is finished. The board is how the human sees
+  what is underway; a task left in \`todo\` while you work on it reads as unclaimed.
 - \`orbital server add <port>\` when you start a dev server, \`orbital server remove <port>\`
   when you stop it, so the human can open it in one click.
 
@@ -109,12 +111,23 @@ export function remove(agent: AgentConfig): CodexInstructionsStatus {
   return status(agent)
 }
 
+/** Orbital's block as it currently sits in `content`, or null when it is absent. */
+function blockIn(content: string): string | null {
+  const start = content.indexOf(BEGIN)
+  if (start === -1) return null
+  const end = content.indexOf(END, start)
+  return end === -1 ? null : content.slice(start, end + END.length)
+}
+
 /** Read-only source-of-truth check; never throws. */
 export function status(agent: AgentConfig): CodexInstructionsStatus {
   const path = instructionsPath(agent)
   try {
-    return { installed: existsSync(path) && readFileSync(path, 'utf8').includes(BEGIN), path }
+    const block = existsSync(path) ? blockIn(readFileSync(path, 'utf8')) : null
+    // An unterminated block reads as not installed, which is also what remove()
+    // treats it as — it is a hand-edit, and install() rewrites it either way.
+    return { installed: block !== null, path, outdated: block !== null && block !== instructionsBlock() }
   } catch {
-    return { installed: false, path }
+    return { installed: false, path, outdated: false }
   }
 }

@@ -95,3 +95,29 @@ describe("a profile with the user's own AGENTS.md", () => {
     expect(status(agent).installed).toBe(false)
   })
 })
+
+describe('staying current', () => {
+  it('spots a block an older Orbital wrote, and updating rewrites just that block', () => {
+    writeFileSync(instructionsPath(agent), '# My notes\n\nKeep these.\n', 'utf8')
+    install(agent)
+    expect(status(agent).outdated).toBe(false)
+
+    const stale = read().replace('## Orbital cockpit', '## Orbital (old)')
+    writeFileSync(instructionsPath(agent), stale, 'utf8')
+    expect(status(agent)).toMatchObject({ installed: true, outdated: true })
+
+    install(agent)
+    expect(status(agent).outdated).toBe(false)
+    // The user's own text is still there — an update is not a rewrite of the file.
+    expect(read()).toContain('Keep these.')
+  })
+
+  it('is not outdated when the block is not there', () => {
+    expect(status(agent)).toMatchObject({ installed: false, outdated: false })
+  })
+
+  it('tells Codex to move a task to in-progress when it starts on one', () => {
+    install(agent)
+    expect(read()).toContain('--status in-progress')
+  })
+})

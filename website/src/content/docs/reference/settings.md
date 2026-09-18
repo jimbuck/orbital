@@ -97,6 +97,9 @@ already) know how to report status, file tasks, and register dev servers:
   workspace's Claude profile directory, else `CLAUDE_CONFIG_DIR`, else `~/.claude`.
 - Orbital won't overwrite a skill it doesn't own, and **Remove** deletes only
   its own.
+- When an Orbital update changes the skill, the card says **Update available**
+  and offers **Update** — no remove-and-reinstall, and no window in which your
+  agents have no skill at all. The same goes for the hooks and the Codex block.
 
 ## Orbital instructions for Codex
 

@@ -109,3 +109,45 @@ describe('install / remove', () => {
     expect(readFileSync(skillPath(agent), 'utf8')).toContain('mine, not yours')
   })
 })
+
+describe('staying current', () => {
+  it('reports an older Orbital\'s copy as outdated, and updating rewrites it', () => {
+    install(agent)
+    expect(status(agent).outdated).toBe(false)
+
+    // What an app update leaves behind: our own file, our own marker, someone
+    // else's text.
+    const file = skillPath(agent)
+    writeFileSync(file, skillMarkdown().replace('# The `orbital` CLI', '# An older skill'), 'utf8')
+    expect(status(agent)).toMatchObject({ installed: true, outdated: true, foreign: false })
+
+    // Update is the same write as install — no remove-then-reinstall, and no
+    // window in which the agent has no skill at all.
+    install(agent)
+    expect(status(agent).outdated).toBe(false)
+    expect(readFileSync(file, 'utf8')).toBe(skillMarkdown())
+  })
+
+  it('is not outdated when it is not installed at all', () => {
+    expect(status(agent)).toMatchObject({ installed: false, outdated: false })
+  })
+
+  it('does not call someone else\'s skill outdated', () => {
+    // Foreign is a different answer with a different remedy: Orbital will not
+    // touch that file, so offering to update it would be a lie.
+    const file = skillPath(agent)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, '---\nname: orbital\n---\nmine\n', 'utf8')
+    expect(status(agent)).toMatchObject({ installed: false, foreign: true, outdated: false })
+  })
+})
+
+describe('what it tells an agent about tasks', () => {
+  it('says to move a task to in-progress when work starts on it', () => {
+    // The board is how the human sees what is underway; a task left in `todo`
+    // while an agent works on it reads as unclaimed.
+    const md = skillMarkdown()
+    expect(md).toContain('orbital task update 12 --status in-progress')
+    expect(md).toMatch(/in-progress.*when you pick it up/s)
+  })
+})

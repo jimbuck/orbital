@@ -85,6 +85,7 @@ function briefingText({ project, worktree, providerName, hooksInstalled }: Brief
     "- `orbital task list [--status <s>] [--tag <t>]` — the project's open tasks (number, status, title). Done tasks are hidden unless you pass `--all` or ask for a status explicitly.",
     '- `orbital task show <number>` — full detail for one task (e.g. `orbital task show 12`).',
     '- `orbital task update <number> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <number>` when it is finished; `orbital task delete <number>` to drop one.',
+    '  Move a task to `in-progress` the moment you start on it and off it when you finish — the board is how the human sees what is underway, and a task left in `todo` while you work reads as unclaimed. (A worktree opened with `orbital task start` has already done this.)',
     '- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress.',
     "- `orbital worktrees` — list this project's worktrees.",
     '- `orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [name]` — open a new worktree, on a fresh branch, an existing one, or forked from a given ref.',

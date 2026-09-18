@@ -861,6 +861,12 @@ export interface ClaudeHooksStatus {
   installed: boolean
   /** Absolute path of the settings.json the hooks live in. */
   settingsPath: string
+  /**
+   * Installed, but not what this build would write — an older Orbital's copy.
+   * Orbital updates in place, so the answer is one button rather than a remove
+   * and a reinstall; see the Update path in Settings.
+   */
+  outdated: boolean
 }
 
 /** Preview of exactly what Orbital will merge into settings.json, for confirmation. */
@@ -881,6 +887,8 @@ export interface ClaudeSkillStatus {
   skillPath: string
   /** True when the file exists but was not written by Orbital (we never overwrite it). */
   foreign: boolean
+  /** Installed, but not byte-for-byte what this build would write. */
+  outdated: boolean
 }
 
 /** Preview of exactly what Orbital will write, for confirmation. */
@@ -899,6 +907,8 @@ export interface CodexInstructionsStatus {
   installed: boolean
   /** Absolute path of the AGENTS.md holding Orbital's block. */
   path: string
+  /** The block is there, but not the one this build would write. */
+  outdated: boolean
 }
 
 /** Preview of the block Orbital would merge into that AGENTS.md. */

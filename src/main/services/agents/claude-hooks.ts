@@ -170,12 +170,23 @@ export function remove(agent: AgentConfig): ClaudeHooksStatus {
 export function status(agent: AgentConfig): ClaudeHooksStatus {
   try {
     const hooks = readSettings(agent).hooks
-    const installed =
-      !!hooks &&
-      typeof hooks === 'object' &&
-      Object.values(hooks).some((groups) => Array.isArray(groups) && groups.some(isOrbitalGroup))
-    return { installed, settingsPath: settingsPath(agent) }
+    const map = hooks && typeof hooks === 'object' ? hooks : {}
+    const groupsFor = (event: string): unknown[] => (Array.isArray(map[event]) ? map[event] : [])
+    const installed = Object.keys(map).some((event) => groupsFor(event).some(isOrbitalGroup))
+    // Out of date when what is registered is not what install() would register:
+    // an event this build added and the file has never heard of, an Orbital
+    // group left behind for an event no longer registered, or a command whose
+    // shim path moved (which is what an app update to a new install location
+    // does). Compared by value, so any of the three shows up.
+    const current = new Set(HOOK_EVENTS.map((e) => JSON.stringify(orbitalGroup(e))))
+    const missing = HOOK_EVENTS.some(
+      (event) => !groupsFor(event).some((g) => current.has(JSON.stringify(g)))
+    )
+    const stale = Object.keys(map).some((event) =>
+      groupsFor(event).some((g) => isOrbitalGroup(g) && !current.has(JSON.stringify(g)))
+    )
+    return { installed, settingsPath: settingsPath(agent), outdated: installed && (missing || stale) }
   } catch {
-    return { installed: false, settingsPath: settingsPath(agent) }
+    return { installed: false, settingsPath: settingsPath(agent), outdated: false }
   }
 }

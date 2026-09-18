@@ -115,3 +115,39 @@ describe('merge and uninstall', () => {
     expect(status(agent).installed).toBe(false)
   })
 })
+
+describe('staying current', () => {
+  it('spots hooks an older Orbital wrote, and updating brings them back in line', () => {
+    install(agent)
+    expect(status(agent).outdated).toBe(false)
+
+    // The shim path moving is what an app update to a new install location
+    // does: still Orbital's entries, no longer Orbital's command.
+    const file = settingsPath(agent)
+    const settings = JSON.parse(readFileSync(file, 'utf8'))
+    for (const groups of Object.values(settings.hooks) as { hooks: { command: string }[] }[][]) {
+      for (const group of groups) {
+        for (const hook of group.hooks) hook.command = hook.command.replace('Orbital', 'Orbital-1.0')
+      }
+    }
+    writeFileSync(file, JSON.stringify(settings), 'utf8')
+    expect(status(agent)).toMatchObject({ installed: true, outdated: true })
+
+    install(agent)
+    expect(status(agent).outdated).toBe(false)
+  })
+
+  it('spots an event this build registers that the file has never heard of', () => {
+    install(agent)
+    const file = settingsPath(agent)
+    const trimmed = JSON.parse(readFileSync(file, 'utf8'))
+    delete trimmed.hooks.SessionEnd
+    writeFileSync(file, JSON.stringify(trimmed), 'utf8')
+
+    expect(status(agent)).toMatchObject({ installed: true, outdated: true })
+  })
+
+  it('is not outdated when nothing is installed', () => {
+    expect(status(agent)).toMatchObject({ installed: false, outdated: false })
+  })
+})

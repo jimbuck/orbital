@@ -128,6 +128,8 @@ interface InstallState {
   path: string
   /** Exists but was not written by Orbital — we refuse to overwrite it (skill only). */
   foreign?: boolean
+  /** Installed, but an older Orbital's copy — offer Update rather than nothing. */
+  outdated?: boolean
 }
 
 /**
@@ -146,6 +148,7 @@ const INSTALLABLES = {
       </>
     ),
     installLabel: 'Set up Claude status hooks',
+    updateLabel: 'Update the hooks',
     removeLabel: 'Remove Claude hooks',
     confirmLabel: 'Confirm & write',
     removeConfirmLabel: 'Remove hooks',
@@ -155,7 +158,7 @@ const INSTALLABLES = {
     removeIntro: "Remove Orbital's hook entries from settings.json? Other hooks stay intact.",
     status: async (id: string): Promise<InstallState> => {
       const s = await window.orbital.claudeHooksStatus(id)
-      return { installed: s.installed, path: s.settingsPath }
+      return { installed: s.installed, path: s.settingsPath, outdated: s.outdated }
     },
     preview: async (id: string): Promise<string> => (await window.orbital.claudeHooksPlan(id)).json,
     install: (id: string) => window.orbital.installClaudeHooks(id),
@@ -173,6 +176,7 @@ const INSTALLABLES = {
       </>
     ),
     installLabel: 'Install the orbital skill',
+    updateLabel: 'Update the skill',
     removeLabel: 'Remove the orbital skill',
     confirmLabel: 'Confirm & write',
     removeConfirmLabel: 'Remove skill',
@@ -187,7 +191,7 @@ const INSTALLABLES = {
     ),
     status: async (id: string): Promise<InstallState> => {
       const s = await window.orbital.claudeSkillStatus(id)
-      return { installed: s.installed, path: s.skillPath, foreign: s.foreign }
+      return { installed: s.installed, path: s.skillPath, foreign: s.foreign, outdated: s.outdated }
     },
     preview: async (id: string): Promise<string> => (await window.orbital.claudeSkillPlan(id)).markdown,
     install: (id: string) => window.orbital.installClaudeSkill(id),
@@ -205,6 +209,7 @@ const INSTALLABLES = {
       </>
     ),
     installLabel: 'Install the Codex instructions',
+    updateLabel: 'Update the instructions',
     removeLabel: 'Remove the Codex instructions',
     confirmLabel: 'Confirm & write',
     removeConfirmLabel: 'Remove block',
@@ -213,7 +218,7 @@ const INSTALLABLES = {
     removeIntro: "Remove Orbital's block from AGENTS.md? The rest of the file stays intact.",
     status: async (id: string): Promise<InstallState> => {
       const s = await window.orbital.codexInstructionsStatus(id)
-      return { installed: s.installed, path: s.path }
+      return { installed: s.installed, path: s.path, outdated: s.outdated }
     },
     preview: async (id: string): Promise<string> => (await window.orbital.codexInstructionsPlan(id)).markdown,
     install: (id: string) => window.orbital.installCodexInstructions(id),
@@ -298,6 +303,9 @@ function InstallPanel({ agentId, kind }: { agentId: string; kind: InstallKind })
     }
   }, [agentId, spec])
 
+  // Install and update are the same write — every install() here is already
+  // idempotent and rewrites only Orbital's own file or block — so they are the
+  // same confirm flow, differing in what the buttons say.
   const startInstall = async (): Promise<void> => {
     setError(null)
     try {
@@ -338,10 +346,14 @@ function InstallPanel({ agentId, kind }: { agentId: string; kind: InstallKind })
         </div>
         <span
           className={`mt-0.5 flex-none rounded-chip px-2 py-0.5 text-[10px] font-bold ${
-            state?.installed ? 'bg-green/15 text-green-2' : 'bg-hover text-dim'
+            state?.outdated
+              ? 'bg-amber/15 text-amber-2'
+              : state?.installed
+                ? 'bg-green/15 text-green-2'
+                : 'bg-hover text-dim'
           }`}
         >
-          {state?.installed ? 'Installed' : 'Not installed'}
+          {state?.outdated ? 'Update available' : state?.installed ? 'Installed' : 'Not installed'}
         </span>
       </div>
 
@@ -353,7 +365,9 @@ function InstallPanel({ agentId, kind }: { agentId: string; kind: InstallKind })
                 className={`flex items-center gap-2 text-[11.5px] ${spec.warn ? 'text-amber-2' : 'text-text-3'}`}
               >
                 {spec.warn && <AlertTriangle size={13} strokeWidth={1.5} className="flex-none" />}
-                {spec.previewIntro}
+                {/* An update overwrites what is already there, which the install
+                    wording ("before writing it") does not quite say. */}
+                {state?.outdated ? 'This replaces what is there now. Review it first:' : spec.previewIntro}
               </div>
               {/* Fixed dark code block: pin a light foreground (not a theme token) so
                   the preview stays readable in light mode too. */}
@@ -372,20 +386,39 @@ function InstallPanel({ agentId, kind }: { agentId: string; kind: InstallKind })
               Cancel
             </button>
             <button type="button" className={primaryBtn} onClick={apply} disabled={busy}>
-              {confirm.mode === 'install' ? spec.confirmLabel : spec.removeConfirmLabel}
+              {confirm.mode === 'remove'
+                ? spec.removeConfirmLabel
+                : state?.outdated
+                  ? 'Confirm & update'
+                  : spec.confirmLabel}
             </button>
           </div>
         </div>
       ) : (
         <div className="mt-3">
           {state?.installed ? (
-            <button type="button" className={ghostBtn} onClick={() => setConfirm({ mode: 'remove' })}>
-              {spec.removeLabel}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Update leads when there is one: the alternative used to be
+                  remove-then-reinstall, which is two confirmations and a window
+                  in which the agent has no skill at all. */}
+              {state.outdated && (
+                <button type="button" className={primaryBtn} onClick={startInstall}>
+                  {spec.updateLabel}
+                </button>
+              )}
+              <button type="button" className={ghostBtn} onClick={() => setConfirm({ mode: 'remove' })}>
+                {spec.removeLabel}
+              </button>
+            </div>
           ) : (
             <button type="button" className={ghostBtn} onClick={startInstall} disabled={state?.foreign}>
               {spec.installLabel}
             </button>
+          )}
+          {state?.outdated && (
+            <div className="mt-2 text-[11px] text-dim">
+              Written by an older Orbital — updating rewrites only what Orbital manages.
+            </div>
           )}
           {state?.foreign && foreignNote && <div className="mt-2 text-[11px] text-amber-2">{foreignNote}</div>}
         </div>

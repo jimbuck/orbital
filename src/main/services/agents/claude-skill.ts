@@ -123,6 +123,20 @@ a unique id prefix. Statuses: \`draft\`, \`todo\`, \`in-progress\`, \`ready-for-
 \`done\`. \`task list\` hides done tasks unless you pass \`--all\` or name a status
 yourself, so \`--status done\` works on its own.
 
+**Move the task as you work it.** The board is how the human sees what is
+underway, and a task sitting in \`todo\` while you work on it tells them nobody
+picked it up — which is how two people end up doing the same thing.
+
+\`\`\`sh
+orbital task update 12 --status in-progress   # the moment you start on it
+orbital task update 12 --status ready-for-review
+orbital task done 12
+\`\`\`
+
+Do this whether the task came from the human or from your own \`task add\`. The
+one case you can skip it is a worktree opened with \`orbital task start\`, which
+has already moved the task for you.
+
 ## Worktrees
 
 \`\`\`sh
@@ -162,6 +176,8 @@ orbital server list
 
 ## Conventions worth following
 
+- Move the task you are working on to \`in-progress\` when you pick it up, and off
+  it when you are done.
 - Register dev servers you start, and deregister them when you stop them.
 - File follow-ups with \`orbital task add\` rather than growing the current change.
 - Set \`needs-attention\` before asking a question the human must answer, so the
@@ -221,7 +237,21 @@ export function remove(agent: AgentConfig): ClaudeSkillStatus {
 /** Read-only source-of-truth check; never throws. */
 export function status(agent: AgentConfig): ClaudeSkillStatus {
   const file = skillPath(agent)
-  const exists = existsSync(file)
-  const ours = exists && isOrbitalSkill(file)
-  return { installed: ours, skillPath: file, foreign: exists && !ours }
+  let content: string | null = null
+  try {
+    content = readFileSync(file, 'utf8')
+  } catch {
+    content = null
+  }
+  const ours = content !== null && content.includes(SKILL_MARKER)
+  return {
+    installed: ours,
+    skillPath: file,
+    foreign: content !== null && !ours,
+    // Byte-for-byte, not a version compare. The version stamp moves with every
+    // release whether the skill changed or not, and the skill can change within
+    // one — what matters is whether the file on disk is the text this build
+    // would write.
+    outdated: ours && content !== skillMarkdown()
+  }
 }
