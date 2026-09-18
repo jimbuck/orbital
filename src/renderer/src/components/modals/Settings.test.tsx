@@ -26,6 +26,7 @@ function makeSettings(theme: ThemeMode): SettingsModel {
     // test is about the Appearance section.
     agents: [],
     theme,
+    defaultOpenAction: 'right',
     accentColor: null
   } as unknown as SettingsModel
 }

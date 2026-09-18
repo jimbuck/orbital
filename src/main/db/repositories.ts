@@ -308,6 +308,19 @@ export const worktrees = {
       )
       .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'status'>[]
   },
+  /**
+   * Lightweight id+path projection for the palette's file search — it runs on
+   * every keystroke and wants only somewhere to point `git ls-files`, not the
+   * pane/tab hydration a full list() does.
+   */
+  listPaths(): Pick<Worktree, 'id' | 'path' | 'projectId'>[] {
+    return getDb()
+      .prepare(
+        `SELECT w.id, w.path, w.project_id AS projectId FROM worktrees w
+         JOIN projects p ON p.id = w.project_id WHERE p.workspace_id = ?`
+      )
+      .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'path' | 'projectId'>[]
+  },
   get(wid: string): Worktree | undefined {
     const r = getDb().prepare('SELECT * FROM worktrees WHERE id = ?').get(wid)
     return r ? hydrateWorktree(r) : undefined

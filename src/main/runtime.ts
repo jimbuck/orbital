@@ -7,6 +7,7 @@ import * as repo from './db/repositories'
 import { safeWrite } from './db/database'
 import { deleteBriefing } from './services/agents/briefing'
 import { getSettings } from './services/settings'
+import { invalidate as invalidateFileIndex } from './services/file-index'
 import { IPC, isPtyTabType, type AppState, type GitChangedEvent } from '@shared/types'
 
 /**
@@ -214,6 +215,10 @@ class Runtime {
    */
   broadcastGitChanged(worktreeIds: string[]): void {
     if (worktreeIds.length === 0) return
+    // Drop the palette's cached path listing for these checkouts BEFORE the
+    // coalescing window: a file an agent just created has to be findable as
+    // soon as the rest of the UI knows about it, and the drop is a map delete.
+    invalidateFileIndex(worktreeIds)
     for (const id of worktreeIds) this.pendingGitChanged.add(id)
     this.coalesce('git', () => {
       const evt: GitChangedEvent = { worktreeIds: [...this.pendingGitChanged] }

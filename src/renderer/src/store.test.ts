@@ -134,7 +134,7 @@ describe('applyState structural sharing', () => {
 describe('openInEditor', () => {
   it('records the request and numbers each one, so a repeat of the same file is new', () => {
     useStore.setState({ editorOpen: null })
-    useStore.getState().openInEditor('E1', 'src/a.ts', false, 'modified')
+    useStore.getState().openInEditor('E1', { path: 'src/a.ts', gitState: 'modified' })
     expect(useStore.getState().editorOpen).toEqual({
       tabId: 'E1',
       path: 'src/a.ts',
@@ -142,7 +142,16 @@ describe('openInEditor', () => {
       gitState: 'modified',
       seq: 1
     })
-    useStore.getState().openInEditor('E1', 'src/a.ts', false, 'modified')
+    useStore.getState().openInEditor('E1', { path: 'src/a.ts', gitState: 'modified' })
     expect(useStore.getState().editorOpen?.seq).toBe(2)
+  })
+
+  it('carries a target line, which is how a content-search hit reaches the editor', () => {
+    useStore.setState({ editorOpen: null })
+    useStore.getState().openInEditor('E1', { path: 'src/a.ts', line: 42 })
+    expect(useStore.getState().editorOpen).toMatchObject({ path: 'src/a.ts', line: 42, staged: false })
+    // No git state and no staged side: a line request is a plain file open, and
+    // the editor reads exactly that to decide against diff mode.
+    expect(useStore.getState().editorOpen?.gitState).toBeUndefined()
   })
 })

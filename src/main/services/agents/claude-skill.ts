@@ -148,6 +148,7 @@ orbital tab new terminal
 orbital tab new browser http://localhost:5173   # in-app browser tab
 orbital tab new editor src/lib/cart.ts          # open a file in the cockpit's editor
 orbital tab new agent claude                    # boot another agent (by its configured name) here
+orbital tab new search "TODO("                  # content search across this checkout
 \`\`\`
 
 When you start or stop a long-running dev server, tell the cockpit — the human

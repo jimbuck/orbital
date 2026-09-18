@@ -1,6 +1,8 @@
-import { IPC } from '@shared/types'
+import { IPC, type SearchQuery } from '@shared/types'
 import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
+import { searchFiles } from '../services/file-index'
+import { searchContent, cancelSearch } from '../services/search'
 import { handle, broadcast, gitChanged } from './handle'
 import { worktreeRepoPath } from './resolve'
 
@@ -117,4 +119,12 @@ export function register(): void {
   h(IPC.resolvePath, (_e, worktreeId: string, path: string) =>
     git.resolveInRepo(worktreeRepoPath(worktreeId), path)
   )
+  // Cross-Worktree file search for the command palette. No worktree id: it
+  // spans every checkout in the workspace, and main picks them from its own
+  // rows — the renderer names nothing but a query string.
+  h(IPC.searchFiles, (_e, query: string, limit?: number) => searchFiles(query, limit))
+  // Content search. Like searchFiles it names no worktree of its own — the
+  // query's scope decides which checkouts main points git at.
+  h(IPC.searchContent, (_e, query: SearchQuery, searchId: string) => searchContent(query, searchId))
+  h(IPC.cancelSearch, (_e, searchId: string) => cancelSearch(searchId))
 }

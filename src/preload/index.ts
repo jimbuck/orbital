@@ -31,6 +31,9 @@ import {
   type GitLogPage,
   type GitCommitDetail,
   type FileNode,
+  type FileSearchHit,
+  type SearchQuery,
+  type SearchResults,
   type TerminalDataEvent,
   type TerminalExitEvent,
   type TerminalBuffer,
@@ -207,6 +210,11 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.trashPath, worktreeId, path) as Promise<void>,
   resolvePath: (worktreeId: string, path: string) =>
     ipcRenderer.invoke(IPC.resolvePath, worktreeId, path) as Promise<string>,
+  searchFiles: (query: string, limit?: number) =>
+    ipcRenderer.invoke(IPC.searchFiles, query, limit) as Promise<FileSearchHit[]>,
+  searchContent: (query: SearchQuery, searchId: string) =>
+    ipcRenderer.invoke(IPC.searchContent, query, searchId) as Promise<SearchResults>,
+  cancelSearch: (searchId: string) => ipcRenderer.invoke(IPC.cancelSearch, searchId) as Promise<void>,
 
   // tasks
   createTask: (projectId: string, title: string, description?: string, tags?: string[]) =>
@@ -252,7 +260,8 @@ const api: OrbitalApi = {
   onAlert: (cb: (evt: AlertEvent) => void) => on<AlertEvent>(IPC.evtAlert, cb),
   onUpdateStatus: (cb: (status: UpdateStatus) => void) => on<UpdateStatus>(IPC.evtUpdate, cb),
   onGitChanged: (cb: (evt: GitChangedEvent) => void) => on<GitChangedEvent>(IPC.evtGitChanged, cb),
-  onZoomChanged: (cb: (factor: number) => void) => on<number>(IPC.evtZoomChanged, cb)
+  onZoomChanged: (cb: (factor: number) => void) => on<number>(IPC.evtZoomChanged, cb),
+  onOpenPalette: (cb: (prefix: string) => void) => on<string>(IPC.evtOpenPalette, cb)
 }
 
 contextBridge.exposeInMainWorld('orbital', api)

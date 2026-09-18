@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
-import { Orbit, Terminal, Globe, FileText } from 'lucide-react'
+import { Orbit, Terminal, Globe, FileText, TextSearch } from 'lucide-react'
 import type { Worktree, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
 import { defaultAgentConfigs } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
@@ -9,6 +9,7 @@ import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
 import EditorTab from './EditorTab'
 import BrowserTab from './BrowserTab'
+import SearchTab from './SearchTab'
 
 /** Custom drag MIME carrying a tab id, so only Orbital tab-drags trigger drop zones. */
 export const TAB_DND = 'application/x-orbital-tab'
@@ -143,7 +144,8 @@ function computeEdge(el: HTMLElement, clientX: number, clientY: number): DropEdg
 const OPENERS: { type: TabType; label: string; Icon: ComponentType<BrandIconProps>; config?: TabConfig }[] = [
   { type: 'terminal', label: 'Terminal', Icon: Terminal },
   { type: 'browser', label: 'Browser', Icon: Globe },
-  { type: 'editor', label: 'Editor', Icon: FileText }
+  { type: 'editor', label: 'Editor', Icon: FileText },
+  { type: 'search', label: 'Search', Icon: TextSearch }
 ]
 
 /** Brand icon per agent provider (Claude's doubles as the unknown-provider fallback). */
@@ -172,6 +174,10 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
   // expansion, view mode, scroll); keep them mounted (hidden when inactive) so
   // that state survives switching away and back.
   const editorTabs = pane.tabs.filter((t) => t.type === 'editor')
+  // Search tabs keep their query, results and expansion state in component
+  // state, so like editors they stay mounted when another tab is showing —
+  // coming back to a search should not mean running it again.
+  const searchTabs = pane.tabs.filter((t) => t.type === 'search')
   // The workspace's agent profiles (Settings → Agents) fill the agent openers,
   // in list order. Undefined (state not loaded yet) means the default lineup.
   const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
@@ -243,6 +249,16 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
             </div>
           )
         })}
+        {searchTabs.map((t) => {
+          const isActive = !!activeTab && t.id === activeTab.id
+          return (
+            <div key={t.id} className={`absolute inset-0 ${isActive ? '' : 'hidden'}`}>
+              {/* `active` tells it to take focus when shown. */}
+              <SearchTab tab={t} active={isActive} />
+            </div>
+          )
+        })}
+
         {/* Keyed like the editors: BrowserTab seeds its address from the tab's
             config once, so without a key a second browser tab in the same pane
             reused the first one's instance and kept showing its page. */}

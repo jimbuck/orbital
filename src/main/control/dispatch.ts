@@ -137,7 +137,7 @@ const handlers: Record<ControlCommand, Handler> = {
   'tab-new': async (req) => {
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     const type = String(req.args.type ?? 'terminal') as TabType
-    if (!['terminal', 'browser', 'editor', 'agent'].includes(type)) {
+    if (!['terminal', 'browser', 'editor', 'agent', 'search'].includes(type)) {
       return { ok: false, error: `unknown tab type '${type}'` }
     }
     const arg = req.args.arg ? String(req.args.arg) : undefined
@@ -154,8 +154,16 @@ const handlers: Record<ControlCommand, Handler> = {
       runtime.broadcastState()
       return { ok: true, data: { id: tab.id, type: tab.type } }
     }
+    // A search tab's argument is the query, scoped to the calling Worktree —
+    // `orbital tab new search TODO` is how an agent hands its findings over.
     const config: TabConfig =
-      type === 'browser' ? { url: arg } : type === 'editor' ? { filePath: arg } : {}
+      type === 'browser'
+        ? { url: arg }
+        : type === 'editor'
+          ? { filePath: arg }
+          : type === 'search' && arg
+            ? { search: { query: arg, scope: 'worktree', worktreeId: req.worktreeId } }
+            : {}
     const tab = createTabInWorktree(req.worktreeId, null, type, config)
     runtime.broadcastState()
     return { ok: true, data: { id: tab.id, type: tab.type } }

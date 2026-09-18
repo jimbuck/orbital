@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu } from 'electron'
+import { IPC } from '@shared/types'
 import { closeDb } from './db/database'
 import { runtime } from './runtime'
 import { updater } from './services/updater'
@@ -12,6 +13,7 @@ import {
 import { getSettings } from './services/settings'
 import { refreshJumpList } from './services/jump-list'
 import { zoom } from './services/zoom'
+import { paletteShortcutPrefix } from './services/palette-shortcut'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -84,6 +86,19 @@ function createWindow(): BrowserWindow {
     ) {
       event.preventDefault()
       win.webContents.reloadIgnoringCache()
+      return
+    }
+    // Ctrl+Shift+P opens the command palette. Handled here for the same reason
+    // the zoom shortcuts are: with focus in a terminal, xterm swallows the
+    // keystroke before any renderer listener sees it, and the palette has to
+    // work from wherever you happen to be looking. (Plain Ctrl+P is left alone
+    // on purpose — it is readline's "previous command", and taking it from
+    // every shell in the cockpit would cost more than it gives. The renderer
+    // binds it only while focus is outside a terminal.)
+    const prefix = paletteShortcutPrefix(input)
+    if (prefix !== null) {
+      event.preventDefault()
+      win.webContents.send(IPC.evtOpenPalette, prefix)
       return
     }
     if (zoom.handleInput(win, input)) event.preventDefault()

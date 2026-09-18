@@ -12,10 +12,11 @@ import {
   X
 } from 'lucide-react'
 import { Spinner } from '@renderer/lib/status'
-import { useStore, activeWorktree, activeProject, activePaneId } from '@renderer/store'
+import { useStore, activeWorktree, activeProject } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
+import { openFileInEditor } from '@renderer/lib/openTab'
 import { ContextMenu, type MenuPos } from '../rail/menu'
-import type { GitFileState, GitFileStatus, GitStatus, Pane, Tab } from '@shared/types'
+import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
 
 /* Secondary button recipe (design guide: "// secondary"). */
 const SECONDARY =
@@ -470,27 +471,13 @@ export default function GitPanel(): JSX.Element {
 
   /**
    * Show this file's staged/unstaged diff in the editor the user is already
-   * looking at: the active pane's active tab if it is an editor, else another
-   * editor in that pane, else any editor in the worktree — an editor holds
-   * many files, so a click here adds to it rather than spawning a tab per
-   * file. Only when there is no editor at all does one get created, in the
-   * pane the user last worked in (null = main's "first pane" default).
+   * looking at — an editor holds many files, so a click here adds to it rather
+   * than spawning a tab per file. The rule (which editor, and where a new one
+   * goes when there is none) is shared with the command palette's file search;
+   * see lib/openTab.ts.
    */
   const openDiff = (f: GitFileStatus): void => {
-    const s = useStore.getState()
-    const paneId = activePaneId(s, worktree.id)
-    const editorIn = (pane: Pane): Tab | undefined => {
-      const active = pane.tabs.find((t) => t.id === pane.activeTabId)
-      return active?.type === 'editor' ? active : pane.tabs.find((t) => t.type === 'editor')
-    }
-    const panes = [...worktree.panes].sort((a, b) => (a.id === paneId ? -1 : b.id === paneId ? 1 : 0))
-    const editor = panes.map(editorIn).find((t): t is Tab => !!t)
-    if (editor) {
-      void window.orbital.setActiveTab(editor.paneId, editor.id)
-      s.openInEditor(editor.id, f.path, f.staged, f.state)
-      return
-    }
-    void window.orbital.createTab(worktree.id, paneId, 'editor', { filePath: f.path, diffStaged: f.staged })
+    openFileInEditor(worktree.id, f.path, { staged: f.staged, gitState: f.state })
   }
 
   /** Anchor the branch picker under the branch button and (re)load the local branch list. */

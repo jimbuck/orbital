@@ -30,7 +30,7 @@ Usage:
   orbital worktrees
   orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [name]
   orbital worktree sync
-  orbital tab new <terminal|browser|editor|agent> [arg]
+  orbital tab new <terminal|browser|editor|agent|search> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
   orbital task list [--all] [--status <status>] [--tag <tag>]
   orbital task show <number|id>
@@ -54,6 +54,7 @@ Examples:
   orbital worktree sync
   orbital tab new browser http://localhost:5173
   orbital tab new agent "Claude (work)"
+  orbital tab new search "TODO("
   orbital task add "Write tests" --description "cover the parser" --tags test
   orbital task list --status todo
   orbital task start 12
@@ -128,7 +129,7 @@ function request(cmd: ControlCommand, args: Record<string, unknown>): ControlReq
   }
 }
 
-const TAB_TYPES = ['terminal', 'browser', 'editor', 'agent'] as const
+const TAB_TYPES = ['terminal', 'browser', 'editor', 'agent', 'search'] as const
 
 /**
  * `--json` swaps every printer for the raw response payload. It is stripped from

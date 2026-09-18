@@ -219,6 +219,17 @@
     box-shadow: 0 0 7px 1px color-mix(in srgb, var(--color-red) 75%, transparent);
   }
 }
+/* A content-search hit: the line lights up, then settles back so the band
+   doesn't sit there competing with the code once you've found it. */
+@keyframes revealFade {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
 @keyframes overlayIn {
   from {
     opacity: 0;

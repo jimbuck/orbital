@@ -1,7 +1,9 @@
 import { useEffect, useState, type JSX } from 'react'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
-import { useStore, activeProject, activeWorktree, activePaneId } from '@renderer/store'
+import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
+import { openTab } from '@renderer/lib/openTab'
+import { fireAndForget } from '@renderer/lib/bridge'
 import { OrbitalMark } from './icons'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { setThemeMode, themeModeLabel, useSystemTheme, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
@@ -44,6 +46,7 @@ export default function TitleBar(): JSX.Element {
   const updateStatus = useStore((s) => s.updateStatus)
   const zoomFactor = useStore((s) => s.zoomFactor)
   const openModal = useStore((s) => s.openModal)
+  const openPalette = useStore((s) => s.openPalette)
   const project = useStore(activeProject)
 
   const [openMenu, setOpenMenu] = useState<string | null>(null)
@@ -63,9 +66,9 @@ export default function TitleBar(): JSX.Element {
   const openServer = (url: string): void => {
     setDevMenu(false)
     if (!activeWorktreeId) return
-    // Land in the pane the user last worked in (null = first pane, before any click).
-    const paneId = activePaneId(useStore.getState(), activeWorktreeId)
-    void window.orbital.createTab(activeWorktreeId, paneId, 'browser', { url })
+    // Opened from outside the pane area, so where it lands is the Default Open
+    // Action's call (Settings ▸ Opening tabs).
+    fireAndForget(openTab(activeWorktreeId, 'browser', { url }))
   }
 
   // Escape closes an open menu (WAI-ARIA menu-button pattern).
@@ -106,6 +109,9 @@ export default function TitleBar(): JSX.Element {
       id: 'view',
       label: 'View',
       items: [
+        { label: 'Command Palette…', hint: 'Ctrl Shift P', onClick: () => openPalette('>') },
+        { label: 'Go to File…', hint: 'Ctrl Shift O', onClick: () => openPalette('') },
+        { sep: true, label: '' },
         { label: 'All Tasks…', onClick: () => openModal('board') },
         { label: 'Commit History…', onClick: () => openModal('commitHistory'), disabled: !activeWorktreeId },
         { label: 'Reload', onClick: () => window.location.reload() },

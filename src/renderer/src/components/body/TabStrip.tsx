@@ -9,7 +9,8 @@ import {
   Pencil,
   SplitSquareHorizontal,
   SplitSquareVertical,
-  Columns2
+  Columns2,
+  TextSearch
 } from 'lucide-react'
 import type { AgentConfig, Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
 import { defaultAgentConfigs, providerLabel, resolveAgentRef } from '@shared/types'
@@ -44,6 +45,7 @@ function TypeIcon({
   const props = { size: 14, strokeWidth: 1.5, className }
   if (type === 'browser') return <Globe {...props} />
   if (type === 'editor') return <FileText {...props} />
+  if (type === 'search') return <TextSearch {...props} />
   if (type === 'agent') {
     if (provider === 'codex') return <CodexIcon {...props} />
     if (provider === 'cursor') return <CursorIcon {...props} />
@@ -56,7 +58,8 @@ function TypeIcon({
 const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig; provider?: string }[] = [
   { type: 'terminal', label: 'Terminal' },
   { type: 'browser', label: 'Browser' },
-  { type: 'editor', label: 'Editor' }
+  { type: 'editor', label: 'Editor' },
+  { type: 'search', label: 'Search' }
 ]
 
 /**
@@ -78,6 +81,12 @@ function tabAgent(tab: Tab, agents: AgentConfig[], defaultAgentId?: string): Age
 export function tabTitle(tab: Tab, agent?: AgentConfig): string {
   if (tab.config.title) return tab.config.title
   if (tab.type === 'editor') return 'Editor'
+  // The query, once there is one: several Search tabs are only tellable apart
+  // by what they are searching for.
+  if (tab.type === 'search') {
+    const q = tab.config.search?.query?.trim()
+    return q ? `Search: ${q}` : 'Search'
+  }
   if (tab.type === 'browser') {
     const u = tab.config.url
     if (!u) return 'Browser'

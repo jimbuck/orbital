@@ -123,10 +123,18 @@ type ExecError = Error & {
   killed?: boolean
 }
 
-interface GitResult {
+export interface GitResult {
   stdout: string
   stderr: string
   code: number
+  /** The caller killed it through {@link captureCancellable}; the other fields are empty. */
+  cancelled?: boolean
+}
+
+/** A git process that can still be killed, plus the handle to do it. */
+export interface CancellableRun {
+  result: Promise<GitResult>
+  cancel: () => void
 }
 
 /** Run git, never throwing — the caller inspects `code` (used where non-zero is expected). */
@@ -154,6 +162,52 @@ async function capture(cwd: string, args: string[], opts: SpawnOptions = {}): Pr
     }
     if (!stderr && !stdout && e.message) stderr = e.message
     return { stdout, stderr, code }
+  }
+}
+
+/**
+ * As {@link capture}, but the caller keeps a handle to kill the process.
+ *
+ * Content search runs one of these per checkout on every keystroke, and a
+ * superseded search has to stop rather than run to completion behind the one
+ * the user is now waiting on — on a large repo that is the difference between
+ * a responsive box and a queue of greps. A cancelled run resolves with
+ * `cancelled: true` instead of rejecting, because being superseded is the
+ * normal case here, not a failure.
+ */
+function captureCancellable(cwd: string, args: string[], opts: SpawnOptions = {}): CancellableRun {
+  const timeout = opts.timeoutMs ?? LOCAL_TIMEOUT_MS
+  let cancelled = false
+  let child: ReturnType<typeof execFile> | null = null
+  const result = new Promise<GitResult>((resolve) => {
+    child = execFile(
+      'git',
+      args,
+      { cwd, maxBuffer: MAX_BUFFER, windowsHide: true, timeout, env: gitEnv(opts.nonInteractive) },
+      (err, stdout, stderr) => {
+        if (cancelled) return resolve({ stdout: '', stderr: '', code: 0, cancelled: true })
+        const e = err as ExecError | null
+        if (!e) return resolve({ stdout: String(stdout), stderr: String(stderr), code: 0 })
+        const code = typeof e.code === 'number' ? e.code : 1
+        // The CALLBACK's stderr, not the error's. `promisify(execFile)` decorates
+        // its rejection with stdout/stderr, but the raw callback form does not —
+        // reading e.stderr here yields undefined and falls through to
+        // e.message, which is Node's "Command failed: git -c core.quotePath…"
+        // with the whole argv in it. That is what the user would have been
+        // shown in place of git's own one-line explanation.
+        let errText = String(stderr ?? '')
+        if (e.killed) errText = `git ${args[2] ?? ''} timed out after ${Math.round(timeout / 1000)}s`
+        if (!errText && e.message) errText = e.message
+        resolve({ stdout: String(stdout ?? ''), stderr: errText, code })
+      }
+    )
+  })
+  return {
+    result,
+    cancel: () => {
+      cancelled = true
+      child?.kill()
+    }
   }
 }
 
@@ -900,6 +954,25 @@ function sortNodes(nodes: FileNode[]): void {
   for (const n of nodes) if (n.children) sortNodes(n.children)
 }
 
+/**
+ * Every tracked and untracked-but-not-ignored path in a checkout, relative to
+ * its root, `/`-separated. This is the flat form of {@link fileTree}'s input
+ * and exists for the palette's file search, which wants a list to rank rather
+ * than a tree to render — and wants it without the second `ls-files` pass and
+ * the status merge that building the tree costs.
+ */
+async function filePaths(repoPath: string): Promise<string[]> {
+  const out = await run(repoPath, [
+    '-c',
+    'core.quotePath=false',
+    'ls-files',
+    '--cached',
+    '--others',
+    '--exclude-standard'
+  ])
+  return Array.from(new Set(toLines(out).filter(Boolean)))
+}
+
 async function fileTree(repoPath: string): Promise<FileNode[]> {
   const out = await run(repoPath, [
     '-c',
@@ -1418,6 +1491,8 @@ export const git = {
   commitDetail,
   commitDiff,
   fileTree,
+  filePaths,
+  captureCancellable,
   listDir,
   readFile,
   readFileBase64,

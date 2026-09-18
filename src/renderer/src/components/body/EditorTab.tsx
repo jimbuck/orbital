@@ -71,17 +71,29 @@ function previewKind(path: string): PreviewKind {
 export function CodeEditor({
   path,
   value,
-  onChange
+  onChange,
+  reveal
 }: {
   path: string
   value: string
   onChange: (next: string) => void
+  /**
+   * Scroll a 1-based line into view and flash it — where a content-search hit
+   * lands. `seq` makes asking for the same line twice a fresh request.
+   */
+  reveal?: { line: number; seq: number }
 }): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ pos: MenuPos; hasSelection: boolean } | null>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  // The flash band over a revealed line. Its position is written straight to
+  // the node on every scroll rather than held in state — a setState per scroll
+  // event would re-render the whole editor at frame rate.
+  const bandRef = useRef<HTMLDivElement>(null)
+  const bandLineRef = useRef<number | null>(null)
+  const [banding, setBanding] = useState(false)
   const theme = useResolvedTheme()
 
   // One number per line. wrap="off" on the textarea means a source line is
@@ -120,6 +132,33 @@ export function CodeEditor({
     // theme is a dep so the mirror re-highlights when the app theme flips.
   }, [path, value, theme])
 
+  /**
+   * Line height and top padding in CSS pixels, read off the live element
+   * rather than hard-coded from the classes. The window has a user zoom, and
+   * `getComputedStyle` reports the same CSS pixels that `scrollTop` is measured
+   * in, so the arithmetic holds at any zoom level.
+   */
+  const metrics = (ta: HTMLTextAreaElement): { lineHeight: number; padTop: number } => {
+    const cs = getComputedStyle(ta)
+    const lineHeight = parseFloat(cs.lineHeight)
+    const padTop = parseFloat(cs.paddingTop)
+    return {
+      lineHeight: Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 19.2,
+      padTop: Number.isFinite(padTop) ? padTop : 12
+    }
+  }
+
+  /** Put the flash band over its line, in viewport coordinates. */
+  const positionBand = (): void => {
+    const ta = taRef.current
+    const band = bandRef.current
+    const line = bandLineRef.current
+    if (!ta || !band || line === null) return
+    const { lineHeight, padTop } = metrics(ta)
+    band.style.top = `${padTop + (line - 1) * lineHeight - ta.scrollTop}px`
+    band.style.height = `${lineHeight}px`
+  }
+
   const syncScroll = (): void => {
     const ta = taRef.current
     if (!ta) return
@@ -130,9 +169,35 @@ export function CodeEditor({
     }
     const gutter = gutterRef.current
     if (gutter) gutter.scrollTop = ta.scrollTop
+    positionBand()
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(syncScroll, [html, lineCount])
+
+  // Centre the requested line and flash it. Runs on `seq` so the same line can
+  // be asked for again; the band clears itself after a beat.
+  const revealSeq = reveal?.seq ?? 0
+  const revealLine = reveal?.line
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta || revealLine === undefined || revealLine < 1) return
+    const { lineHeight, padTop } = metrics(ta)
+    const top = padTop + (revealLine - 1) * lineHeight
+    // Centre it, but never scroll past the top for a line near the start.
+    ta.scrollTop = Math.max(0, top - ta.clientHeight / 2 + lineHeight / 2)
+    bandLineRef.current = revealLine
+    setBanding(true)
+    syncScroll()
+    const timer = setTimeout(() => {
+      setBanding(false)
+      bandLineRef.current = null
+    }, 1800)
+    return () => clearTimeout(timer)
+    // syncScroll is redefined every render and would re-run this on every
+    // keystroke, re-scrolling away from wherever the user had moved to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealSeq, revealLine])
 
   const openMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -209,6 +274,15 @@ export function CodeEditor({
             : 'text-text-2'
         } ${FOCUS}`}
       />
+      {banding && (
+        <div
+          ref={bandRef}
+          aria-hidden
+          data-testid="reveal-band"
+          style={{ animation: 'revealFade 1.8s ease-out forwards' }}
+          className="pointer-events-none absolute inset-x-0 z-[5] border-y border-accent/40 bg-accent/15"
+        />
+      )}
       <div
         ref={gutterRef}
         aria-hidden
@@ -847,19 +921,33 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   }, [])
 
   /**
-   * The git panel asked this editor to show a file's diff (store.editorOpen).
-   * A file that is already open is pointed at the requested side and its diff
-   * refetched — the panel's row is fresher than whatever was cached. The git
-   * state travels with the request so the file opens straight onto its diff
-   * even if the tree has not caught up with the change yet.
+   * Something outside this editor asked it to show a file (store.editorOpen):
+   * the git panel's change list, or the command palette's file search.
+   *
+   * What the request carries says which of the two it is. The git panel names a
+   * side (`staged`) and the file's git state, because it is asking for a DIFF —
+   * and it travels with the request so the file opens straight onto that diff
+   * even if the tree has not caught up with the change yet. The palette sends
+   * neither, because it is asking for the file. That distinction only matters
+   * for a file that is ALREADY open: forcing diff mode there would answer "go
+   * to file" on an unchanged file with an empty diff.
    */
   const editorOpen = useStore((s) => s.editorOpen)
   // Requests made before this tab mounted were for some other editor.
   const handledSeqRef = useRef(editorOpen?.seq ?? 0)
+  // The line a content-search hit asked for, held until that file's contents
+  // have actually loaded — scrolling to line 400 of an empty buffer just pins
+  // it at the top, and by the time the text arrives nothing would re-scroll.
+  const [reveal, setReveal] = useState<{ path: string; line: number; seq: number } | null>(null)
   useEffect(() => {
     if (!editorOpen || editorOpen.tabId !== tab.id || editorOpen.seq === handledSeqRef.current) return
     handledSeqRef.current = editorOpen.seq
-    const { path, staged, gitState } = editorOpen
+    const { path, staged, gitState, line } = editorOpen
+    // A line number is a working-tree line. A diff renumbers everything around
+    // its hunks, so revealing one inside a diff would land somewhere arbitrary
+    // — a request carrying a line means the file view.
+    const wantsDiff = line === undefined && (staged || gitState !== undefined)
+    setReveal(line === undefined ? null : { path, line, seq: editorOpen.seq })
     const node = findNode(tree, path) ?? { name: baseName(path), path, type: 'file' as const }
     setFiles((fs) => {
       if (!fs.some((f) => f.path === path)) {
@@ -871,8 +959,10 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
               ...f,
               staged,
               gitState: f.gitState ?? gitState,
-              diff: null,
-              mode: imageMime(path) ? f.mode : 'diff'
+              // Drop the cached diff only when one was asked for: the panel's
+              // row is fresher than anything cached here.
+              diff: wantsDiff ? null : f.diff,
+              mode: wantsDiff && !imageMime(path) ? 'diff' : line !== undefined ? 'file' : f.mode
             }
           : f
       )
@@ -1265,6 +1355,12 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                   path={activeFile.path}
                   value={activeFile.draft}
                   onChange={(next) => patch(activeFile.path, (f) => ({ ...f, draft: next }))}
+                  // Only once the text is here — see `reveal` above.
+                  reveal={
+                    reveal && reveal.path === activeFile.path && activeFile.content !== null
+                      ? { line: reveal.line, seq: reveal.seq }
+                      : undefined
+                  }
                 />
               )}
             </div>

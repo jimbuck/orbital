@@ -135,22 +135,37 @@ describe('GitPanel opening a change', () => {
     config: {}
   })
 
-  /** Worktree A with two panes, each holding the given tabs (first tab active). */
+  /**
+   * Worktree A with two panes side by side, each holding the given tabs (first
+   * tab active). The layout tree is set to match: where a NEW editor lands is
+   * decided from that tree (see lib/paneTarget.ts), so a fixture whose panes
+   * and layout disagree would be testing a state the app cannot be in.
+   */
   function twoPanes(left: Tab[], right: Tab[]): void {
     const w = worktree('A')
     w.panes = [
       { id: 'A-left', worktreeId: 'A', activeTabId: left[0]?.id ?? null, tabs: left },
       { id: 'A-right', worktreeId: 'A', activeTabId: right[0]?.id ?? null, tabs: right }
     ]
+    w.layout = {
+      type: 'split',
+      id: 'A-split',
+      dir: 'row',
+      ratio: 0.5,
+      a: { type: 'pane', paneId: 'A-left' },
+      b: { type: 'pane', paneId: 'A-right' }
+    }
     useStore.setState({ worktrees: [w], editorOpen: null } as unknown as Parameters<typeof useStore.setState>[0])
   }
 
   let setActiveTab: ReturnType<typeof vi.fn>
   let createTab: ReturnType<typeof vi.fn>
+  let splitPane: ReturnType<typeof vi.fn>
   beforeEach(() => {
     setActiveTab = vi.fn(async () => undefined)
     createTab = vi.fn(async () => undefined)
-    Object.assign(window.orbital, { setActiveTab, createTab })
+    splitPane = vi.fn(async () => ({ id: 'A-new' }))
+    Object.assign(window.orbital, { setActiveTab, createTab, splitPane })
   })
 
   async function clickChange(): Promise<void> {
@@ -197,8 +212,23 @@ describe('GitPanel opening a change', () => {
     useStore.getState().setActivePane('A', 'A-left')
     await clickChange()
 
-    expect(createTab).toHaveBeenCalledWith('A', 'A-left', 'editor', { filePath: 'src/a.ts', diffStaged: false })
+    // Where it lands is the Default Open Action's call — Right Pane by default,
+    // and this Worktree already has one, so nothing is split.
+    expect(splitPane).not.toHaveBeenCalled()
+    expect(createTab).toHaveBeenCalledWith('A', 'A-right', 'editor', { filePath: 'src/a.ts', diffStaged: false })
     expect(setActiveTab).not.toHaveBeenCalled()
     expect(useStore.getState().editorOpen).toBeNull()
+  })
+
+  it('splits a single-pane Worktree to make the pane the setting names', async () => {
+    // One pane, Default Open Action "Right Pane": the right-hand pane has to be
+    // created, or the setting would mean nothing until the user split by hand.
+    useStore.setState({ editorOpen: null } as unknown as Parameters<typeof useStore.setState>[0])
+    await clickChange()
+
+    expect(splitPane).toHaveBeenCalledWith('A', 'A-pane', 'row', 'after')
+    await vi.waitFor(() =>
+      expect(createTab).toHaveBeenCalledWith('A', 'A-new', 'editor', { filePath: 'src/a.ts', diffStaged: false })
+    )
   })
 })

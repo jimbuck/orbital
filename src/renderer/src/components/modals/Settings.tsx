@@ -1,12 +1,19 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useStore, activeProject } from '@renderer/store'
-import type { Settings as SettingsModel, SettingsPatch, AgentConfig, ProfileDirInfo } from '@shared/types'
+import type {
+  Settings as SettingsModel,
+  SettingsPatch,
+  AgentConfig,
+  OpenAction,
+  ProfileDirInfo
+} from '@shared/types'
 import { setThemeMode, themeModeLabel, useThemeMode, THEME_MODES } from '@renderer/lib/theme'
 import { previewAccentColor, setAccentColor, useAccentColor } from '@renderer/lib/accent'
 import { AccentPicker } from '../AccentPicker'
 import { SegmentedControl } from '../SegmentedControl'
 import {
+  OPEN_ACTIONS,
   SUPPORTED_AGENTS,
   defaultAgentConfigs,
   findAgentConfig,
@@ -411,6 +418,9 @@ export default function Settings(): React.JSX.Element {
   const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
+  const [defaultOpenAction, setDefaultOpenAction] = useState<OpenAction>(
+    () => settings?.defaultOpenAction ?? 'right'
+  )
   const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
   // App theme is NOT a working copy: it is applied and persisted the moment it is
   // clicked (see the control below), so it is read live from the store — that way
@@ -548,6 +558,7 @@ export default function Settings(): React.JSX.Element {
         envSyncPatterns: patterns,
         periodicFetch,
         debugLogging,
+        defaultOpenAction,
         agents: cleanedAgents
       }
       await window.orbital.setSettings(changedOnly(edited, seededRef.current))
@@ -706,6 +717,39 @@ export default function Settings(): React.JSX.Element {
           onChange={setThemeMode}
           describedBy={themeHintId}
         />
+      </div>
+
+      <div className="my-[18px] h-px bg-soft" />
+
+      {/* Opening tabs */}
+      <div className={sectionLabel}>Opening tabs</div>
+      <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
+        Where a tab opened from outside the pane area lands — the command palette, a file in the git
+        panel, a dev-server link. A Worktree with a single pane is split to create the pane you
+        picked; once it is already split, a direction with nothing on that side falls back to the
+        pane you were working in.
+      </p>
+      <div className="mt-2.5 flex items-center justify-between gap-4">
+        <span className="text-[12.5px] text-text-2">Default open action</span>
+        <div className="relative">
+          <select
+            value={defaultOpenAction}
+            onChange={(e) => setDefaultOpenAction(e.target.value as OpenAction)}
+            aria-label="Default open action"
+            className="appearance-none rounded-btn border border-line-2 bg-bg py-[7px] pl-3 pr-9 text-[12px] text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+          >
+            {OPEN_ACTIONS.map((a) => (
+              <option key={a.value} value={a.value} className="bg-panel text-text-2">
+                {a.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={13}
+            strokeWidth={1.5}
+            className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-faint"
+          />
+        </div>
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

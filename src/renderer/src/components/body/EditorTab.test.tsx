@@ -944,7 +944,7 @@ describe('EditorTab open-file pills', () => {
 
   /** The git panel's ask, as the store carries it (see store.openInEditor). */
   const askToOpen = (tabId: string, path: string, staged = false): void =>
-    act(() => useStore.getState().openInEditor(tabId, path, staged, 'modified'))
+    act(() => useStore.getState().openInEditor(tabId, { path, staged, gitState: 'modified' }))
 
   it('opens a file the git panel asks for, straight onto its diff', async () => {
     await open('a.txt')

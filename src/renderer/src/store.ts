@@ -57,15 +57,38 @@ interface UIState {
   updateStatus: UpdateStatus
   /** The window's UI zoom factor (1 = 100%), mirrored from main for the View menu. */
   zoomFactor: number
+  /**
+   * The command palette, when open. `query` is what it should be seeded with
+   * (`>` for commands, `''` for the mixed view); `seq` makes re-opening with a
+   * different prefix a fresh request even while the palette is already up, so
+   * Ctrl+Shift+P from inside the file view switches it to commands.
+   */
+  palette: { query: string; seq: number } | null
 }
 
-export interface EditorOpenRequest {
-  tabId: string
+/** What an outside caller wants an editor to show. */
+export interface EditorOpenTarget {
   path: string
   /** Show the staged (index) side of the diff rather than the working tree. */
-  staged: boolean
-  /** What git says about the file, so the editor opens straight onto its diff. */
+  staged?: boolean
+  /**
+   * What git says about the file. Its PRESENCE is also the signal that a diff
+   * is wanted: the git panel sends it, the palette's file search does not, and
+   * the editor uses that to decide whether to force diff mode on a file that is
+   * already open. See EditorTab's editorOpen effect.
+   */
   gitState?: GitFileState
+  /**
+   * 1-based line to scroll to and flash — a content-search hit. Implies the
+   * file view: a diff has different line numbers, so revealing a working-tree
+   * line inside one would land somewhere arbitrary.
+   */
+  line?: number
+}
+
+export interface EditorOpenRequest extends EditorOpenTarget {
+  tabId: string
+  staged: boolean
   seq: number
 }
 
@@ -91,8 +114,11 @@ interface Actions {
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
   setActivePane: (worktreeId: string, paneId: string) => void
-  /** Ask editor `tabId` to show `path` (see `editorOpen`). */
-  openInEditor: (tabId: string, path: string, staged: boolean, gitState?: GitFileState) => void
+  /** Ask editor `tabId` to show a file (see `editorOpen`). */
+  openInEditor: (tabId: string, target: EditorOpenTarget) => void
+  /** Open (or re-seed) the command palette with `prefix` already typed. */
+  openPalette: (prefix?: string) => void
+  closePalette: () => void
 }
 
 export type Store = Data & UIState & Actions
@@ -177,6 +203,7 @@ export const useStore = create<Store>((set, get) => ({
   alertCount: 0,
   updateStatus: { phase: 'idle' },
   zoomFactor: 1,
+  palette: null,
 
   async init() {
     if (initStarted) return
@@ -283,8 +310,18 @@ export const useStore = create<Store>((set, get) => ({
     set((s) => ({ activePaneIds: { ...s.activePaneIds, [worktreeId]: paneId } }))
   },
 
-  openInEditor(tabId, path, staged, gitState) {
-    set((s) => ({ editorOpen: { tabId, path, staged, gitState, seq: (s.editorOpen?.seq ?? 0) + 1 } }))
+  openInEditor(tabId, target) {
+    set((s) => ({
+      editorOpen: { ...target, tabId, staged: !!target.staged, seq: (s.editorOpen?.seq ?? 0) + 1 }
+    }))
+  },
+
+  openPalette(prefix = '') {
+    set((s) => ({ palette: { query: prefix, seq: (s.palette?.seq ?? 0) + 1 } }))
+  },
+
+  closePalette() {
+    set({ palette: null })
   }
 }))
 

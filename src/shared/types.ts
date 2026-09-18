@@ -36,10 +36,38 @@ export type WorktreeKind = 'root' | 'linked'
 export type ThemeMode = 'system' | 'light' | 'dark'
 
 /**
+ * Where a tab opened from OUTSIDE the pane area lands — the command palette, a
+ * git-panel diff, a dev-server link. `active` is the pane the user last worked
+ * in; the four directions name the pane on that side of it, and are created by
+ * splitting the active pane when nothing is there yet (see
+ * `renderer/lib/paneTarget.ts`).
+ */
+export type OpenAction = 'active' | 'right' | 'left' | 'top' | 'bottom'
+
+/** The Default Open Action choices, in the order Settings offers them. */
+export const OPEN_ACTIONS: ReadonlyArray<{ value: OpenAction; label: string }> = [
+  { value: 'active', label: 'Active Pane' },
+  { value: 'right', label: 'Right Pane' },
+  { value: 'left', label: 'Left Pane' },
+  { value: 'bottom', label: 'Bottom Pane' },
+  { value: 'top', label: 'Top Pane' }
+]
+
+/** Display label for an open action, falling back to the raw value. */
+export function openActionLabel(action: OpenAction): string {
+  return OPEN_ACTIONS.find((a) => a.value === action)?.label ?? action
+}
+
+/** Coerce a stored (or hand-edited) value to a known OpenAction, else null. */
+export function normalizeOpenAction(value: unknown): OpenAction | null {
+  return OPEN_ACTIONS.some((a) => a.value === value) ? (value as OpenAction) : null
+}
+
+/**
  * The kinds of tab a Worktree pane can host (PRD §6). `agent` is a PTY-backed tab
  * (like `terminal`) that boots straight into a coding agent — see TabConfig.agentId.
  */
-export type TabType = 'terminal' | 'browser' | 'editor' | 'agent'
+export type TabType = 'terminal' | 'browser' | 'editor' | 'agent' | 'search'
 
 /**
  * Agent providers Orbital can launch, in menu order. Keep in sync with
@@ -385,6 +413,11 @@ export interface TabConfig {
    * can resume by id set it (Claude today).
    */
   agentSessionId?: string
+  /**
+   * search: what this Search tab is searching for. Persisted so a tab restored
+   * after a restart comes back on the query you left it on.
+   */
+  search?: SearchQuery
   /** display title override. */
   title?: string
 }
@@ -475,6 +508,12 @@ export interface Settings {
   agents: AgentConfig[]
   /** App color theme: 'system' follows the OS, else an explicit 'light'/'dark'. Defaults to 'dark'. */
   theme: ThemeMode
+  /**
+   * Where a tab opened from outside the pane area lands (command palette, git
+   * panel, dev-server link). Defaults to `right`, so an opened file sits beside
+   * what you were doing rather than on top of it.
+   */
+  defaultOpenAction: OpenAction
   /**
    * The workspace's accent colour as `#rrggbb`, or null for the theme's built-in
    * blue. Workspace-scoped on purpose: each workspace runs in its own window,
@@ -641,6 +680,94 @@ export interface GitCommitDetail {
   /** The whole message, subject line included, trailing whitespace trimmed. */
   body: string
   files: GitCommitFile[]
+}
+
+/**
+ * One file matched by the command palette's search, across every Worktree in
+ * the workspace. `worktreeId` is what makes the hit openable (and what the
+ * palette labels with the owning project ▸ Worktree); `path` is
+ * checkout-relative, like every other path crossing this bridge.
+ */
+export interface FileSearchHit {
+  worktreeId: string
+  path: string
+  /** Fuzzy score, descending across the returned list (see shared/fuzzy.ts). */
+  score: number
+}
+
+/* ----------------------------------------------------------------------------
+ * Content search (the Search tab and the palette's `/` view)
+ *
+ * Distinct from {@link FileSearchHit}, which matches file NAMES. This searches
+ * file CONTENTS, and is served by `git grep` per checkout — see
+ * main/services/search.ts for why that rather than an index.
+ * -------------------------------------------------------------------------- */
+
+/** How wide a content search casts: one checkout, one project's checkouts, or all of them. */
+export type SearchScope = 'worktree' | 'project' | 'workspace'
+
+/** The scopes in the order the Search tab offers them, with their labels. */
+export const SEARCH_SCOPES: ReadonlyArray<{ value: SearchScope; label: string }> = [
+  { value: 'worktree', label: 'This Worktree' },
+  { value: 'project', label: 'This project' },
+  { value: 'workspace', label: 'All projects' }
+]
+
+export interface SearchQuery {
+  /** The pattern. A literal by default; a PCRE regular expression when `regex`. */
+  query: string
+  caseSensitive?: boolean
+  /** Match only at word boundaries (git grep -w). */
+  wholeWord?: boolean
+  regex?: boolean
+  /** Default: `worktree` when `worktreeId` is given, else `workspace`. */
+  scope?: SearchScope
+  /** The checkout the `worktree` and `project` scopes are anchored on. */
+  worktreeId?: string
+  /**
+   * Comma-separated globs limiting which files are searched, e.g.
+   * `src/**,*.ts`. Empty means every file the checkout tracks.
+   */
+  include?: string
+  /** Cap on total matches returned; the palette's peek asks for far fewer than the tab. */
+  limit?: number
+}
+
+/** One matching line. */
+export interface SearchMatch {
+  /** 1-based line number in the file. */
+  line: number
+  /** The line's text. A very long line is clipped around its first match. */
+  text: string
+  /** `[start, end)` character offsets into `text` for each match on the line. */
+  ranges: [number, number][]
+  /** Characters cut from the START of the line when clipping; 0 when whole. */
+  clippedStart: number
+}
+
+/** One file's matches. */
+export interface SearchFileResult {
+  worktreeId: string
+  /** Checkout-relative, `/`-separated — the same spelling the file API takes. */
+  path: string
+  matches: SearchMatch[]
+  /** The per-file cap was reached; this file has more matches than are listed. */
+  truncated: boolean
+}
+
+export interface SearchResults {
+  files: SearchFileResult[]
+  totalMatches: number
+  /** A cap was reached, so the result set is partial. */
+  truncated: boolean
+  /**
+   * Per-checkout failures — a bad regex, a checkout whose directory is gone.
+   * One failing checkout must not take the whole search down, so they are
+   * reported alongside whatever the others found.
+   */
+  errors: { worktreeId: string; message: string }[]
+  /** True when the search was superseded or cancelled; `files` is meaningless. */
+  cancelled: boolean
 }
 
 export interface FileNode {
@@ -916,6 +1043,9 @@ export const IPC = {
   renamePath: 'orbital:renamePath',
   trashPath: 'orbital:trashPath',
   resolvePath: 'orbital:resolvePath',
+  searchFiles: 'orbital:searchFiles',
+  searchContent: 'orbital:searchContent',
+  cancelSearch: 'orbital:cancelSearch',
   // tasks
   createTask: 'orbital:createTask',
   updateTask: 'orbital:updateTask',
@@ -950,7 +1080,8 @@ export const IPC = {
   evtAlert: 'orbital:evt:alert',
   evtUpdate: 'orbital:evt:update',
   evtGitChanged: 'orbital:evt:gitChanged',
-  evtZoomChanged: 'orbital:evt:zoomChanged'
+  evtZoomChanged: 'orbital:evt:zoomChanged',
+  evtOpenPalette: 'orbital:evt:openPalette'
 } as const
 
 /* ============================================================================
@@ -1157,6 +1288,25 @@ export interface OrbitalApi {
    * committed in the checkout to a target outside it.
    */
   resolvePath(worktreeId: string, path: string): Promise<string>
+  /**
+   * Fuzzy-search tracked files across EVERY Worktree in the workspace, best
+   * match first. Main keeps one path list per checkout (git's own file list,
+   * so ignored trees are skipped) and rebuilds it when that checkout changes,
+   * which is what keeps this fast enough to run on every keystroke.
+   */
+  searchFiles(query: string, limit?: number): Promise<FileSearchHit[]>
+  /**
+   * Search file CONTENTS across the scoped checkouts, best-effort: a checkout
+   * that fails reports an error rather than failing the whole search.
+   *
+   * `searchId` identifies the caller's search slot. Issuing a new search with
+   * the same id kills whatever was still running under it, which is what makes
+   * this safe to fire on every keystroke — the palette uses one slot, and each
+   * Search tab uses its own.
+   */
+  searchContent(query: SearchQuery, searchId: string): Promise<SearchResults>
+  /** Kill anything running under `searchId` (a Search tab closing, the palette dismissing). */
+  cancelSearch(searchId: string): Promise<void>
 
   // tasks
   createTask(projectId: string, title: string, description?: string, tags?: string[]): Promise<Task>
@@ -1264,6 +1414,13 @@ export interface OrbitalApi {
   onGitChanged(cb: (evt: GitChangedEvent) => void): () => void
   /** The window's zoom factor changed (a shortcut, a menu action, or the persisted level applied on load). */
   onZoomChanged(cb: (factor: number) => void): () => void
+  /**
+   * A keyboard shortcut asked for the command palette. Handled in main (like
+   * the zoom shortcuts) so it fires even when a terminal has focus and xterm
+   * would otherwise swallow the keystroke. `prefix` seeds the query — `>` for
+   * commands, `''` for the mixed everything view.
+   */
+  onOpenPalette(cb: (prefix: string) => void): () => void
 }
 
 /* ============================================================================

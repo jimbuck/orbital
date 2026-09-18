@@ -4,6 +4,7 @@ import {
   defaultAgentConfigs,
   normalizeAccentColor,
   normalizeAgentConfigs,
+  normalizeOpenAction,
   type GlobalSettings,
   type Settings,
   type SettingsPatch,
@@ -32,6 +33,9 @@ const DEFAULT_SETTINGS: Settings = {
   // Existing installs merge over this default, so they stay dark and keep the
   // current look; only an explicit change opts a user into light/system.
   theme: 'dark',
+  // Right pane by default: something opened from the palette or the git panel
+  // lands beside what you were doing rather than on top of it.
+  defaultOpenAction: 'right',
   accentColor: null
 }
 
@@ -46,7 +50,8 @@ const GLOBAL_SETTING_KEYS = Object.keys({
   defaultShell: true,
   alerts: true,
   debugLogging: true,
-  theme: true
+  theme: true,
+  defaultOpenAction: true
 } satisfies Record<keyof GlobalSettings, true>) as readonly (keyof GlobalSettings)[]
 
 /**
@@ -158,6 +163,10 @@ export function getSettings(): Settings {
   // The workspace row can be hand-edited (or written by an import); a value that
   // is not a colour must read as "no accent", not reach the renderer's CSS.
   merged.accentColor = normalizeAccentColor(merged.accentColor)
+  // Same reasoning as the accent: the blob is shared with hand edits, imports
+  // and other builds, and an unknown placement would leave the renderer unable
+  // to resolve a target pane at all.
+  merged.defaultOpenAction = normalizeOpenAction(merged.defaultOpenAction) ?? DEFAULT_SETTINGS.defaultOpenAction
   return merged
 }
 
