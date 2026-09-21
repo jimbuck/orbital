@@ -536,8 +536,8 @@ export interface Settings {
   /**
    * Whether the mono font draws its coding ligatures — JetBrains Mono turning
    * `!=` and `=>` into one glyph. On by default, because that is the font's own
-   * look and what the app has always shipped. Machine-global, unlike the theme:
-   * it is a fact about how this person reads code, not about a workspace.
+   * look and what the app has always shipped. Workspace-scoped along with the
+   * theme, so the whole look of a window is set in one place.
    */
   fontLigatures: boolean
   /**
@@ -563,7 +563,8 @@ export const WORKSPACE_SETTING_KEYS = [
   'accentColor',
   'theme',
   'systemDarkTheme',
-  'systemLightTheme'
+  'systemLightTheme',
+  'fontLigatures'
 ] as const
 
 /**

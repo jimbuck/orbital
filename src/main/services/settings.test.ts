@@ -105,22 +105,22 @@ beforeEach(() => {
 
 describe('setSettings — partial writes', () => {
   it('leaves stored keys the patch does not name untouched', () => {
-    setSettings({ defaultShell: 'pwsh.exe', fontLigatures: true, debugLogging: true })
+    setSettings({ defaultShell: 'pwsh.exe', defaultOpenAction: 'right', debugLogging: true })
 
-    setSettings({ fontLigatures: false })
+    setSettings({ defaultOpenAction: 'left' })
 
     const after = getSettings()
-    expect(after.fontLigatures).toBe(false)
+    expect(after.defaultOpenAction).toBe('left')
     expect(after.defaultShell).toBe('pwsh.exe')
     expect(after.debugLogging).toBe(true)
     // Not merely re-derived from defaults on read — still on disk.
-    expect(storedGlobalKeys().sort()).toEqual(['debugLogging', 'defaultShell', 'fontLigatures'])
+    expect(storedGlobalKeys().sort()).toEqual(['debugLogging', 'defaultOpenAction', 'defaultShell'])
   })
 
   it('does not touch the workspace row for a global-only patch, or vice versa', () => {
     setSettings({ periodicFetch: false, defaultShell: 'cmd.exe' })
 
-    setSettings({ fontLigatures: false })
+    setSettings({ defaultOpenAction: 'left' })
     expect(workspaceRow.periodicFetch).toBe(false)
 
     setSettings({ periodicFetch: true })
@@ -133,16 +133,16 @@ describe('setSettings — partial writes', () => {
     // checking does not survive assignment to a variable — so the runtime pick is
     // the real backstop, both for a stray key that type-checked its way through and
     // for a renderer a version ahead of or behind the main process it talks to.
-    setSettings({ fontLigatures: false, notASetting: 'junk' } as SettingsPatch)
+    setSettings({ defaultOpenAction: 'left', notASetting: 'junk' } as SettingsPatch)
 
-    expect(storedGlobalKeys()).toEqual(['fontLigatures'])
+    expect(storedGlobalKeys()).toEqual(['defaultOpenAction'])
   })
 
   it('re-reads and merges inside a transaction that takes the write lock at BEGIN', () => {
     setSettings({ defaultShell: 'pwsh.exe' })
     readInsideTransaction = false
 
-    setSettings({ fontLigatures: false })
+    setSettings({ defaultOpenAction: 'left' })
 
     // A read-modify-write outside the transaction would let two processes
     // interleave read/read/write/write and lose one of the two changes.
@@ -162,18 +162,18 @@ describe('setSettings — concurrent instances', () => {
     // is the half that has to hold once such a patch arrives.
 
     // Both instances start from the same settings.
-    setSettings({ defaultShell: 'pwsh.exe', fontLigatures: true })
+    setSettings({ defaultShell: 'pwsh.exe', defaultOpenAction: 'right' })
     const staleSnapshot: Settings = getSettings()
 
     // Instance A changes the default shell. B's snapshot is now stale.
     setSettings({ defaultShell: 'bash.exe' })
     expect(staleSnapshot.defaultShell).toBe('pwsh.exe')
 
-    // Instance B's user flips the ligatures toggle — one click, no Save, and B never reloaded.
-    setSettings({ fontLigatures: false })
+    // Instance B's user changes the default open action — one click, no Save, and B never reloaded.
+    setSettings({ defaultOpenAction: 'left' })
 
     const after = getSettings()
-    expect(after.fontLigatures).toBe(false)
+    expect(after.defaultOpenAction).toBe('left')
     // Before the fix, B's write handed A's change back to the stale 'pwsh.exe'.
     expect(after.defaultShell).toBe('bash.exe')
   })
@@ -202,7 +202,7 @@ describe('setSettings — patches with nothing to write', () => {
   })
 
   it('opens no transaction for a patch of only unrecognized keys', () => {
-    setSettings({ fontLigatures: false })
+    setSettings({ defaultOpenAction: 'left' })
     transactionsRun = 0
     lastTransactionMode = null
 
@@ -211,7 +211,7 @@ describe('setSettings — patches with nothing to write', () => {
 
     expect(transactionsRun).toBe(0)
     expect(lastTransactionMode).toBeNull()
-    expect(storedGlobalKeys()).toEqual(['fontLigatures'])
+    expect(storedGlobalKeys()).toEqual(['defaultOpenAction'])
   })
 })
 
@@ -254,23 +254,23 @@ describe('setSettings — unrecognized keys in the stored global blob', () => {
 
   it('keeps them when merging a global patch', () => {
     globalRow = JSON.stringify({
-      fontLigatures: true,
+      defaultOpenAction: 'right',
       // A global setting only a newer build knows about.
       fromANewerBuild: 42,
       // Retired by this build; still what an older one reads its install state from.
       claudeHooksInstalled: true
     })
 
-    setSettings({ fontLigatures: false })
+    setSettings({ defaultOpenAction: 'left' })
 
     const stored = JSON.parse(globalRow as string)
-    expect(stored.fontLigatures).toBe(false)
+    expect(stored.defaultOpenAction).toBe('left')
     expect(stored.fromANewerBuild).toBe(42)
     expect(stored.claudeHooksInstalled).toBe(true)
   })
 
   it('does not let them reach the assembled settings', () => {
-    globalRow = JSON.stringify({ fontLigatures: true, fromANewerBuild: 42, envSyncPatterns: ['leftover'] })
+    globalRow = JSON.stringify({ defaultOpenAction: 'right', fromANewerBuild: 42, envSyncPatterns: ['leftover'] })
 
     const s = getSettings()
 
@@ -294,9 +294,9 @@ describe('patchTouches', () => {
   })
 
   it('is false for a key the patch leaves out, including an empty patch', () => {
-    expect(patchTouches({ fontLigatures: false }, 'envSyncPatterns')).toBe(false)
-    expect(patchTouches({ fontLigatures: false }, 'periodicFetch')).toBe(false)
-    expect(patchTouches({ fontLigatures: false }, 'debugLogging')).toBe(false)
+    expect(patchTouches({ defaultOpenAction: 'left' }, 'envSyncPatterns')).toBe(false)
+    expect(patchTouches({ defaultOpenAction: 'left' }, 'periodicFetch')).toBe(false)
+    expect(patchTouches({ defaultOpenAction: 'left' }, 'debugLogging')).toBe(false)
     expect(patchTouches({}, 'envSyncPatterns')).toBe(false)
     // Explicitly undefined means absent, the same rule the write path picks by.
     expect(patchTouches({ debugLogging: undefined }, 'debugLogging')).toBe(false)
@@ -386,13 +386,22 @@ describe('the system theme pair', () => {
 })
 
 describe('fontLigatures', () => {
-  it('defaults on and lives in the global slice', () => {
+  it('defaults on and lives on the workspace row', () => {
     // The font's own look, and what every install has had until now.
     expect(getSettings().fontLigatures).toBe(true)
 
     setSettings({ fontLigatures: false })
     expect(getSettings().fontLigatures).toBe(false)
-    expect(storedGlobalKeys()).toEqual(['fontLigatures'])
-    expect(workspaceWrites).toBe(0)
+    expect(workspaceRow.fontLigatures).toBe(false)
+    expect(storedGlobalKeys()).toEqual([])
+  })
+
+  it('falls back to the machine-wide value for a workspace that never set one', () => {
+    globalRow = JSON.stringify({ fontLigatures: false })
+    expect(getSettings().fontLigatures).toBe(false)
+
+    setSettings({ fontLigatures: true })
+    expect(getSettings().fontLigatures).toBe(true)
+    expect(JSON.parse(globalRow as string).fontLigatures).toBe(false)
   })
 })

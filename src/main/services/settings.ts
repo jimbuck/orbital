@@ -19,7 +19,7 @@ import { requireWorkspaceId, workspaces } from '../db/repositories'
  * {@link Settings} object and writes back a {@link SettingsPatch} of only the
  * keys it actually changed; behind it the fields live in two places in the
  * global DB — workspace-scoped fields (env-sync patterns, periodic fetch,
- * configured agent profiles, accent, theme) on the active workspace's row,
+ * configured agent profiles, accent, theme, ligatures) on the active workspace's row,
  * machine-global fields (alerts, shell, logging) in the settings table, shared
  * by every workspace and instance.
  */
@@ -57,7 +57,6 @@ const GLOBAL_SETTING_KEYS = Object.keys({
   defaultShell: true,
   alerts: true,
   debugLogging: true,
-  fontLigatures: true,
   defaultOpenAction: true
 } satisfies Record<keyof GlobalSettings, true>) as readonly (keyof GlobalSettings)[]
 
@@ -149,7 +148,7 @@ function writeGlobalSettings(s: Record<string, unknown>): void {
 }
 
 /**
- * The theme keys, which used to be machine-global and now belong to a workspace.
+ * The appearance keys, which used to be machine-global and now belong to a workspace.
  *
  * A workspace that has never had its own theme set still reads them from the
  * global blob, so moving them did not reset anyone's look: every workspace keeps
@@ -157,7 +156,7 @@ function writeGlobalSettings(s: Record<string, unknown>): void {
  * builds sharing the DB still read and write them there, which is why they are
  * left in the blob rather than migrated out of it.
  */
-const LEGACY_GLOBAL_THEME_KEYS = ['theme', 'systemDarkTheme', 'systemLightTheme'] as const
+const LEGACY_GLOBAL_THEME_KEYS = ['theme', 'systemDarkTheme', 'systemLightTheme', 'fontLigatures'] as const
 
 function readLegacyGlobalTheme(): Partial<Pick<Settings, (typeof LEGACY_GLOBAL_THEME_KEYS)[number]>> {
   return pick(readGlobalBlob() as SettingsPatch, LEGACY_GLOBAL_THEME_KEYS)

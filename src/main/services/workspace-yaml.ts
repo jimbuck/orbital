@@ -74,6 +74,7 @@ export function normalize(raw: unknown): WorkspaceConfig {
     const accent = normalizeAccentColor(s.accentColor)
     if (accent) settings.accentColor = accent
     if (s.theme === 'system' || isThemeId(s.theme)) settings.theme = s.theme
+    if (typeof s.fontLigatures === 'boolean') settings.fontLigatures = s.fontLigatures
     // Only a half of the right appearance; see normalizeSystemTheme.
     if (isThemeId(s.systemDarkTheme) && normalizeSystemTheme(s.systemDarkTheme, 'dark') === s.systemDarkTheme) {
       settings.systemDarkTheme = s.systemDarkTheme

@@ -78,3 +78,12 @@ describe('workspace-yaml normalize — theme', () => {
     expect(cfg.settings).toEqual({ periodicFetch: true })
   })
 })
+
+describe('workspace-yaml normalize — ligatures', () => {
+  it('keeps a boolean and drops anything else', () => {
+    expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: false }, projects: [] }).settings).toEqual({
+      fontLigatures: false
+    })
+    expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: 'no' }, projects: [] }).settings).toBeUndefined()
+  })
+})

@@ -745,7 +745,9 @@ export default function Settings(): React.JSX.Element {
           is no preference at all. */}
       <div className="mt-3.5 flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[12.5px] text-text-2">Code ligatures</div>
+          <div className="text-[12.5px] text-text-2">
+            Code ligatures <span className="font-normal text-faint">· for this workspace</span>
+          </div>
           <div className="mt-px text-[11px] text-dim">
             Draw <span className="font-mono">!=</span> and <span className="font-mono">=&gt;</span> as one glyph,
             in the editor and the terminal.
