@@ -7,9 +7,11 @@ import TaskTracker from './TaskTracker'
 
 /**
  * The cockpit's right rail: the Git surface for the active Worktree (bordered off
- * below) followed by the project Task tracker. Each section scrolls on its
- * own — a long changed-file list caps at ~half the panel so the task list stays
- * reachable, and the task list scrolls independently below it.
+ * below) followed by the project Task tracker. Inside each, only the list
+ * scrolls — the changed files, the task cards — while the buttons and inputs
+ * around it stay put. The Git section caps at ~half the panel so the task list
+ * stays reachable. Each wrapper still scrolls as a last resort, for a window
+ * too short to fit even a section's fixed parts.
  */
 export default function RightPanel(): JSX.Element {
   const { width, collapsed, dragging, startResize, resetWidth, toggleCollapsed } = usePanelWidth({
@@ -25,10 +27,10 @@ export default function RightPanel(): JSX.Element {
   return (
     <aside style={{ width }} className="relative flex flex-none flex-col bg-rail border-l border-line">
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="max-h-[55%] flex-none overflow-y-auto">
+        <div className="flex max-h-[55%] flex-none flex-col overflow-y-auto">
           <GitPanel />
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <TaskTracker />
         </div>
       </div>

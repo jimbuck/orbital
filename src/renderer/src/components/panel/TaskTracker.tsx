@@ -68,10 +68,11 @@ export default function TaskTracker(): JSX.Element {
     )
   }
 
+  // The header and capture box stay put; only the cards below them scroll.
   return (
-    <div className="px-[15px] pt-[13px] pb-5">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* header */}
-      <div className="flex items-center justify-between mb-[10px]">
+      <div className="flex flex-none items-center justify-between px-[15px] pt-[13px] mb-[10px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Tasks</span>
           {project && (
@@ -92,7 +93,7 @@ export default function TaskTracker(): JSX.Element {
       </div>
 
       {/* capture */}
-      <div className="flex items-center gap-2 px-[11px] py-2 mb-[11px] rounded-btn bg-bg border border-dashed border-line-2 focus-within:border-accent transition-colors">
+      <div className="mx-[15px] flex flex-none items-center gap-2 px-[11px] py-2 mb-[11px] rounded-btn bg-bg border border-dashed border-line-2 focus-within:border-accent transition-colors">
         <Plus size={14} strokeWidth={1.5} className="flex-none text-accent" />
         <input
           value={draft}
@@ -105,7 +106,7 @@ export default function TaskTracker(): JSX.Element {
       </div>
 
       {/* task list */}
-      <div className="flex flex-col gap-2">
+      <div className="flex min-h-[88px] flex-1 flex-col gap-2 overflow-y-auto px-[15px] pb-5">
         {tasks.length === 0 && <div className="px-1 py-2 text-[12px] text-faint">No tasks yet.</div>}
         {tasks.map((task) => {
           const done = task.status === 'done'

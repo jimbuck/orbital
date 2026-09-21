@@ -595,10 +595,13 @@ export default function GitPanel(): JSX.Element {
     )
   }
 
+  // A column whose fixed parts (header, actions, commit box) never scroll: only
+  // the Staged/Changes file lists between them do. RightPanel caps this panel's
+  // height, and the lists are what shrinks to fit under that cap.
   return (
-    <div className="border-b border-soft">
+    <div className="flex min-h-0 flex-col border-b border-soft">
       {/* header: label + branch + ahead/behind + refresh */}
-      <div className="flex items-center justify-between px-[15px] pt-[13px] pb-[11px]">
+      <div className="flex flex-none items-center justify-between px-[15px] pt-[13px] pb-[11px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Git</span>
           {isRoot ? (
@@ -695,7 +698,7 @@ export default function GitPanel(): JSX.Element {
       )}
 
       {/* actions */}
-      <div className="flex gap-[7px] px-[15px] pb-3">
+      <div className="flex flex-none gap-[7px] px-[15px] pb-3">
         <button
           type="button"
           disabled={!!busy}
@@ -726,7 +729,7 @@ export default function GitPanel(): JSX.Element {
 
       {/* error banner */}
       {error && (
-        <div className="mx-[15px] mb-2 flex items-start gap-2 rounded-[7px] border border-red/25 bg-red/10 px-2.5 py-2">
+        <div className="mx-[15px] mb-2 flex flex-none items-start gap-2 rounded-[7px] border border-red/25 bg-red/10 px-2.5 py-2">
           <span className="allow-select min-w-0 flex-1 break-words font-mono text-[10.5px] leading-snug text-red-2">
             {error}
           </span>
@@ -736,129 +739,135 @@ export default function GitPanel(): JSX.Element {
         </div>
       )}
 
-      {/* staged */}
-      <div className="px-[15px]">
-        <div className="flex items-center justify-between pt-[7px] pb-[6px]">
-          <span className="text-[10.5px] tracking-[0.5px] uppercase text-faint font-bold">Staged</span>
-          <div className="flex items-center gap-1.5">
-            {staged.length > 0 && (
-              <IconBtn
-                title="Unstage all"
-                onClick={() => void exec('unstageAll', () => window.orbital.gitUnstageAll(worktree.id))}
-                disabled={!!busy}
-                className="text-faint hover:text-text"
-              >
-                <Minus size={13} strokeWidth={1.5} />
-              </IconBtn>
-            )}
-            <span className="font-mono text-[10.5px] text-green-2">{staged.length}</span>
-          </div>
-        </div>
-        {staged.length === 0 ? (
-          <div className="px-[7px] pb-1 text-[11px] text-faint">No staged changes</div>
-        ) : (
-          stagedTree.map((node) => (
-            <TreeRow
-              key={`s:${node.path}`}
-              node={node}
-              depth={0}
-              section="s"
-              collapsed={collapsedDirs}
-              armedDir={null}
-              onToggle={toggleDir}
-              renderDirActions={renderStagedDirActions}
-              renderLeaf={(f) => (
-                <GitFileRow
-                  file={f}
-                  action="unstage"
-                  armed={false}
+      {/* The file lists: the one part that scrolls. `shrink` rather than `flex-1`,
+          so an empty or short list takes only its own height. The floor keeps a
+          few rows visible when the window is short; below that RightPanel's
+          wrapper scrolls the whole panel as a last resort. */}
+      <div className="min-h-[88px] shrink overflow-y-auto">
+        {/* staged */}
+        <div className="px-[15px]">
+          <div className="flex items-center justify-between pt-[7px] pb-[6px]">
+            <span className="text-[10.5px] tracking-[0.5px] uppercase text-faint font-bold">Staged</span>
+            <div className="flex items-center gap-1.5">
+              {staged.length > 0 && (
+                <IconBtn
+                  title="Unstage all"
+                  onClick={() => void exec('unstageAll', () => window.orbital.gitUnstageAll(worktree.id))}
                   disabled={!!busy}
-                  onAction={() => void exec('unstage', () => window.orbital.gitUnstage(worktree.id, f.path))}
-                  onOpenDiff={() => openDiff(f)}
-                />
+                  className="text-faint hover:text-text"
+                >
+                  <Minus size={13} strokeWidth={1.5} />
+                </IconBtn>
               )}
-            />
-          ))
-        )}
-      </div>
+              <span className="font-mono text-[10.5px] text-green-2">{staged.length}</span>
+            </div>
+          </div>
+          {staged.length === 0 ? (
+            <div className="px-[7px] pb-1 text-[11px] text-faint">No staged changes</div>
+          ) : (
+            stagedTree.map((node) => (
+              <TreeRow
+                key={`s:${node.path}`}
+                node={node}
+                depth={0}
+                section="s"
+                collapsed={collapsedDirs}
+                armedDir={null}
+                onToggle={toggleDir}
+                renderDirActions={renderStagedDirActions}
+                renderLeaf={(f) => (
+                  <GitFileRow
+                    file={f}
+                    action="unstage"
+                    armed={false}
+                    disabled={!!busy}
+                    onAction={() => void exec('unstage', () => window.orbital.gitUnstage(worktree.id, f.path))}
+                    onOpenDiff={() => openDiff(f)}
+                  />
+                )}
+              />
+            ))
+          )}
+        </div>
 
-      {/* unstaged */}
-      <div className="px-[15px] pb-1">
-        <div className="flex items-center justify-between pt-[9px] pb-[6px]">
-          <span className="text-[10.5px] tracking-[0.5px] uppercase text-faint font-bold">Changes</span>
-          <div className="flex items-center gap-1.5">
-            {unstaged.length > 0 &&
-              (armed === '*' ? (
-                <>
-                  <span className="text-[10px] font-bold text-red-2">Discard all?</span>
-                  <IconBtn
-                    title="Confirm — discard all changes and delete untracked files"
-                    onClick={() => void exec('discardAll', () => window.orbital.gitDiscardAll(worktree.id))}
-                    disabled={!!busy}
-                    className="text-red-2 hover:text-red"
-                  >
-                    <Check size={14} strokeWidth={2} />
-                  </IconBtn>
-                  <IconBtn title="Cancel" onClick={() => setArmed(null)} className="text-faint hover:text-text">
-                    <X size={14} strokeWidth={1.5} />
-                  </IconBtn>
-                </>
-              ) : (
-                <>
-                  <IconBtn
-                    title="Discard all changes"
-                    onClick={() => setArmed('*')}
-                    disabled={!!busy}
-                    className="text-faint hover:text-red-2"
-                  >
-                    <Undo2 size={13} strokeWidth={1.5} />
-                  </IconBtn>
-                  <IconBtn
-                    title="Stage all"
-                    onClick={() => void exec('stageAll', () => window.orbital.gitStageAll(worktree.id))}
-                    disabled={!!busy}
-                    className="text-faint hover:text-accent"
-                  >
-                    <Plus size={13} strokeWidth={1.5} />
-                  </IconBtn>
-                </>
-              ))}
-            <span className="font-mono text-[10.5px] text-amber-2">{unstaged.length}</span>
+        {/* unstaged */}
+        <div className="px-[15px] pb-1">
+          <div className="flex items-center justify-between pt-[9px] pb-[6px]">
+            <span className="text-[10.5px] tracking-[0.5px] uppercase text-faint font-bold">Changes</span>
+            <div className="flex items-center gap-1.5">
+              {unstaged.length > 0 &&
+                (armed === '*' ? (
+                  <>
+                    <span className="text-[10px] font-bold text-red-2">Discard all?</span>
+                    <IconBtn
+                      title="Confirm — discard all changes and delete untracked files"
+                      onClick={() => void exec('discardAll', () => window.orbital.gitDiscardAll(worktree.id))}
+                      disabled={!!busy}
+                      className="text-red-2 hover:text-red"
+                    >
+                      <Check size={14} strokeWidth={2} />
+                    </IconBtn>
+                    <IconBtn title="Cancel" onClick={() => setArmed(null)} className="text-faint hover:text-text">
+                      <X size={14} strokeWidth={1.5} />
+                    </IconBtn>
+                  </>
+                ) : (
+                  <>
+                    <IconBtn
+                      title="Discard all changes"
+                      onClick={() => setArmed('*')}
+                      disabled={!!busy}
+                      className="text-faint hover:text-red-2"
+                    >
+                      <Undo2 size={13} strokeWidth={1.5} />
+                    </IconBtn>
+                    <IconBtn
+                      title="Stage all"
+                      onClick={() => void exec('stageAll', () => window.orbital.gitStageAll(worktree.id))}
+                      disabled={!!busy}
+                      className="text-faint hover:text-accent"
+                    >
+                      <Plus size={13} strokeWidth={1.5} />
+                    </IconBtn>
+                  </>
+                ))}
+              <span className="font-mono text-[10.5px] text-amber-2">{unstaged.length}</span>
+            </div>
           </div>
+          {unstaged.length === 0 ? (
+            <div className="px-[7px] pb-1 text-[11px] text-faint">Working tree clean</div>
+          ) : (
+            unstagedTree.map((node) => (
+              <TreeRow
+                key={`u:${node.path}`}
+                node={node}
+                depth={0}
+                section="u"
+                collapsed={collapsedDirs}
+                armedDir={armed}
+                onToggle={toggleDir}
+                renderDirActions={renderUnstagedDirActions}
+                renderLeaf={(f) => (
+                  <GitFileRow
+                    file={f}
+                    action="stage"
+                    armed={armed === f.path}
+                    disabled={!!busy}
+                    onAction={() => void exec('stage', () => window.orbital.gitStage(worktree.id, f.path))}
+                    onOpenDiff={() => openDiff(f)}
+                    onArm={() => setArmed(f.path)}
+                    onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(worktree.id, f.path))}
+                    onDisarm={() => setArmed(null)}
+                  />
+                )}
+              />
+            ))
+          )}
         </div>
-        {unstaged.length === 0 ? (
-          <div className="px-[7px] pb-1 text-[11px] text-faint">Working tree clean</div>
-        ) : (
-          unstagedTree.map((node) => (
-            <TreeRow
-              key={`u:${node.path}`}
-              node={node}
-              depth={0}
-              section="u"
-              collapsed={collapsedDirs}
-              armedDir={armed}
-              onToggle={toggleDir}
-              renderDirActions={renderUnstagedDirActions}
-              renderLeaf={(f) => (
-                <GitFileRow
-                  file={f}
-                  action="stage"
-                  armed={armed === f.path}
-                  disabled={!!busy}
-                  onAction={() => void exec('stage', () => window.orbital.gitStage(worktree.id, f.path))}
-                  onOpenDiff={() => openDiff(f)}
-                  onArm={() => setArmed(f.path)}
-                  onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(worktree.id, f.path))}
-                  onDisarm={() => setArmed(null)}
-                />
-              )}
-            />
-          ))
-        )}
       </div>
 
       {/* commit */}
-      <div className="px-[15px] pt-2 pb-[14px]">
+      <div className="flex-none px-[15px] pt-2 pb-[14px]">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
