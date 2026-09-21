@@ -60,3 +60,21 @@ describe('workspace-yaml normalize — accent colour', () => {
     }
   })
 })
+
+describe('workspace-yaml normalize — theme', () => {
+  it('keeps a known theme, System, and a pair of the right appearances', () => {
+    const settings = { theme: 'system', systemDarkTheme: 'dracula', systemLightTheme: 'github-light' }
+    const cfg = normalize({ id: 'ws', name: 'Work', settings, projects: [] })
+    expect(cfg.settings).toEqual(settings)
+  })
+
+  it('drops an unknown theme and a half of the wrong appearance', () => {
+    const cfg = normalize({
+      id: 'ws',
+      name: 'Work',
+      settings: { theme: 'not-a-theme', systemDarkTheme: 'github-light', systemLightTheme: 'nord', periodicFetch: true },
+      projects: []
+    })
+    expect(cfg.settings).toEqual({ periodicFetch: true })
+  })
+})

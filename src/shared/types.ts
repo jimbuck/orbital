@@ -512,7 +512,11 @@ export interface Settings {
   debugLogging: boolean
   /** Configured agent profiles: what the new-tab menus offer, plus each one's launch tweaks. */
   agents: AgentConfig[]
-  /** App color theme: 'system' follows the OS, else a theme id. Defaults to 'dark'. */
+  /**
+   * App color theme: 'system' follows the OS, else a theme id. Defaults to 'dark'.
+   * Workspace-scoped, like the accent: each workspace runs in its own window,
+   * and a different theme per window is another way to tell them apart.
+   */
   theme: ThemeMode
   /**
    * What `theme: 'system'` resolves to on a dark and on a light OS.
@@ -525,13 +529,14 @@ export interface Settings {
    * first switching to it and being blinded.
    *
    * Each must name a theme OF ITS OWN APPEARANCE; see normalizeSystemTheme.
+   * Workspace-scoped along with `theme`, since the two only mean anything together.
    */
   systemDarkTheme: ThemeId
   systemLightTheme: ThemeId
   /**
    * Whether the mono font draws its coding ligatures — JetBrains Mono turning
    * `!=` and `=>` into one glyph. On by default, because that is the font's own
-   * look and what the app has always shipped. Machine-global like the theme:
+   * look and what the app has always shipped. Machine-global, unlike the theme:
    * it is a fact about how this person reads code, not about a workspace.
    */
   fontLigatures: boolean
@@ -551,7 +556,15 @@ export interface Settings {
 }
 
 /** Settings that belong to a workspace (persisted in its YAML config file). */
-export const WORKSPACE_SETTING_KEYS = ['envSyncPatterns', 'periodicFetch', 'agents', 'accentColor'] as const
+export const WORKSPACE_SETTING_KEYS = [
+  'envSyncPatterns',
+  'periodicFetch',
+  'agents',
+  'accentColor',
+  'theme',
+  'systemDarkTheme',
+  'systemLightTheme'
+] as const
 
 /**
  * Coerce a stored or imported accent value to `#rrggbb` lowercase, or null when

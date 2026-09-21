@@ -10,7 +10,7 @@ import {
   type SettingsPatch,
   type WorkspaceSettings
 } from '@shared/types'
-import { normalizeSystemTheme } from '@shared/themes'
+import { DEFAULT_THEME_ID, isThemeId, normalizeSystemTheme } from '@shared/themes'
 import { getDb } from '../db/database'
 import { requireWorkspaceId, workspaces } from '../db/repositories'
 
@@ -19,9 +19,9 @@ import { requireWorkspaceId, workspaces } from '../db/repositories'
  * {@link Settings} object and writes back a {@link SettingsPatch} of only the
  * keys it actually changed; behind it the fields live in two places in the
  * global DB — workspace-scoped fields (env-sync patterns, periodic fetch,
- * configured agent profiles) on the active workspace's row, machine-global fields
- * (theme, alerts, shell, logging) in the settings table, shared by every
- * workspace and instance.
+ * configured agent profiles, accent, theme) on the active workspace's row,
+ * machine-global fields (alerts, shell, logging) in the settings table, shared
+ * by every workspace and instance.
  */
 
 const DEFAULT_SETTINGS: Settings = {
@@ -57,9 +57,6 @@ const GLOBAL_SETTING_KEYS = Object.keys({
   defaultShell: true,
   alerts: true,
   debugLogging: true,
-  theme: true,
-  systemDarkTheme: true,
-  systemLightTheme: true,
   fontLigatures: true,
   defaultOpenAction: true
 } satisfies Record<keyof GlobalSettings, true>) as readonly (keyof GlobalSettings)[]
@@ -151,7 +148,25 @@ function writeGlobalSettings(s: Record<string, unknown>): void {
     .run(JSON.stringify(s))
 }
 
-/** The assembled settings: defaults ← global slice ← active workspace's slice. */
+/**
+ * The theme keys, which used to be machine-global and now belong to a workspace.
+ *
+ * A workspace that has never had its own theme set still reads them from the
+ * global blob, so moving them did not reset anyone's look: every workspace keeps
+ * the theme the machine had until the user changes it in that workspace. Older
+ * builds sharing the DB still read and write them there, which is why they are
+ * left in the blob rather than migrated out of it.
+ */
+const LEGACY_GLOBAL_THEME_KEYS = ['theme', 'systemDarkTheme', 'systemLightTheme'] as const
+
+function readLegacyGlobalTheme(): Partial<Pick<Settings, (typeof LEGACY_GLOBAL_THEME_KEYS)[number]>> {
+  return pick(readGlobalBlob() as SettingsPatch, LEGACY_GLOBAL_THEME_KEYS)
+}
+
+/**
+ * The assembled settings: defaults ← global slice ← legacy global theme ←
+ * active workspace's slice.
+ */
 export function getSettings(): Settings {
   // A workspace row written before configured agents existed carries a legacy
   // `enabledAgents` id array instead of `agents` — convert it (and scrub any
@@ -164,7 +179,12 @@ export function getSettings(): Settings {
   // (see setSettings), and spreading it raw would let one of them shadow a global
   // field of the same name, or hand the renderer a field its build cannot mean
   // anything by. Storage remembers them; the runtime object never sees them.
-  const merged = { ...DEFAULT_SETTINGS, ...readGlobalSettings(), ...pick(stored, WORKSPACE_SETTING_KEYS) }
+  const merged = {
+    ...DEFAULT_SETTINGS,
+    ...readGlobalSettings(),
+    ...readLegacyGlobalTheme(),
+    ...pick(stored, WORKSPACE_SETTING_KEYS)
+  }
   merged.agents = agents ?? DEFAULT_SETTINGS.agents
   // The top-level merge is shallow, so a stored alerts blob written before a
   // toggle existed would shadow that toggle's default with undefined — deep-merge
@@ -173,6 +193,9 @@ export function getSettings(): Settings {
   // The workspace row can be hand-edited (or written by an import); a value that
   // is not a colour must read as "no accent", not reach the renderer's CSS.
   merged.accentColor = normalizeAccentColor(merged.accentColor)
+  // A theme id this build does not ship (a newer build's, a hand edit) falls back
+  // to the default rather than reaching the renderer as a theme it cannot draw.
+  if (merged.theme !== 'system' && !isThemeId(merged.theme)) merged.theme = DEFAULT_THEME_ID
   // Same reasoning as the accent: the blob is shared with hand edits, imports
   // and other builds, and an unknown placement would leave the renderer unable
   // to resolve a target pane at all.
@@ -224,17 +247,16 @@ export function setSettings(patch: SettingsPatch): Settings {
 
   const apply = getDb().transaction(() => {
     // Skip the row entirely when the patch touches nothing on that side: a theme
-    // click should not rewrite (and bump) the workspace row at all.
+    // click should not rewrite (and bump) the global row at all.
     if (Object.keys(globalPatch).length > 0) {
       // Merged over the RAW stored blob, exactly like the workspace row below,
       // and for exactly the same reason. Merging over readGlobalSettings() would
       // narrow the row to the keys this build happens to name, and that list is
       // of CURRENT keys, not retired ones — so it deletes a newer build's new
       // global setting just as readily as it deletes claudeHooksInstalled. This
-      // row is the one shared by every instance on the machine, and its most
-      // frequent write is a single theme click: run the released app beside a
-      // worktree build that added a global setting, click the theme once, and
-      // that setting would be gone. Unknown keys are instead dropped where
+      // row is the one shared by every instance on the machine: run the released
+      // app beside a worktree build that added a global setting, flip one
+      // toggle, and that setting would be gone. Unknown keys are instead dropped where
       // dropping them is free — on the way OUT, in readGlobalSettings — so they
       // stay safe in storage without ever influencing this build's behavior.
       writeGlobalSettings({ ...readGlobalBlob(), ...globalPatch })

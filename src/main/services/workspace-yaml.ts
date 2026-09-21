@@ -9,6 +9,7 @@ import {
   type WorkspaceConfig,
   type WorkspaceProjectConfig
 } from '@shared/types'
+import { isThemeId, normalizeSystemTheme } from '@shared/themes'
 
 /**
  * The Export/Import Workspace YAML format. Workspaces live in the global DB —
@@ -72,6 +73,14 @@ export function normalize(raw: unknown): WorkspaceConfig {
     if (typeof s.periodicFetch === 'boolean') settings.periodicFetch = s.periodicFetch
     const accent = normalizeAccentColor(s.accentColor)
     if (accent) settings.accentColor = accent
+    if (s.theme === 'system' || isThemeId(s.theme)) settings.theme = s.theme
+    // Only a half of the right appearance; see normalizeSystemTheme.
+    if (isThemeId(s.systemDarkTheme) && normalizeSystemTheme(s.systemDarkTheme, 'dark') === s.systemDarkTheme) {
+      settings.systemDarkTheme = s.systemDarkTheme
+    }
+    if (isThemeId(s.systemLightTheme) && normalizeSystemTheme(s.systemLightTheme, 'light') === s.systemLightTheme) {
+      settings.systemLightTheme = s.systemLightTheme
+    }
     // Modern `agents` entries, or a legacy `enabledAgents` id array from an
     // export written before agents were configurable.
     const agents = normalizeAgentConfigs(s.agents, s.enabledAgents)

@@ -722,7 +722,9 @@ export default function Settings(): React.JSX.Element {
       {/* Appearance */}
       <div className={sectionLabel}>Appearance</div>
       <div className="mt-2.5">
-        <div className="text-[12.5px] text-text-2">Theme</div>
+        <div className="text-[12.5px] text-text-2">
+          Theme <span className="font-normal text-faint">· for this workspace, like the accent</span>
+        </div>
         {/* Every other field in this modal is a working copy: committed on Save,
             thrown away on Cancel. Theme is not, and nothing about a grid of
             swatches says so — a user who previews Dracula and then hits Cancel

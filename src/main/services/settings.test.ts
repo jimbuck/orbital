@@ -105,22 +105,22 @@ beforeEach(() => {
 
 describe('setSettings — partial writes', () => {
   it('leaves stored keys the patch does not name untouched', () => {
-    setSettings({ defaultShell: 'pwsh.exe', theme: 'dark', debugLogging: true })
+    setSettings({ defaultShell: 'pwsh.exe', fontLigatures: true, debugLogging: true })
 
-    setSettings({ theme: 'light' })
+    setSettings({ fontLigatures: false })
 
     const after = getSettings()
-    expect(after.theme).toBe('light')
+    expect(after.fontLigatures).toBe(false)
     expect(after.defaultShell).toBe('pwsh.exe')
     expect(after.debugLogging).toBe(true)
     // Not merely re-derived from defaults on read — still on disk.
-    expect(storedGlobalKeys().sort()).toEqual(['debugLogging', 'defaultShell', 'theme'])
+    expect(storedGlobalKeys().sort()).toEqual(['debugLogging', 'defaultShell', 'fontLigatures'])
   })
 
   it('does not touch the workspace row for a global-only patch, or vice versa', () => {
     setSettings({ periodicFetch: false, defaultShell: 'cmd.exe' })
 
-    setSettings({ theme: 'light' })
+    setSettings({ fontLigatures: false })
     expect(workspaceRow.periodicFetch).toBe(false)
 
     setSettings({ periodicFetch: true })
@@ -133,16 +133,16 @@ describe('setSettings — partial writes', () => {
     // checking does not survive assignment to a variable — so the runtime pick is
     // the real backstop, both for a stray key that type-checked its way through and
     // for a renderer a version ahead of or behind the main process it talks to.
-    setSettings({ theme: 'light', notASetting: 'junk' } as SettingsPatch)
+    setSettings({ fontLigatures: false, notASetting: 'junk' } as SettingsPatch)
 
-    expect(storedGlobalKeys()).toEqual(['theme'])
+    expect(storedGlobalKeys()).toEqual(['fontLigatures'])
   })
 
   it('re-reads and merges inside a transaction that takes the write lock at BEGIN', () => {
     setSettings({ defaultShell: 'pwsh.exe' })
     readInsideTransaction = false
 
-    setSettings({ theme: 'light' })
+    setSettings({ fontLigatures: false })
 
     // A read-modify-write outside the transaction would let two processes
     // interleave read/read/write/write and lose one of the two changes.
@@ -162,18 +162,18 @@ describe('setSettings — concurrent instances', () => {
     // is the half that has to hold once such a patch arrives.
 
     // Both instances start from the same settings.
-    setSettings({ defaultShell: 'pwsh.exe', theme: 'dark' })
+    setSettings({ defaultShell: 'pwsh.exe', fontLigatures: true })
     const staleSnapshot: Settings = getSettings()
 
     // Instance A changes the default shell. B's snapshot is now stale.
     setSettings({ defaultShell: 'bash.exe' })
     expect(staleSnapshot.defaultShell).toBe('pwsh.exe')
 
-    // Instance B's user clicks a theme — one click, no Save, and B never reloaded.
-    setSettings({ theme: 'light' })
+    // Instance B's user flips the ligatures toggle — one click, no Save, and B never reloaded.
+    setSettings({ fontLigatures: false })
 
     const after = getSettings()
-    expect(after.theme).toBe('light')
+    expect(after.fontLigatures).toBe(false)
     // Before the fix, B's write handed A's change back to the stale 'pwsh.exe'.
     expect(after.defaultShell).toBe('bash.exe')
   })
@@ -202,7 +202,7 @@ describe('setSettings — patches with nothing to write', () => {
   })
 
   it('opens no transaction for a patch of only unrecognized keys', () => {
-    setSettings({ theme: 'light' })
+    setSettings({ fontLigatures: false })
     transactionsRun = 0
     lastTransactionMode = null
 
@@ -211,7 +211,7 @@ describe('setSettings — patches with nothing to write', () => {
 
     expect(transactionsRun).toBe(0)
     expect(lastTransactionMode).toBeNull()
-    expect(storedGlobalKeys()).toEqual(['theme'])
+    expect(storedGlobalKeys()).toEqual(['fontLigatures'])
   })
 })
 
@@ -249,28 +249,28 @@ describe('setSettings — unrecognized keys in the stored workspace blob', () =>
 describe('setSettings — unrecognized keys in the stored global blob', () => {
   // Same argument as the workspace blob above, and it has to hold here too: the
   // settings row is the one every instance on the machine shares, and its most
-  // frequent write is a single theme click. Narrowing it to the keys THIS build
-  // names would delete a newer build's new global setting on that click.
+  // frequent write is a single toggle. Narrowing it to the keys THIS build
+  // names would delete a newer build's new global setting on that toggle.
 
   it('keeps them when merging a global patch', () => {
     globalRow = JSON.stringify({
-      theme: 'dark',
+      fontLigatures: true,
       // A global setting only a newer build knows about.
       fromANewerBuild: 42,
       // Retired by this build; still what an older one reads its install state from.
       claudeHooksInstalled: true
     })
 
-    setSettings({ theme: 'light' })
+    setSettings({ fontLigatures: false })
 
     const stored = JSON.parse(globalRow as string)
-    expect(stored.theme).toBe('light')
+    expect(stored.fontLigatures).toBe(false)
     expect(stored.fromANewerBuild).toBe(42)
     expect(stored.claudeHooksInstalled).toBe(true)
   })
 
   it('does not let them reach the assembled settings', () => {
-    globalRow = JSON.stringify({ theme: 'dark', fromANewerBuild: 42, envSyncPatterns: ['leftover'] })
+    globalRow = JSON.stringify({ fontLigatures: true, fromANewerBuild: 42, envSyncPatterns: ['leftover'] })
 
     const s = getSettings()
 
@@ -294,9 +294,9 @@ describe('patchTouches', () => {
   })
 
   it('is false for a key the patch leaves out, including an empty patch', () => {
-    expect(patchTouches({ theme: 'light' }, 'envSyncPatterns')).toBe(false)
-    expect(patchTouches({ theme: 'light' }, 'periodicFetch')).toBe(false)
-    expect(patchTouches({ theme: 'light' }, 'debugLogging')).toBe(false)
+    expect(patchTouches({ fontLigatures: false }, 'envSyncPatterns')).toBe(false)
+    expect(patchTouches({ fontLigatures: false }, 'periodicFetch')).toBe(false)
+    expect(patchTouches({ fontLigatures: false }, 'debugLogging')).toBe(false)
     expect(patchTouches({}, 'envSyncPatterns')).toBe(false)
     // Explicitly undefined means absent, the same rule the write path picks by.
     expect(patchTouches({ debugLogging: undefined }, 'debugLogging')).toBe(false)
@@ -327,30 +327,60 @@ describe('accentColor', () => {
   })
 })
 
+describe('the theme', () => {
+  it('lives on the workspace row', () => {
+    expect(getSettings().theme).toBe('dark')
+    setSettings({ theme: 'nord' })
+    expect(workspaceRow.theme).toBe('nord')
+    expect(storedGlobalKeys()).toEqual([])
+    expect(getSettings().theme).toBe('nord')
+  })
+
+  it('falls back to the machine-wide theme for a workspace that never set one', () => {
+    // Where the theme lived before it was per-workspace. Moving it must not
+    // reset anyone's look, so a workspace without its own keeps this one.
+    globalRow = JSON.stringify({ theme: 'dracula', systemLightTheme: 'github-light' })
+    expect(getSettings().theme).toBe('dracula')
+    expect(getSettings().systemLightTheme).toBe('github-light')
+
+    // Once the workspace picks its own, that wins, and the global is left alone
+    // for other workspaces (and older builds) still reading it.
+    setSettings({ theme: 'light' })
+    expect(getSettings().theme).toBe('light')
+    expect(JSON.parse(globalRow as string).theme).toBe('dracula')
+  })
+
+  it('falls back to the default for an id this build does not ship', () => {
+    workspaceRow = { theme: 'a-newer-builds-theme' }
+    expect(getSettings().theme).toBe('dark')
+    workspaceRow = { theme: 'system' }
+    expect(getSettings().theme).toBe('system')
+  })
+})
+
 describe('the system theme pair', () => {
-  it('defaults to the built-ins and lives in the global slice', () => {
+  it('defaults to the built-ins and lives on the workspace row', () => {
     expect(getSettings().systemDarkTheme).toBe('dark')
     expect(getSettings().systemLightTheme).toBe('light')
 
     setSettings({ systemDarkTheme: 'dracula' })
     expect(getSettings().systemDarkTheme).toBe('dracula')
-    // Global, not per-workspace: 'system' meaning Dracula at night is a fact
-    // about this machine, like the theme itself.
-    expect(storedGlobalKeys()).toEqual(['systemDarkTheme'])
-    expect(workspaceWrites).toBe(0)
+    // Scoped with the theme: the pair is what the workspace's 'system' means.
+    expect(workspaceRow.systemDarkTheme).toBe('dracula')
+    expect(storedGlobalKeys()).toEqual([])
   })
 
   it('rejects a stored half that names a theme of the wrong appearance', () => {
     // The failure this guards: a dark-OS slot holding a light theme would make
     // System hand you a white window at night — the one thing it exists to
     // avoid. A hand edit, an import or another build can all produce it.
-    globalRow = JSON.stringify({ systemDarkTheme: 'github-light', systemLightTheme: 'nord' })
+    workspaceRow = { systemDarkTheme: 'github-light', systemLightTheme: 'nord' }
     expect(getSettings().systemDarkTheme).toBe('dark')
     expect(getSettings().systemLightTheme).toBe('light')
   })
 
   it('falls back for an id this build does not ship', () => {
-    globalRow = JSON.stringify({ systemDarkTheme: 'a-newer-builds-theme' })
+    workspaceRow = { systemDarkTheme: 'a-newer-builds-theme' }
     expect(getSettings().systemDarkTheme).toBe('dark')
   })
 })
