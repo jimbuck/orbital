@@ -96,8 +96,8 @@ const envChip =
  * working copies are seeded when the modal opens and never resync, while the
  * store behind them is replaced by every state broadcast, and those are constant
  * (appState() re-reads settings, and main broadcasts from dozens of places). Some
- * of those broadcasts carry a machine-global setting another workspace instance
- * just changed. Diffing against the live store therefore reports "the user
+ * of those broadcasts carry a setting changed elsewhere meanwhile — the View
+ * menu, the palette, an agent through the CLI. Diffing against the live store therefore reports "the user
  * changed this" for a field the user never touched and someone else did, and Save
  * hands that field back to this modal's opening snapshot — the exact lost update
  * this modal exists to avoid. Diffed against the seed instead, an untouched field
@@ -722,9 +722,7 @@ export default function Settings(): React.JSX.Element {
       {/* Appearance */}
       <div className={sectionLabel}>Appearance</div>
       <div className="mt-2.5">
-        <div className="text-[12.5px] text-text-2">
-          Theme <span className="font-normal text-faint">· for this workspace, like the accent</span>
-        </div>
+        <div className="text-[12.5px] text-text-2">Theme</div>
         {/* Every other field in this modal is a working copy: committed on Save,
             thrown away on Cancel. Theme is not, and nothing about a grid of
             swatches says so — a user who previews Dracula and then hits Cancel
@@ -745,9 +743,7 @@ export default function Settings(): React.JSX.Element {
           is no preference at all. */}
       <div className="mt-3.5 flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[12.5px] text-text-2">
-            Code ligatures <span className="font-normal text-faint">· for this workspace</span>
-          </div>
+          <div className="text-[12.5px] text-text-2">Code ligatures</div>
           <div className="mt-px text-[11px] text-dim">
             Draw <span className="font-mono">!=</span> and <span className="font-mono">=&gt;</span> as one glyph,
             in the editor and the terminal.

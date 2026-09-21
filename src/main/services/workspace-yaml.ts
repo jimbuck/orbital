@@ -6,6 +6,8 @@ import {
   WORKSPACE_CONFIG_VERSION,
   normalizeAccentColor,
   normalizeAgentConfigs,
+  normalizeOpenAction,
+  type Settings,
   type WorkspaceConfig,
   type WorkspaceProjectConfig
 } from '@shared/types'
@@ -75,6 +77,19 @@ export function normalize(raw: unknown): WorkspaceConfig {
     if (accent) settings.accentColor = accent
     if (s.theme === 'system' || isThemeId(s.theme)) settings.theme = s.theme
     if (typeof s.fontLigatures === 'boolean') settings.fontLigatures = s.fontLigatures
+    if (typeof s.defaultShell === 'string') settings.defaultShell = s.defaultShell
+    if (typeof s.debugLogging === 'boolean') settings.debugLogging = s.debugLogging
+    const openAction = normalizeOpenAction(s.defaultOpenAction)
+    if (openAction) settings.defaultOpenAction = openAction
+    // Alerts: only the toggles that are booleans; getSettings fills the rest.
+    if (s.alerts && typeof s.alerts === 'object' && !Array.isArray(s.alerts)) {
+      const alerts = Object.fromEntries(
+        Object.entries(s.alerts).filter(
+          ([k, v]) => ['indicator', 'sound', 'taskbarBadge', 'taskbarFlash'].includes(k) && typeof v === 'boolean'
+        )
+      )
+      if (Object.keys(alerts).length > 0) settings.alerts = alerts as Settings['alerts']
+    }
     // Only a half of the right appearance; see normalizeSystemTheme.
     if (isThemeId(s.systemDarkTheme) && normalizeSystemTheme(s.systemDarkTheme, 'dark') === s.systemDarkTheme) {
       settings.systemDarkTheme = s.systemDarkTheme

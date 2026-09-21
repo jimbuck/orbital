@@ -490,10 +490,8 @@ export interface Task {
 }
 
 /**
- * The renderer-facing settings shape. Behind this flat object the fields live in
- * two stores: {@link WORKSPACE_SETTING_KEYS workspace-scoped} fields persist in
- * the workspace's YAML config, everything else in the machine-global store —
- * the renderer never needs to know which is which.
+ * The renderer-facing settings shape. Every field belongs to the workspace and
+ * persists on its row; see {@link WORKSPACE_SETTING_KEYS}.
  */
 export interface Settings {
   defaultShell: string
@@ -555,17 +553,27 @@ export interface Settings {
   accentColor: string | null
 }
 
-/** Settings that belong to a workspace (persisted in its YAML config file). */
-export const WORKSPACE_SETTING_KEYS = [
-  'envSyncPatterns',
-  'periodicFetch',
-  'agents',
-  'accentColor',
-  'theme',
-  'systemDarkTheme',
-  'systemLightTheme',
-  'fontLigatures'
-] as const
+/**
+ * Every settings key. All of them are workspace-scoped: each workspace runs in
+ * its own window, and each window is configured on its own. Written as the keys
+ * of a `satisfies Record<keyof Settings>` object so adding a field to
+ * {@link Settings} without listing it here fails typecheck, rather than silently
+ * making that field unreadable and unwritable.
+ */
+export const WORKSPACE_SETTING_KEYS = Object.keys({
+  defaultShell: true,
+  alerts: true,
+  envSyncPatterns: true,
+  periodicFetch: true,
+  debugLogging: true,
+  agents: true,
+  theme: true,
+  systemDarkTheme: true,
+  systemLightTheme: true,
+  fontLigatures: true,
+  defaultOpenAction: true,
+  accentColor: true
+} satisfies Record<keyof Settings, true>) as readonly (keyof Settings)[]
 
 /**
  * Coerce a stored or imported accent value to `#rrggbb` lowercase, or null when
@@ -578,18 +586,14 @@ export function normalizeAccentColor(value: unknown): string | null {
   return m ? `#${m[1].toLowerCase()}` : null
 }
 
-/** The workspace-scoped slice of {@link Settings}. */
-export type WorkspaceSettings = Pick<Settings, (typeof WORKSPACE_SETTING_KEYS)[number]>
-
-/** The machine-global slice of {@link Settings} (persisted in the global store). */
-export type GlobalSettings = Omit<Settings, keyof WorkspaceSettings>
+/** What a workspace row stores: every field of {@link Settings}. */
+export type WorkspaceSettings = Settings
 
 /**
  * A settings write: only the keys the caller actually changed.
  *
- * The global slice is shared by every running instance (one process per
- * workspace, one DB), so a writer that sends its whole in-memory copy reverts
- * whatever another instance changed in the meantime. Naming the changed keys and
+ * A writer that sends its whole in-memory copy reverts whatever changed in the
+ * meantime (the View menu, the palette, an import). Naming the changed keys and
  * nothing else is what makes concurrent edits to different keys compose. Being a
  * `Partial` of {@link Settings} rather than a loose bag also catches most unknown
  * keys at the call site — but only where the patch is written inline, since

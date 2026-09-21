@@ -87,3 +87,25 @@ describe('workspace-yaml normalize — ligatures', () => {
     expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: 'no' }, projects: [] }).settings).toBeUndefined()
   })
 })
+
+describe('workspace-yaml normalize — shell, logging, open action, alerts', () => {
+  it('keeps well-typed values', () => {
+    const settings = {
+      defaultShell: 'pwsh.exe',
+      debugLogging: true,
+      defaultOpenAction: 'left',
+      alerts: { sound: false, taskbarFlash: true }
+    }
+    expect(normalize({ id: 'ws', name: 'W', settings, projects: [] }).settings).toEqual(settings)
+  })
+
+  it('drops badly-typed values and unknown alert toggles', () => {
+    const cfg = normalize({
+      id: 'ws',
+      name: 'W',
+      settings: { defaultShell: 3, debugLogging: 'yes', defaultOpenAction: 'sideways', alerts: { sound: 'no', bogus: true } },
+      projects: []
+    })
+    expect(cfg.settings).toBeUndefined()
+  })
+})

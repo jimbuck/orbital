@@ -5,11 +5,9 @@ import type { Settings, SettingsPatch } from '@shared/types'
 /**
  * The settings write path, exercised against a stand-in for the DB.
  *
- * The bug these cover: Orbital runs one process per workspace, all sharing one
- * orbital.db, and the settings table's row is machine-global. When a writer sent
- * the whole global slice from its own in-memory copy, instance B changing the
- * theme rewrote defaultShell / alerts / debugLogging from B's snapshot — quietly
- * reverting whatever instance A had just changed.
+ * Every setting lives on the workspace's row. The machine-global settings row is
+ * where some of them used to live, so it is still read as a fallback, but never
+ * written: older builds sharing the DB still own it.
  *
  * better-sqlite3 is a native addon built against Electron's ABI and cannot load
  * under plain Node, so the store below stands in for it. That is not a loss: a
@@ -28,7 +26,7 @@ let lastTransactionMode: string | null
 let transactionsRun: number
 /** Writes to the workspace row, likewise. */
 let workspaceWrites: number
-/** Whether the stored global blob was re-read while a transaction was open. */
+/** Whether the workspace row was re-read while a transaction was open. */
 let readInsideTransaction: boolean
 let inTransaction = false
 
@@ -37,7 +35,6 @@ const fakeDb = {
     if (sql.startsWith('SELECT value FROM settings')) {
       return {
         get: () => {
-          if (inTransaction) readInsideTransaction = true
           return globalRow === undefined ? undefined : { value: globalRow }
         }
       }
@@ -78,7 +75,10 @@ vi.mock('../db/repositories', () => ({
   workspaces: {
     // A fresh copy per read, so nothing the service does to what it gets back can
     // reach into the "stored" row behind its own write.
-    getSettings: () => JSON.parse(JSON.stringify(workspaceRow)),
+    getSettings: () => {
+      if (inTransaction) readInsideTransaction = true
+      return JSON.parse(JSON.stringify(workspaceRow))
+    },
     updateSettings: (_workspaceId: string, settings: unknown) => {
       workspaceWrites += 1
       workspaceRow = JSON.parse(JSON.stringify(settings))
@@ -87,11 +87,6 @@ vi.mock('../db/repositories', () => ({
 }))
 
 const { getSettings, patchTouches, setSettings } = await import('./settings')
-
-/** The keys actually present in the stored global blob. */
-function storedGlobalKeys(): string[] {
-  return globalRow === undefined ? [] : Object.keys(JSON.parse(globalRow))
-}
 
 beforeEach(() => {
   globalRow = undefined
@@ -105,27 +100,30 @@ beforeEach(() => {
 
 describe('setSettings — partial writes', () => {
   it('leaves stored keys the patch does not name untouched', () => {
-    setSettings({ defaultShell: 'pwsh.exe', defaultOpenAction: 'right', debugLogging: true })
+    setSettings({ defaultShell: 'pwsh.exe', periodicFetch: false, debugLogging: true })
 
-    setSettings({ defaultOpenAction: 'left' })
+    setSettings({ defaultShell: 'bash.exe' })
 
     const after = getSettings()
-    expect(after.defaultOpenAction).toBe('left')
-    expect(after.defaultShell).toBe('pwsh.exe')
+    expect(after.defaultShell).toBe('bash.exe')
+    expect(after.periodicFetch).toBe(false)
     expect(after.debugLogging).toBe(true)
     // Not merely re-derived from defaults on read — still on disk.
-    expect(storedGlobalKeys().sort()).toEqual(['debugLogging', 'defaultOpenAction', 'defaultShell'])
+    expect(Object.keys(workspaceRow).sort()).toEqual(['debugLogging', 'defaultShell', 'periodicFetch'])
   })
 
-  it('does not touch the workspace row for a global-only patch, or vice versa', () => {
-    setSettings({ periodicFetch: false, defaultShell: 'cmd.exe' })
-
-    setSettings({ defaultOpenAction: 'left' })
-    expect(workspaceRow.periodicFetch).toBe(false)
-
-    setSettings({ periodicFetch: true })
-    expect(getSettings().defaultShell).toBe('cmd.exe')
-    expect(getSettings().periodicFetch).toBe(true)
+  it('writes every setting to the workspace row and never to the global one', () => {
+    setSettings({
+      defaultShell: 'pwsh.exe',
+      alerts: { indicator: false, sound: true, taskbarBadge: true, taskbarFlash: true },
+      debugLogging: true,
+      defaultOpenAction: 'left',
+      theme: 'nord',
+      fontLigatures: false
+    })
+    expect(workspaceRow.defaultShell).toBe('pwsh.exe')
+    expect(workspaceRow.defaultOpenAction).toBe('left')
+    expect(globalRow).toBeUndefined()
   })
 
   it('drops keys that are not settings instead of persisting them', () => {
@@ -133,49 +131,38 @@ describe('setSettings — partial writes', () => {
     // checking does not survive assignment to a variable — so the runtime pick is
     // the real backstop, both for a stray key that type-checked its way through and
     // for a renderer a version ahead of or behind the main process it talks to.
-    setSettings({ defaultOpenAction: 'left', notASetting: 'junk' } as SettingsPatch)
+    setSettings({ defaultShell: 'pwsh.exe', notASetting: 'junk' } as SettingsPatch)
 
-    expect(storedGlobalKeys()).toEqual(['defaultOpenAction'])
+    expect(Object.keys(workspaceRow)).toEqual(['defaultShell'])
   })
 
   it('re-reads and merges inside a transaction that takes the write lock at BEGIN', () => {
     setSettings({ defaultShell: 'pwsh.exe' })
-    readInsideTransaction = false
-
-    setSettings({ defaultOpenAction: 'left' })
-
-    // A read-modify-write outside the transaction would let two processes
+    // A read-modify-write outside the transaction would let two writers
     // interleave read/read/write/write and lose one of the two changes.
     expect(readInsideTransaction).toBe(true)
     // Deferred would take a read lock first and then have to upgrade it, which
-    // fails with SQLITE_BUSY instead of waiting out the other process.
+    // fails with SQLITE_BUSY instead of waiting out another instance.
     expect(lastTransactionMode).toBe('immediate')
   })
 })
 
-describe('setSettings — concurrent instances', () => {
-  it('does not revert another instance’s change when a stale window writes', () => {
-    // The reported bug. Two windows are two processes sharing one DB, and this
-    // settings row is machine-global. The other half of the fix — that a window
-    // sends only the key its user touched, rather than its whole snapshot — is
-    // asserted on the renderer side (Settings.test.tsx, TitleBar.test.tsx); this
-    // is the half that has to hold once such a patch arrives.
-
-    // Both instances start from the same settings.
-    setSettings({ defaultShell: 'pwsh.exe', defaultOpenAction: 'right' })
+describe('setSettings — stale snapshots', () => {
+  it('does not revert a change made after the writer took its snapshot', () => {
+    // The Settings modal holds a snapshot while the View menu writes a theme.
+    // Because each writer sends only the key its user touched, the later write
+    // of an unrelated key cannot hand the theme back to the stale value.
+    setSettings({ defaultShell: 'pwsh.exe', theme: 'dark' })
     const staleSnapshot: Settings = getSettings()
 
-    // Instance A changes the default shell. B's snapshot is now stale.
-    setSettings({ defaultShell: 'bash.exe' })
-    expect(staleSnapshot.defaultShell).toBe('pwsh.exe')
+    setSettings({ theme: 'nord' })
+    expect(staleSnapshot.theme).toBe('dark')
 
-    // Instance B's user changes the default open action — one click, no Save, and B never reloaded.
-    setSettings({ defaultOpenAction: 'left' })
+    setSettings({ defaultShell: 'bash.exe' })
 
     const after = getSettings()
-    expect(after.defaultOpenAction).toBe('left')
-    // Before the fix, B's write handed A's change back to the stale 'pwsh.exe'.
     expect(after.defaultShell).toBe('bash.exe')
+    expect(after.theme).toBe('nord')
   })
 })
 
@@ -202,81 +189,93 @@ describe('setSettings — patches with nothing to write', () => {
   })
 
   it('opens no transaction for a patch of only unrecognized keys', () => {
-    setSettings({ defaultOpenAction: 'left' })
-    transactionsRun = 0
-    lastTransactionMode = null
-
-    // Nothing here survives the pick, so this reduces to exactly the empty case.
     setSettings({ notASetting: 'junk' } as SettingsPatch)
 
     expect(transactionsRun).toBe(0)
-    expect(lastTransactionMode).toBeNull()
-    expect(storedGlobalKeys()).toEqual(['defaultOpenAction'])
+    expect(workspaceWrites).toBe(0)
   })
 })
 
 describe('setSettings — unrecognized keys in the stored workspace blob', () => {
   // The blob is the only copy of anything in it, and this build is not its only
   // writer: a second install (a worktree build beside the released app, or a
-  // downgrade) may know keys this one does not. So they are kept in storage and
-  // dropped on the way out, rather than deleted on the first write that happens
-  // to touch the row.
+  // downgrade) may know keys this one does not, and zoom.ts keeps its level here
+  // outside Settings. So they are kept in storage and dropped on the way out,
+  // rather than deleted on the first write that happens to touch the row.
 
-  it('keeps them when merging a workspace patch', () => {
-    workspaceRow = { periodicFetch: true, enabledAgents: ['claude'], fromANewerBuild: 42 }
+  it('keeps them when merging a patch', () => {
+    workspaceRow = { periodicFetch: true, enabledAgents: ['claude'], zoomLevel: 2, fromANewerBuild: 42 }
 
     setSettings({ periodicFetch: false })
 
     expect(workspaceRow.periodicFetch).toBe(false)
     // Still what an older build reads its agent list from.
     expect(workspaceRow.enabledAgents).toEqual(['claude'])
+    expect(workspaceRow.zoomLevel).toBe(2)
     expect(workspaceRow.fromANewerBuild).toBe(42)
   })
 
   it('does not let them reach the assembled settings', () => {
-    // defaultShell is a GLOBAL key: spreading the workspace blob raw would let a
-    // stray copy of it here shadow the real, machine-global value.
-    workspaceRow = { defaultShell: 'shadowed.exe', fromANewerBuild: 42 }
+    workspaceRow = { fromANewerBuild: 42, zoomLevel: 2 }
 
-    setSettings({ defaultShell: 'pwsh.exe' })
-
-    const s = getSettings()
-    expect(s.defaultShell).toBe('pwsh.exe')
-    expect((s as unknown as Record<string, unknown>).fromANewerBuild).toBeUndefined()
+    const s = getSettings() as unknown as Record<string, unknown>
+    expect(s.fromANewerBuild).toBeUndefined()
+    expect(s.zoomLevel).toBeUndefined()
   })
 })
 
-describe('setSettings — unrecognized keys in the stored global blob', () => {
-  // Same argument as the workspace blob above, and it has to hold here too: the
-  // settings row is the one every instance on the machine shares, and its most
-  // frequent write is a single toggle. Narrowing it to the keys THIS build
-  // names would delete a newer build's new global setting on that toggle.
+describe('the legacy global row', () => {
+  // Where defaultShell, alerts, debugLogging, the theme, ligatures and the
+  // default open action used to live. Moving them must not reset anyone, so a
+  // workspace that never set one of them still reads it from here.
 
-  it('keeps them when merging a global patch', () => {
+  it('supplies every formerly-global setting a workspace has not set', () => {
     globalRow = JSON.stringify({
-      defaultOpenAction: 'right',
-      // A global setting only a newer build knows about.
-      fromANewerBuild: 42,
-      // Retired by this build; still what an older one reads its install state from.
-      claudeHooksInstalled: true
+      defaultShell: 'pwsh.exe',
+      alerts: { sound: false },
+      debugLogging: true,
+      theme: 'dracula',
+      systemLightTheme: 'github-light',
+      fontLigatures: false,
+      defaultOpenAction: 'left'
     })
 
-    setSettings({ defaultOpenAction: 'left' })
-
-    const stored = JSON.parse(globalRow as string)
-    expect(stored.defaultOpenAction).toBe('left')
-    expect(stored.fromANewerBuild).toBe(42)
-    expect(stored.claudeHooksInstalled).toBe(true)
+    const s = getSettings()
+    expect(s.defaultShell).toBe('pwsh.exe')
+    // Deep-merged with the defaults, like a workspace's own alerts.
+    expect(s.alerts).toEqual({ indicator: true, sound: false, taskbarBadge: true, taskbarFlash: true })
+    expect(s.debugLogging).toBe(true)
+    expect(s.theme).toBe('dracula')
+    expect(s.systemLightTheme).toBe('github-light')
+    expect(s.fontLigatures).toBe(false)
+    expect(s.defaultOpenAction).toBe('left')
   })
 
-  it('does not let them reach the assembled settings', () => {
-    globalRow = JSON.stringify({ defaultOpenAction: 'right', fromANewerBuild: 42, envSyncPatterns: ['leftover'] })
+  it('loses to the workspace once it sets its own, and is left untouched', () => {
+    globalRow = JSON.stringify({ defaultShell: 'pwsh.exe', theme: 'dracula' })
+
+    setSettings({ defaultShell: 'bash.exe', theme: 'light' })
+
+    expect(getSettings().defaultShell).toBe('bash.exe')
+    expect(getSettings().theme).toBe('light')
+    // Other workspaces, and older builds, still read the old values.
+    expect(JSON.parse(globalRow as string)).toEqual({ defaultShell: 'pwsh.exe', theme: 'dracula' })
+  })
+
+  it('does not let a pre-split copy of an always-workspace key through', () => {
+    // Blobs from before the workspace split also carried these; they were seeded
+    // into the first workspace and must not leak into every other one.
+    globalRow = JSON.stringify({ envSyncPatterns: ['leftover'], periodicFetch: false, fromANewerBuild: 42 })
 
     const s = getSettings()
-
-    expect((s as unknown as Record<string, unknown>).fromANewerBuild).toBeUndefined()
-    // A pre-split blob's copy of a WORKSPACE key must not shadow the workspace's own.
     expect(s.envSyncPatterns).not.toEqual(['leftover'])
+    expect(s.periodicFetch).toBe(true)
+    expect((s as unknown as Record<string, unknown>).fromANewerBuild).toBeUndefined()
+  })
+
+  it('tolerates an unreadable row', () => {
+    globalRow = 'not json'
+    expect(getSettings().defaultShell).toBe('')
   })
 })
 
@@ -308,7 +307,7 @@ describe('accentColor', () => {
     expect(getSettings().accentColor).toBeNull()
     setSettings({ accentColor: '#8b7cf6' })
     expect(workspaceRow.accentColor).toBe('#8b7cf6')
-    expect(storedGlobalKeys()).toEqual([])
+    expect(globalRow).toBeUndefined()
     expect(getSettings().accentColor).toBe('#8b7cf6')
   })
 
@@ -332,7 +331,7 @@ describe('the theme', () => {
     expect(getSettings().theme).toBe('dark')
     setSettings({ theme: 'nord' })
     expect(workspaceRow.theme).toBe('nord')
-    expect(storedGlobalKeys()).toEqual([])
+    expect(globalRow).toBeUndefined()
     expect(getSettings().theme).toBe('nord')
   })
 
@@ -367,7 +366,7 @@ describe('the system theme pair', () => {
     expect(getSettings().systemDarkTheme).toBe('dracula')
     // Scoped with the theme: the pair is what the workspace's 'system' means.
     expect(workspaceRow.systemDarkTheme).toBe('dracula')
-    expect(storedGlobalKeys()).toEqual([])
+    expect(globalRow).toBeUndefined()
   })
 
   it('rejects a stored half that names a theme of the wrong appearance', () => {
@@ -393,7 +392,7 @@ describe('fontLigatures', () => {
     setSettings({ fontLigatures: false })
     expect(getSettings().fontLigatures).toBe(false)
     expect(workspaceRow.fontLigatures).toBe(false)
-    expect(storedGlobalKeys()).toEqual([])
+    expect(globalRow).toBeUndefined()
   })
 
   it('falls back to the machine-wide value for a workspace that never set one', () => {

@@ -1,6 +1,7 @@
 import type { BrowserWindow, Input } from 'electron'
-import { IPC } from '@shared/types'
+import { IPC, type WorkspaceSettings } from '@shared/types'
 import { getDb } from '../db/database'
+import { requireWorkspaceId, workspaces } from '../db/repositories'
 
 /**
  * UI zoom for the cockpit window: View ▸ Zoom In / Out / Reset and the usual
@@ -8,10 +9,10 @@ import { getDb } from '../db/database'
  * default scale reads small.
  *
  * Zoom is a Chromium *zoom level*: the factor is 1.2^level, one level per step,
- * the same progression Chrome itself uses. The level is persisted in the global
- * settings table (one value per machine, like the theme) and re-applied on every
- * load, because Chromium's own per-origin zoom memory does not cover the
- * `file://` origin a packaged build runs from — without this a zoom would be
+ * the same progression Chrome itself uses. The level is persisted on the
+ * workspace's row (each workspace window keeps its own, like the theme) and
+ * re-applied on every load, because Chromium's own per-origin zoom memory does
+ * not cover the `file://` origin a packaged build runs from — without this a zoom would be
  * lost on restart.
  */
 
@@ -19,6 +20,12 @@ import { getDb } from '../db/database'
 export const ZOOM_MIN_LEVEL = -4
 export const ZOOM_MAX_LEVEL = 6
 
+/**
+ * The key on the workspace row, and the legacy machine-global settings row the
+ * level used to live in. A workspace that has never zoomed reads the legacy
+ * value, so the move did not reset anyone's zoom; older builds still own that
+ * row, so it is only ever read.
+ */
 const SETTINGS_KEY = 'zoomLevel'
 
 /** Chromium's zoom factor for a level. */
@@ -55,19 +62,38 @@ export function zoomActionForInput(input: Input): 'in' | 'out' | 'reset' | null 
   }
 }
 
-function readLevel(): number {
-  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(SETTINGS_KEY) as
-    | { value: string }
-    | undefined
-  const parsed = row ? Number(row.value) : 0
-  if (!Number.isFinite(parsed)) return 0
+/** A stored level as a supported integer, or null when it is not a number. */
+function parseLevel(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(parsed)) return null
   return Math.max(ZOOM_MIN_LEVEL, Math.min(ZOOM_MAX_LEVEL, Math.round(parsed)))
 }
 
+function readLegacyLevel(): number | null {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(SETTINGS_KEY) as
+    | { value: string }
+    | undefined
+  return row ? parseLevel(row.value) : null
+}
+
+function readLevel(): number {
+  const stored = (workspaces.getSettings(requireWorkspaceId()) as Record<string, unknown>)[SETTINGS_KEY]
+  return parseLevel(stored) ?? readLegacyLevel() ?? 0
+}
+
 function writeLevel(level: number): void {
+  const workspaceId = requireWorkspaceId()
+  // Merged over the whole stored row, inside an IMMEDIATE transaction, for the
+  // same reasons setSettings does it that way: the row holds keys this build may
+  // not know, and the DB is shared by every running instance.
   getDb()
-    .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-    .run(SETTINGS_KEY, String(level))
+    .transaction(() => {
+      workspaces.updateSettings(workspaceId, {
+        ...workspaces.getSettings(workspaceId),
+        [SETTINGS_KEY]: level
+      } as Partial<WorkspaceSettings>)
+    })
+    .immediate()
 }
 
 export const zoom = {

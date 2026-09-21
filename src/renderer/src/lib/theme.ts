@@ -47,10 +47,9 @@ export function useThemeMode(): ThemeMode {
  * Persist ONE theme setting, applying it immediately.
  *
  * Sends that key and nothing else. Writing a whole Settings object here would
- * push this window's snapshot of every other field — the machine-global ones
- * included, which every workspace instance shares — over whatever another
- * instance had just changed. A one-click control writing a dozen unrelated
- * fields is exactly how a lost update happens.
+ * push this window's snapshot of every other field over whatever had changed
+ * meanwhile (a Save in the Settings modal, say). A one-click control writing a
+ * dozen unrelated fields is exactly how a lost update happens.
  * Every theme control funnels through here, so the View menu, the Settings
  * modal and the palette cannot drift apart: there is only one write path.
  *

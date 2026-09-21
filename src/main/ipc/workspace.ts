@@ -30,8 +30,8 @@ export function register(): void {
   // ---- state / settings ----
   h(IPC.getState, () => runtime.appState())
   h(IPC.setSettings, (_e, patch: SettingsPatch) => {
-    // Merges the patch's keys across the global store and the workspace YAML
-    // behind the facade, leaving every key the renderer did not send untouched.
+    // Merges the patch's keys into the workspace's settings behind the facade,
+    // leaving every key the renderer did not send untouched.
     const s = setSettings(patch)
     // Each side effect is gated on the key that actually drives it. Patches are
     // single-key and frequent — a theme click sends { theme }, an untouched Save
