@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.37.0](https://github.com/jimbuck/orbital/compare/v1.36.0...v1.37.0) (2026-09-21)
+
+
+### Features
+
+* **settings:** make every setting per-workspace ([bbda301](https://github.com/jimbuck/orbital/commit/bbda3015ddf55ab68c546d8c8d7e9425e562aa45))
+
 # [1.36.0](https://github.com/jimbuck/orbital/compare/v1.35.0...v1.36.0) (2026-09-21)
 
 
