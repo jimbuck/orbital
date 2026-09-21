@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.36.0](https://github.com/jimbuck/orbital/compare/v1.35.0...v1.36.0) (2026-09-21)
+
+
+### Features
+
+* **settings:** make the code ligatures toggle per-workspace ([9a025ec](https://github.com/jimbuck/orbital/commit/9a025ec89325db0091116f56d9d245708106c8f5))
+
 # [1.35.0](https://github.com/jimbuck/orbital/compare/v1.34.0...v1.35.0) (2026-09-21)
 
 
