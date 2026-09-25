@@ -10,6 +10,10 @@ are absent and most commands will refuse to run.
 
 Add `--json` to any command to get the raw response payload instead of a
 formatted table — use it whenever something is going to parse the output.
+`orbital help` prints the usage.
+
+If you're an agent, [Working inside Orbital](/orbital/agents/overview/) covers
+which of these to use and when.
 
 ## Status
 
@@ -63,18 +67,30 @@ orbital worktree new --existing-branch origin/pr-42
 orbital worktree new --worktree feature/x --base main
 ```
 
+```sh
+orbital worktree sync
+```
+
+Copies the root checkout's env files (the patterns in Settings ▸ Environment
+file sync) into the calling worktree again, **overwriting** its copies. Env
+files are copied once at creation and never kept in sync, so run this when the
+root's copies have changed. Prints how many files it copied.
+
 ## Tabs
 
 ```sh
-orbital tab new <terminal|browser|editor|agent> [arg]
+orbital tab new <terminal|browser|editor|agent|search> [arg]
 ```
 
 Opens a tab in the calling worktree. The argument is type-specific: a URL for
-`browser`, a file path for `editor`, a provider name for `agent`.
+`browser`, a file path for `editor`, the name of a configured agent profile for
+`agent`, a query for `search`.
 
 ```sh
 orbital tab new browser http://localhost:3000
 orbital tab new editor src/lib/cart.ts
+orbital tab new agent "Claude (work)"
+orbital tab new search "TODO("
 ```
 
 ## Tasks

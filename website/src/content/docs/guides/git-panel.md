@@ -9,19 +9,28 @@ in a linked worktree that's its own checkout, in the root worktree your main che
 ## What's there
 
 - **Branch + ahead/behind** counts against the upstream, with Pull / Fetch, and
-  a **Push** that sets the upstream automatically on first push.
-- **Staged** and **Changes** lists with per-file state badges
-  (modified / added / deleted / renamed / untracked / conflicted).
-- Hover a file for **stage / unstage / discard** actions. Discard (and
+  a **Push** that sets the upstream automatically on first push. Periodic
+  background fetch (on by default, in Settings ▸ Git) keeps the counts current.
+- In the **root worktree**, click the branch name to switch to another branch
+  or type into **New branch…** to create one. Linked worktrees stay on their
+  own branch, which is what keeps them isolated.
+- **Staged** and **Changes** lists, drawn as a collapsible folder tree, with
+  per-file state badges (modified / added / deleted / renamed / untracked /
+  conflicted).
+- Hover a file for **stage / unstage / discard** actions. Folder rows carry the
+  same actions for everything beneath them. Discard (and
   discard-all) is a two-step confirm: first click arms it, ✓ executes. Untracked
   files are deleted; staged changes always survive a discard-all.
-- **Commit** with an **Amend** toggle that prefills HEAD's message.
+- **Commit** (Ctrl+Enter in the message box) with an **Amend** toggle that
+  prefills HEAD's message.
 
 ## Diffs
 
-Click any changed file to open its diff in an editor tab — unified view, line
-numbers on both sides, syntax-highlighted code, and `+N −N` counts in the
-header. Staged files diff against the index.
+Click any changed file to open its diff in the editor you're looking at, as a
+pill beside your other open files (a new editor tab opens only if the worktree
+has none). The diff is unified, with line numbers on both sides,
+syntax-highlighted code, and `+N −N` counts in the header. Staged files diff
+against the index.
 
 ![A syntax-highlighted diff opened from the git panel](../../../assets/screenshots/07-diff-view.png)
 
@@ -37,6 +46,8 @@ current branch's history as a full-size modal, like the task board.
 - **Right:** the selected commit's full message, author and date, its hash
   (click to copy), and every file it changed with `+N −N` counts. The first
   file's diff opens straight away; click another file to switch.
+
+![The commit history modal: lane graph, commit list, and the selected commit's files and diff](../../../assets/screenshots/13-commit-history.png)
 
 The list follows the checkout: a commit, pull, or checkout made anywhere
 (the panel, a terminal, an agent) moves the tip and the history reloads.

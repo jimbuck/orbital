@@ -20,10 +20,17 @@ Orbital's answer is a cockpit:
 
 - Each stream of work runs in its own **worktree** — an isolated git worktree with
   its own branch, terminals, browser previews, and editor.
+- Projects group into **workspaces**, each in its own window with its own theme,
+  accent and agent profiles, so work and personal repos never mix.
 - Every terminal carries a live **status**. The left rail, the title bar, and the
   Windows taskbar all tell you the moment an agent needs you.
 - A built-in **git panel** and **task tracker** close the loop: review the diff,
   commit, push, mark the task done, delete the worktree.
+- A **command palette** and cross-worktree **search** get you to any file,
+  task, worktree or command from the keyboard.
+- Agents take part through the `orbital` CLI: they report their status, claim
+  and file tasks, and register dev servers. See
+  [Working inside Orbital](/orbital/agents/overview/).
 
 ## What Orbital is *not*
 
@@ -31,12 +38,13 @@ Orbital's answer is a cockpit:
   spawns the real interactive CLI in a real terminal (ConPTY), so you keep the
   full feature set of your preferred harness — slash commands, hooks, MCP
   servers, permission modes — and everything runs on your existing subscription
-  instead of metered API usage. **Claude Code is fully supported at launch;
-  Codex support is planned.**
+  instead of metered API usage. Orbital launches **Claude Code**, **Codex** and
+  **Cursor**, with the deepest integration for Claude Code.
 - **It is not a merge tool or CI system.** It orchestrates working copies and
   surfaces state; git semantics stay plain git.
 - **It never writes into your repositories.** All of Orbital's state lives in
-  SQLite under your user profile. Worktrees are created in a sibling
+  SQLite under your user profile, and briefings and skills go into Orbital's
+  app-data folder or your agent's profile directory. Worktrees are created in a sibling
   `.orbital-worktrees` directory, not inside your repo.
 
 ## The core loop

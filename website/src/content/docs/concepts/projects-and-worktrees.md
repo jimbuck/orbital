@@ -7,8 +7,11 @@ description: Orbital's core model — how repos, worktrees, panes, and tabs fit 
 
 A **project** is a local git repository opened in Orbital. The left rail lists
 every project with an aggregate status dot and its worktrees. Add one with the
-**+** button; remove one from Orbital by right-clicking its header (the repo and
-its worktrees stay on disk).
+**+** button or **File ▸ Add Project…**; remove one from Orbital by
+right-clicking its header (the repo and its worktrees stay on disk). Projects
+belong to a [workspace](/orbital/concepts/workspaces/).
+
+![The Add Project dialog](../../../assets/screenshots/14-add-project.png)
 
 The **Add project** dialog has three sources:
 
@@ -52,32 +55,67 @@ the new worktree appears in the rail within a second; remove one externally and
 its entry (with its tabs and layout) goes away. Discovery runs at launch and
 live, by watching each repo's `.git/worktrees` directory.
 
+**New Worktree** (on the project row, **File ▸ New Worktree…**, or the ▶ on a
+task) leads with the worktree's name and offers two choices:
+
+- **Create a new branch.** The branch name follows the worktree name until you
+  edit it, and forks from the base ref you pick.
+- **Open an existing branch.** Local branches are checked out directly; a
+  remote-only branch like `origin/pr-42` gets a local tracking branch. Handy for
+  reviewing a pull request in its own worktree.
+
+![The New Worktree dialog](../../../assets/screenshots/02-new-worktree.png)
+
 Branch names are slugified for you ("Login flow" → `login-flow`) and collisions
 get numeric suffixes. If the branch already exists, Orbital attaches to it;
 otherwise it forks a new branch from the base ref you chose (default `HEAD`).
 
-Right-click a worktree to **rename** it, **close** it (keeping it on disk), or
-**delete the worktree**. Deleting refuses to discard uncommitted or unpushed
-work unless you explicitly force it.
+Right-click a worktree for **Rename**, **Sync env files from root**,
+**Open in Explorer**, **Open in External Terminal**, **Clear Status** (for a
+status that got stuck), **Close Worktree** (keeps it on disk) and **Delete
+worktree**. Deleting refuses to discard uncommitted or unpushed work unless you
+explicitly force it, and the rail shows progress while a large worktree is
+removed.
 
-### Env-file sync
+![The right-click menu on a linked worktree](../../../assets/screenshots/20-rail-context-menu.png)
 
-New worktrees are seeded with the project's untracked env files (`.env`,
-`.env.*` by default — configurable per project in Settings), and changes to
-those files in the root checkout keep syncing to linked worktrees while Orbital
-runs. Your feature branches are runnable immediately.
+### Env-file copy
+
+A new worktree gets the project's untracked env files copied in from the root
+checkout: `.env` and `.env.*` at any depth, agent config directories like
+`.claude/`, and `node_modules/`, which copies in the background while the rail
+shows the worktree as setting up. Your feature branch runs straight away. The
+patterns are configurable in **Settings ▸ Environment file sync**.
+
+The copy happens once. After that the worktree's files are its own, so a
+worktree can diverge from the root on purpose. When you do want the root's
+current copies, right-click the worktree and choose **Sync env files from
+root** (or run `orbital worktree sync` in one of its terminals). It asks first,
+since it overwrites, and tells you how many files it copied.
 
 ## Panes & tabs
 
 Each worktree owns a **split tree of panes**, each pane a strip of tabs:
 
-- **Terminal** — a real PTY running your shell.
-- **Claude (agent)** — a PTY that boots straight into your coding agent.
+- **Terminal** — a real PTY running your shell. Paste a clipboard image and
+  Orbital saves it to a scratch file and pastes the path, so an agent can read
+  your screenshot.
+- **Agent** — a PTY that boots straight into one of the workspace's
+  [agent profiles](/orbital/guides/running-agents/#agent-profiles).
 - **Browser** — an in-app preview (plain-clicking a URL in any terminal opens
   one; Ctrl+click uses your system browser).
-- **Editor** — file tree, syntax-highlighted source, diffs, previews, images.
+- **Editor** — file tree, open-file pills, syntax-highlighted source, diffs,
+  previews, images. See [The editor](/orbital/guides/editor/).
+- **Search** — content search across the checkout, the project or the whole
+  workspace. See [Command palette & search](/orbital/guides/command-palette/).
+
+![A linked worktree with split panes](../../../assets/screenshots/03-linked-worktree.png)
+
+Right-click a tab to rename, split, close it, or close the others. Closing a
+terminal or agent tab whose process is still running asks first.
 
 Drag a tab to another pane's strip to move it, or to a pane **edge** to split in
-that direction. Drag the dividers to resize. Layouts, tabs, and worktrees all
+that direction. Drag the dividers to resize. A new worktree starts with one empty pane; pick
+what to open from its **+** menu. Layouts, tabs, and worktrees all
 persist across restarts — terminals restart fresh (scrollback intentionally does
 not persist), while scrollback *does* survive tab switches within a session.

@@ -1,112 +1,110 @@
 ---
 title: Settings
-description: Shell, alerts, env-file sync, themes, agent providers, the Claude hooks, and the orbital skill.
+description: Every section of Orbital's Settings dialog, from accent colour to agent profiles.
 ---
 
-Open Settings from **File → Settings…**.
+Open Settings from **File ▸ Settings…**, the gear at the bottom of the left
+rail, or the command palette.
 
-## Default shell
+Every setting belongs to the **workspace** whose window you opened it in.
+Nothing is machine-wide, so a Work window and a Personal window can differ in
+everything from theme to shell. A workspace that never set a value falls back
+to what older builds stored globally. See [Workspaces](/orbital/concepts/workspaces/).
 
-The shell new terminals run (PowerShell by default). Any executable on `PATH`
-or an absolute path works — `pwsh`, `cmd`, a WSL launcher.
+Most changes wait for **Save changes**. The theme, the accent and code
+ligatures apply the moment you click them, so Cancel won't undo those.
 
-## Alerts
+## Workspace
 
-The three needs-attention channels are individually toggleable:
+- **Name** is shown in the title bar and the workspace picker.
+- **Accent color** tints this workspace's window: eight presets, a custom
+  colour, or a hex value. Orbital adjusts it as far as the current theme needs
+  to keep it readable. **Default** uses the theme's accent.
 
-| Setting | Effect |
-|---|---|
-| In-app indicator | Rail badges + the title-bar "N agents need you" banner |
-| Sound | A quiet chime on the *rising edge* (a newly blocked agent) |
-| Taskbar badge | The taskbar icon's satellite swells and glows amber |
+## Environment file sync
 
-## Env-file sync (per project)
+Glob patterns for untracked files to copy from the root checkout into a new
+worktree. The defaults cover `.env` and `.env.*` files at any depth plus agent
+config directories (`.claude/**`, `.codex/**`, `.cursor/**` and friends), and `node_modules/**`,
+which copies in the background so a new worktree doesn't need an install. Add
+patterns like `**/.dev.vars` for whatever else your tooling keeps out of git.
 
-Glob patterns for untracked files to copy into new worktrees and keep synced
-from the root checkout — `.env` and `.env.*` by default. Add patterns like
-`.claude/settings.local.json` if your tooling keeps local config out of git.
+The copy happens once, at creation. After that a worktree's files are its own.
+To copy again, use **Sync env files from root** on the worktree's right-click
+menu, or run `orbital worktree sync` in one of its terminals. Both overwrite the
+worktree's copies.
 
 ## Appearance
 
-### Theme
+- **Theme** shows the gallery of twenty themes plus **System**, which follows
+  the OS with a dark theme and a light theme of your choice.
+- **Code ligatures** turns JetBrains Mono's joined glyphs (`=>`, `!=`) on or
+  off in the editor, diffs and terminal.
 
-Twenty themes, light and dark — Orbital's own pair, the ones the editors ship
-(VS Code Dark+/Light+, Darcula, IntelliJ Light, One Dark/Light, Monokai) and the
-community classics (Dracula, Nord, Tokyo Night, Catppuccin, GitHub, Gruvbox,
-Solarized). Picking one pins it; **System** hands the choice back to the OS.
+More on both in [Themes & appearance](/orbital/guides/appearance/).
 
-**System** is a *pair* — the theme for a dark OS and the theme for a light one —
-so following the OS doesn't mean giving up your theme. Choose System and two
-selects appear beneath the gallery: Dracula at night, GitHub Light by day, and
-the window changes with the OS. They default to Orbital Dark and Orbital Light.
-Setting a half doesn't switch to it; the View menu and the palette name the half
-your OS is asking for right now, so you can see what System would give before
-you pick it.
+![Settings, showing the theme gallery](../../../assets/screenshots/15-settings-appearance.png)
 
-A theme colours the whole window, not just the chrome: the terminal's ANSI
-palette, the editor's syntax highlighting and the markdown preview all follow it.
+## Opening tabs
 
-Picking one applies and saves it straight away, so Cancel won't put the old one
-back. The same choice is on **View ▸ Theme** (System and the two Orbital themes,
-with the rest a click further on) and in the command palette — type `theme`.
+**Default open action** decides where a tab opened from outside the pane area
+lands: the command palette, a file in the git panel, a dev-server link. Choose
+**Active Pane**, **Right Pane** (the default), **Left Pane**, **Bottom Pane** or
+**Top Pane**. A worktree with a single pane is split to create the pane you
+picked. Once it's split, a direction with nothing on that side falls back to
+the pane you were working in.
 
-The theme is machine-wide: every workspace and every window shares it.
+## Terminal
 
-### Code ligatures
+**Default shell** is what new terminals run. PowerShell is the default; `pwsh`,
+`cmd`, Git Bash or a WSL launcher work too.
 
-JetBrains Mono draws `!=`, `=>` and `===` as single glyphs. Some people read
-code faster that way and some want to see the characters they typed; the toggle
-covers the editor, its diffs and the terminal. Like the theme, it applies on
-click.
+## Git
 
-### Accent colour
+**Periodic fetch** fetches each repo in the background so ahead/behind counts
+stay current. On by default.
 
-Per *workspace*, unlike the theme — a different accent per window is the fastest
-way to tell two workspaces apart. Pick a preset or any hex; Orbital deepens or
-lightens it as far as the current theme needs to keep it readable, and picks the
-ink that reads on top of it. **Default** means the theme's own accent.
+## Agents
 
-## Agent (per project)
+A list of **agent profiles**. Each profile shows up in the new-tab menus and
+launches its CLI with its own settings:
 
-- **Default provider** — which agent an agent tab boots (Claude today).
-- **Executable path** — explicit path override when the agent CLI isn't on
-  `PATH`, or you want a specific installation.
+- **Name**, as it appears in menus and to `orbital tab new agent <name>`
+- **CLI**: Claude, Codex or Cursor
+- **Profile directory** (optional), exported as `CLAUDE_CONFIG_DIR`,
+  `CODEX_HOME` or `CURSOR_CONFIG_DIR`. `~`, `%VAR%` and `$VAR` are expanded,
+  and Settings shows what the path resolves to and warns if no directory is
+  there yet.
+- **Executable path**, **extra arguments** and **environment variables**
 
-## Claude status hooks
+Add as many as you like, including several of one CLI. A personal Claude and a
+work Claude, each pointed at its own profile directory, can sit side by side.
 
-Installs Orbital's status hooks into the `settings.json` of the Claude profile
-this workspace launches agents with — the profile directory set on the Claude
-agent above, else `CLAUDE_CONFIG_DIR`, else `~/.claude` — so Claude sessions
-report status automatically:
+Each profile's card also carries the installs for that profile:
+[Claude status hooks](/orbital/agents/integration/#claude-status-hooks),
+[the orbital skill](/orbital/agents/skill/), and, for Codex,
+[the AGENTS.md instructions](/orbital/agents/integration/#codex-instructions).
+Every one has **Preview**, **Install** and **Remove**, and **Update** when a new
+Orbital release changes what it would write. Save a new or edited profile
+before installing; the installs write into the saved profile directory.
 
-- **Preview** the exact JSON before it's merged.
-- Install is idempotent; **Remove** strips exactly Orbital's entries.
-- Workspaces on different Claude profiles each need their own install — the
-  badge reflects the profile this workspace actually uses.
-- The hook guards on Orbital's env vars — Claude sessions outside Orbital are
-  untouched.
+![Agent profiles in Settings](../../../assets/screenshots/16-settings-agents.png)
 
-## The orbital skill for Claude
+Below the profiles are two per-**project** settings for the project you're on:
 
-Installs an [Agent Skill](https://code.claude.com/docs/en/skills) documenting the
-`orbital` CLI, so Claude sessions you start by hand (agent tabs are briefed
-already) know how to report status, file tasks, and register dev servers:
+- **Default agent** is the profile an agent tab boots when you don't pick one.
+- **Executable path** overrides the profile's own path for this project only.
 
-- **Preview** the exact `SKILL.md` before it's written.
-- It goes to `skills/orbital/SKILL.md` in the same profile the hooks use: this
-  workspace's Claude profile directory, else `CLAUDE_CONFIG_DIR`, else `~/.claude`.
-- Orbital won't overwrite a skill it doesn't own, and **Remove** deletes only
-  its own.
-- When an Orbital update changes the skill, the card says **Update available**
-  and offers **Update** — no remove-and-reinstall, and no window in which your
-  agents have no skill at all. The same goes for the hooks and the Codex block.
+## Debug logging
 
-## Orbital instructions for Codex
+Records CLI calls, UI actions and errors to a rotating log file. Useful when
+reporting a crash. **Open log folder** takes you to the files.
 
-Shown when Codex is one of the workspace's agents. Codex takes no briefing file,
-so Orbital merges a short marked block into the `AGENTS.md` of its profile
-directory (`CODEX_HOME`, else `~/.codex`) — the file Codex loads every session:
+## Needs-attention alerts
 
-- **Preview** the exact block before it's written.
-- Install rewrites just that block; **Remove** strips just that block and leaves
-  the rest of your `AGENTS.md` alone.
+| Setting | Effect |
+|---|---|
+| Global indicator | The title-bar banner when any worktree needs you |
+| Sound | A chime on a *new* needs-attention |
+| Taskbar badge | The taskbar icon's satellite glows amber |
+| Taskbar flash | The taskbar button flashes while Orbital is in the background |

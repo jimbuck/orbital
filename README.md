@@ -38,8 +38,9 @@ isolated **worktree**, glance at the rail to see who's `working` and who
 interactive CLI in a real terminal (ConPTY + xterm.js), so you keep the full
 feature set of your preferred harness — slash commands, hooks, MCP servers,
 permission modes, plan mode — and everything runs on your existing
-subscription instead of metered API tokens. **Claude Code is fully supported
-at launch; Codex support is planned.** The full product spec lives in
+subscription instead of metered API tokens. Orbital launches **Claude Code**,
+**Codex** and **Cursor** as agent tabs, with the deepest integration for Claude
+Code. The full product spec lives in
 [`Orbital_PRD_v1.1.md`](./Orbital_PRD_v1.1.md).
 
 ![The Orbital cockpit: projects and worktrees in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)

@@ -9,6 +9,12 @@ head:
 
 import overview from '../../assets/screenshots/01-cockpit-overview.png'
 import statusAlert from '../../assets/screenshots/04-status-alert.png'
+import palette from '../../assets/screenshots/11-command-palette.png'
+import history from '../../assets/screenshots/13-commit-history.png'
+import board from '../../assets/screenshots/10-board-all.png'
+import editor from '../../assets/screenshots/19-editor-file.png'
+import light from '../../assets/screenshots/18-light-theme.png'
+import agents from '../../assets/screenshots/16-settings-agents.png'
 
 <div class="ob-splash">
 
@@ -17,10 +23,10 @@ import statusAlert from '../../assets/screenshots/04-status-alert.png'
   <p class="ob-eyebrow">Mission control for coding agents</p>
   <h1 class="ob-title">Get work done <em>from orbit.</em></h1>
   <p class="ob-lede">
-    Orbital runs many interactive coding agents side by side — each in its own git
-    worktree with terminals, previews, and diffs — and tells you the moment one
-    needs you. The full power of your preferred harness (Claude Code at launch,
-    Codex planned), on your subscription instead of metered tokens.
+    Orbital runs many interactive coding agents side by side, each in its own git
+    worktree with terminals, previews, and diffs, and tells you the moment one
+    needs you. Claude Code, Codex and Cursor at full power, on your subscription
+    instead of metered tokens.
   </p>
   <div class="ob-actions">
     <a class="ob-btn primary" href="/orbital/getting-started/quick-start/">Quick start →</a>
@@ -36,7 +42,7 @@ import statusAlert from '../../assets/screenshots/04-status-alert.png'
   <div class="ob-shot-wrap">
     <div class="ob-shot">
       <div class="ob-shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>orbital — nebula-shop ▸ main</span></div>
-      <img src={overview.src} alt="The Orbital cockpit: workspaces and Flights in the left rail, a live terminal in the middle, git panel and task tracker on the right" />
+      <img src={overview.src} alt="The Orbital cockpit: projects and worktrees in the left rail, terminals and an editor in the middle, git panel and task tracker on the right" />
     </div>
   </div>
 </div>
@@ -47,11 +53,11 @@ import statusAlert from '../../assets/screenshots/04-status-alert.png'
 <section class="ob-features">
   <article class="ob-feature" data-index="01">
     <span class="glyph">◫</span>
-    <h3>Isolated Flights</h3>
+    <h3>Isolated worktrees</h3>
     <p>
       Every stream of work gets its own git worktree, branch, terminals, and pane
-      layout — created in one click, with your <code>.env</code> files synced in
-      automatically. Agents never trample each other's changes.
+      layout, created in one click with your <code>.env</code> files and agent
+      config copied in. Agents never trample each other's changes.
     </p>
   </article>
   <article class="ob-feature" data-index="02">
@@ -59,8 +65,8 @@ import statusAlert from '../../assets/screenshots/04-status-alert.png'
     <h3>Know who needs you</h3>
     <p>
       Terminals report their status live. When an agent blocks on a permission
-      prompt, the rail pulses, the title bar shows a banner, the taskbar icon is
-      badged — and typing into the agent clears it instantly.
+      prompt, the rail pulses, the title bar shows a banner, the taskbar icon
+      glows and flashes. Typing into the agent clears it.
     </p>
   </article>
   <article class="ob-feature" data-index="03">
@@ -68,32 +74,52 @@ import statusAlert from '../../assets/screenshots/04-status-alert.png'
     <h3>A cockpit, not just terminals</h3>
     <p>
       Split panes of terminals, in-app browser previews, and an editor with
-      syntax-highlighted diffs and image rendering — plus a full git panel to
-      review, commit, and push finished work.
+      highlighted diffs, markdown and mermaid previews, plus a full git panel
+      with commit history to review, commit, and push finished work.
     </p>
   </article>
   <article class="ob-feature" data-index="04">
     <span class="glyph">▸_</span>
     <h3>Your harness, at full power</h3>
     <p>
-      Orbital runs the real interactive CLI, so nothing is lost in a wrapper —
-      slash commands, hooks, MCP servers, permission modes all work. And the
-      <code>orbital</code> CLI lets agents set status, file tasks, and register
-      dev servers, so the cockpit always reflects reality.
+      Orbital runs the real interactive CLI, so slash commands, hooks, MCP
+      servers and permission modes all work. Agent tabs pick up their
+      conversation again after a restart.
+    </p>
+  </article>
+  <article class="ob-feature" data-index="05">
+    <span class="glyph">⌘</span>
+    <h3>Keyboard to anywhere</h3>
+    <p>
+      <kbd>Ctrl+Shift+P</kbd> reaches files in every worktree, commands, tasks
+      and worktrees. Content search runs across checkouts in a tab you can
+      work through hit by hit.
+    </p>
+  </article>
+  <article class="ob-feature" data-index="06">
+    <span class="glyph">◐</span>
+    <h3>Workspaces, your way</h3>
+    <p>
+      Keep work and personal repos in separate windows, each with its own theme,
+      accent colour and agent profiles. Twenty themes, from Dracula to
+      Solarized, colour the terminal and editor too.
     </p>
   </article>
 </section>
 
-<p class="ob-section-label">Instrumentation</p>
+<p class="ob-section-label" style="margin-top:4rem">Instrumentation</p>
 <h2 class="ob-section-title">Your agents talk back</h2>
 
+<p class="ob-intro">Every terminal has the <code>orbital</code> CLI on its path. Agents use it to report status, claim and file tasks, and register dev servers, so the cockpit always reflects what's actually happening. Orbital teaches it to them with a per-launch briefing, an Agent Skill, and an <code>AGENTS.md</code> block for Codex. <a href="/orbital/agents/overview/">Docs for agents →</a></p>
+
 <div class="ob-terminal">
-  <div class="ob-shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>flight checkout-flow — nebula-shop</span></div>
-  <pre>{`$ orbital status working
+  <div class="ob-shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>worktree checkout-flow — nebula-shop</span></div>
+  <pre>{`$ orbital task update 12 --status in-progress
+task updated: Add checkout flow → in_progress
 $ orbital server add 3000
 dev server registered: http://localhost:3000/ (1 live)
-$ orbital task add "Fix cart badge count"
-task added: Fix cart badge count
+$ orbital task add "Cart total ignores discounts" --tags bug
+task added: #14 Cart total ignores discounts
 $ orbital status needs-attention`}<span class="warn">{`
 ● nebula-shop / checkout-flow needs you`}</span></pre>
 </div>
@@ -105,9 +131,33 @@ $ orbital status needs-attention`}<span class="warn">{`
   </div>
 </div>
 
+<p class="ob-section-label" style="margin-top:4rem">Tour</p>
+<h2 class="ob-section-title">A closer look</h2>
+
+<section class="ob-gallery">
+  <figure>
+    <a href="/orbital/guides/command-palette/"><img src={palette.src} alt="The command palette" loading="lazy" /><figcaption><strong>Command palette</strong>Files, commands, worktrees and tasks, one shortcut away.</figcaption></a>
+  </figure>
+  <figure>
+    <a href="/orbital/guides/git-panel/#commit-history"><img src={history.src} alt="The commit history modal with a lane graph" loading="lazy" /><figcaption><strong>Commit history</strong>A lane graph, every commit's files, and their diffs.</figcaption></a>
+  </figure>
+  <figure>
+    <a href="/orbital/guides/tasks/"><img src={board.src} alt="The all-projects task board" loading="lazy" /><figcaption><strong>Task board</strong>Every project as a swim-lane. Drag between columns and projects.</figcaption></a>
+  </figure>
+  <figure>
+    <a href="/orbital/guides/editor/"><img src={editor.src} alt="The editor with file tree, open-file pills and find bar" loading="lazy" /><figcaption><strong>Editor</strong>File icons, open-file pills, find in file, and quick edits.</figcaption></a>
+  </figure>
+  <figure>
+    <a href="/orbital/guides/appearance/"><img src={light.src} alt="The cockpit in a light theme" loading="lazy" /><figcaption><strong>Twenty themes</strong>Light, dark, or following Windows with a pair of your choice.</figcaption></a>
+  </figure>
+  <figure>
+    <a href="/orbital/guides/running-agents/#agent-profiles"><img src={agents.src} alt="Agent profiles in Settings" loading="lazy" /><figcaption><strong>Agent profiles</strong>A personal and a work Claude, side by side, each with its own hooks.</figcaption></a>
+  </figure>
+</section>
+
 <div class="ob-cta">
   <h2>Three agents. One glance. Zero babysitting.</h2>
-  <p>Windows 10/11 · Claude Code at launch, Codex planned · your subscription, not tokens · MIT licensed</p>
+  <p>Windows 10/11 · Claude Code, Codex and Cursor · your subscription, not tokens · MIT licensed</p>
   <div class="ob-actions">
     <a class="ob-btn primary" href="/orbital/getting-started/installation/">Install Orbital</a>
     <a class="ob-btn ghost" href="/orbital/getting-started/what-is-orbital/">Read the docs</a>

@@ -43,5 +43,29 @@ driver update, restart the app first.
 
 ## The app won't start a second time
 
-Orbital is single-instance per profile: launching it again focuses the existing
-window instead of starting a new process.
+Orbital runs one window per workspace: launching a workspace that's already
+open focuses its window instead of starting a new process. To open a
+different workspace side by side, use **File ▸ Workspaces…** or the taskbar
+icon's **Recent** list.
+
+## A worktree doesn't have my latest `.env` changes
+
+Env files are copied into a worktree once, when it's created, and not kept in
+sync after that. Right-click the worktree and choose **Sync env files from
+root**, or run `orbital worktree sync` in one of its terminals. Both overwrite
+the worktree's copies.
+
+## Agents don't report status
+
+- Check the hooks are installed for the profile the agent tab uses: **Settings ▸
+  Agents**, on that profile's card. Each profile directory needs its own install.
+- If the card says **Update available**, update it. An Orbital update that
+  moves the install location changes the CLI path the hooks call.
+- A status that got stuck can be reset from the worktree's right-click menu
+  with **Clear Status**.
+
+## Reporting a crash
+
+Turn on **Settings ▸ Debug logging**, reproduce the problem, then use **Open
+log folder** and attach the latest log to a
+[GitHub issue](https://github.com/jimbuck/orbital/issues).

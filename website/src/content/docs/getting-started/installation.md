@@ -8,9 +8,11 @@ description: Install Orbital on Windows, or build it from source.
 - **Windows 10/11.** Orbital is currently Windows-only (ConPTY terminals, taskbar
   badges, and the installer are all Windows-native).
 - **git** on your `PATH`.
-- Your coding agent's CLI installed and authenticated as usual — **Claude Code**
-  is fully supported at launch (Codex support is planned), and any interactive
+- Your coding agent's CLI installed and signed in as usual. Orbital launches
+  **Claude Code**, **Codex** and **Cursor** as agent tabs, and any interactive
   CLI runs fine in a plain worktree terminal.
+- Optional: the [GitHub CLI](https://cli.github.com) (`gh`), signed in, to clone
+  or create GitHub repositories from the Add Project dialog.
 
 ## Install the app
 
