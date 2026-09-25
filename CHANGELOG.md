@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.37.1](https://github.com/jimbuck/orbital/compare/v1.37.0...v1.37.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* **panel:** scroll only the lists in the Git and Tasks panels ([982d06f](https://github.com/jimbuck/orbital/commit/982d06faa9e24f1d079cb7ec0119e2c5b8264503))
+
 # [1.37.0](https://github.com/jimbuck/orbital/compare/v1.36.0...v1.37.0) (2026-09-21)
 
 
