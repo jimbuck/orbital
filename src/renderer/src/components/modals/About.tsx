@@ -14,7 +14,7 @@ function updateLine(s: UpdateStatus): string {
     case 'downloading':
       return `Downloading v${s.version ?? '?'}… ${s.percent ?? 0}%`
     case 'ready':
-      return `v${s.version ?? '?'} downloaded — restart to apply.`
+      return `v${s.version ?? '?'} downloaded — click Update to install it.`
     case 'uptodate':
       return 'You are on the latest version.'
     case 'error':
@@ -43,7 +43,7 @@ export default function About(): React.JSX.Element {
         <>
           {updateStatus.phase === 'ready' ? (
             <button type="button" className={ghostBtn} onClick={() => window.orbital.installUpdate()}>
-              Restart to update
+              Update
             </button>
           ) : (
             <button

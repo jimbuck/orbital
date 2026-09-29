@@ -319,12 +319,12 @@ export default function TitleBar(): JSX.Element {
         {updateStatus.phase === 'ready' && (
           <button
             type="button"
-            title={`Orbital ${updateStatus.version} has been downloaded — restart to apply it`}
+            title={`Orbital ${updateStatus.version} has been downloaded — close Orbital and install it`}
             onClick={() => window.orbital.installUpdate()}
             className="mr-2 flex items-center gap-[7px] rounded-[7px] border border-accent/30 bg-accent/12 py-[3px] pl-2 pr-[9px] outline-none hover:bg-accent/20 focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <RefreshCw size={11} strokeWidth={2} className="flex-none text-accent" />
-            <span className="whitespace-nowrap text-[11px] font-semibold text-accent">Restart to update</span>
+            <span className="whitespace-nowrap text-[11px] font-semibold text-accent">Update</span>
           </button>
         )}
         {alertCount > 0 && (

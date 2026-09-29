@@ -1,14 +1,21 @@
-import { app } from 'electron'
+import { app, dialog, type BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { IPC, type UpdateStatus } from '@shared/types'
+import { IPC, controlPipePath, type UpdateStatus } from '@shared/types'
+import { requireWorkspaceId, workspaces } from '../db/repositories'
+import { logger } from './logger'
+import { findLivePeers, peerUpdatePrompt, quitPeers } from './peer-instances'
 
 /** Re-check cadence while the app stays open (ms). */
 const CHECK_INTERVAL = 4 * 60 * 60 * 1000
 
 /**
  * Auto-update over GitHub releases (electron-updater). Updates download in the
- * background; nothing is installed until the user clicks "Restart to update"
- * (or quits — autoInstallOnAppQuit applies a downloaded update on exit).
+ * background; nothing is installed until the user clicks "Update" (or quits —
+ * autoInstallOnAppQuit applies a downloaded update on exit).
+ *
+ * Every workspace runs as its own instance, and the installer can't replace
+ * files a running instance holds, so "Update" first finds the other open
+ * workspaces, confirms closing them, and asks them to quit before installing.
  *
  * In an unpackaged dev run there is no app-update.yml and no installed copy to
  * replace, so the whole service reports `disabled` and never touches the network.
@@ -17,6 +24,8 @@ class UpdaterService {
   private current: UpdateStatus = { phase: 'idle' }
   private send: (channel: string, payload: unknown) => void = () => {}
   private timer: ReturnType<typeof setInterval> | null = null
+  /** Set while an Update click is confirming / closing peers, so a second click is a no-op. */
+  private installing = false
 
   init(send: (channel: string, payload: unknown) => void): void {
     this.send = send
@@ -69,12 +78,73 @@ class UpdaterService {
     return this.current
   }
 
-  /** Quit and install the downloaded update, relaunching afterwards. */
-  install(): void {
-    if (this.current.phase !== 'ready') return
-    // silent install + relaunch: the NSIS installer runs without UI and starts
-    // the new version, so "Restart to update" feels like a plain restart.
-    autoUpdater.quitAndInstall(true, true)
+  /**
+   * Close every Orbital window and install the downloaded update, relaunching
+   * afterwards. When other workspaces are open the user confirms first (a
+   * native dialog over `win`), then those instances are asked to quit and
+   * waited on, so the installer never finds them holding the install dir.
+   */
+  async install(win: BrowserWindow | null): Promise<void> {
+    if (this.current.phase !== 'ready' || this.installing) return
+    this.installing = true
+    try {
+      const selfId = requireWorkspaceId()
+      const candidates = workspaces
+        .list()
+        .filter((w) => w.id !== selfId)
+        .map((w) => ({ id: w.id, name: w.name, pipePath: controlPipePath(w.id) }))
+      const peers = await findLivePeers(candidates)
+
+      if (peers.length > 0) {
+        const { message, detail } = peerUpdatePrompt(
+          this.current.version,
+          peers.map((p) => p.name)
+        )
+        const opts = {
+          type: 'question' as const,
+          buttons: ['Close All and Update', 'Cancel'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+          title: 'Update Orbital',
+          message,
+          detail
+        }
+        const { response } = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
+        if (response !== 0) return
+
+        const stragglers = await quitPeers(peers)
+        // The silent installer closes whatever is still running itself; this is
+        // just a trail for when an old build (no quit-for-update) was open.
+        if (stragglers.length > 0) {
+          logger.error('update: peers still running, installing anyway', {
+            peers: stragglers.map((p) => p.name)
+          })
+        }
+      }
+
+      // The relaunch after install takes no --workspace-id, so it opens the most
+      // recently opened workspace; make that the one the user clicked Update in.
+      workspaces.touchOpened(selfId)
+      // silent install + relaunch: the NSIS installer runs without UI and starts
+      // the new version, so "Update" feels like a plain restart.
+      autoUpdater.quitAndInstall(true, true)
+    } catch (err) {
+      logger.error('update: install failed', { error: err instanceof Error ? err.message : String(err) })
+    } finally {
+      this.installing = false
+    }
+  }
+
+  /**
+   * Another instance is installing an update and asked this one to get out of
+   * the way. Quit WITHOUT installing — that instance runs the installer, and a
+   * second copy launched from this exit would race it.
+   */
+  quitForPeerUpdate(): void {
+    if (app.isPackaged) autoUpdater.autoInstallOnAppQuit = false
+    // Let the control channel write its reply before the pipe goes down.
+    setTimeout(() => app.quit(), 100)
   }
 
   stop(): void {

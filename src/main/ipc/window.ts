@@ -28,5 +28,5 @@ export function register(): void {
   h(IPC.getVersion, () => app.getVersion())
   h(IPC.updateStatus, () => updater.status())
   h(IPC.updateCheck, () => updater.check())
-  ipcMain.on(IPC.updateInstall, () => updater.install())
+  ipcMain.on(IPC.updateInstall, () => void updater.install(runtime.window))
 }

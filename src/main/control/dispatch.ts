@@ -14,6 +14,7 @@ import { runtime, repo } from '../runtime'
 import { createLinkedWorktree } from '../services/worktree'
 import { getSettings } from '../services/settings'
 import { logger } from '../services/logger'
+import { updater } from '../services/updater'
 import { recordAgentSession } from '../services/agents/launch'
 import { createTabInWorktree } from '../tabs'
 import { beginWorktreeSetup, syncWorktreeEnv } from '../worktree-lifecycle'
@@ -283,6 +284,12 @@ const handlers: Record<ControlCommand, Handler> = {
   'server-list': async (req) => {
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     return { ok: true, data: runtime.devServersFor(req.worktreeId) }
+  },
+  'quit-for-update': async () => {
+    // Sent by the instance whose Update button was clicked (peer-instances.ts).
+    // The pid lets it wait for this process to fully exit, not just the pipe.
+    updater.quitForPeerUpdate()
+    return { ok: true, data: { pid: process.pid } }
   }
 }
 

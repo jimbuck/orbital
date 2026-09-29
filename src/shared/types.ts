@@ -1457,7 +1457,10 @@ export interface OrbitalApi {
   updateStatus(): Promise<UpdateStatus>
   /** Trigger a check now; progress/result arrive via onUpdateStatus events. */
   checkForUpdates(): Promise<UpdateStatus>
-  /** Quit and install the downloaded update (no-op unless phase is `ready`). */
+  /**
+   * Close every Orbital window and install the downloaded update (no-op unless
+   * phase is `ready`). Main confirms first when other workspaces are open.
+   */
   installUpdate(): void
 
   // events — each returns an unsubscribe function
@@ -1507,6 +1510,8 @@ export type ControlCommand =
   | 'server-remove'
   | 'server-list'
   | 'hook'
+  /** App-to-app, not a CLI verb: another instance is installing an update. */
+  | 'quit-for-update'
 
 export interface ControlRequest {
   cmd: ControlCommand

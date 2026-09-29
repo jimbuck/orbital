@@ -23,8 +23,10 @@ description: Install Orbital on Windows, or build it from source.
 ### Auto-update
 
 Packaged builds check GitHub releases in the background. When an update has
-downloaded, a quiet **"Restart to update"** pill appears in the title bar —
-click it whenever convenient. You can also check manually via
+downloaded, a quiet **"Update"** pill appears in the title bar. Click it
+whenever convenient: Orbital closes and relaunches on the new version. If other
+workspaces are open in their own windows, it lists them and asks before closing
+them too. You can also check manually via
 **Help → Check for Updates…**.
 
 ## Build from source
