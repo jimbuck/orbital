@@ -10,6 +10,7 @@ import {
   __setMarkdownAssetCacheTtl
 } from '@renderer/lib/markdownAssets'
 import EditorTab, { CodeEditor, PREVIEW_TYPING_DEBOUNCE_MS, Preview } from './EditorTab'
+import { clearThumbnailCache } from './FolderView'
 
 /**
  * A readFileBase64 bridge whose reads stay in flight until the test settles
@@ -965,12 +966,22 @@ describe('EditorTab open-file pills', () => {
   const closeBtn = (name: string, dirty = false): HTMLElement =>
     screen.getByRole('button', { name: dirty ? `Close ${name} (unsaved changes)` : `Close ${name}` })
 
-  /** Mount with nothing open and open the given files from the tree, in order. */
+  /** A real double-click: the browser delivers both clicks before the dblclick. */
+  const doubleClick = (el: HTMLElement): void => {
+    fireEvent.click(el)
+    fireEvent.click(el)
+    fireEvent.doubleClick(el)
+  }
+
+  /**
+   * Mount with nothing open and open the given files from the tree, in order —
+   * double-clicked, so each stays open rather than replacing the preview.
+   */
   async function open(...paths: string[]): Promise<void> {
     render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
     await flush()
     for (const p of paths) {
-      fireEvent.click(treeRow(p))
+      doubleClick(treeRow(p))
       await flush()
     }
   }
@@ -983,6 +994,91 @@ describe('EditorTab open-file pills', () => {
     // The old header buttons are gone: saving is Ctrl+S, discarding is closing.
     expect(screen.queryByText('Save')).toBeNull()
     expect(screen.queryByText('Cancel')).toBeNull()
+  })
+
+  /** Mount with nothing open. */
+  async function mount(): Promise<void> {
+    render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
+    await flush()
+  }
+  const previews = (): (string | null)[] =>
+    pills()
+      .filter((p) => p.dataset.preview === 'true')
+      .map((p) => p.getAttribute('aria-label'))
+  const pillLabel = (path: string): HTMLElement => pill(path).querySelector('span.font-mono') as HTMLElement
+
+  it('a single click opens the file as an italic preview', async () => {
+    await mount()
+    fireEvent.click(treeRow('a.txt'))
+    await flush()
+    expect(pillPaths()).toEqual(['a.txt'])
+    expect(previews()).toEqual(['a.txt'])
+    expect(pillLabel('a.txt').className).toContain('italic')
+    expect(editor().value).toBe('alpha\n')
+  })
+
+  it('the next single click replaces the preview instead of adding a pill', async () => {
+    await open('a.txt')
+    fireEvent.click(treeRow('b.txt'))
+    await flush()
+    fireEvent.click(treeRow('c.txt'))
+    await flush()
+    expect(pillPaths()).toEqual(['a.txt', 'c.txt'])
+    expect(previews()).toEqual(['c.txt'])
+    expect(activePill()).toBe('c.txt')
+  })
+
+  it('a double-click in the tree keeps the file open', async () => {
+    await mount()
+    fireEvent.click(treeRow('a.txt'))
+    fireEvent.doubleClick(treeRow('a.txt'))
+    await flush()
+    expect(previews()).toEqual([])
+    expect(pillLabel('a.txt').className).not.toContain('italic')
+    fireEvent.click(treeRow('b.txt'))
+    await flush()
+    expect(pillPaths()).toEqual(['a.txt', 'b.txt'])
+  })
+
+  it('double-clicking the preview pill keeps it', async () => {
+    await mount()
+    fireEvent.click(treeRow('a.txt'))
+    await flush()
+    fireEvent.doubleClick(pill('a.txt'))
+    expect(previews()).toEqual([])
+  })
+
+  it('editing the preview keeps it', async () => {
+    await mount()
+    fireEvent.click(treeRow('a.txt'))
+    await flush()
+    type('alpha, edited\n')
+    expect(previews()).toEqual([])
+    fireEvent.click(treeRow('b.txt'))
+    await flush()
+    // The edited file was not replaced — its draft is still there.
+    expect(pillPaths()).toEqual(['a.txt', 'b.txt'])
+    expect(pill('a.txt').dataset.dirty).toBe('true')
+  })
+
+  it('saving the preview keeps it, even when there is nothing to write', async () => {
+    await mount()
+    fireEvent.click(treeRow('a.txt'))
+    await flush()
+    fireEvent.keyDown(editor(), { key: 's', ctrlKey: true })
+    await flush()
+    expect(previews()).toEqual([])
+    expect(bridge.writeFile).not.toHaveBeenCalled()
+  })
+
+  it('a file asked for by the git panel stays open and leaves the preview alone', async () => {
+    await mount()
+    fireEvent.click(treeRow('a.txt'))
+    await flush()
+    askToOpen('E1', 'b.txt')
+    await flush()
+    expect(pillPaths()).toEqual(['a.txt', 'b.txt'])
+    expect(previews()).toEqual(['a.txt'])
   })
 
   it('re-opening a file selects its pill instead of adding another', async () => {
@@ -1191,5 +1287,137 @@ describe('EditorTab open-file pills', () => {
     expect(pill('src/deep/x.txt')).toBeTruthy()
     // `deep` is collapsed in the tree, so the only "deep" on screen is the crumb.
     expect(screen.getByText('deep')).toBeTruthy()
+  })
+})
+
+/* ---- Folder view ------------------------------------------------------------
+ *
+ * Clicking a folder in the tree shows its entries as tiles: images as
+ * thumbnails, everything else as an icon. Tiles follow the tree's preview
+ * rules, and a double-click on a folder tile goes into it.
+ * -------------------------------------------------------------------------- */
+
+describe('EditorTab folder view', () => {
+  let bridge: Record<string, ReturnType<typeof vi.fn>>
+
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    __resetFileTreeRegistry()
+    __setFileTreeBridge({
+      fileTree: async () => [
+        {
+          name: 'assets',
+          path: 'assets',
+          type: 'dir' as const,
+          children: [
+            {
+              name: 'icons',
+              path: 'assets/icons',
+              type: 'dir' as const,
+              children: [{ name: 'star.svg', path: 'assets/icons/star.svg', type: 'file' as const }]
+            },
+            { name: 'logo.png', path: 'assets/logo.png', type: 'file' as const },
+            { name: 'notes.txt', path: 'assets/notes.txt', type: 'file' as const }
+          ]
+        }
+      ],
+      onGitChanged: () => () => {}
+    })
+    bridge = {
+      readFile: vi.fn(async () => 'hello\n'),
+      readFileBase64: vi.fn(async (_w: string, path: string) => b64(path)),
+      gitDiff: vi.fn(async () => null),
+      listDir: vi.fn(async () => [])
+    }
+    vi.stubGlobal('orbital', bridge)
+    useStore.setState({
+      projects: [{ id: 'p1' }],
+      worktrees: [worktree('w1')],
+      activeProjectId: 'p1',
+      activeWorktreeId: 'w1'
+    } as unknown as Parameters<typeof useStore.setState>[0])
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+    __setFileTreeBridge(null)
+    __resetFileTreeRegistry()
+    clearThumbnailCache()
+  })
+
+  const treeRow = (name: string): HTMLElement => within(screen.getByTestId('file-tree')).getByText(name)
+  const tiles = (): HTMLElement[] => screen.queryAllByTestId('folder-tile')
+  const tile = (path: string): HTMLElement => tiles().find((t) => t.title === path)!
+
+  async function showAssets(): Promise<void> {
+    render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
+    await flush()
+    fireEvent.click(treeRow('assets'))
+    await flush()
+  }
+
+  it('shows the folder as tiles and still expands it in the tree', async () => {
+    await showAssets()
+    expect(tiles().map((t) => t.title)).toEqual(['assets/icons', 'assets/logo.png', 'assets/notes.txt'])
+    // Expanded too: its children are rows in the tree.
+    expect(treeRow('logo.png')).toBeTruthy()
+  })
+
+  it('draws images as thumbnails and reads nothing else', async () => {
+    await showAssets()
+    await flush()
+    const img = tile('assets/logo.png').querySelector('img')
+    expect(img?.getAttribute('src')).toBe(`data:image/png;base64,${b64('assets/logo.png')}`)
+    expect(tile('assets/notes.txt').querySelector('img')).toBeNull()
+    expect(bridge.readFileBase64).toHaveBeenCalledTimes(1)
+    expect(bridge.readFile).not.toHaveBeenCalled()
+  })
+
+  it('a click on a file tile previews it; a double-click keeps it', async () => {
+    await showAssets()
+    fireEvent.click(tile('assets/notes.txt'))
+    await flush()
+    expect(screen.queryByTestId('folder-view')).toBeNull()
+    expect(screen.getByRole('tab', { name: 'assets/notes.txt' }).dataset.preview).toBe('true')
+
+    fireEvent.click(treeRow('assets'))
+    await flush()
+    fireEvent.doubleClick(tile('assets/notes.txt'))
+    await flush()
+    expect(screen.getByRole('tab', { name: 'assets/notes.txt' }).dataset.preview).toBeUndefined()
+  })
+
+  it('a double-click on a folder tile goes into it; the breadcrumb comes back out', async () => {
+    await showAssets()
+    fireEvent.click(tile('assets/icons'))
+    // A single click only selects a folder.
+    expect(tiles()).toHaveLength(3)
+    fireEvent.doubleClick(tile('assets/icons'))
+    await flush()
+    expect(tiles().map((t) => t.title)).toEqual(['assets/icons/star.svg'])
+
+    const crumb = screen
+      .getAllByRole('button', { name: 'assets' })
+      .find((b) => !screen.getByTestId('file-tree').contains(b))!
+    fireEvent.click(crumb)
+    await flush()
+    expect(tiles()).toHaveLength(3)
+  })
+
+  it('selecting a pill leaves the folder view for that file', async () => {
+    await showAssets()
+    fireEvent.doubleClick(tile('assets/notes.txt'))
+    await flush()
+    fireEvent.click(treeRow('assets'))
+    await flush()
+    expect(screen.getByTestId('folder-view')).toBeTruthy()
+    fireEvent.click(screen.getByRole('tab', { name: 'assets/notes.txt' }))
+    expect(screen.queryByTestId('folder-view')).toBeNull()
+    expect(screen.getByRole('textbox')).toBeTruthy()
   })
 })

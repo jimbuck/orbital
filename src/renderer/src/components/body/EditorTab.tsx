@@ -35,6 +35,8 @@ import DiffView from './DiffView'
 import PanelResizeHandle from '../PanelResizeHandle'
 import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import { clampTreeWidth, treeMaxWidth, TREE_DEFAULT_WIDTH, TREE_MIN_WIDTH } from '@renderer/lib/editorTreeWidth'
+import FolderView, { clearThumbnailCache } from './FolderView'
+import { promoteFile, showFile } from '@renderer/lib/openFiles'
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
@@ -1001,6 +1003,8 @@ function ImageView({ src, alt }: { src: string; alt: string }): JSX.Element {
  */
 interface OpenFile {
   path: string
+  /** The one replaceable, italic preview pill (see lib/openFiles). */
+  preview: boolean
   gitState?: GitFileState
   /** Viewing the staged (index) side of the diff (from tab config). */
   staged: boolean
@@ -1019,6 +1023,7 @@ interface OpenFile {
 function freshFile(node: FileNode, staged: boolean): OpenFile {
   return {
     path: node.path,
+    preview: false,
     gitState: node.gitState,
     staged,
     // Images open on the rendered image — their "diff" is just a binary notice.
@@ -1061,11 +1066,14 @@ function FilePill({
   file,
   active,
   onSelect,
+  onKeep,
   onClose
 }: {
   file: OpenFile
   active: boolean
   onSelect: () => void
+  /** Double-click: turn the preview into a file that stays open. */
+  onKeep: () => void
   onClose: () => void
 }): JSX.Element {
   const dirty = isDirty(file)
@@ -1086,7 +1094,9 @@ function FilePill({
       title={file.path}
       tabIndex={0}
       data-dirty={dirty || undefined}
+      data-preview={file.preview || undefined}
       onClick={onSelect}
+      onDoubleClick={onKeep}
       onMouseDown={(e) => {
         // Middle button: no autoscroll cursor while we close the pill.
         if (e.button === 1) e.preventDefault()
@@ -1111,7 +1121,7 @@ function FilePill({
           strip is scanned for "where did the yaml one go", and a column of
           grey marks answers that no faster than reading every name. */}
       <Icon size={12} strokeWidth={1.5} className={`flex-none ${iconColor} ${active ? '' : 'opacity-70'}`} />
-      <span className="max-w-[180px] truncate font-mono">{name}</span>
+      <span className={`max-w-[180px] truncate font-mono ${file.preview ? 'italic' : ''}`}>{name}</span>
       <button
         type="button"
         tabIndex={-1}
@@ -1280,6 +1290,11 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   /** Open buffers, in pill order. */
   const [files, setFiles] = useState<OpenFile[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
+  /**
+   * The folder whose tiles fill the content area, or null when it shows the
+   * active file. Opening or selecting any file clears it.
+   */
+  const [folder, setFolder] = useState<string | null>(null)
   /** Path of the dirty file whose close is waiting on the save / discard prompt. */
   const [closing, setClosing] = useState<string | null>(null)
   const [closeBusy, setCloseBusy] = useState(false)
@@ -1325,16 +1340,25 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
         .then((kids) => setLazyChildren((m) => ({ ...m, [path]: kids })))
         .catch(() => {
           // Unreadable (e.g. removed since the tree was fetched) — stays empty.
+          setLazyChildren((m) => ({ ...m, [path]: [] }))
         })
     },
     [worktreeId]
   )
 
-  /** Open a file in a new pill, or bring its existing pill to the front. */
-  const openFile = useCallback((node: FileNode, staged = false): void => {
-    setFiles((fs) => (fs.some((f) => f.path === node.path) ? fs : [...fs, freshFile(node, staged)]))
+  /**
+   * Show a file: as the single replaceable preview (a click), or as a file
+   * that stays open (a double-click, or anything that asked for it by name).
+   * An already-open file just comes to the front — promoted if kept.
+   */
+  const showNode = useCallback((node: FileNode, preview: boolean, staged = false): void => {
+    setFiles((fs) => showFile(fs, node.path, () => freshFile(node, staged), preview).files)
     setActivePath(node.path)
+    setFolder(null)
   }, [])
+  const openFile = useCallback((node: FileNode, staged = false): void => showNode(node, false, staged), [showNode])
+  const previewFile = useCallback((node: FileNode): void => showNode(node, true), [showNode])
+  const keepFile = useCallback((path: string): void => setFiles((fs) => promoteFile(fs, path)), [])
 
   /**
    * Something outside this editor asked it to show a file (store.editorOpen):
@@ -1376,6 +1400,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
         f.path === path
           ? {
               ...f,
+              // Asked for by name, so it stays: never a replaceable preview.
+              preview: false,
               staged,
               gitState: f.gitState ?? gitState,
               // Drop the cached diff only when one was asked for: the panel's
@@ -1387,6 +1413,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
       )
     })
     setActivePath(path)
+    setFolder(null)
     setClosing(null)
   }, [editorOpen, tab.id, tree])
 
@@ -1451,6 +1478,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
       setFiles((fs) => fs.map((f) => ({ ...f, path: moved(f.path) ?? f.path })))
       setActivePath((p) => (p && moved(p)) || p)
       setClosing((p) => (p && moved(p)) || p)
+      setFolder((p) => (p && moved(p)) || p)
       // Expansion is keyed by path, so a renamed directory (or one under it)
       // has to carry its open/closed state across to the new key — otherwise
       // renaming an expanded folder snaps it shut in the user's face.
@@ -1468,6 +1496,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
       // Deleted. Keeping a binned file open in an editable buffer would invite
       // saving it back into existence, so close it.
       dropFiles((p) => p === m.path || p.startsWith(`${m.path}/`))
+      setFolder((p) => (p !== null && (p === m.path || p.startsWith(`${m.path}/`)) ? null : p))
     }
   }
 
@@ -1590,7 +1619,11 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     const key = e.key.toLowerCase()
     if (key === 's') {
       e.preventDefault()
-      if (activeFile) void save(activeFile)
+      if (activeFile && folder === null) {
+        // Saving commits to the file, even a clean one — it stops being a preview.
+        keepFile(activeFile.path)
+        void save(activeFile)
+      }
     } else if (key === 'f') {
       e.preventDefault()
       setFindSeq((n) => n + 1)
@@ -1607,6 +1640,19 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     [worktreeId, tab.paneId]
   )
 
+  // The folder view's tiles: the tree's own children where it has them, else
+  // (an ignored folder, or one inside one) a listing fetched on demand.
+  const folderEntries: FileNode[] | null =
+    folder === null
+      ? null
+      : folder === ''
+        ? tree
+        : (findNode(tree, folder)?.children ?? lazyChildren[folder] ?? null)
+  const needFolderLoad = folder !== null && folderEntries === null
+  useEffect(() => {
+    if (needFolderLoad && folder !== null) loadDir(folder)
+  }, [needFolderLoad, folder, loadDir])
+
   const kind = activeFile ? previewKind(activeFile.path) : null
   const isImage = !!activeFile && !!imageMime(activeFile.path)
   const canDiff = !!activeFile && (!!activeFile.gitState || activeFile.staged)
@@ -1615,7 +1661,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     ...(canDiff ? [{ id: 'diff' as const, label: 'Diff' }] : []),
     ...(kind ? [{ id: 'preview' as const, label: 'Preview' }] : [])
   ]
-  const crumbs = activeFile ? activeFile.path.split('/') : []
+  const crumbs = folder !== null ? folder.split('/') : activeFile ? activeFile.path.split('/') : []
 
   return (
     <div ref={rootRef} className="flex h-full w-full bg-pane" onKeyDown={onKeyDown}>
@@ -1634,6 +1680,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             onClick={() => {
               // Drop lazily loaded ignored-dir contents too; expanded ones refetch.
               setLazyChildren({})
+              clearThumbnailCache()
               refetchTree()
             }}
             className={`flex-none rounded p-0.5 text-faint hover:text-text-2 ${FOCUS}`}
@@ -1652,8 +1699,10 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 depth={0}
                 expanded={expanded}
                 toggle={(p) => setExpanded((e) => ({ ...e, [p]: !e[p] }))}
-                onSelect={openFile}
-                selectedPath={activePath}
+                onSelect={previewFile}
+                onKeep={openFile}
+                onShowFolder={setFolder}
+                selectedPath={folder ?? activePath}
                 changedDirs={changedDirs}
                 lazyChildren={lazyChildren}
                 loadDir={loadDir}
@@ -1685,7 +1734,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
 
       {/* Content */}
       <div className="relative flex min-w-0 flex-1 flex-col">
-        {!activeFile ? (
+        {!activeFile && folder === null ? (
           <div className="flex flex-1 items-center justify-center text-sm text-faint">
             Select a file
           </div>
@@ -1707,13 +1756,18 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                   <FilePill
                     key={f.path}
                     file={f}
-                    active={f.path === activePath}
-                    onSelect={() => setActivePath(f.path)}
+                    active={f.path === activePath && folder === null}
+                    onSelect={() => {
+                      setActivePath(f.path)
+                      setFolder(null)
+                    }}
+                    onKeep={() => keepFile(f.path)}
                     onClose={() => requestClose(f.path)}
                   />
                 ))}
               </div>
 
+              {activeFile && folder === null && (
               <div className="flex flex-none items-center gap-2">
                 {activeFile.mode === 'diff' && activeFile.diff && (
                   <span className="flex items-center gap-2 font-mono text-[10px]">
@@ -1740,6 +1794,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                   </div>
                 )}
               </div>
+              )}
             </div>
 
             {/* Breadcrumb: where the active file lives, since the pill only has its name. */}
@@ -1748,11 +1803,22 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 {crumbs.map((seg, i) => (
                   <span key={i} className="flex items-center gap-0.5">
                     {i > 0 && <ChevronRight size={11} strokeWidth={1.5} className="flex-none text-faint" />}
-                    <span className={i === crumbs.length - 1 ? 'text-text-3' : ''}>{seg}</span>
+                    {i === crumbs.length - 1 ? (
+                      <span className="text-text-3">{seg}</span>
+                    ) : (
+                      // Every folder on the way is a way into its tiles.
+                      <button
+                        type="button"
+                        onClick={() => setFolder(crumbs.slice(0, i + 1).join('/'))}
+                        className={`rounded-[3px] hover:text-text-2 hover:underline ${FOCUS}`}
+                      >
+                        {seg}
+                      </button>
+                    )}
                   </span>
                 ))}
               </div>
-              {activeFile.saveError && (
+              {activeFile && folder === null && activeFile.saveError && (
                 <span className="allow-select truncate text-red-2" title={activeFile.saveError}>
                   Save failed: {activeFile.saveError}
                 </span>
@@ -1760,7 +1826,24 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
-              {activeFile.loading ? (
+              {folder !== null ? (
+                <FolderView
+                  worktreeId={worktreeId}
+                  entries={folderEntries}
+                  selectedPath={activePath}
+                  onOpenFile={(node, keep) => showNode(node, !keep)}
+                  onEnterDir={(p) => {
+                    setFolder(p)
+                    // Reveal it in the tree: open it and every folder above it.
+                    setExpanded((e) => {
+                      const next = { ...e }
+                      p.split('/').forEach((_, i, segs) => (next[segs.slice(0, i + 1).join('/')] = true))
+                      return next
+                    })
+                  }}
+                  onContextMenu={openMenu}
+                />
+              ) : !activeFile ? null : activeFile.loading ? (
                 <div className="px-4 py-3 font-mono text-[11px] text-faint">Loading…</div>
               ) : activeFile.loadError ? (
                 <div className="allow-select px-4 py-3 font-mono text-[11px] leading-relaxed text-faint">
@@ -1795,7 +1878,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 <CodeEditor
                   path={activeFile.path}
                   value={activeFile.draft}
-                  onChange={(next) => patch(activeFile.path, (f) => ({ ...f, draft: next }))}
+                  // Editing commits to the file: it stops being a preview.
+                  onChange={(next) => patch(activeFile.path, (f) => ({ ...f, draft: next, preview: false }))}
                   // Only once the text is here — see `reveal` above.
                   reveal={
                     reveal && reveal.path === activeFile.path && activeFile.content !== null
@@ -1832,6 +1916,8 @@ function TreeNode({
   expanded,
   toggle,
   onSelect,
+  onKeep,
+  onShowFolder,
   selectedPath,
   changedDirs,
   lazyChildren,
@@ -1842,7 +1928,13 @@ function TreeNode({
   depth: number
   expanded: Record<string, boolean>
   toggle: (path: string) => void
+  /** Click on a file: show it as the preview. */
   onSelect: (node: FileNode) => void
+  /** Double-click on a file: open it to stay. */
+  onKeep: (node: FileNode) => void
+  /** Click on a folder: show its tiles (as well as expanding or collapsing it). */
+  onShowFolder: (path: string) => void
+  /** The active file, or the folder whose tiles are showing. */
   selectedPath: string | null
   changedDirs: Set<string>
   lazyChildren: Record<string, FileNode[]>
@@ -1866,10 +1958,15 @@ function TreeNode({
     return (
       <>
         <button
-          onClick={() => toggle(node.path)}
+          onClick={() => {
+            toggle(node.path)
+            onShowFolder(node.path)
+          }}
           onContextMenu={(e) => onContextMenu(e, node)}
           style={pad}
-          className={`flex w-full items-center gap-1.5 py-1 pr-2 text-left text-[12px] text-text-3 hover:bg-hover ${dim} ${FOCUS}`}
+          className={`flex w-full items-center gap-1.5 py-1 pr-2 text-left text-[12px] hover:bg-hover ${
+            node.path === selectedPath ? 'bg-accent/10 text-text' : 'text-text-3'
+          } ${dim} ${FOCUS}`}
         >
           <ChevronRight
             size={13}
@@ -1892,6 +1989,8 @@ function TreeNode({
             expanded={expanded}
             toggle={toggle}
             onSelect={onSelect}
+            onKeep={onKeep}
+            onShowFolder={onShowFolder}
             selectedPath={selectedPath}
             changedDirs={changedDirs}
             lazyChildren={lazyChildren}
@@ -1909,6 +2008,7 @@ function TreeNode({
   return (
     <button
       onClick={() => onSelect(node)}
+      onDoubleClick={() => onKeep(node)}
       onContextMenu={(e) => onContextMenu(e, node)}
       style={pad}
       className={`flex w-full items-center gap-2 py-1 pr-2 text-left text-[12px] hover:bg-hover ${
