@@ -15,6 +15,7 @@ export type ModalType =
   | 'addProject'
   | 'newWorktree'
   | 'board'
+  | 'archivedTasks'
   | 'about'
   | 'editTask'
   | 'workspaces'

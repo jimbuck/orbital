@@ -131,12 +131,13 @@ orbital worktrees                                          # list worktrees in t
 orbital worktree new [--worktree <branch>] [--existing-branch <b>] [--base <ref>] [name]
 orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this worktree
 orbital task add "<title>" [--description <text>] [--tags <a,b>]   # capture a task
-orbital task list [--all] [--status <s>] [--tag <t>]       # open tasks (number, status, title)
+orbital task list [--all | --archived] [--status <s>] [--tag <t>]   # open tasks (number, status, title)
 orbital task show <number>                                 # full detail for one task
 orbital task update <number> --status <status>             # progress a task (id prefix ok)
 orbital task start <number>                                # worktree from a task, linked + started
 orbital task done <number>                                 # shorthand for --status done
-orbital task delete <number>                               # drop a task
+orbital task archive <number>                              # hide a task from the board (alias: delete)
+orbital task unarchive <number>                            # bring an archived task back
 orbital server add <url|port>                              # register a live dev server
 orbital server remove <url|port>                           # deregister it
 orbital server list                                        # this worktree's live servers

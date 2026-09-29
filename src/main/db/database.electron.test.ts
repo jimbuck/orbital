@@ -132,6 +132,8 @@ describe('migrating a pre-revamp database', () => {
       { id: 't1', seq: 1, project_id: 'ws1', worktree_id: 'f2', tags: '[]' },
       { id: 't2', seq: 2, project_id: 'ws1', worktree_id: null, tags: '[]' }
     ])
+    // ...and the archived_at column, NULL: every pre-existing task stays active.
+    expect(d.prepare('SELECT archived_at FROM tasks').all()).toEqual([{ archived_at: null }, { archived_at: null }])
     // The projects' stored env patterns were folded into the settings blob
     // (union with the defaults), so a custom glob survives the move.
     const app = JSON.parse((d.prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string }).value)
@@ -187,8 +189,41 @@ describe('repositories', () => {
     const a = repo.tasks.create({ projectId, title: 'a', createdBy: 'user' })
     const b = repo.tasks.create({ projectId, title: 'b', createdBy: 'user' })
     expect([a.seq, b.seq]).toEqual([1, 2])
-    repo.tasks.remove(b.id)
+    // Only a project removal still deletes task rows; simulate one going away.
+    getDb().prepare('DELETE FROM tasks WHERE id = ?').run(b.id)
     expect(repo.tasks.create({ projectId, title: 'c', createdBy: 'user' }).seq).toBe(3)
+  })
+
+  it('archives a task instead of deleting it: hidden from list(), kept with its number, reversible', () => {
+    const a = repo.tasks.create({ projectId, title: 'a', createdBy: 'user' })
+    const b = repo.tasks.create({ projectId, title: 'b', createdBy: 'user' })
+    expect(a.archivedAt).toBeNull()
+    getDb().prepare('UPDATE tasks SET updated_at = 0 WHERE id = ?').run(b.id)
+
+    repo.tasks.archive(b.id)
+    const archived = repo.tasks.get(b.id)!
+    expect(archived.archivedAt).toEqual(expect.any(Number))
+    expect(archived.updatedAt).toBe(archived.archivedAt)
+    expect(archived.seq).toBe(2)
+    expect(repo.tasks.list().map((t) => t.id)).toEqual([a.id])
+    expect(repo.tasks.list('archived').map((t) => t.id)).toEqual([b.id])
+    expect(repo.tasks.list('all').map((t) => t.id).sort()).toEqual([a.id, b.id].sort())
+    // Archiving does not free the number.
+    expect(repo.tasks.create({ projectId, title: 'c', createdBy: 'user' }).seq).toBe(3)
+
+    getDb().prepare('UPDATE tasks SET updated_at = 0 WHERE id = ?').run(b.id)
+    repo.tasks.unarchive(b.id)
+    const back = repo.tasks.get(b.id)!
+    expect(back.archivedAt).toBeNull()
+    expect(back.updatedAt).toBeGreaterThan(0)
+    expect(repo.tasks.list('archived')).toEqual([])
+  })
+
+  it("still cascades a removed project's tasks, archived ones included", () => {
+    const t = repo.tasks.create({ projectId, title: 'a', createdBy: 'user' })
+    repo.tasks.archive(t.id)
+    repo.projects.remove(projectId)
+    expect(repo.tasks.get(t.id)).toBeUndefined()
   })
 
   it('records who filed a task and when, and bumps updated_at on edits', () => {

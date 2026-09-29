@@ -28,6 +28,19 @@ import { normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } 
  */
 type Handler = (req: ControlRequest) => Promise<ControlResponse>
 
+/** `task archive` / `task unarchive` (and the legacy `task delete`). */
+async function archiveTask(req: ControlRequest, archive: boolean): Promise<ControlResponse> {
+  if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+  const idArg = String(req.args.id ?? '').trim()
+  if (!idArg) return { ok: false, error: 'task id required' }
+  const { task, error } = resolveTask(req.projectId, idArg)
+  if (!task) return { ok: false, error }
+  if (archive) repo.tasks.archive(task.id)
+  else repo.tasks.unarchive(task.id)
+  runtime.broadcastState()
+  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }
+}
+
 const handlers: Record<ControlCommand, Handler> = {
   status: async (req) => {
     const status = normalizeStatus(String(req.args.status ?? ''))
@@ -223,6 +236,7 @@ const handlers: Record<ControlCommand, Handler> = {
   'task-list': async (req) => {
     if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
     const all = req.args.all === true || req.args.all === 'true'
+    const archived = req.args.archived === true || req.args.archived === 'true'
     // Explicit --status implies --all: asking for `done` and getting nothing
     // because the default hides done tasks would just be confusing.
     let wanted: TaskStatus | null = null
@@ -231,9 +245,11 @@ const handlers: Record<ControlCommand, Handler> = {
       if (!wanted) return { ok: false, error: `unknown task status '${req.args.status}'` }
     }
     const tag = req.args.tag !== undefined ? String(req.args.tag).trim().toLowerCase() : null
+    // --archived shows only archived tasks (any status); --all adds them to
+    // everything else; the default is active, not-done tasks.
     const list = repo.tasks
-      .list()
-      .filter((t) => t.projectId === req.projectId && (all || wanted !== null || t.status !== 'done'))
+      .list(archived ? 'archived' : all ? 'all' : 'active')
+      .filter((t) => t.projectId === req.projectId && (all || archived || wanted !== null || t.status !== 'done'))
       .filter((t) => wanted === null || t.status === wanted)
       .filter((t) => !tag || t.tags.some((x) => x.toLowerCase() === tag))
       .map(taskDto)
@@ -267,16 +283,10 @@ const handlers: Record<ControlCommand, Handler> = {
     runtime.broadcastState()
     return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title } }
   },
-  'task-delete': async (req) => {
-    if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
-    const idArg = String(req.args.id ?? '').trim()
-    if (!idArg) return { ok: false, error: 'task id required' }
-    const { task, error } = resolveTask(req.projectId, idArg)
-    if (!task) return { ok: false, error }
-    repo.tasks.remove(task.id)
-    runtime.broadcastState()
-    return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }
-  },
+  'task-archive': async (req) => archiveTask(req, true),
+  'task-unarchive': async (req) => archiveTask(req, false),
+  // Tasks are never hard-deleted; an older CLI's `task delete` archives.
+  'task-delete': async (req) => archiveTask(req, true),
   'server-add': async (req) => {
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     const url = normalizeServerUrl(String(req.args.url ?? ''))

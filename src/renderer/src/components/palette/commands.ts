@@ -53,7 +53,7 @@ import { THEMES } from '@shared/themes'
  * here renders; the palette turns these into rows.
  *
  * Deliberately absent: the destructive git operations (discard, remove
- * Worktree, delete task). A palette is a place you arrive at by typing three
+ * Worktree). A palette is a place you arrive at by typing three
  * letters and pressing Enter, and "Discard All Changes" three letters away from
  * "Stage All Changes" is a trap, not a feature. Those keep their confirm-backed
  * homes in the git panel and the rail menus.

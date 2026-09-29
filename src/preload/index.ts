@@ -221,7 +221,9 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.createTask, projectId, title, description, tags) as Promise<Task>,
   updateTask: (taskId: string, patch: TaskPatch) =>
     ipcRenderer.invoke(IPC.updateTask, taskId, patch) as Promise<Task>,
-  deleteTask: (taskId: string) => ipcRenderer.invoke(IPC.deleteTask, taskId) as Promise<void>,
+  archiveTask: (taskId: string) => ipcRenderer.invoke(IPC.archiveTask, taskId) as Promise<void>,
+  unarchiveTask: (taskId: string) => ipcRenderer.invoke(IPC.unarchiveTask, taskId) as Promise<void>,
+  listArchivedTasks: () => ipcRenderer.invoke(IPC.listArchivedTasks) as Promise<Task[]>,
 
   // browser / window
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,

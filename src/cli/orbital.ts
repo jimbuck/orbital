@@ -33,12 +33,13 @@ Usage:
   orbital worktree sync
   orbital tab new <terminal|browser|editor|agent|search> [arg]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--project <name|id>]
-  orbital task list [--all] [--status <status>] [--tag <tag>] [--project <name|id>]
+  orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--project <name|id>]
   orbital task show <number|id> [--project <name|id>]
   orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--project <name|id>]
   orbital task start <number|id> [--worktree <branch>] [--base <ref>] [--project <name|id>] [name]
   orbital task done <number|id> [--project <name|id>]
-  orbital task delete <number|id> [--project <name|id>]
+  orbital task archive <number|id> [--project <name|id>]      (alias: task delete)
+  orbital task unarchive <number|id> [--project <name|id>]
   orbital server add <url|port>
   orbital server remove <url|port>
   orbital server list
@@ -64,6 +65,7 @@ Examples:
   orbital task add "Bump the API client" --project api
   orbital task start 12
   orbital task done 12
+  orbital task archive 12
   orbital server add 5173
   orbital server remove 5173
 `
@@ -231,7 +233,7 @@ function buildRequest(argv: string[]): ControlRequest {
         return request('task-add', withProject(args, flags))
       }
       if (sub === 'list') {
-        const args: Record<string, unknown> = { all: 'all' in flags }
+        const args: Record<string, unknown> = { all: 'all' in flags, archived: 'archived' in flags }
         if (flags.status) args.status = flags.status
         if (flags.tag) args.tag = flags.tag
         return request('task-list', withProject(args, flags))
@@ -263,10 +265,12 @@ function buildRequest(argv: string[]): ControlRequest {
         if (!id) usageError()
         return request('task-update', withProject({ id, status: 'done' }, flags))
       }
-      if (sub === 'delete') {
+      // Tasks are archived, never deleted; `delete` stays as an alias so
+      // existing agent scripts keep working.
+      if (sub === 'archive' || sub === 'delete' || sub === 'unarchive') {
         const id = positionals[0]
         if (!id) usageError()
-        return request('task-delete', withProject({ id }, flags))
+        return request(sub === 'unarchive' ? 'task-unarchive' : 'task-archive', withProject({ id }, flags))
       }
       return usageError()
     }
@@ -361,10 +365,12 @@ function printProjects(data: unknown): void {
   )
 }
 
-function printTasks(data: unknown): void {
+function printTasks(data: unknown, archived: boolean): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
-    process.stdout.write('No open tasks. (`--all` includes done tasks.)\n')
+    process.stdout.write(
+      archived ? 'No archived tasks.\n' : 'No open tasks. (`--all` includes done and archived tasks.)\n'
+    )
     return
   }
   printTable(
@@ -423,7 +429,8 @@ function printTaskDetail(data: unknown): void {
     ['tags', Array.isArray(o.tags) && o.tags.length > 0 ? o.tags.join(', ') : '(none)'],
     ['worktree', o.worktreeId ? String(o.worktreeId) : '(not linked)'],
     ['created', `${formatWhen(o.createdAt)}${o.createdBy ? ` by ${String(o.createdBy)}` : ''}`],
-    ['updated', formatWhen(o.updatedAt)]
+    ['updated', formatWhen(o.updatedAt)],
+    ...(o.archivedAt != null ? [['archived', formatWhen(o.archivedAt)] as [string, string]] : [])
   ])
 }
 
@@ -468,8 +475,11 @@ function confirmation(req: ControlRequest, data: unknown): string {
       return `task added: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
     case 'task-update':
       return `task updated: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
+    case 'task-archive':
     case 'task-delete':
-      return `task deleted: ${String(d.title ?? '')}`
+      return `task archived: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`
+    case 'task-unarchive':
+      return `task unarchived: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`
     case 'server-add': {
       const n = Array.isArray(d.servers) ? d.servers.length : 0
       return `dev server registered: ${String(d.url ?? '')} (${n} live)`
@@ -594,7 +604,7 @@ function handleResponse(req: ControlRequest, lineText: string): void {
   } else if (req.cmd === 'worktrees') {
     printWorktrees(res.data)
   } else if (req.cmd === 'task-list') {
-    printTasks(res.data)
+    printTasks(res.data, req.args.archived === true)
   } else if (req.cmd === 'task-show') {
     printTaskDetail(res.data)
   } else if (req.cmd === 'server-list') {

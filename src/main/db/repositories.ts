@@ -63,7 +63,8 @@ function mapTask(r: any): Task {
     worktreeId: r.worktree_id ?? null,
     createdBy: r.created_by === 'user' || r.created_by === 'agent' ? (r.created_by as TaskCreator) : null,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    archivedAt: r.archived_at ?? null
   }
 }
 
@@ -523,12 +524,20 @@ function nextTaskSeq(db: ReturnType<typeof getDb>): number {
   return seq
 }
 
+/**
+ * Which tasks `tasks.list()` returns: active only (the default — the board,
+ * the side panel and `task list`), archived only, or both.
+ */
+export type TaskArchiveFilter = 'active' | 'archived' | 'all'
+
 export const tasks = {
-  list(): Task[] {
+  list(filter: TaskArchiveFilter = 'active'): Task[] {
+    const archived =
+      filter === 'active' ? ' AND t.archived_at IS NULL' : filter === 'archived' ? ' AND t.archived_at IS NOT NULL' : ''
     return getDb()
       .prepare(
         `SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id
-         WHERE p.workspace_id = ? ORDER BY t.created_at, t.id`
+         WHERE p.workspace_id = ?${archived} ORDER BY t.created_at, t.id`
       )
       .all(requireWorkspaceId())
       .map(mapTask)
@@ -594,8 +603,16 @@ export const tasks = {
   setWorktree(tid: string, worktreeId: string | null): void {
     getDb().prepare('UPDATE tasks SET worktree_id = ?, updated_at = ? WHERE id = ?').run(worktreeId, now(), tid)
   },
-  remove(tid: string): void {
-    getDb().prepare('DELETE FROM tasks WHERE id = ?').run(tid)
+  /**
+   * Tasks are archived, never deleted: the row (and its number) stays, it just
+   * drops out of the default views. Only removing its project deletes it.
+   */
+  archive(tid: string): void {
+    const t = now()
+    getDb().prepare('UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?').run(t, t, tid)
+  },
+  unarchive(tid: string): void {
+    getDb().prepare('UPDATE tasks SET archived_at = NULL, updated_at = ? WHERE id = ?').run(now(), tid)
   }
 }
 

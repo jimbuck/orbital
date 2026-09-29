@@ -158,7 +158,8 @@ function migrate(d: Database.Database): void {
       worktree_id  TEXT,
       created_by   TEXT NOT NULL DEFAULT '',
       created_at   INTEGER NOT NULL,
-      updated_at   INTEGER NOT NULL
+      updated_at   INTEGER NOT NULL,
+      archived_at  INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 
@@ -177,6 +178,8 @@ function migrate(d: Database.Database): void {
   // '' (not NULL) so the column can be NOT NULL; mapTask reads it back as null:
   // tasks from before provenance tracking have no known creator.
   addColumnIfMissing(d, 'tasks', 'created_by', "TEXT NOT NULL DEFAULT ''")
+  // NULL = active; a timestamp = archived (hidden from the default views).
+  addColumnIfMissing(d, 'tasks', 'archived_at', 'INTEGER')
   backfillTaskSeqs(d)
   d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')
   const defaultWorkspaceId = ensureDefaultWorkspace(d)

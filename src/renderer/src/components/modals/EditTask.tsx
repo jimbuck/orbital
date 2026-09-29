@@ -6,6 +6,7 @@ import { TASK_STATUSES, taskStatusLabel, taskColumnDot, taskColumnHeadClass } fr
 import { formatTaskTime, taskCreatorLabel } from '@renderer/components/panel/TaskMeta'
 import { enhanceMarkdownCode } from '@renderer/lib/markdownCode'
 import { useThemeId } from '@renderer/lib/theme'
+import { useArchivedTasks } from '@renderer/lib/useArchivedTasks'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 
@@ -22,13 +23,14 @@ function tagsChanged(a: string[], b: string[]): boolean {
 /**
  * Edit every field of a task in one place — opened by clicking a card's title.
  * Fields are edited into local state and committed together on Save (a single
- * updateTask patch of only what changed); Delete removes the task after an
- * armed confirm.
+ * updateTask patch of only what changed); Archive hides the task from the
+ * board (reversible from the archived-tasks list, so no confirm).
  */
 export default function EditTask(): JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
   const data = useStore((s) => s.modalData) as EditTaskData | null
   const allTasks = useStore((s) => s.tasks)
+  const archivedTasks = useArchivedTasks()
   const task = data?.task
 
   const [title, setTitle] = useState(task?.title ?? '')
@@ -60,13 +62,13 @@ export default function EditTask(): JSX.Element {
   }, [descMode, description, theme])
   const [tags, setTags] = useState<string[]>(task?.tags ?? [])
   const [tagDraft, setTagDraft] = useState('')
-  const [deleteArmed, setDeleteArmed] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Recently-used tags to suggest, so users reuse existing tags instead of
   // retyping and creating near-duplicates. Drawn from other tasks in the same
-  // project, ordered by how recently a task carrying the tag was touched.
+  // project, archived ones included (archiving a task must not make its tags
+  // vanish from here), ordered by how recently a task carrying the tag was touched.
   // Declared before the `if (!task)` early return to keep hook order stable;
   // guarded to return [] when there's no task to edit.
   const tagSuggestions = useMemo<string[]>(() => {
@@ -75,7 +77,7 @@ export default function EditTask(): JSX.Element {
     const draft = tagDraft.trim().toLowerCase()
     // For each tag, remember the most recent updatedAt of a task that carries it.
     const recency = new Map<string, number>()
-    for (const t of allTasks) {
+    for (const t of [...allTasks, ...archivedTasks]) {
       if (t.projectId !== task.projectId) continue
       for (const tag of t.tags) {
         if (selected.has(tag)) continue
@@ -88,7 +90,7 @@ export default function EditTask(): JSX.Element {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 8)
       .map(([tag]) => tag)
-  }, [allTasks, tags, tagDraft, task])
+  }, [allTasks, archivedTasks, tags, tagDraft, task])
 
   // The card that opened us passed a task snapshot; if it's gone, say so.
   if (!task) {
@@ -164,14 +166,14 @@ export default function EditTask(): JSX.Element {
     }
   }
 
-  const remove = async (): Promise<void> => {
+  const archive = async (): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      await window.orbital.deleteTask(task.id)
+      await window.orbital.archiveTask(task.id)
       closeModal()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete the task.')
+      setError(e instanceof Error ? e.message : 'Failed to archive the task.')
       setBusy(false)
     }
   }
@@ -203,25 +205,9 @@ export default function EditTask(): JSX.Element {
       onClose={closeModal}
       footer={
         <>
-          {deleteArmed ? (
-            <button
-              type="button"
-              className={`${ghostBtn} mr-auto border-red/40 text-red-2`}
-              onClick={() => void remove()}
-              disabled={busy}
-            >
-              Confirm delete
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={`${ghostBtn} mr-auto`}
-              onClick={() => setDeleteArmed(true)}
-              disabled={busy}
-            >
-              Delete
-            </button>
-          )}
+          <button type="button" className={`${ghostBtn} mr-auto`} onClick={() => void archive()} disabled={busy}>
+            Archive
+          </button>
           <button type="button" className={ghostBtn} onClick={closeModal}>
             Cancel
           </button>

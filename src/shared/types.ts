@@ -485,8 +485,10 @@ export interface Task {
   createdBy: TaskCreator | null
   /** Unix ms. */
   createdAt: number
-  /** Unix ms; bumped by every field edit, status change and worktree link. */
+  /** Unix ms; bumped by every field edit, status change, worktree link and (un)archive. */
   updatedAt: number
+  /** Unix ms when archived; null while active. Archived tasks are hidden from the default views. */
+  archivedAt: number | null
 }
 
 /**
@@ -1104,7 +1106,9 @@ export const IPC = {
   // tasks
   createTask: 'orbital:createTask',
   updateTask: 'orbital:updateTask',
-  deleteTask: 'orbital:deleteTask',
+  archiveTask: 'orbital:archiveTask',
+  unarchiveTask: 'orbital:unarchiveTask',
+  listArchivedTasks: 'orbital:listArchivedTasks',
   // browser
   openExternal: 'orbital:openExternal',
   registerBrowserView: 'orbital:registerBrowserView',
@@ -1366,7 +1370,15 @@ export interface OrbitalApi {
   // tasks
   createTask(projectId: string, title: string, description?: string, tags?: string[]): Promise<Task>
   updateTask(taskId: string, patch: TaskPatch): Promise<Task>
-  deleteTask(taskId: string): Promise<void>
+  /** Tasks are archived, never deleted: hidden from the board and panel, but kept (with their number). */
+  archiveTask(taskId: string): Promise<void>
+  unarchiveTask(taskId: string): Promise<void>
+  /**
+   * The active workspace's archived tasks. AppState.tasks carries only active
+   * ones, so the archived-tasks table and the task editor's tag suggestions
+   * fetch these on demand.
+   */
+  listArchivedTasks(): Promise<Task[]>
 
   // browser / window
   openExternal(url: string): Promise<void>
@@ -1506,6 +1518,9 @@ export type ControlCommand =
   | 'task-list'
   | 'task-show'
   | 'task-update'
+  | 'task-archive'
+  | 'task-unarchive'
+  /** Legacy alias for 'task-archive' (tasks are never hard-deleted). */
   | 'task-delete'
   | 'server-add'
   | 'server-remove'

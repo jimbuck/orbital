@@ -81,16 +81,21 @@ of expanding the scope of what you were asked to do.
 ```sh
 orbital task add "Write tests" --description "cover the parser" --tags test,parser
 orbital task list [--all] [--status <status>] [--tag <tag>]   # open tasks (see below)
+orbital task list --archived                                  # only archived tasks
 orbital task show 12                                          # full detail for one task
 orbital task update 12 --status in-progress                   # progress it as you work
 orbital task done 12
-orbital task delete 12
+orbital task archive 12                                       # hide it from the board
+orbital task unarchive 12                                     # bring it back
 ```
 
 Tasks are addressed by their number (`12` or `#12`, as shown in `task list`) or by
 a unique id prefix. Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`,
 `done`. `task list` hides done tasks unless you pass `--all` or name a status
 yourself, so `--status done` works on its own.
+Tasks are never deleted: `task archive` (alias `task delete`) hides one from
+the board and the default list but keeps it, number and all. `--all` includes
+archived tasks, and `task show` / `update` / `unarchive` still reach them.
 
 **Move the task as you work it.** The board is how the human sees what is
 underway, and a task sitting in `todo` while you work on it tells them nobody

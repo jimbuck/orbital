@@ -126,19 +126,21 @@ orbital tab new search "TODO("
 
 ```sh
 orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
-orbital task list [--all] [--status <status>] [--tag <tag>]
+orbital task list [--all | --archived] [--status <status>] [--tag <tag>]
 orbital task show <number|id>
 orbital task update <number|id> [--status <status>] [--title <text>] [--description <text>] [--tags <a,b,c>]
 orbital task start <number|id> [--worktree <branch>] [--base <ref>] [name]
 orbital task done <number|id>
-orbital task delete <number|id>
+orbital task archive <number|id>
+orbital task unarchive <number|id>
 ```
 
 Every `task` command also takes `--project <name|id>` to work on a sibling
 project's tasks (see [Projects](#projects)).
 
-- `task list` prints open tasks by number (`--all` includes done ones; an
-  explicit `--status` implies `--all`):
+- `task list` prints open tasks by number (`--all` includes done and archived
+  ones; an explicit `--status` also shows done ones; `--archived` shows only
+  archived tasks):
 
   ```
   ID   STATUS       TITLE                 TAGS       WORKTREE
@@ -148,8 +150,13 @@ project's tasks (see [Projects](#projects)).
 
 - `task show` prints every field, including who filed the task (`user` from
   the cockpit UI, `agent` from this CLI) and when it was created and last
-  updated; `--json` carries them as `createdBy`, `createdAt` and `updatedAt`
-  (unix milliseconds).
+  updated, plus when it was archived if it was; `--json` carries them as
+  `createdBy`, `createdAt`, `updatedAt` and `archivedAt` (unix milliseconds;
+  `archivedAt` is `null` for an active task).
+- Tasks are never deleted. `task archive` hides one from the board, the side
+  panel and `task list`, but keeps it with its number; `task unarchive` brings
+  it back. `task delete` is an alias for `task archive`, kept so existing
+  scripts work.
 - Every command that takes a task accepts its **number** (`12` or `#12`) or a
   **unique id prefix** — `f907` works.
 - Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or

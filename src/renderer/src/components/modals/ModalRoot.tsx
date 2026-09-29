@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Archive, Plus, X } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import {
   TASK_STATUSES,
@@ -18,6 +18,7 @@ import Settings from './Settings'
 import AddProject from './AddProject'
 import NewWorktree from './NewWorktree'
 import EditTask from './EditTask'
+import ArchivedTasks from './ArchivedTasks'
 import About from './About'
 import Workspaces from './Workspaces'
 import CommitHistory from './CommitHistory'
@@ -179,6 +180,7 @@ function FullBoard(): React.JSX.Element {
   const projects = useStore((s) => s.projects)
   const tasks = useStore((s) => s.tasks)
   const closeModal = useStore((s) => s.closeModal)
+  const openModal = useStore((s) => s.openModal)
   const [hoverCell, setHoverCell] = useState<string | null>(null)
 
   // Dropping a card on a cell sets its status (column) and project (lane).
@@ -204,14 +206,26 @@ function FullBoard(): React.JSX.Element {
             {tasks.length === 1 ? '' : 's'}
           </div>
         </div>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={closeModal}
-          className="grid size-7 flex-none place-items-center rounded-[7px] text-muted hover:bg-hover hover:text-text transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
-        >
-          <X size={14} strokeWidth={1.5} />
-        </button>
+        <div className="flex flex-none items-center gap-2">
+          {/* Archived tasks are left off the board; this opens them as a table
+              (stacked over the board) where each can be unarchived. */}
+          <button
+            type="button"
+            onClick={() => openModal('archivedTasks')}
+            className="inline-flex items-center gap-1.5 rounded-btn px-2 py-1 text-[11.5px] font-semibold text-muted hover:bg-hover hover:text-text transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+          >
+            <Archive size={13} strokeWidth={1.5} />
+            Archived tasks
+          </button>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={closeModal}
+            className="grid size-7 flex-none place-items-center rounded-[7px] text-muted hover:bg-hover hover:text-text transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 outline-none"
+          >
+            <X size={14} strokeWidth={1.5} />
+          </button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-[18px]">
@@ -319,7 +333,7 @@ export default function ModalRoot(): React.JSX.Element | null {
   // The backdrop deliberately does NOT dismiss on click: a text-selection drag
   // that starts inside the panel and releases outside would register as a
   // backdrop click and close the modal. Closing is explicit only — the X
-  // button, Cancel/Save/Delete actions, or Escape.
+  // button, Cancel/Save/Archive actions, or Escape.
   return (
     <>
       {modalStack.map((entry, i) => (
@@ -333,6 +347,7 @@ export default function ModalRoot(): React.JSX.Element | null {
           {entry.type === 'newWorktree' && <NewWorktree />}
           {entry.type === 'editTask' && <EditTask />}
           {entry.type === 'board' && <FullBoard />}
+          {entry.type === 'archivedTasks' && <ArchivedTasks />}
           {entry.type === 'about' && <About />}
           {entry.type === 'workspaces' && <Workspaces />}
           {entry.type === 'commitHistory' && <CommitHistory />}

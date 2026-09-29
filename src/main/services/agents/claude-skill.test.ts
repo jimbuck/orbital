@@ -47,8 +47,8 @@ describe('the generated SKILL.md', () => {
   it('pre-approves only the read-only and reporting commands', () => {
     const tools = frontmatter(skillMarkdown())['allowed-tools'] as string[]
     expect(tools).toContain('Bash(orbital status *)')
-    // Creating worktrees/tabs and deleting tasks should still prompt.
-    expect(tools.some((t) => /worktree new|tab new|task delete/.test(t))).toBe(false)
+    // Creating worktrees/tabs and archiving tasks should still prompt.
+    expect(tools.some((t) => /worktree new|tab new|task (delete|archive|unarchive)/.test(t))).toBe(false)
   })
 })
 

@@ -55,7 +55,8 @@ function task(id: string, seq: number, projectId: string, title: string): Task {
     worktreeId: null,
     createdBy: 'user',
     createdAt: 0,
-    updatedAt: 0
+    updatedAt: 0,
+    archivedAt: null
   }
 }
 

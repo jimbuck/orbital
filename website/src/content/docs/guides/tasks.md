@@ -30,7 +30,12 @@ Click a task's title to open it in the **Edit Task** dialog:
 ![The Edit Task dialog](../../../assets/screenshots/09-tasks-board.png)
 
 Right-click a card for **Edit task**, **Start Worktree** (or **Go to Worktree**
-once it has one) and **Delete task**.
+once it has one) and **Archive task**.
+
+Tasks are archived, never deleted: an archived task leaves the board and the
+task list but keeps its number, and its tags still show up as suggestions.
+The **Archived tasks** link at the top of the full board lists them, each with
+an **Unarchive** button.
 
 `draft` is for half-formed ideas you don't want to read as ready work.
 

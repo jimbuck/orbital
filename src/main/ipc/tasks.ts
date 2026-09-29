@@ -16,8 +16,13 @@ export function register(): void {
     broadcast()
     return t
   })
-  h(IPC.deleteTask, (_e, taskId: string) => {
-    repo.tasks.remove(taskId)
+  h(IPC.archiveTask, (_e, taskId: string) => {
+    repo.tasks.archive(taskId)
     broadcast()
   })
+  h(IPC.unarchiveTask, (_e, taskId: string) => {
+    repo.tasks.unarchive(taskId)
+    broadcast()
+  })
+  h(IPC.listArchivedTasks, () => repo.tasks.list('archived'))
 }

@@ -68,9 +68,13 @@ export function scopeRequest(req: ControlRequest): { req?: ControlRequest; error
   return { req }
 }
 
-/** Resolve a task by number (`12` / `#12`), full id, or unique id prefix within a project. */
+/**
+ * Resolve a task by number (`12` / `#12`), full id, or unique id prefix within a
+ * project. Archived tasks resolve too, so `task show` / `update` / `unarchive`
+ * can still reach them — an archived #12 stays #12.
+ */
 export function resolveTask(projectId: string, idArg: string): { task?: ReturnType<typeof repo.tasks.get>; error?: string } {
-  const inProject = repo.tasks.list().filter((t) => t.projectId === projectId)
+  const inProject = repo.tasks.list('all').filter((t) => t.projectId === projectId)
   if (/^#?\d+$/.test(idArg)) {
     const seq = Number.parseInt(idArg.replace('#', ''), 10)
     const task = inProject.find((t) => t.seq === seq)
@@ -94,6 +98,7 @@ export function taskDto(t: Task): Record<string, unknown> {
     worktreeId: t.worktreeId,
     createdBy: t.createdBy,
     createdAt: t.createdAt,
-    updatedAt: t.updatedAt
+    updatedAt: t.updatedAt,
+    archivedAt: t.archivedAt
   }
 }
