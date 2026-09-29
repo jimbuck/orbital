@@ -2,6 +2,25 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.38.0](https://github.com/jimbuck/orbital/compare/v1.37.1...v1.38.0) (2026-09-29)
+
+
+### Bug Fixes
+
+* **tabs:** reorder tabs by drag and drop within a pane strip ([25d9f57](https://github.com/jimbuck/orbital/commit/25d9f576821597c15dda74229d1c6564c1cc2393))
+* **worktrees:** stop env sync from overwriting a branch's committed files ([28c9344](https://github.com/jimbuck/orbital/commit/28c9344f431f6339d63ef20990b9234382dc3936))
+
+
+### Features
+
+* **cli:** cross-project access within a workspace ([891b6fb](https://github.com/jimbuck/orbital/commit/891b6fbb10f786a88de71d7e873eb2b392b3391a))
+* **editor:** code folding with gutter markers and Ctrl+Shift+[ / ] ([a743531](https://github.com/jimbuck/orbital/commit/a743531e53cb4d786df1732d4c308ac8ede12b3c))
+* **editor:** folder tile view and VS Code-style preview tabs ([977e14e](https://github.com/jimbuck/orbital/commit/977e14e1d3eb5122c9f2f4fcd8064502f17a6b67))
+* **editor:** resizable file tree pane ([361c702](https://github.com/jimbuck/orbital/commit/361c702e78b1df631236e45b60ce9779cad1dbeb))
+* **git:** show remote branches in the Git panel branch picker ([c8065f8](https://github.com/jimbuck/orbital/commit/c8065f8a54fa29e32356baadebec022c834090ac))
+* **tasks:** archive tasks instead of hard-deleting them ([0fd4b56](https://github.com/jimbuck/orbital/commit/0fd4b5601cc8f335317853966d8e4920f765b50c))
+* **updater:** replace "Restart to update" with an Update button that closes every window ([925f8a9](https://github.com/jimbuck/orbital/commit/925f8a9e10b3cb5c8a6b7cccee076ac36dfe3fe4))
+
 ## [1.37.1](https://github.com/jimbuck/orbital/compare/v1.37.0...v1.37.1) (2026-09-21)
 
 
