@@ -50,6 +50,9 @@ variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 - \`orbital task update <n> --status in-progress\` the moment you start work on a task,
   and \`orbital task done <n>\` when it is finished. The board is how the human sees
   what is underway; a task left in \`todo\` while you work on it reads as unclaimed.
+- \`orbital projects\` lists the other projects in this workspace. Task and worktree
+  commands stay scoped to this project unless you pass \`--project <name|id>\`, which
+  is the explicit opt-in to read or write a sibling's tasks and worktrees.
 - \`orbital server add <port>\` when you start a dev server, \`orbital server remove <port>\`
   when you stop it, so the human can open it in one click.
 

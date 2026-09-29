@@ -41,16 +41,45 @@ task         #12 Add checkout flow (in_progress)
 servers      http://localhost:5173/
 ```
 
+## Projects
+
+```sh
+orbital projects
+```
+
+Lists the projects in this instance's workspace: name, id, and repo path. The
+calling terminal's own project is marked `*`.
+
+```
+   NAME  ID                                    REPO PATH
+*  web   3f1c2a9e-5b7d-4e0a-9c1b-8d2e6f4a7b10  C:\Projects\web
+   api   b82d4e61-0a3c-4f9e-8b5d-1c7a2e9f6d34  C:\Projects\api
+```
+
+Task and worktree commands act on the calling terminal's project. Add
+`--project <name|id>` to `worktrees`, `worktree new`, or any `task` command to
+target a sibling project in the same workspace instead. The name match ignores
+case, and a unique id prefix works too. Passing the flag is the opt-in: without
+it nothing reaches beyond your own project, and with it reads and writes both go
+through. Projects in other workspaces are never reachable, and neither the
+flag nor a spoofed `ORBITAL_PROJECT_ID` gets past that check.
+
+```sh
+orbital task list --project api
+orbital task add "Bump the client to v2" --project api
+orbital worktree new --project api --worktree feat/v2-client
+```
+
 ## Worktrees
 
 ```sh
-orbital worktrees
+orbital worktrees [--project <name|id>]
 ```
 
 Lists the project's worktrees: status, name, branch, id.
 
 ```sh
-orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [name]
+orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--project <name|id>] [name]
 ```
 
 Creates a linked worktree. The branch is slugified; an existing branch of that
@@ -104,6 +133,9 @@ orbital task start <number|id> [--worktree <branch>] [--base <ref>] [name]
 orbital task done <number|id>
 orbital task delete <number|id>
 ```
+
+Every `task` command also takes `--project <name|id>` to work on a sibling
+project's tasks (see [Projects](#projects)).
 
 - `task list` prints open tasks by number (`--all` includes done ones; an
   explicit `--status` implies `--all`):

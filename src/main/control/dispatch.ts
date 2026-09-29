@@ -19,7 +19,7 @@ import { recordAgentSession } from '../services/agents/launch'
 import { createTabInWorktree } from '../tabs'
 import { beginWorktreeSetup, syncWorktreeEnv } from '../worktree-lifecycle'
 import { acceptStatusEvent, clearAttentionKind, hookEventToStatus, setAttentionKind, setTabStatus } from '../status'
-import { normalizeServerUrl, parseTagList, resolveTask, taskDto } from './helpers'
+import { normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
 
 /**
  * The `orbital` CLI's commands, one handler per ControlCommand. The table is
@@ -68,6 +68,16 @@ const handlers: Record<ControlCommand, Handler> = {
         servers: runtime.devServersFor(worktree.id)
       }
     }
+  },
+  projects: async (req) => {
+    // The workspace's projects, so an agent can find a sibling to pass as `--project`.
+    const list = repo.projects.list().map((p) => ({
+      id: p.id,
+      name: p.name,
+      repoPath: p.repoPath,
+      current: p.id === req.projectId
+    }))
+    return { ok: true, data: list }
   },
   worktrees: async (req) => {
     const pid = req.projectId
@@ -300,7 +310,11 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
   const handler = Object.prototype.hasOwnProperty.call(handlers, req.cmd) ? handlers[req.cmd] : undefined
   if (!handler) return { ok: false, error: `unknown command '${String(req.cmd)}'` }
   try {
-    return await handler(req)
+    // Resolve `--project` / validate ORBITAL_PROJECT_ID against this workspace
+    // up front, so every handler's `req.projectId` is one it may act on.
+    const scoped = scopeRequest(req)
+    if (!scoped.req) return { ok: false, error: scoped.error }
+    return await handler(scoped.req)
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     logger.error(`cli ${req.cmd} failed`, { error })

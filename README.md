@@ -126,6 +126,7 @@ pipe — so agents can drive the cockpit:
 ```sh
 orbital status <idle|working|needs-attention|error|done>   # set this terminal's status
 orbital whoami                                             # project, worktree, branch, path, task, servers
+orbital projects                                           # this workspace's projects (name, id, repo path)
 orbital worktrees                                          # list worktrees in this project
 orbital worktree new [--worktree <branch>] [--existing-branch <b>] [--base <ref>] [name]
 orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this worktree
@@ -140,6 +141,10 @@ orbital server add <url|port>                              # register a live dev
 orbital server remove <url|port>                           # deregister it
 orbital server list                                        # this worktree's live servers
 ```
+
+Task and worktree commands act on this terminal's project. Add
+`--project <name|id>` to target a sibling project in the same workspace; passing
+the flag is the opt-in, so writes are allowed with it.
 
 Every command takes `--json` for machine-readable output — see the
 [CLI reference](website/src/content/docs/reference/cli.md).

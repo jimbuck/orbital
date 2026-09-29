@@ -1497,6 +1497,7 @@ export const ENV = {
 export type ControlCommand =
   | 'status'
   | 'whoami'
+  | 'projects'
   | 'worktrees'
   | 'worktree-new'
   | 'worktree-sync'
@@ -1519,6 +1520,11 @@ export interface ControlRequest {
   terminalId?: string
   worktreeId?: string
   projectId?: string
+  /**
+   * Command arguments. `project` (a project name or id, from `--project`)
+   * retargets a project-scoped command at a sibling project in the same
+   * workspace; main resolves it into `projectId` before dispatch.
+   */
   args: Record<string, unknown>
 }
 

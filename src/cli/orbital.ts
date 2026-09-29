@@ -27,24 +27,28 @@ const USAGE = `orbital — control the running Orbital cockpit from inside a wor
 Usage:
   orbital status <idle|working|needs-attention|error|done>
   orbital whoami
-  orbital worktrees
-  orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [name]
+  orbital projects
+  orbital worktrees [--project <name|id>]
+  orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--project <name|id>] [name]
   orbital worktree sync
   orbital tab new <terminal|browser|editor|agent|search> [arg]
-  orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
-  orbital task list [--all] [--status <status>] [--tag <tag>]
-  orbital task show <number|id>
-  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>]
-  orbital task start <number|id> [--worktree <branch>] [--base <ref>] [name]
-  orbital task done <number|id>
-  orbital task delete <number|id>
+  orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--project <name|id>]
+  orbital task list [--all] [--status <status>] [--tag <tag>] [--project <name|id>]
+  orbital task show <number|id> [--project <name|id>]
+  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--project <name|id>]
+  orbital task start <number|id> [--worktree <branch>] [--base <ref>] [--project <name|id>] [name]
+  orbital task done <number|id> [--project <name|id>]
+  orbital task delete <number|id> [--project <name|id>]
   orbital server add <url|port>
   orbital server remove <url|port>
   orbital server list
   orbital help
 
 Options:
-  --json    print the raw JSON response instead of a table — use this when parsing
+  --json       print the raw JSON response instead of a table — use this when parsing
+  --project    act on another project in this workspace (name or id, see \`orbital projects\`).
+               Without it, task and worktree commands stay scoped to this terminal's
+               project; passing it is the explicit opt-in, and writes are allowed.
 
 Examples:
   orbital status needs-attention
@@ -57,6 +61,7 @@ Examples:
   orbital tab new search "TODO("
   orbital task add "Write tests" --description "cover the parser" --tags test
   orbital task list --status todo
+  orbital task add "Bump the API client" --project api
   orbital task start 12
   orbital task done 12
   orbital server add 5173
@@ -139,6 +144,19 @@ const TAB_TYPES = ['terminal', 'browser', 'editor', 'agent', 'search'] as const
 let jsonMode = false
 
 /**
+ * Copy `--project <name|id>` into the request args; main resolves it within
+ * the workspace. A bare `--project` is a usage error rather than a silent
+ * fall-back to the caller's own project.
+ */
+function withProject(args: Record<string, unknown>, flags: Record<string, string>): Record<string, unknown> {
+  if ('project' in flags) {
+    if (!flags.project) usageError()
+    args.project = flags.project
+  }
+  return args
+}
+
+/**
  * Shared by `worktree new` and `task start` — both land on `worktree-new`, which
  * creates the checkout and (given a task) links and starts that task.
  */
@@ -153,6 +171,7 @@ function worktreeNewRequest(tokens: string[], taskId?: string): ControlRequest {
   const task = taskId ?? flags.task
   if (task) args.task = task
   if (positionals[0]) args.name = positionals[0]
+  withProject(args, flags)
   return request('worktree-new', args)
 }
 
@@ -175,7 +194,10 @@ function buildRequest(argv: string[]): ControlRequest {
     // `flights` is a hidden backward-compat alias for `worktrees`.
     case 'worktrees':
     case 'flights':
-      return request('worktrees', {})
+      return request('worktrees', withProject({}, parseArgs(rest).flags))
+
+    case 'projects':
+      return request('projects', {})
 
     // `flight` is a hidden backward-compat alias for `worktree`.
     case 'worktree':
@@ -206,13 +228,13 @@ function buildRequest(argv: string[]): ControlRequest {
         const args: Record<string, unknown> = { title }
         if (flags.description) args.description = flags.description
         if (flags.tags) args.tags = flags.tags
-        return request('task-add', args)
+        return request('task-add', withProject(args, flags))
       }
       if (sub === 'list') {
         const args: Record<string, unknown> = { all: 'all' in flags }
         if (flags.status) args.status = flags.status
         if (flags.tag) args.tag = flags.tag
-        return request('task-list', args)
+        return request('task-list', withProject(args, flags))
       }
       if (sub === 'start') {
         const id = positionals[0]
@@ -229,22 +251,22 @@ function buildRequest(argv: string[]): ControlRequest {
         if (flags.title !== undefined) args.title = flags.title
         if (flags.description !== undefined) args.description = flags.description
         if (flags.tags !== undefined) args.tags = flags.tags
-        return request('task-update', args)
+        return request('task-update', withProject(args, flags))
       }
       if (sub === 'show') {
         const id = positionals[0]
         if (!id) usageError()
-        return request('task-show', { id })
+        return request('task-show', withProject({ id }, flags))
       }
       if (sub === 'done') {
         const id = positionals[0]
         if (!id) usageError()
-        return request('task-update', { id, status: 'done' })
+        return request('task-update', withProject({ id, status: 'done' }, flags))
       }
       if (sub === 'delete') {
         const id = positionals[0]
         if (!id) usageError()
-        return request('task-delete', { id })
+        return request('task-delete', withProject({ id }, flags))
       }
       return usageError()
     }
@@ -308,6 +330,32 @@ function printWorktrees(data: unknown): void {
         name: String(o.name ?? ''),
         branch: String(o.branch ?? ''),
         id: String(o.id ?? '')
+      }
+    })
+  )
+}
+
+function printProjects(data: unknown): void {
+  const list = Array.isArray(data) ? data : []
+  if (list.length === 0) {
+    process.stdout.write('No projects.\n')
+    return
+  }
+  printTable(
+    [
+      { key: 'current', head: '' },
+      { key: 'name', head: 'NAME' },
+      { key: 'id', head: 'ID' },
+      { key: 'repoPath', head: 'REPO PATH' }
+    ],
+    list.map((project) => {
+      const o = (project ?? {}) as Record<string, unknown>
+      return {
+        // Marks the calling terminal's own project — the default scope.
+        current: o.current ? '*' : '',
+        name: String(o.name ?? ''),
+        id: String(o.id ?? ''),
+        repoPath: String(o.repoPath ?? '')
       }
     })
   )
@@ -541,6 +589,8 @@ function handleResponse(req: ControlRequest, lineText: string): void {
     process.stdout.write(JSON.stringify(res.data ?? null, null, 2) + '\n')
   } else if (req.cmd === 'whoami') {
     printWhoami(res.data)
+  } else if (req.cmd === 'projects') {
+    printProjects(res.data)
   } else if (req.cmd === 'worktrees') {
     printWorktrees(res.data)
   } else if (req.cmd === 'task-list') {

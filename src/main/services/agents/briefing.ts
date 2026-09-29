@@ -88,6 +88,7 @@ function briefingText({ project, worktree, providerName, hooksInstalled }: Brief
     '  Move a task to `in-progress` the moment you start on it and off it when you finish — the board is how the human sees what is underway, and a task left in `todo` while you work reads as unclaimed. (A worktree opened with `orbital task start` has already done this.)',
     '- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress.',
     "- `orbital worktrees` — list this project's worktrees.",
+    "- `orbital projects` — the workspace's other projects (name, id, repo path). Task and worktree commands stay scoped to this project; pass `--project <name|id>` to read or write a sibling's instead. Passing it is the opt-in, so only reach across when the work calls for it.",
     '- `orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [name]` — open a new worktree, on a fresh branch, an existing one, or forked from a given ref.',
     "- `orbital worktree sync` — copy the root checkout's env files (.env, agent config) into this worktree again; they are copied once at creation and never kept in sync, so run this if the root's changed. Overwrites this worktree's copies.",
     '- `orbital tab new <terminal|browser|editor|agent|search> [arg]` — open a tab in this worktree (browser arg = URL, editor arg = file path, agent arg = the name of a configured agent, search arg = a query to run across the checkout).',

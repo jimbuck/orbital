@@ -56,6 +56,7 @@ description: Report status, file and progress tasks, list sibling worktrees, ope
 allowed-tools:
   - Bash(orbital status *)
   - Bash(orbital whoami *)
+  - Bash(orbital projects *)
   - Bash(orbital worktrees *)
   - Bash(orbital task list *)
   - Bash(orbital task show *)
@@ -154,6 +155,21 @@ checkout's copies have changed, \`orbital worktree sync\` copies them again
 (overwriting this worktree's). \`task start\` is the scriptable form of the
 cockpit's play button: it creates the worktree, links the task to it, and moves
 the task to \`in-progress\`.
+
+## Other projects in this workspace
+
+\`\`\`sh
+orbital projects                                    # the workspace's projects: name, id, repo path (* = yours)
+orbital task list --project api                     # a sibling project's open tasks
+orbital task add "Bump the client" --project api    # file work against it
+orbital worktree new --project api --worktree feat/x
+\`\`\`
+
+Task and worktree commands are scoped to this terminal's project. \`--project <name|id>\`
+(on \`task list/show/add/update/start/done/delete\`, \`worktrees\` and \`worktree new\`)
+points one at a sibling project in the same workspace instead. Passing it is the
+opt-in, so writes go through. Reach across only when the work calls for it, such as
+filing a bug that belongs to another repo, and tell the human which project you touched.
 
 ## Tabs and dev servers
 

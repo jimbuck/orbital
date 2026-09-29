@@ -1,4 +1,4 @@
-import type { Task } from '@shared/types'
+import type { ControlRequest, Project, Task } from '@shared/types'
 import { repo } from '../runtime'
 
 /**
@@ -22,6 +22,50 @@ export function parseTagList(raw: string): string[] {
     .split(',')
     .map((t) => t.trim())
     .filter(Boolean)
+}
+
+/**
+ * Resolve `--project` against this instance's workspace: an exact id, then a
+ * case-insensitive name, then a unique id prefix. Projects of other workspaces
+ * never match — `repo.projects.list()` is workspace-scoped.
+ */
+export function resolveProject(ref: string): { project?: Project; error?: string } {
+  const needle = ref.trim()
+  if (!needle) return { error: 'project name or id required' }
+  const inWorkspace = repo.projects.list()
+  const byId = inWorkspace.find((p) => p.id === needle)
+  if (byId) return { project: byId }
+  const byName = inWorkspace.filter((p) => p.name.toLowerCase() === needle.toLowerCase())
+  if (byName.length === 1) return { project: byName[0] }
+  if (byName.length > 1) {
+    return { error: `project name '${needle}' is ambiguous — use its id (${byName.map((p) => p.id).join(', ')})` }
+  }
+  const byPrefix = inWorkspace.filter((p) => p.id.startsWith(needle))
+  if (byPrefix.length === 1) return { project: byPrefix[0] }
+  if (byPrefix.length > 1) return { error: `project id '${needle}' is ambiguous (${byPrefix.length} matches)` }
+  return { error: `no project '${needle}' in this workspace (see \`orbital projects\`)` }
+}
+
+/**
+ * Settle which project a request acts on, before any handler sees it.
+ *
+ * Without `--project` a command stays scoped to the calling terminal's project
+ * (ORBITAL_PROJECT_ID). Passing `--project` explicitly is the opt-in to reach a
+ * sibling project — reads and writes alike. Either way the id must belong to
+ * this instance's workspace: the env is client-supplied, so a spoofed id must
+ * not reach another workspace's project (e.g. through `worktree new`).
+ */
+export function scopeRequest(req: ControlRequest): { req?: ControlRequest; error?: string } {
+  const ref = req.args.project
+  if (ref !== undefined && ref !== null && ref !== '') {
+    const { project, error } = resolveProject(String(ref))
+    if (!project) return { error }
+    return { req: { ...req, projectId: project.id } }
+  }
+  if (req.projectId && !repo.projects.list().some((p) => p.id === req.projectId)) {
+    return { error: `project '${req.projectId}' is not in this workspace` }
+  }
+  return { req }
 }
 
 /** Resolve a task by number (`12` / `#12`), full id, or unique id prefix within a project. */
