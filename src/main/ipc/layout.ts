@@ -71,13 +71,16 @@ export function register(): void {
     if (owner !== tab.worktreeId) throw new Error('a tab cannot move to a pane in another worktree')
   }
 
-  h(IPC.moveTab, (_e, tabId: string, targetPaneId: string) => {
+  // `slot` places the tab at an insertion point in the target pane's strip
+  // (see shared/tabOrder); a same-pane move with a slot is a reorder.
+  h(IPC.moveTab, (_e, tabId: string, targetPaneId: string, slot?: number) => {
     const tab = repo.tabs.get(tabId)
-    if (!tab || tab.paneId === targetPaneId) return
+    if (!tab) return
+    if (tab.paneId === targetPaneId && slot === undefined) return
     assertPaneInWorktree(tab, targetPaneId)
     const source = tab.paneId
-    repo.tabs.move(tabId, targetPaneId)
-    collapseIfEmpty(tab.worktreeId, source)
+    repo.tabs.move(tabId, targetPaneId, slot)
+    if (source !== targetPaneId) collapseIfEmpty(tab.worktreeId, source)
     broadcast()
   })
 

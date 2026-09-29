@@ -21,6 +21,7 @@ import {
   isPtyTabType
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
+import { placeTab } from '@shared/tabOrder'
 
 export const id = (): string => randomUUID()
 const now = (): number => Date.now()
@@ -477,15 +478,22 @@ export const tabs = {
   updateConfig(tid: string, config: TabConfig): void {
     getDb().prepare('UPDATE tabs SET config = ? WHERE id = ?').run(JSON.stringify(config), tid)
   },
-  move(tid: string, targetPaneId: string): void {
+  /**
+   * Move a tab into `targetPaneId` (which may be its own pane, to reorder).
+   * `slot` is an insertion point in the target's current order (see
+   * shared/tabOrder); omitted, the tab goes last. The target's positions are
+   * renumbered so the order survives a relaunch.
+   */
+  move(tid: string, targetPaneId: string, slot?: number): void {
     writeTx(() => {
-      const pos =
-        (
-          getDb()
-            .prepare('SELECT COALESCE(MAX(position), -1) AS m FROM tabs WHERE pane_id = ?')
-            .get(targetPaneId) as any
-        ).m + 1
-      getDb().prepare('UPDATE tabs SET pane_id = ?, position = ? WHERE id = ?').run(targetPaneId, pos, tid)
+      const d = getDb()
+      const ids = (d.prepare('SELECT id FROM tabs WHERE pane_id = ? ORDER BY position, rowid').all(targetPaneId) as any[]).map(
+        (r) => r.id as string
+      )
+      const order = placeTab(ids, tid, slot ?? ids.length)
+      d.prepare('UPDATE tabs SET pane_id = ? WHERE id = ?').run(targetPaneId, tid)
+      const set = d.prepare('UPDATE tabs SET position = ? WHERE id = ?')
+      order.forEach((tabId, i) => set.run(i, tabId))
       tabs.setActive(targetPaneId, tid)
     })
   },

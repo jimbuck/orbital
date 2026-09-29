@@ -18,6 +18,7 @@ import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
 import { StatusDot } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '../rail/menu'
+import { dropSlot, isNoopDrop } from '@shared/tabOrder'
 import { TAB_DND } from './PaneGroup'
 
 /** Compact display label for a dev-server URL: host:port (or the URL itself). */
@@ -118,6 +119,9 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
+  // Tab being dragged from this strip, and where a drop would land (slot + marker x).
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropAt, setDropAt] = useState<{ slot: number; left: number } | null>(null)
   const onlyPane = worktree.panes.length <= 1
   const servers = useStore((s) => s.devServers[worktree.id]) ?? []
   const defaultAgentId = useStore((s) => s.projects.find((p) => p.id === worktree.projectId)?.defaultAgentId)
@@ -185,23 +189,53 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
     )
   }
 
+  /** Insertion slot under the pointer, from the chips' midpoints. */
+  const slotAt = (e: React.DragEvent): number => {
+    const chips = e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')
+    const mids = Array.from(chips, (c) => {
+      const r = c.getBoundingClientRect()
+      return r.left + r.width / 2
+    })
+    return dropSlot(mids, e.clientX)
+  }
+  /** Strip-relative x of a slot's edge, for the insertion marker. */
+  const markerLeft = (strip: HTMLElement, slot: number): number => {
+    const chips = strip.querySelectorAll<HTMLElement>('[role="tab"]')
+    if (chips.length === 0) return 0
+    const chip = chips[Math.min(slot, chips.length - 1)].getBoundingClientRect()
+    const atEnd = slot >= chips.length
+    // Centre the 2px marker in the gap between chips.
+    return (atEnd ? chip.right + 1 : chip.left - 1) - strip.getBoundingClientRect().left
+  }
   const onStripDragOver = (e: React.DragEvent): void => {
     if (!e.dataTransfer.types.includes(TAB_DND)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
+    const slot = slotAt(e)
+    // The dragged id is only readable on drop, so a drag from another pane
+    // always shows its marker; our own tab's neighbouring slots do not.
+    const noop = draggingId !== null && isNoopDrop(pane.tabs.map((t) => t.id), draggingId, slot)
+    setDropAt(noop ? null : { slot, left: markerLeft(e.currentTarget as HTMLElement, slot) })
+  }
+  const onStripDragLeave = (e: React.DragEvent): void => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null)
   }
   const onStripDrop = (e: React.DragEvent): void => {
     if (!e.dataTransfer.types.includes(TAB_DND)) return
     e.preventDefault()
+    const slot = slotAt(e)
+    setDropAt(null)
     const tabId = e.dataTransfer.getData(TAB_DND)
-    if (tabId) void window.orbital.moveTab(tabId, pane.id)
+    if (!tabId || isNoopDrop(pane.tabs.map((t) => t.id), tabId, slot)) return
+    void window.orbital.moveTab(tabId, pane.id, slot)
   }
 
   return (
     <div
       onDragOver={onStripDragOver}
+      onDragLeave={onStripDragLeave}
       onDrop={onStripDrop}
-      className="flex h-9 flex-none items-stretch gap-0.5 border-b border-line bg-bar px-1.5 pt-0.5"
+      className="relative flex h-9 flex-none items-stretch gap-0.5 border-b border-line bg-bar px-1.5 pt-0.5"
     >
       {pane.tabs.map((tab) => {
         const isActive = tab.id === pane.activeTabId
@@ -218,7 +252,12 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
             aria-selected={isActive}
             onContextMenu={(e) => openTabMenu(e, tab)}
             draggable={renamingId !== tab.id}
+            onDragEnd={() => {
+              setDraggingId(null)
+              setDropAt(null)
+            }}
             onDragStart={(e) => {
+              setDraggingId(tab.id)
               e.dataTransfer.setData(TAB_DND, tab.id)
               e.dataTransfer.effectAllowed = 'move'
               // The native drag image snapshots the chip's border box, so a tab that's
@@ -233,7 +272,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
               // The browser snapshots synchronously; drop the clone on the next tick.
               setTimeout(() => ghost.remove(), 0)
             }}
-            title="Drag to move to another pane"
+            title="Drag to reorder or move to another pane"
             onClick={() => window.orbital.setActiveTab(pane.id, tab.id)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -286,6 +325,14 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
           </div>
         )
       })}
+
+      {dropAt && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 top-1 z-10 w-0.5 rounded-full bg-accent"
+          style={{ left: dropAt.left }}
+        />
+      )}
 
       {/* Add-tab popover */}
       <div className="relative flex items-center">

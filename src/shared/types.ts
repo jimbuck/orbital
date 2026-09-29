@@ -1252,7 +1252,7 @@ export interface OrbitalApi {
   /** Merge fields into a tab's persisted config (e.g. the browser's current URL). */
   updateTabConfig(tabId: string, patch: Partial<TabConfig>): Promise<void>
   setActiveTab(paneId: string, tabId: string): Promise<void>
-  moveTab(tabId: string, targetPaneId: string): Promise<void>
+  moveTab(tabId: string, targetPaneId: string, slot?: number): Promise<void>
   /** Split `paneId` in `dir`, putting a new empty pane on the `where` side. */
   splitPane(worktreeId: string, paneId: string, dir: SplitDirection, where: SplitWhere): Promise<Pane>
   /** Close a pane (and its tabs); the layout collapses to its sibling. */

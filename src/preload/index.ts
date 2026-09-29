@@ -143,8 +143,8 @@ const api: OrbitalApi = {
     ipcRenderer.invoke(IPC.updateTabConfig, tabId, patch) as Promise<void>,
   setActiveTab: (paneId: string, tabId: string) =>
     ipcRenderer.invoke(IPC.setActiveTab, paneId, tabId) as Promise<void>,
-  moveTab: (tabId: string, targetPaneId: string) =>
-    ipcRenderer.invoke(IPC.moveTab, tabId, targetPaneId) as Promise<void>,
+  moveTab: (tabId: string, targetPaneId: string, slot?: number) =>
+    ipcRenderer.invoke(IPC.moveTab, tabId, targetPaneId, slot) as Promise<void>,
   splitPane: (worktreeId: string, paneId: string, dir: SplitDirection, where: SplitWhere) =>
     ipcRenderer.invoke(IPC.splitPane, worktreeId, paneId, dir, where) as Promise<Pane>,
   closePane: (worktreeId: string, paneId: string) =>
