@@ -20,6 +20,9 @@ import { cleanIpcError } from '@renderer/lib/ipcError'
 import { Spinner } from '@renderer/lib/status'
 import { HIGHLIGHT_MAX, highlightHtml, langFor } from '@renderer/lib/highlight'
 import DiffView from './DiffView'
+import PanelResizeHandle from '../PanelResizeHandle'
+import { usePanelWidth } from '@renderer/lib/usePanelWidth'
+import { clampTreeWidth, treeMaxWidth, TREE_DEFAULT_WIDTH, TREE_MIN_WIDTH } from '@renderer/lib/editorTreeWidth'
 
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
@@ -1034,6 +1037,26 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // tree collapses fully-ignored dirs to a single childless node).
   const [lazyChildren, setLazyChildren] = useState<Record<string, FileNode[]>>({})
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  // Resizable file-tree pane: width persisted like the side panels, capped at a
+  // fraction of the tab's own width (tracked with a ResizeObserver).
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [rootWidth, setRootWidth] = useState(0)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setRootWidth(el.clientWidth))
+    ro.observe(el)
+    setRootWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+  const treePane = usePanelWidth({
+    storageKey: 'orbital.editorTreeWidth',
+    defaultWidth: TREE_DEFAULT_WIDTH,
+    min: TREE_MIN_WIDTH,
+    max: treeMaxWidth(rootWidth),
+    handleEdge: 'right'
+  })
+  const treeWidth = clampTreeWidth(treePane.width, rootWidth)
   /** Open buffers, in pill order. */
   const [files, setFiles] = useState<OpenFile[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
@@ -1375,9 +1398,13 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   const crumbs = activeFile ? activeFile.path.split('/') : []
 
   return (
-    <div className="flex h-full w-full bg-pane" onKeyDown={onKeyDown}>
+    <div ref={rootRef} className="flex h-full w-full bg-pane" onKeyDown={onKeyDown}>
       {/* File tree */}
-      <div data-testid="file-tree" className="flex w-56 flex-none flex-col border-r border-line bg-rail/40 py-1.5">
+      <div
+        data-testid="file-tree"
+        style={{ width: treeWidth }}
+        className="relative flex flex-none flex-col border-r border-line bg-rail/40 py-1.5"
+      >
         <div className="flex flex-none items-center justify-between pb-1 pl-3 pr-2">
           <span className="text-[10.5px] font-bold uppercase tracking-[0.5px] text-faint">Files</span>
           <button
@@ -1415,6 +1442,14 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             ))
           )}
         </div>
+        <PanelResizeHandle
+          edge="right"
+          dragging={treePane.dragging}
+          onMouseDown={treePane.startResize}
+          onDoubleClick={treePane.resetWidth}
+          onNudge={treePane.nudgeWidth}
+          value={treeWidth}
+        />
       </div>
 
       {menu && (

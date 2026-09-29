@@ -18,6 +18,8 @@ export function usePanelWidth(opts: {
   dragging: boolean
   startResize: (e: React.MouseEvent) => void
   resetWidth: () => void
+  /** Move the width by `delta` px (keyboard resize); clamped and persisted. */
+  nudgeWidth: (delta: number) => void
   toggleCollapsed: () => void
 } {
   const { storageKey, defaultWidth, min, max, handleEdge } = opts
@@ -37,7 +39,7 @@ export function usePanelWidth(opts: {
   const startResize = (e: React.MouseEvent): void => {
     e.preventDefault()
     const startX = e.clientX
-    const startWidth = width
+    const startWidth = clamp(width)
     const sign = handleEdge === 'right' ? 1 : -1
     const widthAt = (clientX: number): number => clamp(startWidth + sign * (clientX - startX))
     const move = (ev: MouseEvent): void => setWidth(widthAt(ev.clientX))
@@ -67,6 +69,12 @@ export function usePanelWidth(opts: {
     window.localStorage.removeItem(storageKey)
   }
 
+  const nudgeWidth = (delta: number): void => {
+    const next = clamp(clamp(width) + delta)
+    setWidth(next)
+    window.localStorage.setItem(storageKey, String(next))
+  }
+
   const toggleCollapsed = (): void => {
     setCollapsed((prev) => {
       const next = !prev
@@ -75,5 +83,5 @@ export function usePanelWidth(opts: {
     })
   }
 
-  return { width, collapsed, dragging, startResize, resetWidth, toggleCollapsed }
+  return { width, collapsed, dragging, startResize, resetWidth, nudgeWidth, toggleCollapsed }
 }
