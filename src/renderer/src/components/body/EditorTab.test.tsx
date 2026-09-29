@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import type { FileNode, Tab, Worktree } from '@shared/types'
@@ -462,6 +463,54 @@ describe('CodeEditor', () => {
     const { gutter, ta } = renderEditor(Array.from({ length: 120 }, () => 'x').join('\n'))
     expect(gutter.style.width).toBe('calc(3ch + 20px)')
     expect(ta.style.paddingLeft).toBe('calc(3ch + 32px)')
+  })
+
+  describe('folding', () => {
+    const SRC = ['head', '  one', '  two', 'tail'].join('\n')
+
+    function Harness({ onValue }: { onValue: (v: string) => void }): JSX.Element {
+      const [v, setV] = useState(SRC)
+      return (
+        <CodeEditor
+          path={PATH}
+          value={v}
+          onChange={(n) => {
+            setV(n)
+            onValue(n)
+          }}
+        />
+      )
+    }
+
+    it('folds and unfolds a block from its gutter marker', () => {
+      render(<Harness onValue={noop} />)
+      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+      fireEvent.click(screen.getByTestId('fold-marker'))
+      expect(ta.value).toBe('head\ntail')
+      expect(screen.getByTestId('line-gutter').textContent).toBe('1\n4')
+      fireEvent.click(screen.getByTestId('fold-chip'))
+      expect(ta.value).toBe(SRC)
+    })
+
+    it('folds at the caret with Ctrl+Shift+[ and opens with Ctrl+Shift+]', () => {
+      render(<Harness onValue={noop} />)
+      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+      ta.setSelectionRange(2, 2)
+      fireEvent.keyDown(ta, { key: '{', code: 'BracketLeft', ctrlKey: true, shiftKey: true })
+      expect(ta.value).toBe('head\ntail')
+      ta.setSelectionRange(2, 2)
+      fireEvent.keyDown(ta, { key: '}', code: 'BracketRight', ctrlKey: true, shiftKey: true })
+      expect(ta.value).toBe(SRC)
+    })
+
+    it('maps an edit made while folded onto the full text', () => {
+      const seen = vi.fn()
+      render(<Harness onValue={seen} />)
+      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+      fireEvent.click(screen.getByTestId('fold-marker'))
+      fireEvent.change(ta, { target: { value: 'head\ntail!' } })
+      expect(seen).toHaveBeenLastCalledWith('head\n  one\n  two\ntail!')
+    })
   })
 
   it('opens the editing menu on right-click with Cut/Copy inert when nothing is selected', () => {
