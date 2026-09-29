@@ -367,6 +367,40 @@ describe('git.checkout', () => {
     await git.checkout(repo, 'feature/ok-1', true)
     expect(await git.currentBranch(repo)).toBe('feature/ok-1')
   })
+
+  it('lists remote branches without the origin/HEAD symref', async () => {
+    gitInit()
+    const g = (...args: string[]): void => void execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+    g('remote', 'add', 'origin', repo)
+    g('update-ref', 'refs/remotes/origin/feat', 'HEAD')
+    g('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/feat')
+    expect(await git.listRemoteBranches(repo)).toEqual(['origin/feat'])
+  })
+
+  it('creates a local tracking branch when given a remote-tracking ref', async () => {
+    gitInit()
+    const g = (...args: string[]): void => void execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+    g('remote', 'add', 'origin', repo)
+    g('update-ref', 'refs/remotes/origin/feat', 'HEAD')
+    await git.checkout(repo, 'origin/feat')
+    expect(await git.currentBranch(repo)).toBe('feat')
+    const up = execFileSync('git', ['rev-parse', '--abbrev-ref', 'feat@{upstream}'], { cwd: repo }).toString().trim()
+    expect(up).toBe('origin/feat')
+  })
+
+  it('surfaces git\'s error when the branch is checked out in another worktree', async () => {
+    gitInit()
+    const g = (...args: string[]): void => void execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+    g('remote', 'add', 'origin', repo)
+    g('update-ref', 'refs/remotes/origin/feat', 'HEAD')
+    const other = repo + '-wt'
+    g('worktree', 'add', '-q', '-b', 'feat', other, 'origin/feat')
+    try {
+      await expect(git.checkout(repo, 'feat')).rejects.toThrow(/already (checked out|used by worktree)/)
+    } finally {
+      g('worktree', 'remove', '--force', other)
+    }
+  })
 })
 
 describe('git.readFile', () => {

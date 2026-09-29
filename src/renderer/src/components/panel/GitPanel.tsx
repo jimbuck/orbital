@@ -354,6 +354,7 @@ export default function GitPanel(): JSX.Element {
   /** Branch picker (root Worktree only): anchor position when open, branch list, draft name. */
   const [pickerPos, setPickerPos] = useState<MenuPos | null>(null)
   const [branches, setBranches] = useState<string[]>([])
+  const [remoteBranches, setRemoteBranches] = useState<string[]>([])
   const [newBranch, setNewBranch] = useState('')
 
   const worktreeId = worktree?.id ?? null
@@ -486,7 +487,10 @@ export default function GitPanel(): JSX.Element {
     setPickerPos({ x: Math.min(r.left, window.innerWidth - PICKER_WIDTH - 12), y: r.bottom + 4 })
     setNewBranch('')
     if (project) {
-      void window.orbital.listBranches(project.id).then((info) => setBranches(info.branches))
+      void window.orbital.listBranches(project.id).then((info) => {
+        setBranches(info.branches)
+        setRemoteBranches(info.remotes)
+      })
     }
   }
 
@@ -654,7 +658,7 @@ export default function GitPanel(): JSX.Element {
         </div>
       </div>
 
-      {/* branch picker: local branches + create-and-switch (root Worktree only) */}
+      {/* branch picker: local + remote branches + create-and-switch (root Worktree only) */}
       {pickerPos && (
         <ContextMenu pos={pickerPos} width={PICKER_WIDTH} onClose={() => setPickerPos(null)}>
           <div className="max-h-56 overflow-y-auto">
@@ -673,6 +677,25 @@ export default function GitPanel(): JSX.Element {
                 {b === branch && <Check size={12} strokeWidth={2} className="flex-none" />}
               </button>
             ))}
+            {remoteBranches.length > 0 && (
+              <>
+                <div className="mt-1 border-t border-line-2 px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-faint">
+                  Remote
+                </div>
+                {remoteBranches.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    role="menuitem"
+                    title={`Create a local branch tracking ${r} and switch to it`}
+                    onClick={() => checkoutBranch(r, false)}
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[11.5px] text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60`}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{r}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
           <div className="mt-1 flex gap-1.5 border-t border-line-2 px-1 pb-1 pt-1.5">
             <input

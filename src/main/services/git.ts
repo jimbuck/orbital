@@ -249,13 +249,16 @@ async function listBranches(repoPath: string): Promise<string[]> {
 async function listRemoteBranches(repoPath: string): Promise<string[]> {
   const r = await capture(repoPath, [
     'for-each-ref',
-    '--format=%(refname:short)',
+    '--format=%(refname)',
     '--sort=-committerdate',
     'refs/remotes'
   ])
   if (r.code !== 0) return []
-  // Drop the symbolic `origin/HEAD` pointer — it's not a checkout target.
-  return toLines(r.stdout).filter((b) => b && !b.endsWith('/HEAD'))
+  // Full refnames, because `:short` renders the `origin/HEAD` symref as bare `origin`.
+  // Drop that pointer — it's not a checkout target.
+  return toLines(r.stdout)
+    .map((b) => b.replace(/^refs\/remotes\//, ''))
+    .filter((b) => b && !b.endsWith('/HEAD'))
 }
 
 /**
@@ -452,6 +455,15 @@ function checkRefArg(name: string): void {
 /** Switch the checkout to `branch`; `create` forks a new branch from HEAD first. */
 async function checkout(repoPath: string, branch: string, create?: boolean): Promise<void> {
   await assertBranchName(repoPath, branch)
+  if (!create && !(await branchExists(repoPath, branch))) {
+    // `origin/foo` names a remote-tracking ref: create a local tracking branch
+    // (`foo`) and switch to it. Plain `switch origin/foo` would detach HEAD.
+    const remote = await capture(repoPath, ['rev-parse', '--verify', '--quiet', `refs/remotes/${branch}`])
+    if (remote.code === 0) {
+      await run(repoPath, ['switch', '--track', branch])
+      return
+    }
+  }
   const args = create ? ['switch', '-c', branch] : ['switch', branch]
   await run(repoPath, args)
 }
