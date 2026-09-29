@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process'
 import fs from 'node:fs'
+import { promisify } from 'node:util'
 import { mkdir, copyFile, readdir, readlink, rm, stat, lstat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import picomatch from 'picomatch'
@@ -24,6 +26,8 @@ import picomatch from 'picomatch'
  * the repo (see worktree.ts), but if a project root happens to enclose one,
  * a recursive `.env` glob must never sync files out of sibling worktrees.
  */
+
+const execFileP = promisify(execFile)
 
 /** Directory names the sync walk never descends into. */
 const ALWAYS_SKIPPED_DIRS = ['.git', '.orbital-worktrees']
@@ -98,9 +102,20 @@ export async function syncEnvFiles(
   const skip = new Set([...ALWAYS_SKIPPED_DIRS, 'node_modules'])
   walkFiles(rootPath, rootPath, rels, skip)
 
+  const matches = rels.filter((rel) => isMatch(rel))
+  if (matches.length === 0) return []
+
+  // Only files git does not manage are ours to copy. A pattern like
+  // `.claude/**` also matches COMMITTED files (skills, shared settings), and
+  // copying the root's copies over a worktree on another branch rewrote that
+  // branch's versions and resurrected files it had deleted: opening an existing
+  // branch came up with a pile of "changes" that were just the root's branch
+  // bleeding in. A path tracked on either side is left to git's checkout.
+  const [rootTracked, worktreeTracked] = await Promise.all([trackedFiles(rootPath), trackedFiles(worktreePath)])
+
   const copied: string[] = []
-  for (const rel of rels) {
-    if (!isMatch(rel)) continue
+  for (const rel of matches) {
+    if (rootTracked.has(rel) || worktreeTracked.has(rel)) continue
     try {
       await copyRel(rootPath, worktreePath, rel)
       copied.push(rel)
@@ -109,6 +124,26 @@ export async function syncEnvFiles(
     }
   }
   return copied
+}
+
+/**
+ * Paths git tracks in the checkout at `dir` (its index), relative to `dir` with
+ * forward slashes. Empty when `dir` is not a git checkout or git fails — the
+ * sync then copies every match, as it always did.
+ */
+async function trackedFiles(dir: string): Promise<Set<string>> {
+  try {
+    const { stdout } = await execFileP('git', ['-c', 'core.quotePath=false', 'ls-files', '-z', '--cached'], {
+      cwd: dir,
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+      timeout: 60_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    })
+    return new Set(stdout.split('\0').filter(Boolean))
+  } catch {
+    return new Set()
+  }
 }
 
 /**

@@ -11,6 +11,7 @@ import {
   utimesSync,
   writeFileSync
 } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { COPY_IN_PROGRESS_MARKER, copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './env-sync'
@@ -271,5 +272,50 @@ describe('syncEnvFiles', () => {
     seedEnv()
     expect(await syncEnvFiles(root, worktree, [])).toEqual([])
     expect(existsSync(join(worktree, '.env'))).toBe(false)
+  })
+
+  describe('in a real repo', () => {
+    const gitIn = (cwd: string, ...args: string[]): string =>
+      execFileSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8' })
+
+    /**
+     * A root on `main` and a linked worktree on an existing `feature` branch
+     * that changed one committed `.claude` file and deleted another. The
+     * gitignored `.env` and `settings.local.json` are what the sync is for.
+     */
+    function seedRepo(): string {
+      gitIn(root, 'init', '-q', '-b', 'main')
+      gitIn(root, 'config', 'user.email', 'test@example.com')
+      gitIn(root, 'config', 'user.name', 'test')
+      writeFileSync(join(root, '.gitignore'), '.env\n.claude/settings.local.json\n')
+      mkdirSync(join(root, '.claude', 'skills'), { recursive: true })
+      writeFileSync(join(root, '.claude', 'settings.json'), '{"branch":"main"}')
+      writeFileSync(join(root, '.claude', 'skills', 'old.md'), 'old skill')
+      gitIn(root, 'add', '-A')
+      gitIn(root, 'commit', '-qm', 'init')
+      gitIn(root, 'checkout', '-qb', 'feature')
+      writeFileSync(join(root, '.claude', 'settings.json'), '{"branch":"feature"}')
+      gitIn(root, 'rm', '-q', '.claude/skills/old.md')
+      gitIn(root, 'commit', '-aqm', 'feature')
+      gitIn(root, 'checkout', '-q', 'main')
+      writeFileSync(join(root, '.env'), 'ROOT=1')
+      writeFileSync(join(root, '.claude', 'settings.local.json'), '{"local":true}')
+
+      const wt = join(worktree, 'feature')
+      gitIn(root, 'worktree', 'add', '-q', wt, 'feature')
+      return wt
+    }
+
+    it("leaves a branch's committed files alone and copies only untracked ones", async () => {
+      // Regression: opening an existing branch in a new worktree showed the
+      // root branch's committed `.claude` files as changes on the new branch.
+      const wt = seedRepo()
+      const copied = await syncEnvFiles(root, wt, patterns)
+      expect(copied.sort()).toEqual(['.claude/settings.local.json', '.env'])
+      expect(readFileSync(join(wt, '.claude', 'settings.json'), 'utf8')).toBe('{"branch":"feature"}')
+      expect(existsSync(join(wt, '.claude', 'skills', 'old.md'))).toBe(false)
+      expect(readFileSync(join(wt, '.env'), 'utf8')).toBe('ROOT=1')
+      expect(gitIn(wt, 'status', '--porcelain')).toBe('')
+    })
   })
 })
