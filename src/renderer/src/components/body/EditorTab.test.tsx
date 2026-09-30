@@ -512,6 +512,25 @@ describe('CodeEditor', () => {
       fireEvent.change(ta, { target: { value: 'head\ntail!' } })
       expect(seen).toHaveBeenLastCalledWith('head\n  one\n  two\ntail!')
     })
+
+    it('anchors each chip on its header DISPLAY line, in the editor font', () => {
+      render(<CodeEditor path={PATH} value={['a {', '  1', '  2', '}', 'bb {', '  3', '  4', '}'].join('\n')} onChange={noop} />)
+      fireEvent.click(screen.getAllByTestId('fold-marker')[0])
+      fireEvent.click(screen.getAllByTestId('fold-marker').find((m) => m.dataset.folded === 'false')!)
+      const anchors = screen.getAllByTestId('fold-chip-anchor')
+      // `bb {` is real line 4 but display line 2 once the first block is
+      // folded: two 1.6em lines down, not four (jsdom normalises the calc).
+      expect(anchors.map((a) => a.style.top)).toEqual(['calc(0em + 0.75rem)', 'calc(3.2em + 0.75rem)'])
+      expect(anchors[1].style.left).toBe('calc(5ch + calc(2ch + 32px))') // past `bb {` + 1
+      // The em/ch offsets live on the anchor, which must not change the font
+      // size they resolve against; the small label size is the chip's alone.
+      for (const a of anchors) {
+        expect(a.className).not.toMatch(/text-\[/)
+        const chip = a.querySelector('[data-testid=fold-chip]') as HTMLElement
+        expect(chip.style.top).toBe('')
+        expect(chip.style.left).toBe('')
+      }
+    })
   })
 
   it('opens the editing menu on right-click with Cut/Copy inert when nothing is selected', () => {

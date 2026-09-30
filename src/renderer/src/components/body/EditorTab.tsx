@@ -6,8 +6,10 @@ import {
   applyDisplayChange,
   computeFoldRanges,
   displayToRealOffset,
-  expandedWidth,
+  EDITOR_LINE_HEIGHT,
+  editorLineTop,
   filterHtmlLines,
+  foldChips,
   pruneFolds,
   rangeToFold,
   realToDisplayOffset,
@@ -173,6 +175,10 @@ export function CodeEditor({
     [folded, ranges, lines]
   )
   const display = useMemo(() => (visible ? visible.map((i) => lines[i]).join('\n') : value), [visible, lines, value])
+  const chips = useMemo(
+    () => (visible ? foldChips(lines, visible, ranges, folded, tabSize) : []),
+    [visible, lines, ranges, folded, tabSize]
+  )
   // What to put back after the display text is swapped under the caret.
   const pendingSelRef = useRef<{ start: number; end: number; top: number | null } | null>(null)
   const foldLayerRef = useRef<HTMLDivElement>(null)
@@ -392,7 +398,7 @@ export function CodeEditor({
           // Keep focus (and the caret) in the textarea.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => toggleFold(real)}
-          style={{ top: `calc(0.75rem + ${d} * 1.6em)`, height: '1.6em' }}
+          style={{ top: editorLineTop(d), height: EDITOR_LINE_HEIGHT }}
           className={`pointer-events-auto absolute inset-x-0 flex items-center justify-center hover:text-accent ${
             isFolded ? 'text-accent' : 'text-faint opacity-0 group-hover:opacity-100'
           }`}
@@ -607,8 +613,8 @@ export function CodeEditor({
                   // em and ch, the units the text itself is laid out in, so the
                   // rectangles track the line height and the glyph advance at
                   // any zoom without a second set of numbers to keep in step.
-                  top: `calc(0.75rem + ${m.line - 1} * 1.6em)`,
-                  height: '1.6em',
+                  top: editorLineTop(m.line - 1),
+                  height: EDITOR_LINE_HEIGHT,
                   left: `calc(${textPadLeft} + ${m.column}ch)`,
                   width: `${m.width}ch`
                 }}
@@ -633,31 +639,36 @@ export function CodeEditor({
           onClose={closeFind}
         />
       )}
-      {visible && (
+      {chips.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
           <div ref={foldLayerRef} className="absolute left-0 top-0">
-            {visible.map((real, d) =>
-              folded.has(real) && ranges.has(real) ? (
+            {chips.map((c) => (
+              // The anchor keeps the editor's font so its em/ch offsets match
+              // the text; only the chip inside it gets the smaller label size.
+              <span
+                key={c.line}
+                data-testid="fold-chip-anchor"
+                style={{
+                  position: 'absolute',
+                  top: editorLineTop(c.displayLine),
+                  height: EDITOR_LINE_HEIGHT,
+                  left: `calc(${textPadLeft} + ${c.column}ch)`
+                }}
+                className="flex items-center"
+              >
                 <button
-                  key={real}
                   type="button"
                   tabIndex={-1}
                   data-testid="fold-chip"
-                  title={`${ranges.get(real)!.end - real} lines folded - click to unfold`}
+                  title={`${c.hidden} lines folded - click to unfold`}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => toggleFold(real)}
-                  style={{
-                    position: 'absolute',
-                    top: `calc(0.75rem + ${d} * 1.6em + 0.2em)`,
-                    height: '1.2em',
-                    left: `calc(${textPadLeft} + ${expandedWidth(lines[real], tabSize) + 1}ch)`
-                  }}
-                  className="pointer-events-auto rounded-[3px] bg-accent/15 px-1.5 text-[10px] leading-[1.2em] text-accent hover:bg-accent/30"
+                  onClick={() => toggleFold(c.line)}
+                  className="pointer-events-auto rounded-[3px] bg-accent/15 px-1.5 text-[10px] leading-[1.2] text-accent hover:bg-accent/30"
                 >
                   ...
                 </button>
-              ) : null
-            )}
+              </span>
+            ))}
           </div>
         </div>
       )}

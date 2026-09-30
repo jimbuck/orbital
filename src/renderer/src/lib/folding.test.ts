@@ -3,7 +3,9 @@ import {
   applyDisplayChange,
   computeFoldRanges,
   displayToRealOffset,
+  editorLineTop,
   filterHtmlLines,
+  foldChips,
   pruneFolds,
   rangeToFold,
   realToDisplayOffset,
@@ -105,5 +107,64 @@ describe('offset mapping', () => {
     expect(disp).toBe('function a() {\n}\n\nconst b = 1'.indexOf('const b') + 2)
     expect(displayToRealOffset(SRC, visible, disp)).toBe(real)
     expect(realToDisplayOffset(SRC, visible, SRC.indexOf('y()'))).toBe('function a() {'.length)
+  })
+})
+
+describe('foldChips / editorLineTop', () => {
+  // Four blocks; the third holds a nested one.
+  const src = [
+    'function a() {', //  0
+    '  one()', //         1
+    '}', //               2
+    'function b() {', //  3
+    '  two()', //         4
+    '}', //               5
+    'function c() {', //  6
+    '  if (x) {', //      7
+    '    three()', //     8
+    '  }', //             9
+    '}', //              10
+    '\tfunction d() {', // 11
+    '\t\tfour()', //     12
+    '\t}' //             13
+  ]
+  const ranges = computeFoldRanges(src, 4)
+  const chipsFor = (folds: number[]): ReturnType<typeof foldChips> => {
+    const folded = new Set(folds)
+    return foldChips(src, visibleLines(src.length, ranges, folded), ranges, folded, 4)
+  }
+
+  it('places a chip on its header DISPLAY line, however many folds sit above it', () => {
+    const chips = chipsFor([0, 3, 7, 11])
+    expect(chips.map((c) => [c.line, c.displayLine])).toEqual([
+      [0, 0],
+      [3, 2], // real 3, one hidden line above
+      [7, 5], // real 7, two hidden lines above
+      [11, 8] // real 11, four hidden lines above
+    ])
+    expect(chips.map((c) => c.hidden)).toEqual([1, 1, 1, 1])
+  })
+
+  it('starts a chip one column past the header text, with tabs expanded', () => {
+    const [a, d] = chipsFor([0, 11])
+    expect(a.column).toBe('function a() {'.length + 1)
+    expect(d.column).toBe(4 + 'function d() {'.length + 1)
+  })
+
+  it('does not count a CRLF line ending as a column', () => {
+    const crlf = ['a {\r', '  b\r', '}']
+    const r = computeFoldRanges(crlf, 4)
+    const folded = new Set([0])
+    expect(foldChips(crlf, visibleLines(crlf.length, r, folded), r, folded, 4)[0].column).toBe('a {'.length + 1)
+  })
+
+  it('shows only the outer chip of a nested fold, and the inner one again once the outer opens', () => {
+    expect(chipsFor([6, 7]).map((c) => c.line)).toEqual([6])
+    expect(chipsFor([7]).map((c) => [c.line, c.displayLine])).toEqual([[7, 7]])
+  })
+
+  it('offsets lines by the top padding plus whole line heights', () => {
+    expect(editorLineTop(0)).toBe('calc(0.75rem + 0 * 1.6em)')
+    expect(editorLineTop(8)).toBe('calc(0.75rem + 8 * 1.6em)')
   })
 })

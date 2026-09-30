@@ -318,3 +318,48 @@ export function expandedWidth(text: string, tabSize: number): number {
   for (let i = 0; i < text.length; i++) col = text[i] === '\t' ? (Math.floor(col / tabSize) + 1) * tabSize : col + 1
   return col
 }
+
+/**
+ * Height of one editor line, and the top edge of DISPLAY line `displayLine`
+ * (0-based) in the editor's content box: py-3 then 1.6 line-heights per line.
+ *
+ * These are `em`/`ch` lengths, so they only land on the text when the element
+ * they are set on has the editor's own font size. An overlay that shrinks its
+ * font (a small chip label) must be wrapped in a box that is positioned with
+ * these and keeps the inherited font: `1.6em` inside `text-[10px]` is 16px, not
+ * 19.2px, and everything drifts up by 3.2px per line above it.
+ */
+export const EDITOR_LINE_HEIGHT = '1.6em'
+export function editorLineTop(displayLine: number): string {
+  return `calc(0.75rem + ${displayLine} * ${EDITOR_LINE_HEIGHT})`
+}
+
+/** Where a fold's `...` chip goes: after its header line, on screen. */
+export interface FoldChip {
+  /** Real line of the fold's header (the line that stays visible). */
+  line: number
+  /** Its index in the display text, which is what the screen position follows. */
+  displayLine: number
+  /** Column (in `ch`) the chip starts at: one space past the header's text. */
+  column: number
+  /** How many lines are hidden. */
+  hidden: number
+}
+
+/** One chip per folded range that is on screen. A fold nested in a folded range is hidden with it. */
+export function foldChips(
+  lines: readonly string[],
+  visible: readonly number[],
+  ranges: ReadonlyMap<number, FoldRange>,
+  folded: ReadonlySet<number>,
+  tabSize: number
+): FoldChip[] {
+  const out: FoldChip[] = []
+  visible.forEach((real, displayLine) => {
+    const r = folded.has(real) ? ranges.get(real) : undefined
+    // A CRLF file's `\r` takes no room on screen.
+    const text = lines[real].endsWith('\r') ? lines[real].slice(0, -1) : lines[real]
+    if (r) out.push({ line: real, displayLine, column: expandedWidth(text, tabSize) + 1, hidden: r.end - r.start })
+  })
+  return out
+}
