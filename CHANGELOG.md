@@ -2,6 +2,14 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.38.1](https://github.com/jimbuck/orbital/compare/v1.38.0...v1.38.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **cli:** validate ORBITAL_WORKTREE_ID / ORBITAL_TERMINAL_ID against this workspace ([3d01b08](https://github.com/jimbuck/orbital/commit/3d01b088d1d4ea794ba3fdc64d01173a6b3f4c3d))
+* **editor:** put the fold chip on its header line ([1896c2c](https://github.com/jimbuck/orbital/commit/1896c2c248e67133c54254f91871f06acec0651d))
+
 # [1.38.0](https://github.com/jimbuck/orbital/compare/v1.37.1...v1.38.0) (2026-09-29)
 
 
