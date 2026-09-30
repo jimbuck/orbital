@@ -5,7 +5,17 @@ import type { ControlRequest, Project } from '@shared/types'
 // stands in for "this instance's workspace". A project of another workspace
 // is simply absent from it.
 const workspaceProjects: Project[] = []
-vi.mock('../runtime', () => ({ repo: { projects: { list: () => workspaceProjects } } }))
+// Worktrees/tabs are NOT workspace-scoped in the real repository: lookups by id
+// find rows of any workspace, so these stubs hold foreign ones too.
+const worktrees = new Map<string, { id: string; projectId: string }>()
+const tabs = new Map<string, { id: string; worktreeId: string }>()
+vi.mock('../runtime', () => ({
+  repo: {
+    projects: { list: () => workspaceProjects },
+    worktrees: { get: (id: string) => worktrees.get(id) },
+    tabs: { get: (id: string) => tabs.get(id) }
+  }
+}))
 
 const { resolveProject, scopeRequest } = await import('./helpers')
 
@@ -28,6 +38,13 @@ beforeEach(() => {
     project('cccc3333-0000', 'dup'),
     project('cccc4444-0000', 'dup')
   )
+  worktrees.clear()
+  tabs.clear()
+  worktrees.set('wt-web', { id: 'wt-web', projectId: 'aaaa1111-0000' })
+  worktrees.set('wt-api', { id: 'wt-api', projectId: 'bbbb2222-0000' })
+  worktrees.set('wt-foreign', { id: 'wt-foreign', projectId: 'foreign-project' })
+  tabs.set('tab-web', { id: 'tab-web', worktreeId: 'wt-web' })
+  tabs.set('tab-foreign', { id: 'tab-foreign', worktreeId: 'wt-foreign' })
 })
 
 describe('resolveProject', () => {
@@ -83,5 +100,49 @@ describe('scopeRequest', () => {
 
   it('passes requests without any project through', () => {
     expect(scopeRequest(req({ cmd: 'status' })).req?.projectId).toBeUndefined()
+  })
+})
+
+describe('scopeRequest env worktree / terminal ids', () => {
+  it('accepts own worktree, terminal and matching project', () => {
+    const r = req({ cmd: 'whoami', projectId: 'aaaa1111-0000', worktreeId: 'wt-web', terminalId: 'tab-web' })
+    expect(scopeRequest(r).req).toBeDefined()
+  })
+
+  it('accepts a worktree id without a project id', () => {
+    expect(scopeRequest(req({ worktreeId: 'wt-web' })).req).toBeDefined()
+  })
+
+  it('rejects a worktree of another workspace', () => {
+    expect(scopeRequest(req({ cmd: 'whoami', worktreeId: 'wt-foreign' })).error).toMatch(/worktree .* not in this workspace/)
+  })
+
+  it('rejects a terminal of another workspace', () => {
+    expect(scopeRequest(req({ cmd: 'status', terminalId: 'tab-foreign' })).error).toMatch(/terminal .* not in this workspace/)
+  })
+
+  it('rejects a worktree that belongs to another project than the env project', () => {
+    const scoped = scopeRequest(req({ projectId: 'aaaa1111-0000', worktreeId: 'wt-api' }))
+    expect(scoped.error).toMatch(/does not belong to project/)
+  })
+
+  it('rejects a terminal that is not in the given worktree', () => {
+    const scoped = scopeRequest(req({ worktreeId: 'wt-api', terminalId: 'tab-web' }))
+    expect(scoped.error).toMatch(/does not belong to worktree/)
+  })
+
+  it('lets --project override the project without tripping the env consistency check', () => {
+    const scoped = scopeRequest(
+      req({ projectId: 'aaaa1111-0000', worktreeId: 'wt-web', terminalId: 'tab-web', args: { project: 'api' } })
+    )
+    expect(scoped.req?.projectId).toBe('bbbb2222-0000')
+  })
+
+  it('still rejects a foreign worktree when --project is given', () => {
+    expect(scopeRequest(req({ worktreeId: 'wt-foreign', args: { project: 'api' } })).error).toMatch(/not in this workspace/)
+  })
+
+  it('passes stale ids (closed tab / removed worktree) through for the handlers to no-op', () => {
+    expect(scopeRequest(req({ cmd: 'hook', worktreeId: 'gone-wt', terminalId: 'gone-tab' })).req).toBeDefined()
   })
 })

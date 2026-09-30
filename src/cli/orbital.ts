@@ -451,6 +451,10 @@ function printServers(data: unknown): void {
 /** A one-line confirmation for the non-`worktrees` commands. */
 function confirmation(req: ControlRequest, data: unknown): string {
   const d = (data ?? {}) as Record<string, unknown>
+  // With `--project` the write may land in another project: name it.
+  const into = req.args.project && d.project ? ` ${String(d.project)}` : ''
+  const to = into && ` to${into}`
+  const inn = into && ` in${into}`
   switch (req.cmd) {
     case 'status':
       return `terminal status set to ${String(req.args.status ?? '')}`
@@ -459,7 +463,7 @@ function confirmation(req: ControlRequest, data: unknown): string {
       const branch = d.branch ?? req.args.worktree
       const task = (d.task ?? null) as { seq?: number } | null
       return (
-        `worktree created${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}` +
+        `worktree created${inn}${name ? `: ${String(name)}` : ''}${branch ? ` (${String(branch)})` : ''}` +
         (task ? ` — task #${task.seq} started here` : '')
       )
     }
@@ -472,14 +476,14 @@ function confirmation(req: ControlRequest, data: unknown): string {
     case 'tab-new':
       return `opened ${String(req.args.type ?? '')} tab`
     case 'task-add':
-      return `task added: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
+      return `task added${to}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
     case 'task-update':
-      return `task updated: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
+      return `task updated${inn}: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
     case 'task-archive':
     case 'task-delete':
-      return `task archived: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`
+      return `task archived${inn}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`
     case 'task-unarchive':
-      return `task unarchived: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`
+      return `task unarchived${inn}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`
     case 'server-add': {
       const n = Array.isArray(d.servers) ? d.servers.length : 0
       return `dev server registered: ${String(d.url ?? '')} (${n} live)`

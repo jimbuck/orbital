@@ -47,23 +47,71 @@ export function resolveProject(ref: string): { project?: Project; error?: string
 }
 
 /**
+ * Check the client-supplied ORBITAL_* ids against this workspace. The env is
+ * untrusted: `repo.worktrees.get` / `repo.tabs.get` are not workspace-scoped, so
+ * a spoofed id could otherwise reach another workspace's worktree.
+ *
+ * - a worktree id must belong to a project of this workspace, and to the env
+ *   project when one came along;
+ * - a terminal id must belong to a tab in such a worktree.
+ *
+ * An id that matches nothing passes: there is nothing to act on, and the
+ * handlers already answer "not found" / no-op (e.g. a hook from a just-closed
+ * tab). Cost: two primary-key lookups plus the project list, cheap enough for
+ * the status/hook path.
+ */
+function validateEnvIds(req: ControlRequest, projectIds: Set<string>): string | undefined {
+  if (req.worktreeId) {
+    const wt = repo.worktrees.get(req.worktreeId)
+    if (wt) {
+      if (!projectIds.has(wt.projectId)) return `worktree '${req.worktreeId}' is not in this workspace`
+      if (req.projectId && wt.projectId !== req.projectId) {
+        return `worktree '${req.worktreeId}' does not belong to project '${req.projectId}'`
+      }
+    }
+  }
+  if (req.terminalId) {
+    const tab = repo.tabs.get(req.terminalId)
+    if (tab) {
+      const wt = repo.worktrees.get(tab.worktreeId)
+      if (!wt || !projectIds.has(wt.projectId)) return `terminal '${req.terminalId}' is not in this workspace`
+      if (req.worktreeId && tab.worktreeId !== req.worktreeId) {
+        return `terminal '${req.terminalId}' does not belong to worktree '${req.worktreeId}'`
+      }
+      if (req.projectId && wt.projectId !== req.projectId) {
+        return `terminal '${req.terminalId}' does not belong to project '${req.projectId}'`
+      }
+    }
+  }
+  return undefined
+}
+
+/**
  * Settle which project a request acts on, before any handler sees it.
  *
  * Without `--project` a command stays scoped to the calling terminal's project
  * (ORBITAL_PROJECT_ID). Passing `--project` explicitly is the opt-in to reach a
  * sibling project — reads and writes alike. Either way the id must belong to
  * this instance's workspace: the env is client-supplied, so a spoofed id must
- * not reach another workspace's project (e.g. through `worktree new`).
+ * not reach another workspace's project (e.g. through `worktree new`). The
+ * worktree/terminal ids are validated too, against the env project — before
+ * `--project` overrides it, since the override only retargets task/worktree
+ * commands, not the calling terminal's own identity.
  */
 export function scopeRequest(req: ControlRequest): { req?: ControlRequest; error?: string } {
+  const projects = repo.projects.list()
+  if (req.projectId && !projects.some((p) => p.id === req.projectId)) {
+    return { error: `project '${req.projectId}' is not in this workspace` }
+  }
+  if (req.worktreeId || req.terminalId) {
+    const error = validateEnvIds(req, new Set(projects.map((p) => p.id)))
+    if (error) return { error }
+  }
   const ref = req.args.project
   if (ref !== undefined && ref !== null && ref !== '') {
     const { project, error } = resolveProject(String(ref))
     if (!project) return { error }
     return { req: { ...req, projectId: project.id } }
-  }
-  if (req.projectId && !repo.projects.list().some((p) => p.id === req.projectId)) {
-    return { error: `project '${req.projectId}' is not in this workspace` }
   }
   return { req }
 }

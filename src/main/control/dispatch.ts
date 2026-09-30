@@ -38,8 +38,12 @@ async function archiveTask(req: ControlRequest, archive: boolean): Promise<Contr
   if (archive) repo.tasks.archive(task.id)
   else repo.tasks.unarchive(task.id)
   runtime.broadcastState()
-  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }
+  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, project: projectName(req) } }
 }
+
+/** The target project's name, so the CLI can name it in a cross-project confirmation. */
+const projectName = (req: ControlRequest): string | undefined =>
+  req.projectId ? repo.projects.get(req.projectId)?.name : undefined
 
 const handlers: Record<ControlCommand, Handler> = {
   status: async (req) => {
@@ -146,7 +150,8 @@ const handlers: Record<ControlCommand, Handler> = {
         name: worktree.name,
         branch: worktree.branch,
         path: worktree.path,
-        task: task ? { seq: task.seq, title: task.title } : null
+        task: task ? { seq: task.seq, title: task.title } : null,
+        project: project.name
       }
     }
   },
@@ -231,7 +236,7 @@ const handlers: Record<ControlCommand, Handler> = {
       createdBy: 'agent'
     })
     runtime.broadcastState()
-    return { ok: true, data: { id: task.id, seq: task.seq, title: task.title } }
+    return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, project: projectName(req) } }
   },
   'task-list': async (req) => {
     if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
@@ -281,7 +286,7 @@ const handlers: Record<ControlCommand, Handler> = {
     if (Object.keys(patch).length === 0) return { ok: false, error: 'nothing to update' }
     const updated = repo.tasks.update(task.id, patch)
     runtime.broadcastState()
-    return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title } }
+    return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title, project: projectName(req) } }
   },
   'task-archive': async (req) => archiveTask(req, true),
   'task-unarchive': async (req) => archiveTask(req, false),

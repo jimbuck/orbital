@@ -102,3 +102,18 @@ describe('task archive', () => {
     expect(await run('task-archive', { id: '99' })).toEqual({ ok: false, error: "no task matches number '99'" })
   })
 })
+
+describe('cross-project writes', () => {
+  it('returns the target project name so the CLI can confirm where the write landed', async () => {
+    const other = repo.projects.create({ name: 'sibling', repoPath: 'C:/sibling' })
+    const added = await handleControl({ cmd: 'task-add', projectId, args: { title: 'x', project: 'sibling' } })
+    expect(added).toMatchObject({ ok: true, data: { project: 'sibling' } })
+    expect(repo.tasks.list('all').some((t) => t.projectId === other.id && t.title === 'x')).toBe(true)
+  })
+
+  it("leaves an unknown worktree id to the handler's not-found", async () => {
+    const res = await handleControl({ cmd: 'whoami', worktreeId: 'nope-not-real', args: {} })
+    // Unknown ids fall through to the handler's own not-found.
+    expect(res).toEqual({ ok: false, error: 'worktree not found' })
+  })
+})
