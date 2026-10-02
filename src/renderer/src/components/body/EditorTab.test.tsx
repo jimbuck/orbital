@@ -630,7 +630,7 @@ describe('CodeEditor find', () => {
     return { ta, input: screen.getByLabelText('Find in file') as HTMLInputElement }
   }
 
-  const count = (): string => screen.getByLabelText('Find in file').parentElement?.querySelector('span')?.textContent ?? ''
+  const count = (): string => screen.getByTestId('find-count').textContent ?? ''
 
   it('opens on request and reports nothing until there is a query', () => {
     renderFind()
@@ -725,6 +725,215 @@ describe('CodeEditor find', () => {
     // Reopened with nothing selected: what you last looked for is still there.
     rerender(<CodeEditor path="notes.txt" value={TEXT} onChange={noop} findSeq={2} />)
     expect((screen.getByLabelText('Find in file') as HTMLInputElement).value).toBe('gamma')
+  })
+
+  it('narrows to whole words and reads the query as a regex when asked', () => {
+    const { input } = renderFind('cat concat cat\ncat9')
+    fireEvent.change(input, { target: { value: 'cat' } })
+    expect(count()).toBe('1 of 4')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Match whole word' }))
+    expect(count()).toBe('1 of 2')
+
+    fireEvent.change(input, { target: { value: 'cat\\d' } })
+    expect(count()).toBe('no results')
+    // Alt+W / Alt+R work from the box, like VS Code's.
+    fireEvent.keyDown(input, { key: 'w', code: 'KeyW', altKey: true })
+    fireEvent.keyDown(input, { key: 'r', code: 'KeyR', altKey: true })
+    expect(screen.getByRole('switch', { name: 'Use regular expression' }).getAttribute('aria-checked')).toBe('true')
+    expect(count()).toBe('1 of 1')
+  })
+
+  it('flags a regex that does not compile instead of throwing', () => {
+    const { input } = renderFind()
+    fireEvent.click(screen.getByRole('switch', { name: 'Use regular expression' }))
+    fireEvent.change(input, { target: { value: 'al(' } })
+    expect(count()).toBe('invalid')
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+  })
+})
+
+describe('CodeEditor replace', () => {
+  /**
+   * What Chromium's insertText does to a focused textarea: splice the selection,
+   * leave the caret after the new text, fire `input`. jsdom has no execCommand,
+   * and this is the path a real replace takes (it is what keeps native undo).
+   */
+  const fakeExecCommand = vi.fn((command: string, _ui?: boolean, text = ''): boolean => {
+    const el = document.activeElement
+    if (!(el instanceof HTMLTextAreaElement)) return false
+    const { selectionStart: start, selectionEnd: end } = el
+    const insert = command === 'insertText' ? text : ''
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    setValue?.call(el, el.value.slice(0, start) + insert + el.value.slice(end))
+    el.setSelectionRange(start + insert.length, start + insert.length)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })
+  let savedExec: typeof document.execCommand
+
+  beforeEach(() => {
+    savedExec = document.execCommand
+    fakeExecCommand.mockClear()
+    document.execCommand = fakeExecCommand as unknown as typeof document.execCommand
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+    vi.stubGlobal('orbital', { writeClipboard: vi.fn(), readClipboard: vi.fn(() => '') })
+  })
+  afterEach(() => {
+    cleanup()
+    document.execCommand = savedExec
+    vi.unstubAllGlobals()
+  })
+
+  /** A parent that keeps the text, so a replace actually lands. */
+  function Host({ initial, replaceSeq, onText }: { initial: string; replaceSeq: number; onText: (t: string) => void }): JSX.Element {
+    const [text, setText] = useState(initial)
+    return (
+      <CodeEditor
+        path="notes.txt"
+        value={text}
+        onChange={(next) => {
+          setText(next)
+          onText(next)
+        }}
+        replaceSeq={replaceSeq}
+      />
+    )
+  }
+
+  function renderReplace(initial: string): { ta: HTMLTextAreaElement; text: () => string } {
+    let latest = initial
+    const onText = (t: string): void => {
+      latest = t
+    }
+    const { rerender } = render(<Host initial={initial} replaceSeq={0} onText={onText} />)
+    // Bumping the counter is what Ctrl+H does.
+    rerender(<Host initial={initial} replaceSeq={1} onText={onText} />)
+    return { ta: document.querySelector('textarea') as HTMLTextAreaElement, text: () => latest }
+  }
+
+  const count = (): string => screen.getByTestId('find-count').textContent ?? ''
+
+  it('opens with the replace row showing and focus in it', () => {
+    renderReplace('alpha')
+    expect(screen.getByRole('button', { name: 'Hide replace' }).getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(screen.getByLabelText('Replace with'))
+  })
+
+  it('replaces the current match and moves on to the next', () => {
+    const { ta, text } = renderReplace('foo bar foo baz foo')
+    fireEvent.change(screen.getByLabelText('Find in file'), { target: { value: 'foo' } })
+    fireEvent.change(screen.getByLabelText('Replace with'), { target: { value: 'qux' } })
+    expect(count()).toBe('1 of 3')
+
+    fireEvent.keyDown(screen.getByLabelText('Replace with'), { key: 'Enter' })
+    expect(text()).toBe('qux bar foo baz foo')
+    // On to the next one, selected and ready for the next press.
+    expect(count()).toBe('1 of 2')
+    expect([ta.selectionStart, ta.selectionEnd]).toEqual([8, 11])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    expect(text()).toBe('qux bar qux baz foo')
+  })
+
+  it('only moves to a match when the selection is not on one', () => {
+    const { ta, text } = renderReplace('foo bar foo')
+    fireEvent.change(screen.getByLabelText('Find in file'), { target: { value: 'foo' } })
+    fireEvent.change(screen.getByLabelText('Replace with'), { target: { value: 'x' } })
+    ta.setSelectionRange(4, 4)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    expect(text()).toBe('foo bar foo')
+    expect([ta.selectionStart, ta.selectionEnd]).toEqual([8, 11])
+  })
+
+  it('replaces every match at once, expanding regex groups', () => {
+    const { text } = renderReplace('let a = 1\nlet b = 2')
+    fireEvent.click(screen.getByRole('switch', { name: 'Use regular expression' }))
+    fireEvent.change(screen.getByLabelText('Find in file'), { target: { value: 'let (\\w)' } })
+    fireEvent.change(screen.getByLabelText('Replace with'), { target: { value: 'const $1' } })
+
+    fireEvent.keyDown(screen.getByLabelText('Replace with'), { key: 'Enter', ctrlKey: true, altKey: true })
+    expect(text()).toBe('const a = 1\nconst b = 2')
+    expect(count()).toBe('no results')
+    // One contiguous insertText, so it is one undo step.
+    expect(fakeExecCommand).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces around a fold without losing the folded lines', () => {
+    const { text } = renderReplace('foo\nblock\n  foo hidden\nfoo')
+    fireEvent.click(screen.getAllByTestId('fold-marker')[0])
+    fireEvent.change(screen.getByLabelText('Find in file'), { target: { value: 'foo' } })
+    fireEvent.change(screen.getByLabelText('Replace with'), { target: { value: 'bar' } })
+    // Only what is on screen counts — the folded "foo" is not a match.
+    expect(count()).toBe('1 of 2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    expect(text()).toBe('bar\nblock\n  foo hidden\nbar')
+  })
+
+  it('still replaces when the textarea edit is unavailable', () => {
+    document.execCommand = (() => false) as unknown as typeof document.execCommand
+    const { text } = renderReplace('foo foo')
+    fireEvent.change(screen.getByLabelText('Find in file'), { target: { value: 'foo' } })
+    fireEvent.change(screen.getByLabelText('Replace with'), { target: { value: 'bar' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace all' }))
+    expect(text()).toBe('bar bar')
+  })
+})
+
+describe('CodeEditor selection highlight', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {}
+    }))
+  })
+  afterEach(() => {
+    cleanup()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  /** Select a range the way a person does: React builds onSelect from key/mouse events. */
+  function select(ta: HTMLTextAreaElement, start: number, end: number): void {
+    ta.focus()
+    ta.setSelectionRange(start, end)
+    fireEvent.keyUp(ta)
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+  }
+
+  it('lights up the other occurrences of the selected text', () => {
+    render(<CodeEditor path="notes.txt" value={'item = items[item]\nItem'} onChange={noop} />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    select(ta, 0, 4)
+
+    // Case-sensitive and not the selection itself: "item" twice more, not "Item".
+    const marks = screen.getAllByTestId('selection-match')
+    expect(marks).toHaveLength(2)
+    expect(marks.map((m) => m.style.left)).toEqual([expect.stringContaining('7ch'), expect.stringContaining('13ch')])
+  })
+
+  it('clears when the selection collapses or is only whitespace', () => {
+    render(<CodeEditor path="notes.txt" value={'a  b  a'} onChange={noop} />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    select(ta, 0, 1)
+    expect(screen.getAllByTestId('selection-match')).toHaveLength(1)
+
+    select(ta, 3, 3)
+    expect(screen.queryAllByTestId('selection-match')).toHaveLength(0)
+
+    select(ta, 1, 3)
+    expect(screen.queryAllByTestId('selection-match')).toHaveLength(0)
   })
 })
 

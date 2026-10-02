@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_TAB_SIZE, findMatches, nextMatchIndex, parseTabSize } from './findInFile'
+import {
+  DEFAULT_TAB_SIZE,
+  findError,
+  findMatches,
+  nextMatchIndex,
+  parseTabSize,
+  replaceAll,
+  replacementFor,
+  selectionQuery
+} from './findInFile'
 
 const opts = { caseSensitive: false, tabSize: 4 }
 
@@ -86,5 +95,83 @@ describe('parseTabSize', () => {
     expect(parseTabSize('32px')).toBe(DEFAULT_TAB_SIZE)
     expect(parseTabSize(undefined)).toBe(DEFAULT_TAB_SIZE)
     expect(parseTabSize('0')).toBe(DEFAULT_TAB_SIZE)
+  })
+})
+
+describe('whole word and regex', () => {
+  const spans = (text: string, query: string, extra: object): number[][] =>
+    findMatches(text, query, { ...opts, ...extra }).map((m) => [m.start, m.end])
+
+  it('matches whole words only when asked', () => {
+    expect(spans('cat concat cat_x cat', 'cat', { wholeWord: true })).toEqual([
+      [0, 3],
+      [17, 20]
+    ])
+  })
+
+  it('still finds a word that starts inside a rejected candidate', () => {
+    // "aa" at 0 is half of "aaa"; the one at 4 stands alone.
+    expect(spans('aaa aa', 'aa', { wholeWord: true })).toEqual([[4, 6]])
+  })
+
+  it('treats the query as a pattern in regex mode, line anchors included', () => {
+    expect(spans('foo1 foo22\nfoo', 'foo\\d+', { regex: true })).toEqual([
+      [0, 4],
+      [5, 10]
+    ])
+    expect(spans('ab\nab', '^a', { regex: true })).toEqual([
+      [0, 1],
+      [3, 4]
+    ])
+  })
+
+  it('skips empty matches rather than looping on them', () => {
+    expect(spans('abc', 'x*', { regex: true })).toEqual([])
+  })
+
+  it('keeps matches to one line', () => {
+    expect(spans('a\nb', 'a\\nb', { regex: true })).toEqual([])
+  })
+
+  it('matches nothing for a pattern that does not compile, and says why', () => {
+    expect(spans('(((', '(', { regex: true })).toEqual([])
+    expect(findError('(', { ...opts, regex: true })).toBeTruthy()
+    expect(findError('(', opts)).toBeNull()
+    expect(findError('a+', { ...opts, regex: true })).toBeNull()
+  })
+})
+
+describe('replacementFor / replaceAll', () => {
+  it('is literal for a plain query, even with $ in it', () => {
+    const [m] = findMatches('price', 'price', opts)
+    expect(replacementFor('price', m, 'price', '$1 cost', opts)).toBe('$1 cost')
+  })
+
+  it('expands capture groups against the match it replaces', () => {
+    const text = 'let a = 1; let b = 2'
+    const o = { ...opts, regex: true }
+    const ms = findMatches(text, 'let (\\w)', o)
+    expect(ms.map((m) => replacementFor(text, m, 'let (\\w)', 'const $1', o))).toEqual(['const a', 'const b'])
+    expect(replaceAll(text, ms, 'let (\\w)', 'const $1', o)).toBe('const a = 1; const b = 2')
+  })
+
+  it('evaluates lookbehinds in the full text', () => {
+    const text = 'xa ya'
+    const o = { ...opts, regex: true }
+    const ms = findMatches(text, '(?<=y)a', o)
+    expect(replaceAll(text, ms, '(?<=y)a', 'B', o)).toBe('xa yB')
+  })
+})
+
+describe('selectionQuery', () => {
+  it('takes a single-line, non-blank selection', () => {
+    expect(selectionQuery('foo bar', 0, 3)).toBe('foo')
+  })
+
+  it('refuses empty, blank, multi-line and very long selections', () => {
+    expect(selectionQuery('foo', 1, 1)).toBeNull()
+    expect(selectionQuery('a   b', 1, 4)).toBeNull()
+    expect(selectionQuery('a\nb', 0, 3)).toBeNull()
+    expect(selectionQuery('x'.repeat(300), 0, 300)).toBeNull()
   })
 })

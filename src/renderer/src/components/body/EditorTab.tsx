@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
 import { fileIcon } from '@renderer/lib/fileIcons'
-import { DEFAULT_TAB_SIZE, findMatches, nextMatchIndex, parseTabSize } from '@renderer/lib/findInFile'
+import {
+  DEFAULT_TAB_SIZE,
+  findError,
+  findMatches,
+  nextMatchIndex,
+  parseTabSize,
+  replacementFor,
+  selectionQuery,
+  type FindMatch
+} from '@renderer/lib/findInFile'
 import {
   applyDisplayChange,
   computeFoldRanges,
@@ -16,7 +25,7 @@ import {
   shiftFolds,
   visibleLines
 } from '@renderer/lib/folding'
-import FindBar from './FindBar'
+import FindBar, { type FindToggles } from './FindBar'
 import { marked } from 'marked'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
 import { useTheme, useThemeId } from '@renderer/lib/theme'
@@ -106,7 +115,8 @@ export function CodeEditor({
   value,
   onChange,
   reveal,
-  findSeq = 0
+  findSeq = 0,
+  replaceSeq = 0
 }: {
   path: string
   value: string
@@ -123,6 +133,8 @@ export function CodeEditor({
    * "re-select what is already in the box".
    */
   findSeq?: number
+  /** Bumped to open the bar with its replace row showing (Ctrl+H). */
+  replaceSeq?: number
 }): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ pos: MenuPos; hasSelection: boolean } | null>(null)
@@ -141,9 +153,21 @@ export function CodeEditor({
   // for rather than an empty box.
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
-  const [findCase, setFindCase] = useState(false)
+  const [findToggles, setFindToggles] = useState<FindToggles>({ caseSensitive: false, wholeWord: false, regex: false })
   const [matchIndex, setMatchIndex] = useState(0)
+  const [replaceOpen, setReplaceOpen] = useState(false)
+  const [replacement, setReplacement] = useState('')
+  // Which box a Ctrl+F / Ctrl+H should leave focus in. One counter for both, so
+  // whichever was pressed last wins.
+  const [findFocus, setFindFocus] = useState<{ seq: number; target: 'find' | 'replace' }>({ seq: 0, target: 'find' })
+  // Set by Replace: once the edit has landed and the matches are recomputed,
+  // move on to the next one, the way VS Code's Replace does.
+  const stepAfterReplaceRef = useRef(false)
   const findLayerRef = useRef<HTMLDivElement>(null)
+  // The selection, for highlighting its other occurrences. Display offsets.
+  const [sel, setSel] = useState<{ start: number; end: number } | null>(null)
+  const selTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const selLayerRef = useRef<HTMLDivElement | null>(null)
   // A 1ch-wide probe, so the horizontal scroll can be worked out in the same
   // unit the highlights are drawn in without measuring the font by hand.
   const chRef = useRef<HTMLSpanElement>(null)
@@ -186,9 +210,24 @@ export function CodeEditor({
 
   // Find works on what is on screen: a match inside a fold has nowhere to be
   // drawn, and unfolding to reach it would fight the person who folded it.
+  const findOptions = useMemo(() => ({ ...findToggles, tabSize }), [findToggles, tabSize])
   const matches = useMemo(
-    () => (findOpen ? findMatches(display, findQuery, { caseSensitive: findCase, tabSize }) : []),
-    [findOpen, findQuery, findCase, display, tabSize]
+    () => (findOpen ? findMatches(display, findQuery, findOptions) : []),
+    [findOpen, findQuery, findOptions, display]
+  )
+  const queryError = findOpen ? findError(findQuery, findOptions) : null
+
+  // Selection highlight: every OTHER place the selected text appears, the way
+  // VS Code lights them up. Case-sensitive, since a selection is an exact
+  // string. Off while the find bar is open, which draws its own highlights
+  // (and selects each match it lands on, so the two would double up).
+  const selText = !findOpen && sel ? selectionQuery(display, sel.start, sel.end) : null
+  const occurrences = useMemo(
+    () =>
+      selText && sel
+        ? findMatches(display, selText, { caseSensitive: true, tabSize }).filter((m) => m.start !== sel.start)
+        : [],
+    [selText, sel, display, tabSize]
   )
   // An edit can shrink the match list under the current index.
   const current = matches.length === 0 ? -1 : Math.min(matchIndex, matches.length - 1)
@@ -278,6 +317,8 @@ export function CodeEditor({
     // exactly the jank the reveal band's direct-to-the-node trick avoids.
     const layer = findLayerRef.current
     if (layer) layer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
+    const selLayer = selLayerRef.current
+    if (selLayer) selLayer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
     const foldLayer = foldLayerRef.current
     if (foldLayer) foldLayer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
     const markers = markerLayerRef.current
@@ -286,7 +327,7 @@ export function CodeEditor({
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(syncScroll, [shownHtml, lineCount, matches, visible])
+  useEffect(syncScroll, [shownHtml, lineCount, matches, occurrences, visible])
 
   // Centre the requested line and flash it. Runs on `seq` so the same line can
   // be asked for again; the band clears itself after a beat.
@@ -460,19 +501,131 @@ export function CodeEditor({
 
   const closeFind = (): void => {
     setFindOpen(false)
-    taRef.current?.focus()
+    const ta = taRef.current
+    if (!ta) return
+    ta.focus()
+    // Focus coming back fires no selection event, and the caret is wherever the
+    // last match left it — pick it up so its occurrences light up straight away.
+    setSel({ start: ta.selectionStart, end: ta.selectionEnd })
   }
 
-  // Ctrl+F (caught at the tab, so it works with focus in the tree too). Seeds
-  // from the selection the way every find box does; a multi-line selection is
-  // not a query, so that one is left out and the last query stands.
+  /**
+   * Swap display ranges for new text. `spans` are in display offsets, in order,
+   * and never overlap.
+   *
+   * The textarea's own insertText is used where it can be, so a replace is one
+   * native undo step like any other edit. That needs the edit to be a single
+   * contiguous range of what is on screen — always true unfolded, and true for
+   * one span (a match is one line). Replace All across folds would have that
+   * range swallow the hidden lines, so it is applied to the real text instead.
+   */
+  const replaceSpans = (spans: readonly { start: number; end: number; text: string }[]): void => {
+    const ta = taRef.current
+    if (!ta || spans.length === 0) return
+    const first = spans[0]
+    const last = spans[spans.length - 1]
+    let stitched = ''
+    for (let i = 0; i < spans.length; i++) {
+      stitched += spans[i].text + (i + 1 < spans.length ? display.slice(spans[i].end, spans[i + 1].start) : '')
+    }
+
+    if (!visible || spans.length === 1) {
+      const back = document.activeElement as HTMLElement | null
+      ta.focus()
+      ta.setSelectionRange(first.start, last.end)
+      let ok = false
+      try {
+        ok = document.execCommand(stitched ? 'insertText' : 'delete', false, stitched)
+      } catch {
+        ok = false
+      }
+      if (back && back !== ta) back.focus()
+      if (ok) return
+    }
+
+    // Fallback (or across folds): rebuild the real text and put the caret back.
+    let next = ''
+    let lastReal = 0
+    for (const s of spans) {
+      const start = displayToRealOffset(value, visible, s.start)
+      next += value.slice(lastReal, start) + s.text
+      lastReal = displayToRealOffset(value, visible, s.end)
+    }
+    next += value.slice(lastReal)
+    const realCaret = displayToRealOffset(value, visible, last.end) + (next.length - value.length)
+    pendingSelRef.current = { start: realCaret, end: realCaret, top: ta.scrollTop }
+    onChange(next)
+  }
+
+  /**
+   * Replace the match under the selection and move to the next one. With the
+   * selection somewhere else it only moves — VS Code's rule, so the first press
+   * shows you what the second will change.
+   */
+  const replaceOne = (): void => {
+    const ta = taRef.current
+    if (!ta || queryError) return
+    const match = matches.find((m) => m.start === ta.selectionStart && m.end === ta.selectionEnd)
+    if (!match) {
+      step(true)
+      return
+    }
+    const text = replacementFor(display, match, findQuery, replacement, findOptions)
+    // Nothing to change: no edit means no recomputed matches to step on from.
+    if (text === display.slice(match.start, match.end)) {
+      step(true)
+      return
+    }
+    stepAfterReplaceRef.current = true
+    replaceSpans([{ start: match.start, end: match.end, text }])
+  }
+
+  const replaceEvery = (): void => {
+    if (matches.length === 0 || queryError) return
+    // Expanded against the whole text in one go, so a regex's `$1` and its
+    // lookarounds see exactly what they saw when the match was found.
+    const spans = matches.map((m: FindMatch) => ({
+      start: m.start,
+      end: m.end,
+      text: replacementFor(display, m, findQuery, replacement, findOptions)
+    }))
+    replaceSpans(spans)
+  }
+
   useEffect(() => {
-    if (findSeq <= 0) return
+    if (!stepAfterReplaceRef.current) return
+    stepAfterReplaceRef.current = false
+    const ta = taRef.current
+    const index = nextMatchIndex(matches, ta ? ta.selectionEnd : 0, true)
+    if (index === -1) setMatchIndex(0)
+    else goToMatch(index)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matches])
+
+  /**
+   * Ctrl+F / Ctrl+H (caught at the tab, so they work with focus in the tree
+   * too). Seeds from the selection the way every find box does; a multi-line
+   * selection is not a query, so that one is left out and the last query
+   * stands. In regex mode the selection is escaped, so it still finds itself.
+   */
+  const openFind = (target: 'find' | 'replace'): void => {
     const ta = taRef.current
     const selected = ta ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : ''
-    if (selected && !selected.includes('\n')) setFindQuery(selected)
+    if (selected && !selected.includes('\n')) {
+      setFindQuery(findToggles.regex ? selected.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') : selected)
+    }
+    if (target === 'replace') setReplaceOpen(true)
+    setFindFocus((f) => ({ seq: f.seq + 1, target }))
     setFindOpen(true)
+  }
+  useEffect(() => {
+    if (findSeq > 0) openFind('find')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findSeq])
+  useEffect(() => {
+    if (replaceSeq > 0) openFind('replace')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaceSeq])
 
   /**
    * Find as you type: every change to the query (or the case toggle, or a
@@ -490,7 +643,7 @@ export function CodeEditor({
     if (index === -1) setMatchIndex(0)
     else goToMatch(index)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findOpen, findQuery, findCase, findSeq])
+  }, [findOpen, findQuery, findToggles, findFocus.seq])
 
   const openMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -549,6 +702,9 @@ export function CodeEditor({
         ref={taRef}
         value={display}
         onChange={(e) => {
+          // The selection's text just changed under it; the next select event
+          // says where it is now.
+          setSel(null)
           if (!visible) {
             onChange(e.target.value)
             return
@@ -567,6 +723,14 @@ export function CodeEditor({
           onChange(r.value)
         }}
         onScroll={syncScroll}
+        onSelect={(e) => {
+          const { selectionStart: start, selectionEnd: end } = e.currentTarget
+          if (selTimerRef.current) clearTimeout(selTimerRef.current)
+          // A collapsed caret clears at once; a selection waits a beat, so
+          // dragging across a large file doesn't rescan it on every mouse move.
+          if (start === end) setSel(null)
+          else selTimerRef.current = setTimeout(() => setSel({ start, end }), 60)
+        }}
         onContextMenu={openMenu}
         onKeyDown={(e) => {
           // Tab indents instead of moving focus; execCommand keeps native undo.
@@ -626,16 +790,52 @@ export function CodeEditor({
           </div>
         </div>
       )}
+      {occurrences.length > 0 && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
+          <div
+            ref={(el) => {
+              selLayerRef.current = el
+              // Mounts on a selection, after any scroll, so it has to pick the
+              // current offset up itself.
+              const ta = taRef.current
+              if (el && ta) el.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
+            }}
+            className="absolute left-0 top-0"
+          >
+            {occurrences.slice(0, MAX_HIGHLIGHTS).map((m) => (
+              <span
+                key={m.start}
+                data-testid="selection-match"
+                style={{
+                  position: 'absolute',
+                  top: editorLineTop(m.line - 1),
+                  height: EDITOR_LINE_HEIGHT,
+                  left: `calc(${textPadLeft} + ${m.column}ch)`,
+                  width: `${m.width}ch`
+                }}
+                className="rounded-[2px] bg-accent/20 ring-1 ring-accent/35"
+              />
+            ))}
+          </div>
+        </div>
+      )}
       {findOpen && (
         <FindBar
           query={findQuery}
           onQuery={setFindQuery}
-          caseSensitive={findCase}
-          onCaseSensitive={setFindCase}
+          toggles={findToggles}
+          onToggles={setFindToggles}
+          error={queryError}
           count={matches.length}
           index={current}
-          focusSeq={findSeq}
+          focus={findFocus}
+          replaceOpen={replaceOpen}
+          onReplaceOpen={setReplaceOpen}
+          replacement={replacement}
+          onReplacement={setReplacement}
           onStep={step}
+          onReplace={replaceOne}
+          onReplaceAll={replaceEvery}
           onClose={closeFind}
         />
       )}
@@ -1393,6 +1593,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // Ctrl+F presses, counted. The editor opens its find bar when this moves; a
   // second press with the bar already open re-selects the query.
   const [findSeq, setFindSeq] = useState(0)
+  // Ctrl+H presses: the same bar, opened with its replace row.
+  const [replaceSeq, setReplaceSeq] = useState(0)
   useEffect(() => {
     if (!editorOpen || editorOpen.tabId !== tab.id || editorOpen.seq === handledSeqRef.current) return
     handledSeqRef.current = editorOpen.seq
@@ -1621,7 +1823,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // textarea, the pills, the tree. Nothing else in the window claims it (there
   // is no application menu), so this is the whole binding.
   //
-  // Ctrl+F opens the code view's find bar, caught here rather than in the
+  // Ctrl+F opens the code view's find bar (Ctrl+H the same bar with its
+  // replace row showing), caught here rather than in the
   // editor so it works with focus in the tree or on a file pill as well. It
   // only means anything in File mode; a preview or an image has nothing to
   // search, and Chromium's own find has never been reachable in this window.
@@ -1638,6 +1841,9 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     } else if (key === 'f') {
       e.preventDefault()
       setFindSeq((n) => n + 1)
+    } else if (key === 'h') {
+      e.preventDefault()
+      setReplaceSeq((n) => n + 1)
     }
   }
 
@@ -1898,6 +2104,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                       : undefined
                   }
                   findSeq={findSeq}
+                  replaceSeq={replaceSeq}
                 />
               )}
             </div>
