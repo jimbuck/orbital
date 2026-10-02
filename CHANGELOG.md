@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.39.0](https://github.com/jimbuck/orbital/compare/v1.38.1...v1.39.0) (2026-10-02)
+
+
+### Features
+
+* **editor:** find/replace widget and selection-occurrence highlights ([79c0695](https://github.com/jimbuck/orbital/commit/79c0695df8f187533745acfb65ef629cda8112fe))
+
 ## [1.38.1](https://github.com/jimbuck/orbital/compare/v1.38.0...v1.38.1) (2026-09-30)
 
 
