@@ -15,7 +15,7 @@ import {
   applyDisplayChange,
   computeFoldRanges,
   displayToRealOffset,
-  EDITOR_LINE_HEIGHT,
+  editorLineHeight,
   editorLineTop,
   filterHtmlLines,
   foldChips,
@@ -49,6 +49,9 @@ import { clampTreeWidth, treeMaxWidth, TREE_DEFAULT_WIDTH, TREE_MIN_WIDTH } from
 import FolderView, { clearThumbnailCache } from './FolderView'
 import { promoteFile, showFile } from '@renderer/lib/openFiles'
 
+// Enough lines that the 1/64px snapping shows up in the measured block height.
+const PITCH_LINES = 64
+const PITCH_TEXT = Array.from({ length: PITCH_LINES }, () => 'x').join('\n')
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /** Single-letter git badge + tint for a changed file. */
@@ -171,6 +174,25 @@ export function CodeEditor({
   // A 1ch-wide probe, so the horizontal scroll can be worked out in the same
   // unit the highlights are drawn in without measuring the font by hand.
   const chRef = useRef<HTMLSpanElement>(null)
+  // The line pitch the text is really laid out at, off a hidden block of
+  // PITCH_LINES lines in the same font. Not 1.6em: Chromium snaps each line box
+  // to 1/64px, so overlays drawn in em drift off the text further down a file
+  // (see editorLineTop). A ResizeObserver catches zoom and font changes.
+  const pitchRef = useRef<HTMLDivElement>(null)
+  const [linePx, setLinePx] = useState<number | undefined>(undefined)
+  useLayoutEffect(() => {
+    const el = pitchRef.current
+    if (!el) return
+    const measure = (): void => {
+      const h = el.getBoundingClientRect().height / PITCH_LINES
+      setLinePx(h > 0 ? h : undefined)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   // Read off the element rather than assumed: the highlights are drawn at
   // tab-expanded columns, and a file indented with tabs would otherwise have
   // every rectangle on the wrong side of the screen.
@@ -283,7 +305,7 @@ export function CodeEditor({
    */
   const metrics = (ta: HTMLTextAreaElement): { lineHeight: number; padTop: number } => {
     const cs = getComputedStyle(ta)
-    const lineHeight = parseFloat(cs.lineHeight)
+    const lineHeight = linePx ?? parseFloat(cs.lineHeight)
     const padTop = parseFloat(cs.paddingTop)
     return {
       lineHeight: Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 19.2,
@@ -439,7 +461,7 @@ export function CodeEditor({
           // Keep focus (and the caret) in the textarea.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => toggleFold(real)}
-          style={{ top: editorLineTop(d), height: EDITOR_LINE_HEIGHT }}
+          style={{ top: editorLineTop(d, linePx), height: editorLineHeight(linePx) }}
           className={`pointer-events-auto absolute inset-x-0 flex items-center justify-center hover:text-accent ${
             isFolded ? 'text-accent' : 'text-faint opacity-0 group-hover:opacity-100'
           }`}
@@ -762,6 +784,9 @@ export function CodeEditor({
       {/* Measured, not assumed — see chRef. Kept in the flow of the same font
           context as the textarea so it reports that font's advance width. */}
       <span ref={chRef} aria-hidden className="pointer-events-none absolute left-0 top-0 block h-0 w-[1ch] opacity-0" />
+      <div ref={pitchRef} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-pre">
+        {PITCH_TEXT}
+      </div>
       {findOpen && matches.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
           <div ref={findLayerRef} className="absolute left-0 top-0">
@@ -777,8 +802,8 @@ export function CodeEditor({
                   // em and ch, the units the text itself is laid out in, so the
                   // rectangles track the line height and the glyph advance at
                   // any zoom without a second set of numbers to keep in step.
-                  top: editorLineTop(m.line - 1),
-                  height: EDITOR_LINE_HEIGHT,
+                  top: editorLineTop(m.line - 1, linePx),
+                  height: editorLineHeight(linePx),
                   left: `calc(${textPadLeft} + ${m.column}ch)`,
                   width: `${m.width}ch`
                 }}
@@ -808,8 +833,8 @@ export function CodeEditor({
                 data-testid="selection-match"
                 style={{
                   position: 'absolute',
-                  top: editorLineTop(m.line - 1),
-                  height: EDITOR_LINE_HEIGHT,
+                  top: editorLineTop(m.line - 1, linePx),
+                  height: editorLineHeight(linePx),
                   left: `calc(${textPadLeft} + ${m.column}ch)`,
                   width: `${m.width}ch`
                 }}
@@ -850,8 +875,8 @@ export function CodeEditor({
                 data-testid="fold-chip-anchor"
                 style={{
                   position: 'absolute',
-                  top: editorLineTop(c.displayLine),
-                  height: EDITOR_LINE_HEIGHT,
+                  top: editorLineTop(c.displayLine, linePx),
+                  height: editorLineHeight(linePx),
                   left: `calc(${textPadLeft} + ${c.column}ch)`
                 }}
                 className="flex items-center"

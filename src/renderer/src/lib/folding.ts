@@ -321,17 +321,28 @@ export function expandedWidth(text: string, tabSize: number): number {
 
 /**
  * Height of one editor line, and the top edge of DISPLAY line `displayLine`
- * (0-based) in the editor's content box: py-3 then 1.6 line-heights per line.
+ * (0-based) in the editor's content box: py-3 then one line pitch per line.
  *
- * These are `em`/`ch` lengths, so they only land on the text when the element
- * they are set on has the editor's own font size. An overlay that shrinks its
- * font (a small chip label) must be wrapped in a box that is positioned with
- * these and keeps the inherited font: `1.6em` inside `text-[10px]` is 16px, not
- * 19.2px, and everything drifts up by 3.2px per line above it.
+ * Pass `pitchPx`, the line pitch measured off the rendered text, whenever it
+ * is known. Chromium snaps each line box to its 1/64px layout unit, so 12px at
+ * 1.6 lays out at 19.1875px, not the 19.2px that `1.6em` computes to; an
+ * overlay positioned in `em` falls 0.0125px further behind per line — a few
+ * pixels a couple of hundred lines down, and a whole line by line 1500.
+ *
+ * Without it these are `em` lengths, which only land on the text when the
+ * element they are set on has the editor's own font size. An overlay that
+ * shrinks its font (a small chip label) must be wrapped in a box that is
+ * positioned with these and keeps the inherited font: `1.6em` inside
+ * `text-[10px]` is 16px, not 19.2px, and everything drifts up by 3.2px per line.
  */
 export const EDITOR_LINE_HEIGHT = '1.6em'
-export function editorLineTop(displayLine: number): string {
-  return `calc(0.75rem + ${displayLine} * ${EDITOR_LINE_HEIGHT})`
+export function editorLineHeight(pitchPx?: number): string {
+  return pitchPx ? `${pitchPx}px` : EDITOR_LINE_HEIGHT
+}
+export function editorLineTop(displayLine: number, pitchPx?: number): string {
+  return pitchPx
+    ? `calc(0.75rem + ${displayLine * pitchPx}px)`
+    : `calc(0.75rem + ${displayLine} * ${EDITOR_LINE_HEIGHT})`
 }
 
 /** Where a fold's `...` chip goes: after its header line, on screen. */

@@ -3,6 +3,7 @@ import {
   applyDisplayChange,
   computeFoldRanges,
   displayToRealOffset,
+  editorLineHeight,
   editorLineTop,
   filterHtmlLines,
   foldChips,
@@ -166,5 +167,12 @@ describe('foldChips / editorLineTop', () => {
   it('offsets lines by the top padding plus whole line heights', () => {
     expect(editorLineTop(0)).toBe('calc(0.75rem + 0 * 1.6em)')
     expect(editorLineTop(8)).toBe('calc(0.75rem + 8 * 1.6em)')
+  })
+
+  it('uses the measured line pitch when there is one', () => {
+    // 19.1875 is what Chromium lays 12px at 1.6 out at; 1.6em would be 19.2.
+    expect(editorLineTop(1600, 19.1875)).toBe('calc(0.75rem + 30700px)')
+    expect(editorLineHeight(19.1875)).toBe('19.1875px')
+    expect(editorLineHeight()).toBe('1.6em')
   })
 })
