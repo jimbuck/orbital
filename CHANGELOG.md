@@ -2,6 +2,18 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.40.0](https://github.com/jimbuck/orbital/compare/v1.39.0...v1.40.0) (2026-10-06)
+
+
+### Bug Fixes
+
+* **editor:** keep find and selection highlights on their lines ([a3d81cd](https://github.com/jimbuck/orbital/commit/a3d81cdaf3f4ed21d7b74f1d930af7d53866a515))
+
+
+### Features
+
+* **theme:** accent-tinted text selection ([ddab544](https://github.com/jimbuck/orbital/commit/ddab5441961d76c0b666985be2ceac230749f375))
+
 # [1.39.0](https://github.com/jimbuck/orbital/compare/v1.38.1...v1.39.0) (2026-10-02)
 
 
