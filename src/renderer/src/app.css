@@ -315,6 +315,17 @@
   .allow-select {
     user-select: text;
   }
+  /* Selected text in the theme's accent instead of Chromium's stock blue, as a
+     wash UNDER the glyphs — the same strengths the terminal uses (see
+     xtermTheme) — so the text keeps its own colour and stays readable whatever
+     accent a workspace picks. No `color` here: the editor's textarea draws its
+     text transparent over the highlighted mirror, and must keep doing so. */
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-accent) var(--selection-wash, 30%), transparent);
+  }
+  :root[data-appearance='light'] {
+    --selection-wash: 22%;
+  }
 }
 
 @layer components {

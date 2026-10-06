@@ -23,6 +23,12 @@ function ThemeManager(): null {
   useEffect(() => {
     document.documentElement.dataset.theme = theme.id
   }, [theme.id])
+  // Light or dark, for the few rules that differ by appearance rather than by
+  // theme (the selection wash in app.css). data-theme alone can't say: most
+  // themes' blocks come from the generated stylesheet.
+  useEffect(() => {
+    document.documentElement.dataset.appearance = theme.appearance
+  }, [theme.appearance])
   // Only the OFF state is marked. Ligatures on is the font's own behaviour, so
   // the default needs no attribute — and the app renders correctly before this
   // ever runs. See --code-ligatures in app.css.
