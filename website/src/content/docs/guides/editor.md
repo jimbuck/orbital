@@ -1,12 +1,12 @@
 ---
 title: The editor
-description: File tree, open-file pills, syntax-highlighted source and diffs, find in file, previews, images, and quick edits.
+description: File tree, folder tiles, open-file pills, syntax-highlighted source and diffs, code folding, find and replace, previews, images, and quick edits.
 ---
 
 An **editor tab** shows the active worktree's files: a tree on the left, and on
 the right a strip of open-file pills above the selected file.
 
-![The editor: file tree with icons and git badges, open-file pills, a line-number gutter and the find bar](../../../assets/screenshots/19-editor-file.png)
+![The editor: file tree with icons and git badges, open-file pills, a line-number gutter and the find-and-replace widget](../../../assets/screenshots/19-editor-file.png)
 
 ## Open files
 
@@ -18,6 +18,14 @@ back). Closing it asks whether to save, discard or cancel.
 Files from the git panel, the command palette and search results open as pills
 in the editor you're already using, instead of a new tab each.
 
+### Preview pills
+
+A single click on a file in the tree opens it as a **preview**: its pill label
+is italic, and the next single click replaces it rather than piling up another
+pill. Double-click the file (in the tree, a folder tile or its pill), edit it,
+or save it to keep it open. Files opened by name — from the git panel, the
+palette, a tab's config or **New File…** — open as kept pills straight away.
+
 ## The file tree
 
 - Tracked and untracked files, directories first. Each file has an icon for
@@ -28,6 +36,9 @@ in the editor you're already using, instead of a new tab each.
   ignored trees cost nothing until you open them.
 - Changed files carry their git badge (`M`, `A`, `D`, `?`, …); collapsed
   directories containing changes get an amber dot.
+- Drag the separator between the tree and the file to resize it. The width is
+  remembered; double-click the separator to reset it, or focus it and nudge
+  with the arrow keys.
 - The tree follows the repo live — agent edits and commits re-badge it
   automatically.
 - Right-click a row for **New File…**, **New Folder…**, **Rename…**, **Copy
@@ -35,6 +46,14 @@ in the editor you're already using, instead of a new tab each.
   default app, **Open in Terminal** (folders), git stage / unstage / discard,
   and **Delete** (to the recycle bin). Names are typed right in the menu, and
   names Windows can't represent (`CON`, a trailing dot, `:`) are refused.
+
+### Folder tiles
+
+Clicking a folder in the tree (or in the breadcrumb) also shows its entries as
+tiles in the content area. Images get real thumbnails, loaded as their tiles
+scroll into view; everything else shows its type icon. Click a file tile to
+preview it and double-click to keep it. Click a folder tile to select it, and
+double-click it (or press **Enter**) to go inside.
 
 ## File mode
 
@@ -49,19 +68,39 @@ switch to another pill. Right-click the text for Undo, Redo, Cut, Copy, Paste
 and Select All. It's for config tweaks and small fixes, not a replacement for
 your IDE.
 
+Selecting text highlights its other occurrences in the file, so you can see at
+a glance where else a name is used.
+
 Oversized files and diffs are refused up front with a message saying why,
 rather than freezing the tab.
 
-### Find in file
+### Code folding
 
-**Ctrl+F** opens a find bar over the top-right of the code, seeded with whatever
-you had selected. Every match is highlighted as you type and the current one is
-ringed; the count reads `3 of 17`.
+Chevrons beside the line numbers fold and unfold blocks. Fold ranges follow
+indentation; in Markdown they follow headings. A folded block collapses to its
+header line with a `...` chip; click the chip or the chevron to open it again.
+With the caret in a block, **Ctrl+Shift+[** folds it and **Ctrl+Shift+]**
+unfolds it. You can keep editing while code is folded — the hidden lines are
+left untouched and saved as they were.
+
+### Find and replace
+
+**Ctrl+F** opens a find widget over the top-right of the code, seeded with
+whatever you had selected. Every match is highlighted as you type and the
+current one is ringed; the count reads `3 of 17`.
 
 - **Enter** / **Shift+Enter** step forward and back, wrapping at the ends. So do
   **F3** / **Shift+F3**, which keep working while you carry on typing in the file.
-- **Aa** narrows to an exact-case match.
-- **Esc** closes the bar and leaves the caret on the match you stopped at.
+- Toggles in the find box narrow the search: **match case** (**Alt+C**),
+  **whole word** (**Alt+W**) and **regular expression** (**Alt+R**). A pattern
+  that doesn't compile is marked invalid instead of matching nothing silently.
+- **Ctrl+H**, or the chevron at the left of the widget, opens the replace row.
+  **Enter** there replaces the current match; **Ctrl+Alt+Enter** replaces them
+  all. With regex on, `$1` and named groups (`$<name>`) expand in the
+  replacement.
+- A replace is a single undo step, and **Replace all** reaches matches inside
+  folded code too.
+- **Esc** closes the widget and leaves the caret on the match you stopped at.
 
 Stepping only scrolls when the match is off screen, sideways as well as down —
 a hit past the right edge of a long line is no more found than one below the fold.

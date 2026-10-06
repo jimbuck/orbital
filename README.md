@@ -73,7 +73,8 @@ Code. The full product spec lives in
   cleans itself up.
 - **Browser** — plain-click a URL in any terminal and it opens as an in-app
   preview tab next to your agent; Ctrl+click sends it to your system browser.
-- **Editor** — a file tree with git-status badges, syntax-highlighted viewing,
+- **Editor** — a resizable file tree with git-status badges and folder tiles,
+  preview pills, syntax-highlighted viewing with code folding, find and replace,
   Markdown preview, staged/unstaged **diff views**, and light inline edits.
 - Terminal scrollback survives tab switches and pane moves — the PTY lives in
   the main process, the UI just reattaches.

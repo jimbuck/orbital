@@ -120,6 +120,11 @@ npm run dev   # electron-vite dev with renderer HMR (main/preload changes still 
 - **Inspecting the DB:** the repo's `better-sqlite3` is rebuilt for Electron's
   ABI, so plain `node` can't load it — use `python -c "import sqlite3; ..."`.
 
+- **`page.screenshot` mis-scales browser tabs.** The in-app browser pane's
+  page comes out zoomed (~2.4×) and looks clipped, though it lays out fine at
+  the pane's width. For any frame showing a browser tab, capture with
+  `BrowserWindow.capturePage()` via `app.evaluate` instead.
+
 ## Troubleshooting
 
 - **Launch timeout:** `out/` missing or stale → `npm run build`.
