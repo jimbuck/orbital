@@ -51,7 +51,8 @@ mac:
   artifactName: ${productName}-${version}-${arch}.${ext}
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}
-# Linux: the AppImage self-updates; the deb is for apt-based installs.
+# Linux: the AppImage self-updates; the deb is for apt-based installs. Each
+# target spells ${arch} its own way: x86_64 for the AppImage, amd64 for the deb.
 linux:
   icon: build/icon.png
   category: Development

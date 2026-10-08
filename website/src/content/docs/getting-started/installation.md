@@ -24,8 +24,8 @@ Download the build for your OS from the
   Applications. The build isn't signed yet, so macOS will refuse to open it the
   first time. Clear the quarantine flag once and it opens normally after that:
   `xattr -cr /Applications/Orbital.app`.
-- **Linux:** use `Orbital-<version>-x64.AppImage` (`chmod +x` it, then run
-  it) or install `Orbital-<version>-x64.deb` with `sudo apt install ./Orbital-<version>-x64.deb`.
+- **Linux:** use `Orbital-<version>-x86_64.AppImage` (`chmod +x` it, then run
+  it) or install `Orbital-<version>-amd64.deb` with `sudo apt install ./Orbital-<version>-amd64.deb`.
 
 ### Auto-update
 

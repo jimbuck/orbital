@@ -4,7 +4,7 @@
 #   • Windows: Orbital-<version>-setup.exe (+ .blockmap), latest.yml
 #   • macOS:   Orbital-<version>-arm64.dmg, Orbital-<version>-arm64.zip (+ .blockmap),
 #              latest-mac.yml — the zip is the auto-update target
-#   • Linux:   Orbital-<version>-x64.AppImage, Orbital-<version>-x64.deb,
+#   • Linux:   Orbital-<version>-x86_64.AppImage, Orbital-<version>-amd64.deb,
 #              latest-linux.yml — the AppImage is the auto-update target
 #
 # The three builds run in parallel and hand their assets to one publish job, so
@@ -116,8 +116,8 @@ jobs:
           - os: ubuntu-latest
             name: linux
             assets: |
-              dist/Orbital-*-x64.AppImage
-              dist/Orbital-*-x64.deb
+              dist/Orbital-*-x86_64.AppImage
+              dist/Orbital-*-amd64.deb
               dist/latest-linux.yml
     runs-on: ${{ matrix.os }}
     steps:
@@ -181,7 +181,7 @@ jobs:
           for f in \
             "dist/Orbital-$v-setup.exe" "dist/Orbital-$v-setup.exe.blockmap" "dist/latest.yml" \
             "dist/Orbital-$v-arm64.dmg" "dist/Orbital-$v-arm64.zip" "dist/Orbital-$v-arm64.zip.blockmap" "dist/latest-mac.yml" \
-            "dist/Orbital-$v-x64.AppImage" "dist/Orbital-$v-x64.deb" "dist/latest-linux.yml"
+            "dist/Orbital-$v-x86_64.AppImage" "dist/Orbital-$v-amd64.deb" "dist/latest-linux.yml"
           do
             [ -f "$f" ] || { echo "::error::Missing expected artifact: $f"; exit 1; }
             printf '%s  (%s)\n' "$f" "$(du -h "$f" | cut -f1)"
@@ -207,6 +207,6 @@ jobs:
             dist/Orbital-${{ needs.version.outputs.version }}-arm64.zip
             dist/Orbital-${{ needs.version.outputs.version }}-arm64.zip.blockmap
             dist/latest-mac.yml
-            dist/Orbital-${{ needs.version.outputs.version }}-x64.AppImage
-            dist/Orbital-${{ needs.version.outputs.version }}-x64.deb
+            dist/Orbital-${{ needs.version.outputs.version }}-x86_64.AppImage
+            dist/Orbital-${{ needs.version.outputs.version }}-amd64.deb
             dist/latest-linux.yml
