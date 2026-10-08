@@ -12,12 +12,12 @@ export default defineConfig({
     starlight({
       title: 'Orbital',
       description:
-        'A native Windows cockpit for running many interactive coding agents side by side — each in its own git worktree, with live status, tasks, and a full git panel.',
+        'A desktop cockpit for running many interactive coding agents side by side — each in its own git worktree, with live status, tasks, and a full git panel.',
       plugins: [
         starlightLlmsTxt({
           projectName: 'Orbital',
           details: [
-            'Orbital is a Windows desktop app (Electron). It spawns the real interactive agent CLIs (Claude Code, Codex, Cursor) in real terminals; it does not wrap them or call model APIs.',
+            'Orbital is a desktop app (Electron) for Windows, macOS and Linux. It spawns the real interactive agent CLIs (Claude Code, Codex, Cursor) in real terminals; it does not wrap them or call model APIs.',
             '',
             'If you are an agent running inside an Orbital terminal (`ORBITAL_WORKTREE_ID` is set), the pages under "For agents" and the CLI reference are the ones you need: the `orbital` CLI reports your status, files and progresses tasks, and registers dev servers.'
           ].join('\n'),

@@ -45,8 +45,8 @@ driver update, restart the app first.
 
 Orbital runs one window per workspace: launching a workspace that's already
 open focuses its window instead of starting a new process. To open a
-different workspace side by side, use **File ▸ Workspaces…** or the taskbar
-icon's **Recent** list.
+different workspace side by side, use **File ▸ Workspaces…** or, on Windows, the
+taskbar icon's **Recent** list.
 
 ## A worktree doesn't have my latest `.env` changes
 

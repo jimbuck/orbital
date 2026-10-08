@@ -76,7 +76,9 @@ never overwrites one you already have.
 
 ## Under the hood
 
-All workspaces share one SQLite database under your user profile
-(`%APPDATA%\orbital\orbital.db`). Each window runs as its own process with its
+All workspaces share one SQLite database in Orbital's app-data folder:
+`%APPDATA%\Orbital\orbital.db` on Windows,
+`~/Library/Application Support/Orbital/orbital.db` on macOS and
+`~/.config/Orbital/orbital.db` on Linux. Each window runs as its own process with its
 own Chromium profile and its own control pipe, which is why an `orbital`
 command always reaches the window its terminal belongs to.

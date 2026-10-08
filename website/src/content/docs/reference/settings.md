@@ -56,8 +56,10 @@ the pane you were working in.
 
 ## Terminal
 
-**Default shell** is what new terminals run. PowerShell is the default; `pwsh`,
-`cmd`, Git Bash or a WSL launcher work too.
+**Default shell** is what new terminals run. On Windows, PowerShell is the
+default; `pwsh`, `cmd`, Git Bash or a WSL launcher work too. On macOS and Linux
+the default is your login shell (`$SHELL`), and the picker offers zsh, bash,
+sh, fish and pwsh.
 
 ## Git
 
@@ -106,5 +108,5 @@ reporting a crash. **Open log folder** takes you to the files.
 |---|---|
 | Global indicator | The title-bar banner when any worktree needs you |
 | Sound | A chime on a *new* needs-attention |
-| Taskbar badge | The taskbar icon's satellite glows amber |
-| Taskbar flash | The taskbar button flashes while Orbital is in the background |
+| Taskbar badge | The taskbar icon's satellite glows amber (on macOS, the Dock icon shows a count) |
+| Taskbar flash | The taskbar button flashes (the Dock icon bounces, on macOS) while Orbital is in the background |

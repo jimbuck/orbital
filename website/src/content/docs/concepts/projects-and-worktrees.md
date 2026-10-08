@@ -71,7 +71,7 @@ get numeric suffixes. If the branch already exists, Orbital attaches to it;
 otherwise it forks a new branch from the base ref you chose (default `HEAD`).
 
 Right-click a worktree for **Rename**, **Sync env files from root**,
-**Open in Explorer**, **Open in External Terminal**, **Clear Status** (for a
+**Open in File Explorer** (Finder on macOS), **Open in External Terminal**, **Clear Status** (for a
 status that got stuck), **Close Worktree** (keeps it on disk) and **Delete
 worktree**. Deleting refuses to discard uncommitted or unpushed work unless you
 explicitly force it, and the rail shows progress while a large worktree is
@@ -103,7 +103,7 @@ Each worktree owns a **split tree of panes**, each pane a strip of tabs:
 - **Agent** — a PTY that boots straight into one of the workspace's
   [agent profiles](/orbital/guides/running-agents/#agent-profiles).
 - **Browser** — an in-app preview (plain-clicking a URL in any terminal opens
-  one; Ctrl+click uses your system browser).
+  one; Ctrl+click, or Cmd+click on macOS, uses your system browser).
 - **Editor** — file tree, open-file pills, syntax-highlighted source, diffs,
   previews, images. See [The editor](/orbital/guides/editor/).
 - **Search** — content search across the checkout, the project or the whole

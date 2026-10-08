@@ -35,7 +35,7 @@ Orbital's answer is a cockpit:
 ## What Orbital is *not*
 
 - **It is not a wrapper around your agent, and it never spends tokens.** Orbital
-  spawns the real interactive CLI in a real terminal (ConPTY), so you keep the
+  spawns the real interactive CLI in a real terminal, so you keep the
   full feature set of your preferred harness — slash commands, hooks, MCP
   servers, permission modes — and everything runs on your existing subscription
   instead of metered API usage. Orbital launches **Claude Code**, **Codex** and

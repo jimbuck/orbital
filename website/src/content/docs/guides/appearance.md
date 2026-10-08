@@ -24,7 +24,7 @@ Three ways to switch:
 
 ![The theme gallery in Settings](../../../assets/screenshots/15-settings-appearance.png)
 
-**System** follows Windows' light/dark setting, and it's a pair: pick the theme
+**System** follows your OS's light/dark setting, and it's a pair: pick the theme
 for a dark OS and the one for a light OS, say Dracula at night and GitHub Light
 by day. Both default to the Orbital themes.
 
@@ -57,7 +57,7 @@ never reads as another status.
 ## Zoom
 
 **View ▸ Zoom In / Zoom Out / Reset Zoom**, or **Ctrl +**, **Ctrl -** and
-**Ctrl 0** (numpad too). The shortcuts work with focus in a terminal. Zoom runs
+**Ctrl 0** (numpad too; Cmd on macOS). The shortcuts work with focus in a terminal. Zoom runs
 from 48% to 299%, is saved per workspace, and comes back on restart. It's
 handy for demos and high-DPI screens.
 

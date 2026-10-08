@@ -63,7 +63,7 @@ achieved.
 
 ## Next
 
-- Press **Ctrl+Shift+P** for the [command palette](/orbital/guides/command-palette/).
+- Press **Ctrl+Shift+P** (Cmd+Shift+P on macOS) for the [command palette](/orbital/guides/command-palette/).
 - Install [the orbital skill](/orbital/agents/skill/) so Claude sessions you
   start by hand know the cockpit too.
 - Pick a theme and an accent in [Themes & appearance](/orbital/guides/appearance/).

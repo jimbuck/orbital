@@ -35,7 +35,7 @@ isolated **worktree**, glance at the rail to see who's `working` and who
 `needs you`, answer the blocked one, and get back to what you were doing.
 
 **Orbital never wraps or re-implements your agent.** It spawns the real
-interactive CLI in a real terminal (ConPTY + xterm.js), so you keep the full
+interactive CLI in a real terminal (node-pty + xterm.js), so you keep the full
 feature set of your preferred harness — slash commands, hooks, MCP servers,
 permission modes, plan mode — and everything runs on your existing
 subscription instead of metered API tokens. Orbital launches **Claude Code**,
@@ -72,7 +72,7 @@ Code. The full product spec lives in
   args and env, sit side by side in the new-tab menu. If an agent exits, its tab
   cleans itself up.
 - **Browser** — plain-click a URL in any terminal and it opens as an in-app
-  preview tab next to your agent; Ctrl+click sends it to your system browser.
+  preview tab next to your agent; Ctrl+click (Cmd+click on macOS) sends it to your system browser.
 - **Editor** — a resizable file tree with git-status badges and folder tiles,
   preview pills, syntax-highlighted viewing with code folding, find and replace,
   Markdown preview, staged/unstaged **diff views**, and light inline edits.

@@ -3,6 +3,11 @@ title: Keyboard shortcuts
 description: Every keyboard shortcut in Orbital.
 ---
 
+Shortcuts are listed with Windows and Linux keys. **On macOS, read Ctrl as
+Cmd** (Ctrl+Shift+P is Cmd+Shift+P, Ctrl+S is Cmd+S), except inside a
+terminal, where Ctrl keeps its terminal meaning: Ctrl+C interrupts and Ctrl+P
+is shell history. Menus and tooltips show the right keys for your OS.
+
 ## Anywhere in the window
 
 These work even with focus inside a terminal. Orbital catches them before the
@@ -37,7 +42,7 @@ terminal sees the key.
 
 | Shortcut | Action |
 |---|---|
-| Ctrl+C | Copy the selection. With nothing selected it sends an interrupt, as usual. |
+| Ctrl+C | Copy the selection. With nothing selected it sends an interrupt, as usual. On macOS, Cmd+C copies and Ctrl+C always interrupts. |
 | Ctrl+V | Paste. A clipboard image is saved to a scratch file and its path pasted, so agents can read screenshots. |
 | Right-click | Paste |
 | Click a URL | Open it in an in-app browser tab |

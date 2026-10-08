@@ -33,9 +33,10 @@ When a worktree flips to needs-attention:
 1. The **rail** shows an amber count badge on the project (counting its linked
    worktrees) and a "needs you" label on the worktree.
 2. The **title bar** shows an "N agents need you" banner.
-3. The **Windows taskbar** icon lights up — the orbiting satellite in the app
-   icon swells and glows amber — the taskbar button **flashes** while Orbital
-   is in the background, and an optional **chime** plays on the rising edge.
+3. The **taskbar** icon lights up — the orbiting satellite in the app icon
+   swells and glows amber — and the taskbar button **flashes** while Orbital is
+   in the background. On macOS the Dock icon shows a count badge and bounces
+   instead. An optional **chime** plays on the rising edge.
 
 Each channel can be toggled independently in Settings.
 

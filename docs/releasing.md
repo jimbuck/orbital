@@ -27,9 +27,17 @@ Every push to `main` runs [`.github/workflows/release.yml`](../.github/workflows
 
 2. If a version was cut,
    [`.github/workflows/release-desktop.yml`](../.github/workflows/release-desktop.yml)
-   builds the Windows installer and **publishes the GitHub Release with the
-   assets attached** — `Orbital-X.Y.Z-setup.exe`, its `.blockmap`, and
-   `latest.yml`.
+   builds Windows, macOS and Linux in parallel, then **publishes the GitHub
+   Release with every asset attached**:
+   - Windows: `Orbital-X.Y.Z-setup.exe`, its `.blockmap`, `latest.yml`
+   - macOS: `Orbital-X.Y.Z-arm64.dmg`, `Orbital-X.Y.Z-arm64.zip` and its
+     `.blockmap`, `latest-mac.yml`
+   - Linux: `Orbital-X.Y.Z-x86_64.AppImage`, `Orbital-X.Y.Z-amd64.deb`,
+     `latest-linux.yml`
+
+   If any platform's build fails, nothing is published. Re-run the workflow by
+   hand with the version once it's fixed; its `dry_run` option builds all three
+   without publishing.
 
 The two-step ordering is deliberate: the Release only becomes visible once the
 installer is present, so **electron-updater inside installed apps never sees a

@@ -42,7 +42,7 @@ palette, a tab's config or **New File…** — open as kept pills straight away.
 - The tree follows the repo live — agent edits and commits re-badge it
   automatically.
 - Right-click a row for **New File…**, **New Folder…**, **Rename…**, **Copy
-  Path**, **Copy Relative Path**, **Reveal in File Explorer**, open with the
+  Path**, **Copy Relative Path**, **Reveal in File Explorer** (Finder on macOS), open with the
   default app, **Open in Terminal** (folders), git stage / unstage / discard,
   and **Delete** (to the recycle bin). Names are typed right in the menu, and
   names Windows can't represent (`CON`, a trailing dot, `:`) are refused.

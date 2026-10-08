@@ -5,7 +5,7 @@ description: Jump to any file, worktree, task or command, and search file conten
 
 ## The palette
 
-**Ctrl+Shift+P** opens the command palette. It reaches most of what Orbital
+**Ctrl+Shift+P** (Cmd+Shift+P on macOS) opens the command palette. It reaches most of what Orbital
 can do: tabs, panes, git, worktrees, tasks, appearance and the app menus.
 
 ![The command palette listing commands](../../../assets/screenshots/11-command-palette.png)
