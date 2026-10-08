@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.41.0](https://github.com/jimbuck/orbital/compare/v1.40.0...v1.41.0) (2026-10-08)
+
+
+### Features
+
+* **platform:** macOS and Linux support ([029856c](https://github.com/jimbuck/orbital/commit/029856c2fdea28d0295b689b641bfcace5e1996b))
+
 # [1.40.0](https://github.com/jimbuck/orbital/compare/v1.39.0...v1.40.0) (2026-10-06)
 
 
