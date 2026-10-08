@@ -10,6 +10,7 @@ import { fireAndForget } from '@renderer/lib/bridge'
 import { Marked, positionsToRanges } from '../Marked'
 import { buildCommands, type IconType } from './commands'
 import { fileIcon } from '@renderer/lib/fileIcons'
+import { shortcutLabel } from '@renderer/lib/platform'
 
 /**
  * The command palette — one place to reach Orbital's features by typing.
@@ -224,7 +225,7 @@ export default function CommandPalette(): JSX.Element | null {
         Icon: c.icon,
         label: c.label,
         ranges,
-        detail: c.hint,
+        detail: c.hint && shortcutLabel(c.hint),
         checked: c.checked,
         run: c.run,
         keepOpen: c.keepOpen,

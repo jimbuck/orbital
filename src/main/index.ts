@@ -14,6 +14,10 @@ import { getSettings } from './services/settings'
 import { refreshJumpList } from './services/jump-list'
 import { zoom } from './services/zoom'
 import { paletteShortcutPrefix } from './services/palette-shortcut'
+import { primaryModHeld } from './services/shortcut-mod'
+import { applicationMenu } from './services/app-menu'
+import { adoptLoginShellPath } from './services/login-env'
+import { appImageShimPath } from './services/agents/paths'
 import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
@@ -39,13 +43,21 @@ function createWindow(): BrowserWindow {
     minWidth: 940,
     minHeight: 600,
     show: false,
-    frame: false,
+    // Orbital draws its own titlebar. macOS keeps its traffic lights, inset
+    // into that bar (TitleBar leaves room for them); elsewhere the window is
+    // fully frameless and TitleBar draws minimize/maximize/close itself.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 10 } }
+      : { frame: false }),
     backgroundColor: '#0a0d12',
     title: 'Orbital',
     // In dev the host process is electron.exe, so without an explicit icon the
     // taskbar/Alt-Tab show the generic Electron logo. Point at the source icon
     // (build/ isn't shipped, but a packaged build embeds it in the exe instead).
-    icon: app.isPackaged ? undefined : join(app.getAppPath(), 'build', 'icon.ico'),
+    // Linux takes a PNG; macOS ignores this and uses the bundle's icon.
+    icon: app.isPackaged
+      ? undefined
+      : join(app.getAppPath(), 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -70,20 +82,13 @@ function createWindow(): BrowserWindow {
     runtime.broadcastState()
   })
 
-  // Ctrl+Shift+R reloads the window. Handled in the main process (not a renderer
+  // Ctrl+Shift+R (Cmd+Shift+R on macOS) reloads the window. Handled in the main process (not a renderer
   // keydown listener) so it still fires when the renderer itself is wedged —
   // which is exactly when a reload is most useful. The zoom shortcuts
   // (Ctrl +/-/0) live here too, so they work with focus in a terminal, where
   // xterm would otherwise swallow the keystroke.
   win.webContents.on('before-input-event', (event, input) => {
-    if (
-      input.type === 'keyDown' &&
-      input.control &&
-      input.shift &&
-      !input.alt &&
-      !input.meta &&
-      input.code === 'KeyR'
-    ) {
+    if (input.type === 'keyDown' && primaryModHeld(input) && input.shift && !input.alt && input.code === 'KeyR') {
       event.preventDefault()
       win.webContents.reloadIgnoringCache()
       return
@@ -141,8 +146,13 @@ if (!gotLock) {
     refreshJumpList()
   })
 
+  // Before anything resolves a command by name (agents, git, terminals).
+  adoptLoginShellPath()
+
   app.whenReady().then(async () => {
-    Menu.setApplicationMenu(null)
+    // No native menu bar on Windows/Linux — TitleBar draws the app menu. macOS
+    // gets a minimal one, since that is where Cmd+C/V/Q and friends live there.
+    Menu.setApplicationMenu(applicationMenu())
     // Register Orbital's identity with Windows so the shell attributes the taskbar
     // group, pinning and notifications to "Orbital" rather than to "Electron".
     app.setAppUserModelId(APP_ID)
@@ -182,6 +192,10 @@ if (!gotLock) {
       console.error('control channel failed to start:', err)
     })
     resumeTerminals()
+
+    // An AppImage's mount point moves every launch; keep the stable CLI copy
+    // the Claude hooks point at current with this build (see appImageShimPath).
+    if (process.env.APPIMAGE) appImageShimPath(process.env.APPIMAGE)
 
     // Publish the taskbar jump list of recent workspaces (boot resolution
     // already bumped this workspace's last_opened_at, so it sorts first).

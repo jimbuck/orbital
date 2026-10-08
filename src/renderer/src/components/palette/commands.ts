@@ -43,6 +43,7 @@ import { openTab } from '@renderer/lib/openTab'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { setFontLigatures, setThemeMode, systemThemeId, themeModeLabel } from '@renderer/lib/theme'
 import { THEMES } from '@shared/themes'
+import { fileManagerName } from '@renderer/lib/platform'
 
 /**
  * Everything the command palette can DO, as plain records.
@@ -268,8 +269,8 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     add({
       id: 'worktree.explorer',
       group: 'Worktree',
-      label: 'Open in File Explorer',
-      keywords: 'reveal folder finder',
+      label: `Open in ${fileManagerName}`,
+      keywords: 'reveal folder explorer finder',
       icon: FolderOpen,
       run: () => fireAndForget(window.orbital.openPath(wid, ''))
     })
@@ -277,7 +278,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       id: 'worktree.terminal',
       group: 'Worktree',
       label: 'Open in External Terminal',
-      keywords: 'shell powershell windows terminal',
+      keywords: 'shell powershell windows terminal iterm console',
       icon: SquareTerminal,
       run: () => fireAndForget(window.orbital.openInTerminal(wid, ''))
     })
@@ -320,7 +321,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     add({
       id: 'project.explorer',
       group: 'Project',
-      label: 'Open Project in File Explorer',
+      label: `Open Project in ${fileManagerName}`,
       keywords: 'reveal folder repo',
       icon: FolderOpen,
       run: () => fireAndForget(window.orbital.openProjectPath(project.id))

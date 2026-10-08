@@ -2,6 +2,7 @@ import type { BrowserWindow, Input } from 'electron'
 import { IPC, type WorkspaceSettings } from '@shared/types'
 import { getDb } from '../db/database'
 import { requireWorkspaceId, workspaces } from '../db/repositories'
+import { primaryModHeld } from './shortcut-mod'
 
 /**
  * UI zoom for the cockpit window: View ▸ Zoom In / Out / Reset and the usual
@@ -44,9 +45,10 @@ export function stepZoomLevel(level: number, direction: 'in' | 'out'): number {
  * — `=` and `+` share a key on most layouts) and the numpad plus zoom in;
  * Ctrl - and numpad minus zoom out; Ctrl 0 and numpad 0 reset. Alt is excluded
  * so AltGr combinations on European layouts keep typing their characters.
+ * Ctrl is Cmd on macOS.
  */
 export function zoomActionForInput(input: Input): 'in' | 'out' | 'reset' | null {
-  if (input.type !== 'keyDown' || !input.control || input.alt || input.meta) return null
+  if (input.type !== 'keyDown' || !primaryModHeld(input) || input.alt) return null
   switch (input.code) {
     case 'Equal':
     case 'NumpadAdd':

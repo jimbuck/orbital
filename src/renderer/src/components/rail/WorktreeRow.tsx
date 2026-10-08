@@ -5,6 +5,7 @@ import { useStore } from '@renderer/store'
 import { Spinner, StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 import { fireAndForget } from '@renderer/lib/bridge'
+import { fileManagerName } from '@renderer/lib/platform'
 
 type DeleteMode = 'none' | 'confirm' | 'force'
 
@@ -247,7 +248,7 @@ export default function WorktreeRow({ worktree }: { worktree: Worktree }): JSX.E
                   path itself, so the renderer never names a path to the OS. */}
               <MenuItem
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
-                label="Open in Explorer"
+                label={`Open in ${fileManagerName}`}
                 onClick={() => {
                   fireAndForget(window.orbital.openPath(worktree.id, ''))
                   closeMenu()

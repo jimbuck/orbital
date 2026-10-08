@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import { ClipboardPaste, Copy, Redo2, Scissors, TextSelect, Undo2 } from 'lucide-react'
 import { ContextMenu, MenuItem, type MenuPos } from '../rail/menu'
+import { shortcutLabel } from '@renderer/lib/platform'
 
 /** The editing actions a right-click inside the code editor offers. */
 export type EditorAction = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll'
@@ -39,7 +40,7 @@ export default function EditorContextMenu({
     hint: string,
     disabled = false
   ): JSX.Element => (
-    <MenuItem icon={icon} label={label} hint={hint} disabled={disabled} onClick={() => onAction(action)} />
+    <MenuItem icon={icon} label={label} hint={hint && shortcutLabel(hint)} disabled={disabled} onClick={() => onAction(action)} />
   )
 
   return (

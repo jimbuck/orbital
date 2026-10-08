@@ -11,6 +11,7 @@ import { registerTerminal } from '@renderer/lib/editActions'
 import { decodeOsc52 } from '@renderer/lib/terminalClipboard'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { onTerminalData, onTerminalExit } from '@renderer/lib/terminalStream'
+import { isMac } from '@renderer/lib/platform'
 
 /** Trailing delay before a refit's cols/rows are pushed to the PTY (see fitAndReport). */
 const RESIZE_REPORT_MS = 40
@@ -261,7 +262,8 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
     // undefined and sends nothing. So bare Ctrl+C is the one chord that emits
     // 0x03. That is the price of a single copy binding, and it is xterm's
     // behaviour rather than anything this handler could change without re-adding
-    // a binding. Cmd+C stays unbound because Orbital is a Windows cockpit.
+    // a binding. On macOS none of that applies: Cmd+C is the copy chord, as in
+    // every Mac terminal, and Ctrl+C is left entirely to the PTY.
     // `e.code` (not `e.key`) keeps both bindings layout-independent; Alt+Ctrl+C is
     // left alone because TUIs bind it. The `e.type === 'keydown'` guards are
     // load-bearing, not decorative: xterm hands the custom handler its keyup and
@@ -273,7 +275,9 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
         pasteClipboard()
         return false // paste ourselves (above) and stop xterm sending a literal 'v'
       }
-      const copyChord = e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyC'
+      const copyChord = isMac
+        ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && e.code === 'KeyC'
+        : e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyC'
       if (e.type === 'keydown' && copyChord && term.hasSelection()) {
         e.preventDefault()
         copySelection()

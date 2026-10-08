@@ -48,6 +48,7 @@ import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import { clampTreeWidth, treeMaxWidth, TREE_DEFAULT_WIDTH, TREE_MIN_WIDTH } from '@renderer/lib/editorTreeWidth'
 import FolderView, { clearThumbnailCache } from './FolderView'
 import { promoteFile, showFile } from '@renderer/lib/openFiles'
+import { shortcutLabel } from '@renderer/lib/platform'
 
 // Enough lines that the 1/64px snapping shows up in the measured block height.
 const PITCH_LINES = 64
@@ -457,7 +458,7 @@ export function CodeEditor({
           data-testid="fold-marker"
           data-folded={isFolded ? 'true' : 'false'}
           aria-label={isFolded ? 'Unfold' : 'Fold'}
-          title={isFolded ? 'Unfold (Ctrl+Shift+])' : 'Fold (Ctrl+Shift+[)'}
+          title={shortcutLabel(isFolded ? 'Unfold (Ctrl+Shift+])' : 'Fold (Ctrl+Shift+[)')}
           // Keep focus (and the caret) in the textarea.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => toggleFold(real)}

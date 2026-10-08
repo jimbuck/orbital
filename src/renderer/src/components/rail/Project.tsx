@@ -7,6 +7,7 @@ import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@render
 import WorktreeRow from './WorktreeRow'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
 import { fireAndForget } from '@renderer/lib/bridge'
+import { fileManagerName } from '@renderer/lib/platform'
 
 /**
  * The expand/collapse chevron, carrying what the hidden Worktrees add up to.
@@ -256,7 +257,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                   handing main an absolute path to open. */}
               <MenuItem
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
-                label="Open in Explorer"
+                label={`Open in ${fileManagerName}`}
                 onClick={() => {
                   fireAndForget(window.orbital.openProjectPath(project.id))
                   closeMenu()

@@ -8,6 +8,7 @@ import PaneGroup from './components/body/PaneGroup'
 import RightPanel from './components/panel/RightPanel'
 import ModalRoot from './components/modals/ModalRoot'
 import CommandPalette from './components/palette/CommandPalette'
+import { primaryMod } from '@renderer/lib/platform'
 
 /**
  * Mirrors the applied theme's id onto <html data-theme>, which is what selects
@@ -85,13 +86,13 @@ export default function App(): React.JSX.Element {
   // which sees the keystroke before xterm can swallow it.
   useEffect(() => window.orbital.onOpenPalette((prefix) => useStore.getState().openPalette(prefix)), [])
 
-  // Plain Ctrl+P is the editor convention for "go to file", but it is also
+  // Plain Ctrl+P (Cmd+P on macOS) is the editor convention for "go to file", but it is also
   // readline's "previous command" — so it is bound HERE, in the renderer, and
   // only while focus is outside a terminal. Shell history keeps working where
   // it matters, and the familiar shortcut works everywhere else.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'p') return
+      if (!primaryMod(e) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'p') return
       const el = document.activeElement
       if (el instanceof HTMLElement && el.closest('.xterm')) return
       e.preventDefault()

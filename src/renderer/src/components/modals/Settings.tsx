@@ -25,9 +25,12 @@ import {
   providerLabel
 } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, sectionLabel, fieldLabel, inputBase } from './ModalRoot'
+import { isWindows } from '@renderer/lib/platform'
 
-/** Common Windows shells offered in the default-shell picker. */
-const SHELL_OPTIONS = ['pwsh.exe', 'powershell.exe', 'cmd.exe', 'wsl.exe', 'bash.exe', 'git-bash.exe']
+/** Common shells for this OS, offered in the default-shell picker. */
+const SHELL_OPTIONS = isWindows
+  ? ['pwsh.exe', 'powershell.exe', 'cmd.exe', 'wsl.exe', 'bash.exe', 'git-bash.exe']
+  : ['/bin/zsh', '/bin/bash', '/bin/sh', 'fish', 'pwsh']
 
 const DEFAULT_ALERTS: SettingsModel['alerts'] = { indicator: true, sound: true, taskbarBadge: false, taskbarFlash: false }
 

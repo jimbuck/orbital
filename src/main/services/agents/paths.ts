@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { app } from 'electron'
 
@@ -51,6 +51,37 @@ function installedShimPath(): string | null {
  * back to their own repo shim.
  */
 export function hookShimPath(): string {
+  if (process.env.APPIMAGE) return appImageShimPath(process.env.APPIMAGE)
   if (app.isPackaged) return orbitalShimPath()
   return installedShimPath() ?? orbitalShimPath()
+}
+
+/**
+ * A Linux AppImage runs from a mount point that changes on every launch
+ * (/tmp/.mount_OrbitXXXXXX), so the bundled shim's path is dead by the next
+ * session. Hooks get a stable copy instead, under the XDG data dir: the CLI
+ * script, plus a shim that runs it on the AppImage itself as plain Node. The
+ * copy is refreshed on every call (boot included), so it tracks the installed
+ * version, and a moved AppImage is picked up the next time it runs.
+ */
+export function appImageShimPath(appImage: string): string {
+  const dataHome = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share')
+  const dir = join(dataHome, 'orbital', 'cli')
+  const shim = join(dir, 'orbital')
+  try {
+    mkdirSync(dir, { recursive: true })
+    copyFileSync(join(cliDir(), 'orbital.js'), join(dir, 'orbital.js'))
+    // Single-quoted for sh, so no character in the path is special.
+    const quoted = `'${appImage.replace(/'/g, `'\\''`)}'`
+    writeFileSync(
+      shim,
+      '#!/bin/sh\n' +
+        '# Written by Orbital: runs the bundled CLI on the AppImage as plain Node.\n' +
+        `ELECTRON_RUN_AS_NODE=1 exec ${quoted} "$(dirname "$0")/orbital.js" "$@"\n`
+    )
+    chmodSync(shim, 0o755)
+  } catch {
+    // Leave whatever copy is there; hooks are best-effort.
+  }
+  return shim
 }

@@ -5,7 +5,7 @@
 <h1 align="center">Orbital</h1>
 
 <p align="center"><strong>Get work done from orbit.</strong><br>
-A native Windows cockpit for running many interactive coding agents side by side.</p>
+A desktop cockpit for running many interactive coding agents side by side.</p>
 
 <p align="center">
   <a href="https://jimbuck.github.io/orbital/">Website</a> ·
@@ -16,7 +16,7 @@ A native Windows cockpit for running many interactive coding agents side by side
 
 <p align="center">
   <a href="https://github.com/jimbuck/orbital/releases/latest"><img src="https://img.shields.io/github/v/release/jimbuck/orbital?color=4f8cff" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-4f8cff" alt="Windows 10/11">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-4f8cff" alt="Windows, macOS, Linux">
   <img src="https://img.shields.io/badge/license-MIT-3ddc97" alt="MIT license">
 </p>
 
@@ -83,7 +83,7 @@ Code. The full product spec lives in
 Each terminal carries a status — `idle · working · needs-attention · error ·
 done` — and every worktree and project rolls up the most urgent one. When an
 agent flips to needs-attention you get a **three-way alert**: the rail badge
-pulses, a title-bar banner appears, and the Windows taskbar icon gets a badge
+pulses, a title-bar banner appears, and the taskbar (or Dock) icon gets a badge
 (plus an optional chime). Each is individually toggleable in Settings.
 
 ![An agent needing attention: amber rail badge, title-bar banner, and dev-server pill](website/src/assets/screenshots/04-status-alert.png)
@@ -210,19 +210,21 @@ your GitHub repos, or create a new one on GitHub via the `gh` CLI — and you ha
 a root worktree with a live terminal. Run `claude` (or any agent) in it — or create an
 **agent tab** and let Orbital boot it for you.
 
-### Native build notes (Windows)
+### Native build notes
 
 `node-pty` and `better-sqlite3` are native modules compiled for Electron's ABI.
 
 - `npm run rebuild` runs `electron-rebuild` for both.
+- On macOS you need the Xcode Command Line Tools; on Linux, `build-essential`
+  and Python. node-pty has no Linux prebuild, so it compiles there on install.
 - A small patch (`patches/node-pty+1.1.0.patch`, applied automatically by the
   `postinstall` hook via `patch-package`) makes node-pty's bundled **winpty**
   build portable: it calls its helper `.bat` scripts with a `.\` prefix (so it
   works even when `NoDefaultCurrentDirectoryInExePath` is set) and disables the
   optional **Spectre-mitigated libraries** requirement (`MSB8040`), which is not
   installed by default with Visual Studio Build Tools.
-- You need the **MSVC C++ build tools** and Python (the standard node-gyp
-  prerequisites).
+- On Windows you need the **MSVC C++ build tools** and Python (the standard
+  node-gyp prerequisites).
 
 ## Scripts
 
@@ -230,7 +232,7 @@ a root worktree with a live terminal. Run `claude` (or any agent) in it — or c
 |--------|---------|
 | `npm start` / `npm run dev` | build the CLI and launch the app in dev (HMR) |
 | `npm run build` | production build of main/preload/renderer |
-| `npm run make` | build + package a Windows installer (electron-builder) |
+| `npm run make` | build + package an installer for the current OS (electron-builder) |
 | `npm run rebuild` | recompile native modules for Electron |
 | `npm run typecheck` | `tsc --noEmit` for node + web project references |
 | `npm run lint` | ESLint |
@@ -239,14 +241,14 @@ a root worktree with a live terminal. Run `claude` (or any agent) in it — or c
 ## Stack
 
 Electron · electron-vite · React 18 · Tailwind v4 · TypeScript ·
-node-pty (ConPTY) + xterm.js (WebGL) · better-sqlite3 · chokidar · zustand · Lucide.
+node-pty + xterm.js (WebGL) · better-sqlite3 · chokidar · zustand · Lucide.
 
 ## Releases & auto-update
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
 (enforced by a commitlint hook). semantic-release turns them into versioned
 GitHub releases automatically — no release PRs — publishing each release only
-after the Windows installer is built and attached, and packaged builds
+after the Windows, macOS and Linux builds are attached, and packaged builds
 self-update from those releases in the background — see
 [`docs/releasing.md`](./docs/releasing.md).
 

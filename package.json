@@ -2,7 +2,7 @@
   "name": "orbital",
   "productName": "Orbital",
   "version": "1.40.0",
-  "description": "Get work done from orbit — a native Windows cockpit for running many interactive coding-agent sessions side by side.",
+  "description": "Get work done from orbit — a desktop cockpit for running many interactive coding-agent sessions side by side.",
   "main": "./out/main/index.js",
   "author": "Jim Buck",
   "license": "MIT",

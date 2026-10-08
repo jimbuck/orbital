@@ -7,6 +7,7 @@ import { fireAndForget } from '@renderer/lib/bridge'
 import { OrbitalMark } from './icons'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { setThemeMode, themeModeLabel, useSystemThemeId, useThemeMode } from '@renderer/lib/theme'
+import { isMac, shortcutLabel } from '@renderer/lib/platform'
 
 interface MenuItem {
   label: string
@@ -173,7 +174,12 @@ export default function TitleBar(): JSX.Element {
     // The border is the header's own border-b, and every child (menu buttons,
     // window controls) is h-full — i.e. the 33px content box — so opaque child
     // backgrounds can never paint over the hairline.
-    <header className="drag-region relative flex h-[34px] flex-none items-center justify-between border-b border-line bg-bar pl-[14px]">
+    <header
+      className={`drag-region relative flex h-[34px] flex-none items-center justify-between border-b border-line bg-bar ${
+        // macOS draws its traffic lights into the left of the bar (see createWindow).
+        isMac ? 'pl-[78px]' : 'pl-[14px]'
+      }`}
+    >
       {/* Left: brand + app menu bar. bg-bar so the centered breadcrumb is occluded
           here rather than visually colliding at narrow widths. */}
       <div className="no-drag z-50 flex h-full items-center gap-2.5 bg-bar">
@@ -241,7 +247,7 @@ export default function TitleBar(): JSX.Element {
                           />
                         )}
                         <span className="min-w-0 truncate">{it.label}</span>
-                        {it.hint && <span className="ml-auto flex-none text-[11px] text-faint">{it.hint}</span>}
+                        {it.hint && <span className="ml-auto flex-none text-[11px] text-faint">{shortcutLabel(it.hint)}</span>}
                       </button>
                     )
                   )}
@@ -337,20 +343,25 @@ export default function TitleBar(): JSX.Element {
             </span>
           </div>
         )}
-        <button type="button" aria-label="Minimize" onClick={() => window.orbital.windowMinimize()} className={ctrl}>
-          <Minus size={16} strokeWidth={1.5} />
-        </button>
-        <button type="button" aria-label="Maximize" onClick={() => window.orbital.windowMaximize()} className={ctrl}>
-          <Square size={13} strokeWidth={1.5} />
-        </button>
-        <button
-          type="button"
-          aria-label="Close"
-          onClick={() => window.orbital.windowClose()}
-          className="flex h-full w-[46px] items-center justify-center text-muted outline-none hover:bg-[#c4314b] hover:text-white focus-visible:ring-2 focus-visible:ring-accent/60"
-        >
-          <X size={15} strokeWidth={1.5} />
-        </button>
+        {/* macOS keeps its native traffic lights instead. */}
+        {!isMac && (
+          <>
+            <button type="button" aria-label="Minimize" onClick={() => window.orbital.windowMinimize()} className={ctrl}>
+              <Minus size={16} strokeWidth={1.5} />
+            </button>
+            <button type="button" aria-label="Maximize" onClick={() => window.orbital.windowMaximize()} className={ctrl}>
+              <Square size={13} strokeWidth={1.5} />
+            </button>
+            <button
+              type="button"
+              aria-label="Close"
+              onClick={() => window.orbital.windowClose()}
+              className="flex h-full w-[46px] items-center justify-center text-muted outline-none hover:bg-[#c4314b] hover:text-white focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <X size={15} strokeWidth={1.5} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Click-away backdrop while a menu is open. */}

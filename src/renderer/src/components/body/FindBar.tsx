@@ -11,6 +11,7 @@ import {
   WholeWord,
   X
 } from 'lucide-react'
+import { shortcutLabel } from '@renderer/lib/platform'
 
 /**
  * The editor's find/replace widget, laid out the way VS Code's is: a chevron
@@ -172,7 +173,7 @@ export default function FindBar({
         type="button"
         aria-label={replaceOpen ? 'Hide replace' : 'Show replace'}
         aria-expanded={replaceOpen}
-        title="Toggle replace (Ctrl+H)"
+        title={shortcutLabel('Toggle replace (Ctrl+H)')}
         onClick={() => onReplaceOpen(!replaceOpen)}
         className={`flex h-[22px] w-[16px] flex-none items-center justify-center self-stretch rounded-[5px] text-muted hover:bg-hover hover:text-text ${FOCUS}`}
       >
@@ -260,7 +261,7 @@ export default function FindBar({
             <button type="button" aria-label="Replace" title="Replace (Enter)" disabled={count === 0} onClick={onReplace} className={BTN}>
               <Replace size={13} strokeWidth={1.5} />
             </button>
-            <button type="button" aria-label="Replace all" title="Replace all (Ctrl+Alt+Enter)" disabled={count === 0} onClick={onReplaceAll} className={BTN}>
+            <button type="button" aria-label="Replace all" title={shortcutLabel('Replace all (Ctrl+Alt+Enter)')} disabled={count === 0} onClick={onReplaceAll} className={BTN}>
               <ReplaceAll size={13} strokeWidth={1.5} />
             </button>
           </div>

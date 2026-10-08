@@ -1,6 +1,6 @@
 ---
 title: What is Orbital?
-description: A native Windows cockpit for running many interactive coding agents side by side.
+description: A desktop cockpit for running many interactive coding agents side by side.
 ---
 
 Orbital is a desktop app for people who run **multiple coding agents at once** —
@@ -23,7 +23,7 @@ Orbital's answer is a cockpit:
 - Projects group into **workspaces**, each in its own window with its own theme,
   accent and agent profiles, so work and personal repos never mix.
 - Every terminal carries a live **status**. The left rail, the title bar, and the
-  Windows taskbar all tell you the moment an agent needs you.
+  taskbar (or Dock) all tell you the moment an agent needs you.
 - A built-in **git panel** and **task tracker** close the loop: review the diff,
   commit, push, mark the task done, delete the worktree.
 - A **command palette** and cross-worktree **search** get you to any file,

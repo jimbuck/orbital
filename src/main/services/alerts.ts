@@ -3,7 +3,7 @@ import { app, BrowserWindow, nativeImage } from 'electron'
 import type { Worktree, Settings, AlertEvent } from '@shared/types'
 
 /**
- * AlertManager owns the Windows taskbar leg of the three-way needs-attention
+ * AlertManager owns the taskbar (dock, on macOS) leg of the three-way needs-attention
  * alert. Sound + in-app banner are handled in the renderer.
  *
  * The badge is the app icon itself: when a Worktree needs attention the window
@@ -47,13 +47,19 @@ export class AlertManager {
     if (win && !win.isDestroyed()) {
       const alerts = this.getSettings().alerts
       const badge = count > 0 && alerts.taskbarBadge
-      const icon = this.icon(badge ? 'alert' : 'normal')
       try {
-        if (!icon.isEmpty()) win.setIcon(icon)
-        // Flash the taskbar button on the rising edge while the cockpit is in
-        // the background — Windows stops the flash itself when the window comes
-        // to the foreground; cancel explicitly once nothing needs attention (or
-        // the toggle is off) so a still-backgrounded button stops asking.
+        // macOS has no per-window icon; the dock icon's badge carries the count.
+        if (process.platform === 'darwin') {
+          app.dock?.setBadge(badge ? String(count) : '')
+        } else {
+          const icon = this.icon(badge ? 'alert' : 'normal')
+          if (!icon.isEmpty()) win.setIcon(icon)
+        }
+        // Flash the taskbar button (bounce the dock icon, on macOS) on the
+        // rising edge while the cockpit is in the background — the OS stops it
+        // itself when the window comes to the foreground; cancel explicitly once
+        // nothing needs attention (or the toggle is off) so a still-backgrounded
+        // button stops asking.
         if (alerts.taskbarFlash && rising && !win.isFocused()) win.flashFrame(true)
         else if (count === 0 || !alerts.taskbarFlash) win.flashFrame(false)
       } catch {

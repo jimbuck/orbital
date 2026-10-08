@@ -36,6 +36,33 @@ win:
   target:
     - nsis
   artifactName: ${productName}-${version}-setup.${ext}
+# macOS: Apple Silicon only (CI builds on an arm64 runner, and native modules
+# are compiled for the host arch). The zip is what electron-updater installs;
+# the dmg is for first install. Builds are unsigned unless CSC_LINK /
+# CSC_KEY_PASSWORD are set, and an unsigned app cannot auto-update on macOS.
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+# Linux: the AppImage self-updates; the deb is for apt-based installs.
+linux:
+  icon: build/icon.png
+  category: Development
+  maintainer: Jim Buck <jimbuck@users.noreply.github.com>
+  synopsis: A cockpit for running many coding-agent sessions side by side
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
 # Where electron-updater looks for new versions (baked into resources/app-update.yml
 # at package time). Assets are uploaded to the GitHub release by CI (.github/workflows).
 publish:

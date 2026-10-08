@@ -64,7 +64,7 @@ describe('worktree context menu — sync env files', () => {
     expect(items()).toEqual([
       'Rename',
       'Clear Status',
-      'Open in Explorer',
+      'Open in File Explorer',
       'Open in External Terminal',
       'Sync env files from rootoverwrites',
       'Close Worktreekeep worktree',

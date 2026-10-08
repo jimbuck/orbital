@@ -1,4 +1,5 @@
 import type { Input } from 'electron'
+import { primaryModHeld } from './shortcut-mod'
 
 /**
  * The command-palette keyboard shortcut, recognised in the main process.
@@ -9,7 +10,7 @@ import type { Input } from 'electron'
  * opens from anywhere.
  *
  * Returns the prefix the palette should open with, or null when the input is
- * not the shortcut:
+ * not the shortcut (Ctrl is Cmd on macOS — see {@link primaryModHeld}):
  *
  *  - `Ctrl+Shift+P` → `'>'`, the commands view, matching the editor convention.
  *  - `Ctrl+Shift+O` → `''`, the mixed view that leads with file search. It
@@ -17,10 +18,10 @@ import type { Input } from 'electron'
  *    history keeps working in every terminal tab.
  *
  * Matching is on `code` (physical key) rather than `key`, so a non-US layout
- * still triggers it, and AltGr combinations are excluded along with Alt/Meta.
+ * still triggers it, and AltGr combinations are excluded along with Alt.
  */
 export function paletteShortcutPrefix(input: Input): string | null {
-  if (input.type !== 'keyDown' || !input.control || !input.shift || input.alt || input.meta) return null
+  if (input.type !== 'keyDown' || !primaryModHeld(input) || !input.shift || input.alt) return null
   if (input.code === 'KeyP') return '>'
   if (input.code === 'KeyO') return ''
   return null

@@ -12,7 +12,7 @@ import Project from './Project'
  * That state is not a corner case and it is not transient: the root row comes
  * from `reconcileProjectWorktrees`, which returns without writing any rows when
  * `git worktree list` fails — a folder that was never a repo, or has become
- * unreadable, permanently has none. "Open in Explorer" / "Open in External
+ * unreadable, permanently has none. "Open in File Explorer" / "Open in External
  * Terminal" are what a user reaches for in exactly that state, so they must not
  * be conditioned on a Worktree existing. Clear Status genuinely acts on a
  * Worktree row and correctly disappears with it.
@@ -107,7 +107,7 @@ describe('project context menu', () => {
     expect(items()).toEqual([
       'Rename',
       'New Worktree',
-      'Open in Explorer',
+      'Open in File Explorer',
       'Open in External Terminal',
       'Remove project'
     ])
@@ -121,7 +121,7 @@ describe('project context menu', () => {
       'Rename',
       'New Worktree',
       'Clear Status',
-      'Open in Explorer',
+      'Open in File Explorer',
       'Open in External Terminal',
       'Remove project'
     ])
@@ -130,7 +130,7 @@ describe('project context menu', () => {
   it('sends the OS hand-offs the PROJECT id, with no path over the bridge', () => {
     openMenu([])
 
-    fireEvent.click(screen.getByText('Open in Explorer'))
+    fireEvent.click(screen.getByText('Open in File Explorer'))
     expect(bridge.openProjectPath).toHaveBeenCalledWith(project.id)
     // A path parameter here would be the renderer telling main what to open,
     // which is the shape the containment work removed.

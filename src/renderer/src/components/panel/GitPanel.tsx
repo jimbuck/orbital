@@ -17,6 +17,7 @@ import { cleanIpcError } from '@renderer/lib/ipcError'
 import { openFileInEditor } from '@renderer/lib/openTab'
 import { ContextMenu, type MenuPos } from '../rail/menu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
+import { shortcutLabel } from '@renderer/lib/platform'
 
 /* Secondary button recipe (design guide: "// secondary"). */
 const SECONDARY =
@@ -918,7 +919,7 @@ export default function GitPanel(): JSX.Element {
             type="button"
             onClick={commit}
             disabled={commitDisabled}
-            title="Ctrl+Enter"
+            title={shortcutLabel('Ctrl+Enter')}
             className="flex-1 py-[9px] inline-flex items-center justify-center gap-1.5 rounded-btn bg-accent text-[12.5px] font-bold text-on-accent hover:bg-accent-hover transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-accent"
           >
             {busy === 'commit' && spinner}

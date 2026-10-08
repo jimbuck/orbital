@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import type { FileNode } from '@shared/types'
 import { ContextMenu, MenuConfirm, MenuItem, MenuPrompt, type MenuPos } from '../rail/menu'
+import { fileManagerName } from '@renderer/lib/platform'
 
 /**
  * What a completed operation did, handed back to the editor tab so it can
@@ -284,7 +285,7 @@ export default function FileContextMenu({
           <div className="my-1 h-px bg-soft" />
           <MenuItem
             icon={<FolderOpen size={13} strokeWidth={1.5} />}
-            label="Reveal in File Explorer"
+            label={`Reveal in ${fileManagerName}`}
             onClick={() => void run(() => window.orbital.revealPath(worktreeId, node.path))}
           />
           <MenuItem
