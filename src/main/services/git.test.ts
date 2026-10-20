@@ -581,6 +581,17 @@ function gitInit(): void {
   g('commit', '-q', '-m', 'init')
 }
 
+describe('git.status', () => {
+  it('lists each file inside a new directory, not the directory', async () => {
+    gitInit()
+    mkdirSync(join(repo, 'fresh', 'deep'), { recursive: true })
+    writeFileSync(join(repo, 'fresh', 'a.ts'), 'a\n')
+    writeFileSync(join(repo, 'fresh', 'deep', 'b.ts'), 'b\n')
+    const s = await git.status(repo)
+    expect(s.unstaged.map((f) => f.path).sort()).toEqual(['fresh/a.ts', 'fresh/deep/b.ts'])
+  })
+})
+
 describe('git.diff', () => {
   it('diffs an untracked file against nothing, so it renders as all additions', async () => {
     gitInit()

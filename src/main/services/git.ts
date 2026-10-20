@@ -280,14 +280,17 @@ async function statusUncached(repoPath: string): Promise<GitStatus> {
   // `-c core.quotePath=false` keeps non-ASCII/special filenames literal (not C-quoted),
   // so the paths we hand back can be staged/diffed/opened verbatim. `--no-optional-locks`
   // stops status from opportunistically rewriting `.git/index`, which the watcher watches
-  // — otherwise every refresh would feed itself another change event.
+  // — otherwise every refresh would feed itself another change event. `-uall` lists
+  // each file inside a new directory instead of collapsing it to "dir/", so the panel
+  // can show, diff and stage them one by one.
   const out = await run(repoPath, [
     '--no-optional-locks',
     '-c',
     'core.quotePath=false',
     'status',
     '--porcelain=v2',
-    '--branch'
+    '--branch',
+    '--untracked-files=all'
   ])
   let branch = ''
   let upstream: string | null = null
