@@ -1,4 +1,5 @@
 import { useEffect, useState, type JSX } from 'react'
+import type { WorkspaceInfo } from '@shared/types'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
 import { useStore, activeProject, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
@@ -24,7 +25,12 @@ interface MenuItem {
   hint?: string
   /** A non-interactive group caption (e.g. "Theme") rather than a command. */
   heading?: boolean
+  /** Rows of a flyout that opens beside this one on hover (or click). */
+  submenu?: MenuItem[]
 }
+/** How many other workspaces File ▸ Open Recent Workspace lists. */
+const RECENT_LIMIT = 10
+
 interface Menu {
   id: string
   label: string
@@ -51,6 +57,9 @@ export default function TitleBar(): JSX.Element {
   const project = useStore(activeProject)
 
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  // Index of the row whose flyout is showing, within the open menu.
+  const [openSub, setOpenSub] = useState<number | null>(null)
+  useEffect(() => setOpenSub(null), [openMenu])
   const [devMenu, setDevMenu] = useState(false)
 
   // The picked mode drives the check mark. The 'System' row's hint is the theme
@@ -73,6 +82,30 @@ export default function TitleBar(): JSX.Element {
     fireAndForget(openTab(activeWorktreeId, 'browser', { url }))
   }
 
+  // File ▸ Open Recent Workspace. Fetched each time the menu opens rather than
+  // kept in the store: the list only changes when some window opens a
+  // workspace, and nothing broadcasts that to the others.
+  const workspaceId = useStore((s) => s.workspace?.id)
+  const [recent, setRecent] = useState<WorkspaceInfo[]>([])
+  useEffect(() => {
+    if (openMenu !== 'file') return
+    let live = true
+    Promise.resolve()
+      .then(() => window.orbital.listWorkspaces())
+      .then((list) => {
+        if (live) setRecent(list.filter((w) => w.id !== workspaceId).slice(0, RECENT_LIMIT))
+      })
+      .catch(() => {
+        if (live) setRecent([])
+      })
+    return () => {
+      live = false
+    }
+  }, [openMenu, workspaceId])
+  const recentItems: MenuItem[] = recent.length
+    ? recent.map((w) => ({ label: w.name, onClick: () => fireAndForget(window.orbital.openWorkspace(w.id)) }))
+    : [{ label: 'No other workspaces', disabled: true }]
+
   // Escape closes an open menu (WAI-ARIA menu-button pattern).
   useEffect(() => {
     if (!openMenu) return
@@ -91,6 +124,7 @@ export default function TitleBar(): JSX.Element {
         { label: 'Add Project…', onClick: () => openModal('addProject') },
         { label: 'New Worktree…', onClick: () => openModal('newWorktree', { project }), disabled: !project },
         { sep: true, label: '' },
+        { label: 'Open Recent Workspace', submenu: recentItems },
         { label: 'Workspaces…', onClick: () => openModal('workspaces') },
         { label: 'Settings…', onClick: () => openModal('settings') },
         { sep: true, label: '' },
@@ -162,9 +196,73 @@ export default function TitleBar(): JSX.Element {
   ]
 
   const choose = (item: MenuItem): void => {
-    if (item.disabled) return
+    if (item.disabled || item.submenu) return
     setOpenMenu(null)
     item.onClick?.()
+  }
+
+  const renderItem = (it: MenuItem, i: number, top: boolean): JSX.Element => {
+    if (it.sep) return <div key={i} role="separator" className="my-1 h-px bg-soft" />
+    if (it.heading)
+      return (
+        <div
+          key={i}
+          role="presentation"
+          className="px-2.5 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-[0.6px] text-faint"
+        >
+          {it.label}
+        </div>
+      )
+    const subOpen = top && it.submenu !== undefined && openSub === i
+    const row = (
+      <button
+        key={i}
+        type="button"
+        role={it.checked === undefined ? 'menuitem' : 'menuitemradio'}
+        aria-checked={it.checked}
+        aria-haspopup={it.submenu ? 'menu' : undefined}
+        aria-expanded={it.submenu ? subOpen : undefined}
+        disabled={it.disabled}
+        // Preserve focus (see the menu button above) so Edit
+        // actions target the terminal/input, not this menuitem.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => (it.submenu ? setOpenSub((o) => (o === i ? null : i)) : choose(it))}
+        // Hovering any other row of the top menu closes an open flyout.
+        onMouseEnter={top ? () => setOpenSub(it.submenu ? i : null) : undefined}
+        className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] font-medium text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent ${
+          subOpen ? 'bg-hover' : ''
+        }`}
+      >
+        {/* Reserve the gutter on every radio row so the labels
+            line up whether or not that row is the selected one. */}
+        {it.checked !== undefined && (
+          <Check
+            size={12}
+            strokeWidth={2.5}
+            aria-hidden
+            className={`flex-none text-accent ${it.checked ? '' : 'invisible'}`}
+          />
+        )}
+        <span className="min-w-0 truncate">{it.label}</span>
+        {it.hint && <span className="ml-auto flex-none text-[11px] text-faint">{shortcutLabel(it.hint)}</span>}
+        {it.submenu && <ChevronRight size={12} strokeWidth={2} aria-hidden className="ml-auto flex-none text-faint" />}
+      </button>
+    )
+    if (!it.submenu) return row
+    return (
+      <div key={i} className="relative">
+        {row}
+        {subOpen && (
+          <div
+            role="menu"
+            aria-label={it.label}
+            className="absolute left-full top-[-5px] z-50 ml-1 min-w-[180px] max-w-[280px] rounded-[9px] border border-line-strong bg-elev p-1 elev-menu"
+          >
+            {it.submenu.map((sub, j) => renderItem(sub, j, false))}
+          </div>
+        )}
+      </div>
+    )
   }
 
   const ctrl =
@@ -212,45 +310,7 @@ export default function TitleBar(): JSX.Element {
                   role="menu"
                   className="absolute left-0 top-[34px] z-50 min-w-[210px] rounded-b-[9px] border border-line-strong bg-elev p-1 elev-menu"
                 >
-                  {m.items.map((it, i) =>
-                    it.sep ? (
-                      <div key={i} role="separator" className="my-1 h-px bg-soft" />
-                    ) : it.heading ? (
-                      <div
-                        key={i}
-                        role="presentation"
-                        className="px-2.5 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-[0.6px] text-faint"
-                      >
-                        {it.label}
-                      </div>
-                    ) : (
-                      <button
-                        key={i}
-                        type="button"
-                        role={it.checked === undefined ? 'menuitem' : 'menuitemradio'}
-                        aria-checked={it.checked}
-                        disabled={it.disabled}
-                        // Preserve focus (see the menu button above) so Edit
-                        // actions target the terminal/input, not this menuitem.
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => choose(it)}
-                        className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] font-medium text-text-2 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:text-faint disabled:hover:bg-transparent"
-                      >
-                        {/* Reserve the gutter on every radio row so the labels
-                            line up whether or not that row is the selected one. */}
-                        {it.checked !== undefined && (
-                          <Check
-                            size={12}
-                            strokeWidth={2.5}
-                            aria-hidden
-                            className={`flex-none text-accent ${it.checked ? '' : 'invisible'}`}
-                          />
-                        )}
-                        <span className="min-w-0 truncate">{it.label}</span>
-                        {it.hint && <span className="ml-auto flex-none text-[11px] text-faint">{shortcutLabel(it.hint)}</span>}
-                      </button>
-                    )
-                  )}
+                  {m.items.map((it, i) => renderItem(it, i, true))}
                 </div>
               )}
             </div>

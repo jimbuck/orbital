@@ -452,6 +452,7 @@ export default function Settings(): React.JSX.Element {
   const [workspaceName, setWorkspaceName] = useState(() => workspace?.name ?? '')
   const [patterns, setPatterns] = useState<string[]>(() => settings?.envSyncPatterns ?? [])
   const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
+  const [externalEditor, setExternalEditor] = useState(() => settings?.externalEditor ?? '')
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
   const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
   const [defaultOpenAction, setDefaultOpenAction] = useState<OpenAction>(
@@ -594,6 +595,7 @@ export default function Settings(): React.JSX.Element {
         periodicFetch,
         debugLogging,
         defaultOpenAction,
+        externalEditor: externalEditor.trim(),
         agents: cleanedAgents
       }
       await window.orbital.setSettings(changedOnly(edited, seededRef.current))
@@ -786,6 +788,19 @@ export default function Settings(): React.JSX.Element {
             className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-faint"
           />
         </div>
+      </div>
+
+      <div className="mt-2.5 flex items-center justify-between gap-4">
+        <span className="text-[12.5px] text-text-2">External editor</span>
+        <input
+          value={externalEditor}
+          onChange={(e) => setExternalEditor(e.target.value)}
+          placeholder="code"
+          spellCheck={false}
+          aria-label="External editor"
+          title="Command or path used by Open in External Editor — e.g. code, cursor, subl. Empty uses VS Code."
+          className="w-[180px] rounded-btn border border-line-2 bg-bg px-3 py-[7px] font-mono text-[12px] text-text-2 outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-accent/60"
+        />
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

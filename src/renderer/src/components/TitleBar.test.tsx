@@ -231,3 +231,63 @@ describe('TitleBar View menu — zoom', () => {
     expect((reset as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('TitleBar File menu — Open Recent Workspace', () => {
+  const ws = (id: string, name: string, lastOpenedAt: number) => ({ id, name, lastOpenedAt, projectCount: 1 })
+
+  function stubWorkspaces(list: ReturnType<typeof ws>[]): { openWorkspace: ReturnType<typeof vi.fn> } {
+    const openWorkspace = vi.fn(async () => null)
+    vi.stubGlobal('orbital', { ...window.orbital, listWorkspaces: vi.fn(async () => list), openWorkspace })
+    return { openWorkspace }
+  }
+
+  /** Open File, hover the Open Recent row, and hand back its flyout. */
+  async function openRecent(): Promise<HTMLElement> {
+    fireEvent.click(screen.getByRole('button', { name: 'File' }))
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Open Recent Workspace' }))
+    return screen.findByRole('menu', { name: 'Open Recent Workspace' })
+  }
+
+  it('lists the other workspaces on hover, leaving out the one this window shows', async () => {
+    seed('dark')
+    useStore.setState({ workspace: ws('a', 'Alpha', 3) })
+    stubWorkspaces([ws('a', 'Alpha', 3), ws('b', 'Beta', 2), ws('c', 'Gamma', 1)])
+    render(<TitleBar />)
+
+    const flyout = await openRecent()
+    await within(flyout).findByRole('menuitem', { name: 'Beta' })
+    expect(within(flyout).getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Beta', 'Gamma'])
+  })
+
+  it('opens the picked workspace and closes the menu', async () => {
+    seed('dark')
+    const { openWorkspace } = stubWorkspaces([ws('b', 'Beta', 2)])
+    render(<TitleBar />)
+
+    const flyout = await openRecent()
+    fireEvent.click(await within(flyout).findByRole('menuitem', { name: 'Beta' }))
+    expect(openWorkspace).toHaveBeenCalledWith('b')
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('says so when there is nothing else to open', async () => {
+    seed('dark')
+    useStore.setState({ workspace: ws('a', 'Alpha', 3) })
+    stubWorkspaces([ws('a', 'Alpha', 3)])
+    render(<TitleBar />)
+
+    const flyout = await openRecent()
+    const none = within(flyout).getByRole('menuitem', { name: 'No other workspaces' }) as HTMLButtonElement
+    expect(none.disabled).toBe(true)
+  })
+
+  it('closes the flyout when another row is hovered', async () => {
+    seed('dark')
+    stubWorkspaces([ws('b', 'Beta', 2)])
+    render(<TitleBar />)
+
+    await openRecent()
+    fireEvent.mouseEnter(screen.getByRole('menuitem', { name: 'Settings…' }))
+    expect(screen.queryByRole('menu', { name: 'Open Recent Workspace' })).toBeNull()
+  })
+})

@@ -553,6 +553,12 @@ export interface Settings {
    * without reading the title bar.
    */
   accentColor: string | null
+  /**
+   * The command "Open in External Editor" launches with the file's absolute
+   * path: a name looked up on PATH (`code`, `cursor`, `subl`) or a full path to
+   * the executable. Empty means VS Code's `code`.
+   */
+  externalEditor: string
 }
 
 /**
@@ -574,6 +580,7 @@ export const WORKSPACE_SETTING_KEYS = Object.keys({
   systemLightTheme: true,
   fontLigatures: true,
   defaultOpenAction: true,
+  externalEditor: true,
   accentColor: true
 } satisfies Record<keyof Settings, true>) as readonly (keyof Settings)[]
 
@@ -1115,6 +1122,7 @@ export const IPC = {
   openPath: 'orbital:openPath',
   revealPath: 'orbital:revealPath',
   openInTerminal: 'orbital:openInTerminal',
+  openInEditor: 'orbital:openInEditor',
   openProjectPath: 'orbital:openProjectPath',
   openProjectInTerminal: 'orbital:openProjectInTerminal',
   openLogFolder: 'orbital:openLogFolder',
@@ -1421,6 +1429,12 @@ export interface OrbitalApi {
    * link caveat as `openPath` — the path is the new shell's working directory.
    */
   openInTerminal(worktreeId: string, path: string): Promise<void>
+  /**
+   * Open a file or folder in a Worktree with the configured external editor
+   * (Settings ▸ External editor). Same `(worktreeId, path)` contract and
+   * containment as `openPath`; rejects when the editor cannot be found.
+   */
+  openInEditor(worktreeId: string, path: string): Promise<void>
   /**
    * Open a PROJECT's repo directory in the OS file manager.
    *

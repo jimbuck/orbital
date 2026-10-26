@@ -15,7 +15,8 @@ import { Spinner } from '@renderer/lib/status'
 import { useStore, activeWorktree, activeProject } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import { openFileInEditor } from '@renderer/lib/openTab'
-import { ContextMenu, type MenuPos } from '../rail/menu'
+import { ContextMenu, clampMenuPos, type MenuPos } from '../rail/menu'
+import GitContextMenu, { GIT_MENU_WIDTH, type GitMenuTarget } from './GitContextMenu'
 import type { GitFileState, GitFileStatus, GitStatus } from '@shared/types'
 import { shortcutLabel } from '@renderer/lib/platform'
 
@@ -112,7 +113,8 @@ function GitFileRow({
   onOpenDiff,
   onArm,
   onDiscard,
-  onDisarm
+  onDisarm,
+  onContextMenu
 }: {
   file: GitFileStatus
   action: 'stage' | 'unstage'
@@ -124,6 +126,7 @@ function GitFileRow({
   onArm?: () => void
   onDiscard?: () => void
   onDisarm?: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }): JSX.Element {
   const badge = stateBadge(file.state)
   const isStage = action === 'stage'
@@ -133,6 +136,7 @@ function GitFileRow({
   const name = file.path.split('/').pop() || file.path
   return (
     <div
+      onContextMenu={onContextMenu}
       className={`group flex items-center gap-[9px] px-[7px] py-[5px] rounded-md ${
         armed ? 'bg-red/10' : 'hover:bg-hover'
       }`}
@@ -270,7 +274,8 @@ function TreeRow({
   armedDir,
   onToggle,
   renderLeaf,
-  renderDirActions
+  renderDirActions,
+  onDirMenu
 }: {
   node: TreeNode
   depth: number
@@ -281,6 +286,7 @@ function TreeRow({
   onToggle: (key: string) => void
   renderLeaf: (file: GitFileStatus) => JSX.Element
   renderDirActions: (node: TreeNode) => ReactNode
+  onDirMenu: (node: TreeNode, e: React.MouseEvent) => void
 }): JSX.Element {
   const indent = { paddingLeft: depth * 12 }
 
@@ -296,6 +302,7 @@ function TreeRow({
     <>
       <div
         style={indent}
+        onContextMenu={(e) => onDirMenu(node, e)}
         className={`group flex items-center gap-1 rounded-md pr-[7px] ${
           armed ? 'bg-red/10' : 'hover:bg-hover'
         }`}
@@ -323,6 +330,7 @@ function TreeRow({
             onToggle={onToggle}
             renderLeaf={renderLeaf}
             renderDirActions={renderDirActions}
+            onDirMenu={onDirMenu}
           />
         ))}
     </>
@@ -357,6 +365,8 @@ export default function GitPanel(): JSX.Element {
   const [branches, setBranches] = useState<string[]>([])
   const [remoteBranches, setRemoteBranches] = useState<string[]>([])
   const [newBranch, setNewBranch] = useState('')
+  /** The open right-click menu on a changed file or folder, if any. */
+  const [rowMenu, setRowMenu] = useState<{ target: GitMenuTarget; pos: MenuPos } | null>(null)
 
   const worktreeId = worktree?.id ?? null
 
@@ -408,6 +418,7 @@ export default function GitPanel(): JSX.Element {
     setArmed(null)
     setError(null)
     setPickerPos(null)
+    setRowMenu(null)
     setCollapsedDirs(new Set())
   }, [worktreeId])
 
@@ -469,7 +480,9 @@ export default function GitPanel(): JSX.Element {
   const forEachFile = (
     files: GitFileStatus[],
     op: (path: string) => Promise<void>
-  ): Promise<void> => files.reduce((p, f) => p.then(() => op(f.path)), Promise.resolve())
+  ): Promise<void> => forEachPath(files.map((f) => f.path), op)
+  const forEachPath = (paths: string[], op: (path: string) => Promise<void>): Promise<void> =>
+    paths.reduce((p, path) => p.then(() => op(path)), Promise.resolve())
 
   /**
    * Show this file's staged/unstaged diff in the editor the user is already
@@ -481,6 +494,16 @@ export default function GitPanel(): JSX.Element {
   const openDiff = (f: GitFileStatus): void => {
     openFileInEditor(worktree.id, f.path, { staged: f.staged, gitState: f.state })
   }
+
+  /** Open the row menu at the cursor. The height is a generous estimate, only used to keep it on screen. */
+  const openRowMenu = (target: GitMenuTarget, e: React.MouseEvent): void => {
+    e.preventDefault()
+    setRowMenu({ target, pos: clampMenuPos(e, GIT_MENU_WIDTH, 340) })
+  }
+  const dirMenu =
+    (section: 's' | 'u') =>
+    (node: TreeNode, e: React.MouseEvent): void =>
+      openRowMenu({ kind: 'dir', section, path: node.path, files: collectFiles(node) }, e)
 
   /** Anchor the branch picker under the branch button and (re)load the local branch list. */
   const openPicker = (e: React.MouseEvent<HTMLButtonElement>): void => {
@@ -659,6 +682,25 @@ export default function GitPanel(): JSX.Element {
         </div>
       </div>
 
+      {rowMenu && (
+        <GitContextMenu
+          worktreeId={worktree.id}
+          target={rowMenu.target}
+          pos={rowMenu.pos}
+          busy={!!busy}
+          onClose={() => setRowMenu(null)}
+          actions={{
+            openDiff,
+            openFile: (path) => openFileInEditor(worktree.id, path),
+            stage: (paths) => void exec('stage', () => forEachPath(paths, (p) => window.orbital.gitStage(worktree.id, p))),
+            unstage: (paths) =>
+              void exec('unstage', () => forEachPath(paths, (p) => window.orbital.gitUnstage(worktree.id, p))),
+            discard: (paths) =>
+              void exec('discard', () => forEachPath(paths, (p) => window.orbital.gitDiscard(worktree.id, p)))
+          }}
+        />
+      )}
+
       {/* branch picker: local + remote branches + create-and-switch (root Worktree only) */}
       {pickerPos && (
         <ContextMenu pos={pickerPos} width={PICKER_WIDTH} onClose={() => setPickerPos(null)}>
@@ -799,6 +841,7 @@ export default function GitPanel(): JSX.Element {
                 armedDir={null}
                 onToggle={toggleDir}
                 renderDirActions={renderStagedDirActions}
+                onDirMenu={dirMenu('s')}
                 renderLeaf={(f) => (
                   <GitFileRow
                     file={f}
@@ -807,6 +850,7 @@ export default function GitPanel(): JSX.Element {
                     disabled={!!busy}
                     onAction={() => void exec('unstage', () => window.orbital.gitUnstage(worktree.id, f.path))}
                     onOpenDiff={() => openDiff(f)}
+                    onContextMenu={(e) => openRowMenu({ kind: 'file', section: 's', file: f }, e)}
                   />
                 )}
               />
@@ -871,6 +915,7 @@ export default function GitPanel(): JSX.Element {
                 armedDir={armed}
                 onToggle={toggleDir}
                 renderDirActions={renderUnstagedDirActions}
+                onDirMenu={dirMenu('u')}
                 renderLeaf={(f) => (
                   <GitFileRow
                     file={f}
@@ -882,6 +927,7 @@ export default function GitPanel(): JSX.Element {
                     onArm={() => setArmed(f.path)}
                     onDiscard={() => void exec('discard', () => window.orbital.gitDiscard(worktree.id, f.path))}
                     onDisarm={() => setArmed(null)}
+                    onContextMenu={(e) => openRowMenu({ kind: 'file', section: 'u', file: f }, e)}
                   />
                 )}
               />

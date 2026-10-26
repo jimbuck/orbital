@@ -40,7 +40,8 @@ const DEFAULT_SETTINGS: Settings = {
   // Right pane by default: something opened from the palette or the git panel
   // lands beside what you were doing rather than on top of it.
   defaultOpenAction: 'right',
-  accentColor: null
+  accentColor: null,
+  externalEditor: ''
 }
 
 /**
@@ -144,6 +145,7 @@ export function getSettings(): Settings {
   // Same reasoning as the accent: the blob is shared with hand edits, imports
   // and other builds, and an unknown placement would leave the renderer unable
   // to resolve a target pane at all.
+  if (typeof merged.externalEditor !== 'string') merged.externalEditor = DEFAULT_SETTINGS.externalEditor
   merged.defaultOpenAction = normalizeOpenAction(merged.defaultOpenAction) ?? DEFAULT_SETTINGS.defaultOpenAction
   // Likewise the system pair, with the extra rule that each half has to name a
   // theme of its own appearance — a dark-OS slot holding a light theme would

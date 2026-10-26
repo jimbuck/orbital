@@ -34,6 +34,7 @@ function makeSettings(theme: ThemeMode, pair?: SystemPair): SettingsModel {
     theme,
     ...pair,
     defaultOpenAction: 'right',
+    externalEditor: '',
     accentColor: null
   } as unknown as SettingsModel
 }

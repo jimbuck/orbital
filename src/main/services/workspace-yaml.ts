@@ -78,6 +78,7 @@ export function normalize(raw: unknown): WorkspaceConfig {
     if (s.theme === 'system' || isThemeId(s.theme)) settings.theme = s.theme
     if (typeof s.fontLigatures === 'boolean') settings.fontLigatures = s.fontLigatures
     if (typeof s.defaultShell === 'string') settings.defaultShell = s.defaultShell
+    if (typeof s.externalEditor === 'string') settings.externalEditor = s.externalEditor
     if (typeof s.debugLogging === 'boolean') settings.debugLogging = s.debugLogging
     const openAction = normalizeOpenAction(s.defaultOpenAction)
     if (openAction) settings.defaultOpenAction = openAction

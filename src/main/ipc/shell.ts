@@ -5,6 +5,8 @@ import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
 import { logger } from '../services/logger'
 import { spawnExternalTerminal } from '../services/external-terminal'
+import { spawnExternalEditor } from '../services/external-editor'
+import { getSettings } from '../services/settings'
 import { createTabInWorktree } from '../tabs'
 import { handle } from './handle'
 import { projectRepoPath, worktreeRepoPath } from './resolve'
@@ -118,6 +120,9 @@ export function register(): void {
   h(IPC.openInTerminal, (_e, worktreeId: string, path: string) => {
     spawnExternalTerminal(worktreePath(worktreeId, path))
   })
+  h(IPC.openInEditor, (_e, worktreeId: string, path: string) =>
+    spawnExternalEditor(getSettings().externalEditor, worktreePath(worktreeId, path))
+  )
 
   /* ---- Project-scoped hand-offs -------------------------------------------
    *
