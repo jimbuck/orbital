@@ -2,6 +2,19 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.42.0](https://github.com/jimbuck/orbital/compare/v1.41.1...v1.42.0) (2026-10-26)
+
+
+### Bug Fixes
+
+* **editor:** keep highlighted text aligned at the bottom of a file ([94af876](https://github.com/jimbuck/orbital/commit/94af876695c6ad706a34656d1717fefd71742715))
+
+
+### Features
+
+* **git:** right-click menu on changed files and folders ([5f3429e](https://github.com/jimbuck/orbital/commit/5f3429e65773c7a2e6ec061ec4b75fc1137b5182))
+* **tasks:** one-click archive button on done task cards ([a462ea7](https://github.com/jimbuck/orbital/commit/a462ea7224774f9965934971318adfb0b883fa90))
+
 ## [1.41.1](https://github.com/jimbuck/orbital/compare/v1.41.0...v1.41.1) (2026-10-20)
 
 
