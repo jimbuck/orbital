@@ -12,6 +12,7 @@ import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import TaskTitleButton from '../panel/TaskTitleButton'
 import { TaskCreatorMark, TaskTagsDisplay } from '../panel/TaskMeta'
 import TaskCardContextMenu from '../panel/TaskCardContextMenu'
+import ArchiveTaskButton from '../panel/ArchiveTaskButton'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import AddTaskCard from '../panel/AddTaskCard'
 import Settings from './Settings'
@@ -154,6 +155,11 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
         </span>
       </div>
       <TaskTagsDisplay task={task} />
+      {task.status === 'done' && (
+        <div className="mt-2 flex justify-end">
+          <ArchiveTaskButton task={task} />
+        </div>
+      )}
       {showCreateWorktree && (
         // stopPropagation + a no-op mouseDown keep the click from starting a
         // card drag. openModal now STACKS over the board (see ModalRoot), so
