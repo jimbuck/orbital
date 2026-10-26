@@ -328,13 +328,15 @@ export function CodeEditor({
   const syncScroll = (): void => {
     const ta = taRef.current
     if (!ta) return
-    const mirror = mirrorRef.current
-    if (mirror) {
-      mirror.scrollTop = ta.scrollTop
-      mirror.scrollLeft = ta.scrollLeft
-    }
-    const gutter = gutterRef.current
-    if (gutter) gutter.scrollTop = ta.scrollTop
+    // The mirror and gutter are moved by transform, not by copying scrollTop
+    // across: they have no scrollbar, so their scroll range is shorter than the
+    // textarea's by the horizontal scrollbar's height, and at the very bottom
+    // their scrollTop clamps while the textarea's keeps going. The text then
+    // sat lower than the caret and selection the textarea draws.
+    const mirrorPre = mirrorRef.current?.firstElementChild as HTMLElement | null | undefined
+    if (mirrorPre) mirrorPre.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
+    const gutter = gutterRef.current?.firstElementChild as HTMLElement | null | undefined
+    if (gutter) gutter.style.transform = `translateY(${-ta.scrollTop}px)`
     // The whole highlight layer moves as one transform rather than every
     // rectangle being repositioned: a thousand style writes per scroll frame is
     // exactly the jank the reveal band's direct-to-the-node trick avoids.
@@ -914,7 +916,7 @@ export function CodeEditor({
         style={{ width: gutterWidth }}
         className="pointer-events-none absolute inset-y-0 left-0 z-10 select-none overflow-hidden whitespace-pre border-r border-line bg-pane py-3 pr-2 text-right text-faint"
       >
-        {lineNumbers}
+        <div>{lineNumbers}</div>
       </div>
       {/* The fold strip: opaque like the gutter, so horizontally scrolled text
           slides under it rather than through the chevrons. Sits in the 12px
