@@ -10,47 +10,156 @@ import { extOf } from './markdownAssets'
 
 /** Extension -> shiki grammar id, for the cases where they differ. */
 const EXT_LANG: Record<string, string> = {
+  // JavaScript / TypeScript
   ts: 'typescript',
   mts: 'typescript',
   cts: 'typescript',
   js: 'javascript',
   mjs: 'javascript',
   cjs: 'javascript',
+  // Docs and markup
   md: 'markdown',
   markdown: 'markdown',
-  yml: 'yaml',
-  sh: 'bash',
-  zsh: 'bash',
-  ps1: 'powershell',
-  psm1: 'powershell',
-  py: 'python',
-  rb: 'ruby',
-  rs: 'rust',
-  kt: 'kotlin',
-  cs: 'csharp',
   htm: 'html',
   svg: 'xml',
+  xaml: 'xml',
+  csproj: 'xml',
+  fsproj: 'xml',
+  vbproj: 'xml',
+  props: 'xml',
+  targets: 'xml',
+  plist: 'xml',
+  xsd: 'xml',
+  mmd: 'mermaid',
+  typ: 'typst',
+  // Shells and scripts
+  sh: 'bash',
+  zsh: 'bash',
+  ksh: 'bash',
+  ps1: 'powershell',
+  psm1: 'powershell',
+  psd1: 'powershell',
+  cmd: 'bat',
+  nu: 'nushell',
+  // Languages
+  py: 'python',
+  pyi: 'python',
+  rb: 'ruby',
+  rake: 'ruby',
+  gemspec: 'ruby',
+  rs: 'rust',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  cs: 'csharp',
+  csx: 'csharp',
+  cshtml: 'razor',
+  h: 'c',
+  cc: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  hh: 'cpp',
+  hxx: 'cpp',
+  ex: 'elixir',
+  exs: 'elixir',
+  erl: 'erlang',
+  hrl: 'erlang',
+  hs: 'haskell',
+  sc: 'scala',
+  sbt: 'scala',
+  clj: 'clojure',
+  cljs: 'clojure',
+  cljc: 'clojure',
+  edn: 'clojure',
+  ml: 'ocaml',
+  mli: 'ocaml',
+  fs: 'fsharp',
+  fsi: 'fsharp',
+  fsx: 'fsharp',
+  pl: 'perl',
+  pm: 'perl',
+  jl: 'julia',
+  cr: 'crystal',
+  sol: 'solidity',
+  vert: 'glsl',
+  frag: 'glsl',
+  vim: 'viml',
+  gql: 'graphql',
+  // Templates
+  hbs: 'handlebars',
+  j2: 'jinja',
+  jinja2: 'jinja',
+  jade: 'pug',
+  styl: 'stylus',
+  // Infrastructure and config
+  tf: 'terraform',
+  tfvars: 'terraform',
+  nomad: 'hcl',
+  bicepparam: 'bicep',
+  gradle: 'groovy',
+  mk: 'make',
+  service: 'systemd',
+  socket: 'systemd',
+  timer: 'systemd',
+  mount: 'systemd',
+  rest: 'http',
+  libsonnet: 'jsonnet',
+  ndjson: 'jsonl',
+  pp: 'puppet',
+  feature: 'gherkin',
   patch: 'diff',
   gitignore: 'ini',
-  env: 'ini',
+  editorconfig: 'ini',
+  npmrc: 'ini',
+  gitconfig: 'ini',
+  cfg: 'ini',
+  env: 'dotenv',
   conf: 'ini'
 }
 
-/** Grammars we accept by their own name (extension === shiki id). */
-const SELF_LANGS = new Set([
-  'tsx', 'jsx', 'json', 'jsonc', 'json5', 'css', 'scss', 'less', 'html', 'xml', 'vue', 'svelte',
-  'yaml', 'toml', 'ini', 'bash', 'bat', 'powershell', 'python', 'ruby', 'go', 'rust', 'java',
-  'kotlin', 'swift', 'c', 'cpp', 'csharp', 'php', 'lua', 'sql', 'graphql', 'diff', 'docker',
-  'markdown', 'mdx', 'typescript', 'javascript'
-])
+/**
+ * Whole file names (lowercased) that say what a file is when the extension
+ * does not: build files, dotfiles and the like.
+ */
+const NAME_LANG: Record<string, string> = {
+  dockerfile: 'docker',
+  containerfile: 'docker',
+  makefile: 'make',
+  gnumakefile: 'make',
+  'cmakelists.txt': 'cmake',
+  jenkinsfile: 'groovy',
+  vagrantfile: 'ruby',
+  gemfile: 'ruby',
+  rakefile: 'ruby',
+  podfile: 'ruby',
+  brewfile: 'ruby',
+  justfile: 'just',
+  '.justfile': 'just',
+  codeowners: 'codeowners',
+  commit_editmsg: 'git-commit',
+  'git-rebase-todo': 'git-rebase',
+  '.bashrc': 'bash',
+  '.bash_profile': 'bash',
+  '.zshrc': 'bash',
+  '.zprofile': 'bash',
+  '.profile': 'bash',
+  'nginx.conf': 'nginx',
+  '.htaccess': 'apache',
+  'httpd.conf': 'apache'
+}
 
 /** The shiki grammar for a path, or null when we have none (plain text). */
 export function langFor(path: string): string | null {
-  const name = (path.split('/').pop() ?? '').toLowerCase()
-  if (name === 'dockerfile') return 'docker'
+  const name = (path.split(/[\\/]/).pop() ?? '').toLowerCase()
+  if (NAME_LANG[name]) return NAME_LANG[name]
+  // .env.local, .env.production …: the extension is the environment name.
+  if (name.startsWith('.env.')) return 'dotenv'
+  // Dockerfile.dev, api.Dockerfile
+  if (name.startsWith('dockerfile.') || name.endsWith('.dockerfile')) return 'docker'
+  // ~/.ssh/config and its includes
+  if (/(^|[\\/])\.ssh[\\/]/.test(path) && !name.includes('.')) return 'ssh-config'
   const ext = extOf(path)
   if (EXT_LANG[ext]) return EXT_LANG[ext]
-  if (SELF_LANGS.has(ext)) return ext
+  if (ext in LANG_LOADERS) return ext
   return null
 }
 
@@ -62,9 +171,14 @@ const FENCE_ALIASES: Record<string, string> = {
   golang: 'go',
   'c++': 'cpp',
   'c#': 'csharp',
+  'f#': 'fsharp',
   dockerfile: 'docker',
-  jsonl: 'json',
-  node: 'javascript'
+  node: 'javascript',
+  hcl2: 'hcl',
+  makefile: 'make',
+  protobuf: 'proto',
+  jinja2: 'jinja',
+  ssh: 'ssh-config'
 }
 
 /**
@@ -76,7 +190,7 @@ export function langForFence(tag: string): string | null {
   if (!t) return null
   if (FENCE_ALIASES[t]) return FENCE_ALIASES[t]
   if (EXT_LANG[t]) return EXT_LANG[t]
-  if (SELF_LANGS.has(t)) return t
+  if (t in LANG_LOADERS) return t
   return null
 }
 
@@ -89,7 +203,7 @@ export const HIGHLIGHT_MAX = 300_000
  * (no Oniguruma WASM to ship or boot), and grammars loaded on first use from
  * the explicit list below. `import('shiki')` pulled the full bundle: every
  * grammar shiki knows plus the WASM engine, ~10 MB of chunks in the installer
- * for the forty-odd languages the extension map above can ever ask for.
+ * for the languages the maps above can ever ask for.
  * Static import paths keep the bundler able to see exactly those.
  */
 
@@ -133,8 +247,95 @@ const LANG_LOADERS: Record<string, () => Promise<LangModule>> = {
   sql: () => import('shiki/dist/langs/sql.mjs'),
   graphql: () => import('shiki/dist/langs/graphql.mjs'),
   docker: () => import('shiki/dist/langs/docker.mjs'),
-  mdx: () => import('shiki/dist/langs/mdx.mjs')
+  mdx: () => import('shiki/dist/langs/mdx.mjs'),
+  // Infrastructure, build and config formats
+  terraform: () => import('shiki/dist/langs/terraform.mjs'),
+  hcl: () => import('shiki/dist/langs/hcl.mjs'),
+  bicep: () => import('shiki/dist/langs/bicep.mjs'),
+  nix: () => import('shiki/dist/langs/nix.mjs'),
+  puppet: () => import('shiki/dist/langs/puppet.mjs'),
+  nginx: () => import('shiki/dist/langs/nginx.mjs'),
+  apache: () => import('shiki/dist/langs/apache.mjs'),
+  systemd: () => import('shiki/dist/langs/systemd.mjs'),
+  'ssh-config': () => import('shiki/dist/langs/ssh-config.mjs'),
+  dotenv: () => import('shiki/dist/langs/dotenv.mjs'),
+  properties: () => import('shiki/dist/langs/properties.mjs'),
+  make: () => import('shiki/dist/langs/make.mjs'),
+  cmake: () => import('shiki/dist/langs/cmake.mjs'),
+  just: () => import('shiki/dist/langs/just.mjs'),
+  groovy: () => import('shiki/dist/langs/groovy.mjs'),
+  proto: () => import('shiki/dist/langs/proto.mjs'),
+  prisma: () => import('shiki/dist/langs/prisma.mjs'),
+  cue: () => import('shiki/dist/langs/cue.mjs'),
+  jsonnet: () => import('shiki/dist/langs/jsonnet.mjs'),
+  jsonl: () => import('shiki/dist/langs/jsonl.mjs'),
+  hjson: () => import('shiki/dist/langs/hjson.mjs'),
+  kdl: () => import('shiki/dist/langs/kdl.mjs'),
+  http: () => import('shiki/dist/langs/http.mjs'),
+  csv: () => import('shiki/dist/langs/csv.mjs'),
+  tsv: () => import('shiki/dist/langs/tsv.mjs'),
+  log: () => import('shiki/dist/langs/log.mjs'),
+  reg: () => import('shiki/dist/langs/reg.mjs'),
+  desktop: () => import('shiki/dist/langs/desktop.mjs'),
+  codeowners: () => import('shiki/dist/langs/codeowners.mjs'),
+  'git-commit': () => import('shiki/dist/langs/git-commit.mjs'),
+  'git-rebase': () => import('shiki/dist/langs/git-rebase.mjs'),
+  gherkin: () => import('shiki/dist/langs/gherkin.mjs'),
+  mermaid: () => import('shiki/dist/langs/mermaid.mjs'),
+  rst: () => import('shiki/dist/langs/rst.mjs'),
+  typst: () => import('shiki/dist/langs/typst.mjs'),
+  // Templates and stylesheets
+  sass: () => import('shiki/dist/langs/sass.mjs'),
+  stylus: () => import('shiki/dist/langs/stylus.mjs'),
+  astro: () => import('shiki/dist/langs/astro.mjs'),
+  handlebars: () => import('shiki/dist/langs/handlebars.mjs'),
+  jinja: () => import('shiki/dist/langs/jinja.mjs'),
+  twig: () => import('shiki/dist/langs/twig.mjs'),
+  liquid: () => import('shiki/dist/langs/liquid.mjs'),
+  erb: () => import('shiki/dist/langs/erb.mjs'),
+  pug: () => import('shiki/dist/langs/pug.mjs'),
+  razor: () => import('shiki/dist/langs/razor.mjs'),
+  // Shells
+  fish: () => import('shiki/dist/langs/fish.mjs'),
+  nushell: () => import('shiki/dist/langs/nushell.mjs'),
+  awk: () => import('shiki/dist/langs/awk.mjs'),
+  viml: () => import('shiki/dist/langs/viml.mjs'),
+  // More languages
+  zig: () => import('shiki/dist/langs/zig.mjs'),
+  dart: () => import('shiki/dist/langs/dart.mjs'),
+  elixir: () => import('shiki/dist/langs/elixir.mjs'),
+  erlang: () => import('shiki/dist/langs/erlang.mjs'),
+  gleam: () => import('shiki/dist/langs/gleam.mjs'),
+  haskell: () => import('shiki/dist/langs/haskell.mjs'),
+  elm: () => import('shiki/dist/langs/elm.mjs'),
+  scala: () => import('shiki/dist/langs/scala.mjs'),
+  clojure: () => import('shiki/dist/langs/clojure.mjs'),
+  ocaml: () => import('shiki/dist/langs/ocaml.mjs'),
+  fsharp: () => import('shiki/dist/langs/fsharp.mjs'),
+  r: () => import('shiki/dist/langs/r.mjs'),
+  perl: () => import('shiki/dist/langs/perl.mjs'),
+  julia: () => import('shiki/dist/langs/julia.mjs'),
+  vb: () => import('shiki/dist/langs/vb.mjs'),
+  nim: () => import('shiki/dist/langs/nim.mjs'),
+  crystal: () => import('shiki/dist/langs/crystal.mjs'),
+  solidity: () => import('shiki/dist/langs/solidity.mjs'),
+  glsl: () => import('shiki/dist/langs/glsl.mjs'),
+  hlsl: () => import('shiki/dist/langs/hlsl.mjs'),
+  wgsl: () => import('shiki/dist/langs/wgsl.mjs')
 }
+
+/** Every grammar this build can load, exported so a test can check the maps above only name these. */
+export const HIGHLIGHT_LANGS: ReadonlySet<string> = new Set(Object.keys(LANG_LOADERS))
+
+/** Every grammar the lookup tables can produce, for the same test. */
+export const MAPPED_LANGS: ReadonlySet<string> = new Set([
+  ...Object.values(EXT_LANG),
+  ...Object.values(NAME_LANG),
+  ...Object.values(FENCE_ALIASES),
+  'dotenv',
+  'docker',
+  'ssh-config'
+])
 
 /**
  * Syntax themes, loaded on demand exactly like the grammars above and for the
