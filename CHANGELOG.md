@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.43.0](https://github.com/jimbuck/orbital/compare/v1.42.0...v1.43.0) (2026-11-04)
+
+
+### Features
+
+* **editor:** syntax highlighting for Terraform and other config formats ([feccbfc](https://github.com/jimbuck/orbital/commit/feccbfc4f292a7820213e204111f174163cc5fbd))
+
 # [1.42.0](https://github.com/jimbuck/orbital/compare/v1.41.1...v1.42.0) (2026-10-26)
 
 
