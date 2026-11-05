@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.43.1](https://github.com/jimbuck/orbital/compare/v1.43.0...v1.43.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **editor:** show empty folders in the file tree ([7c25521](https://github.com/jimbuck/orbital/commit/7c25521809a13f72e81fcb7e25f333e100ccbc74))
+
 # [1.43.0](https://github.com/jimbuck/orbital/compare/v1.42.0...v1.43.0) (2026-11-04)
 
 
