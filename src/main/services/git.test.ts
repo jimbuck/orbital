@@ -592,6 +592,35 @@ describe('git.status', () => {
   })
 })
 
+describe('git.fileTree', () => {
+  /** Directory paths in the tree, depth-first, flagged when ignored. */
+  function dirs(nodes: Awaited<ReturnType<typeof git.fileTree>>): string[] {
+    return nodes.flatMap((n) =>
+      n.type === 'dir' ? [n.ignored ? `${n.path} (ignored)` : n.path, ...dirs(n.children ?? [])] : []
+    )
+  }
+
+  it('shows empty folders, including ones nested inside other empty folders', async () => {
+    gitInit()
+    await git.createDirectory(repo, '', 'docs')
+    await git.createDirectory(repo, 'src', 'components')
+    mkdirSync(join(repo, 'app', 'routes', 'api'), { recursive: true })
+    expect(dirs(await git.fileTree(repo)).sort()).toEqual(
+      ['app', 'app/routes', 'app/routes/api', 'docs', 'src', 'src/components'].sort()
+    )
+  })
+
+  it('leaves ignored folders collapsed for lazy loading', async () => {
+    writeFileSync(join(repo, '.gitignore'), 'cache/\n')
+    gitInit()
+    mkdirSync(join(repo, 'fresh', 'cache', 'deep'), { recursive: true })
+    writeFileSync(join(repo, 'fresh', 'cache', 'deep', 'x.bin'), 'x')
+    const tree = await git.fileTree(repo)
+    expect(dirs(tree)).toContain('fresh/cache (ignored)')
+    expect(dirs(tree)).not.toContain('fresh/cache/deep')
+  })
+})
+
 describe('git.diff', () => {
   it('diffs an untracked file against nothing, so it renders as all additions', async () => {
     gitInit()

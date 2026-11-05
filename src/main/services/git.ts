@@ -956,6 +956,49 @@ async function filePaths(repoPath: string): Promise<string[]> {
   return Array.from(new Set(toLines(out).filter(Boolean)))
 }
 
+/** Stop walking for empty folders past this many, so a huge untracked tree can't stall the file tree. */
+const EMPTY_DIR_WALK_MAX = 2000
+
+/**
+ * Add empty folders to the tree. `ls-files` lists files, so a folder with
+ * nothing in it never shows up, and a folder made with New Folder… stays
+ * invisible until a file lands in it. `--directory` without the file pass
+ * reports each untracked directory root (empty ones included); everything
+ * below a root is untracked too, so walk it on disk for nested folders.
+ * Directories the ignored pass already placed are not entered: they load
+ * lazily on expand and must keep an empty children array for that.
+ */
+async function addEmptyDirs(
+  repoPath: string,
+  ensureDir: (dirPath: string) => FileNode[],
+  dirNodes: Map<string, FileNode>
+): Promise<void> {
+  const out = await run(repoPath, [
+    '-c',
+    'core.quotePath=false',
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+    '--directory'
+  ])
+  const roots = toLines(out)
+    .filter((l) => l.endsWith('/'))
+    .map((l) => l.slice(0, -1))
+  let budget = EMPTY_DIR_WALK_MAX
+  async function walk(rel: string): Promise<void> {
+    if (budget-- <= 0 || dirNodes.get(rel)?.ignored) return
+    ensureDir(rel)
+    const entries = await readdir(join(repoPath, rel), { withFileTypes: true }).catch(() => [])
+    // A nested repository shows up as an untracked root; its insides are its own.
+    if (entries.some((e) => e.name === '.git')) return
+    for (const e of entries) {
+      // Real directories only: a link out of the checkout is not ours to list.
+      if (e.isDirectory() && e.name !== '.git') await walk(`${rel}/${e.name}`)
+    }
+  }
+  for (const root of roots) await walk(root)
+}
+
 async function fileTree(repoPath: string): Promise<FileNode[]> {
   const out = await run(repoPath, [
     '-c',
@@ -1032,6 +1075,8 @@ async function fileTree(repoPath: string): Promise<FileNode[]> {
     const name = slash === -1 ? p : p.slice(slash + 1)
     ensureDir(dir).push({ name, path: p, type: 'file', ignored: true })
   }
+
+  await addEmptyDirs(repoPath, ensureDir, dirNodes)
 
   // An ignored dir that stayed empty was collapsed by --directory: drop the
   // children array so the renderer knows to fetch its contents on expand.
