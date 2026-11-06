@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+## [1.43.2](https://github.com/jimbuck/orbital/compare/v1.43.1...v1.43.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **status:** don't flag an unprompted session as needing attention ([6fb2893](https://github.com/jimbuck/orbital/commit/6fb289310cbfd53431c05cfee4bc56d4f847259d))
+
 ## [1.43.1](https://github.com/jimbuck/orbital/compare/v1.43.0...v1.43.1) (2026-11-05)
 
 
