@@ -75,6 +75,37 @@ export function isHumanKeystroke(data: string): boolean {
   return data.replace(TERMINAL_REPORTS, '').length > 0
 }
 
+/**
+ * Fire times of each tab's latest SessionStart and UserPromptSubmit, so an
+ * idle_prompt can tell whether the session it belongs to has had a turn yet.
+ * Times rather than a flag because async hooks arrive out of order: an agent
+ * launched with an initial prompt can deliver its UserPromptSubmit before the
+ * SessionStart that preceded it.
+ */
+const sessionStartedAt = new Map<string, number>()
+const promptedAt = new Map<string, number>()
+
+/** Note the session/prompt lifecycle events that {@link isUnpromptedIdle} reads. */
+export function trackPromptLifecycle(tabId: string, event: string, firedAt: unknown): void {
+  const ts = typeof firedAt === 'number' && Number.isFinite(firedAt) ? firedAt : Date.now()
+  const map = event === 'SessionStart' ? sessionStartedAt : event === 'UserPromptSubmit' ? promptedAt : null
+  if (map && ts >= (map.get(tabId) ?? 0)) map.set(tabId, ts)
+}
+
+/**
+ * True for an idle_prompt from a session nobody has prompted yet — the state
+ * `/clear` leaves behind (and a bare launch). Claude still raises idle_prompt
+ * there a minute later, but an empty session waiting at its prompt is not
+ * asking for anything, so it should not light the needs-attention badge.
+ * A tab Orbital has seen no SessionStart for (the app restarted mid-session)
+ * is not treated as fresh.
+ */
+export function isUnpromptedIdle(tabId: string, payload: Record<string, unknown>): boolean {
+  if (payload.notification_type !== 'idle_prompt') return false
+  const started = sessionStartedAt.get(tabId)
+  return started !== undefined && (promptedAt.get(tabId) ?? 0) < started
+}
+
 /** Why a tab is blocked (its last blocking notification_type), if it is. */
 export function attentionKindOf(tabId: string): string | undefined {
   return attentionKind.get(tabId)
@@ -100,6 +131,8 @@ export function markHumanAction(tabId: string): void {
 export function forgetTabStatus(tabId: string): void {
   statusAppliedAt.delete(tabId)
   attentionKind.delete(tabId)
+  sessionStartedAt.delete(tabId)
+  promptedAt.delete(tabId)
 }
 
 /**

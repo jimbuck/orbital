@@ -18,7 +18,15 @@ import { updater } from '../services/updater'
 import { recordAgentSession } from '../services/agents/launch'
 import { createTabInWorktree } from '../tabs'
 import { beginWorktreeSetup, syncWorktreeEnv } from '../worktree-lifecycle'
-import { acceptStatusEvent, clearAttentionKind, hookEventToStatus, setAttentionKind, setTabStatus } from '../status'
+import {
+  acceptStatusEvent,
+  clearAttentionKind,
+  hookEventToStatus,
+  isUnpromptedIdle,
+  setAttentionKind,
+  setTabStatus,
+  trackPromptLifecycle
+} from '../status'
 import { normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
 
 /**
@@ -210,8 +218,12 @@ const handlers: Record<ControlCommand, Handler> = {
     // — after a `/clear` mid-session that is a different id from the one
     // Orbital launched with.
     recordAgentSession(tab, payload.session_id)
+    trackPromptLifecycle(req.terminalId, event, req.args.firedAt)
     const status = hookEventToStatus(event, payload)
     if (!status) return { ok: true }
+    // An empty session (just `/clear`ed, or launched bare) idling at its prompt
+    // is not waiting on anyone.
+    if (status === 'needs_attention' && isUnpromptedIdle(req.terminalId, payload)) return { ok: true }
     // Async hooks race over the pipe — drop an event a later-fired one beat here.
     if (!acceptStatusEvent(req.terminalId, req.args.firedAt)) return { ok: true }
     if (status === 'needs_attention') {
