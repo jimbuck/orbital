@@ -90,6 +90,16 @@ describe('menu items per row kind', () => {
     expect(screen.getByText('Discard Changes…')).toBeTruthy()
   })
 
+  it('offers only the folder-level actions for the checkout root', () => {
+    show({ name: '', path: '', type: 'dir', gitState: 'modified' })
+    for (const label of ['New File…', 'New Folder…', 'Copy Path', 'Reveal in File Explorer', 'Open Folder', 'Open in Terminal']) {
+      expect(screen.getByText(label)).toBeTruthy()
+    }
+    for (const label of ['Rename…', 'Copy Relative Path', 'Stage', 'Discard Changes…', 'Delete']) {
+      expect(screen.queryByText(label)).toBeNull()
+    }
+  })
+
   it('hides Unstage for an untracked file, which was never in the index', () => {
     show({ ...file, gitState: 'untracked' })
     expect(screen.getByText('Stage')).toBeTruthy()

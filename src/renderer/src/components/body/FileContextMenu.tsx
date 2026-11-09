@@ -112,6 +112,12 @@ export default function FileContextMenu({
   const [error, setError] = useState<string | null>(null)
 
   const isDir = node.type === 'dir'
+  /**
+   * The checkout itself — what a right-click on the tree's empty space below
+   * the rows names. It can be created into, copied, revealed and opened, but
+   * not renamed, binned, or staged as a whole from here.
+   */
+  const isRoot = node.path === ''
   const parentDir = parentDirOf(node)
   const label = isDir ? 'folder' : 'file'
   const unsavedInside = unsavedPaths.filter((p) => p === node.path || p.startsWith(`${node.path}/`))
@@ -260,21 +266,25 @@ export default function FileContextMenu({
           />
 
           <div className="my-1 h-px bg-soft" />
-          <MenuItem
-            icon={<Pencil size={13} strokeWidth={1.5} />}
-            label="Rename…"
-            onClick={go('rename')}
-          />
+          {!isRoot && (
+            <MenuItem
+              icon={<Pencil size={13} strokeWidth={1.5} />}
+              label="Rename…"
+              onClick={go('rename')}
+            />
+          )}
           <MenuItem
             icon={<Copy size={13} strokeWidth={1.5} />}
             label="Copy Path"
             onClick={() => void run(async () => window.orbital.writeClipboard(await absolute()))}
           />
-          <MenuItem
-            icon={<Clipboard size={13} strokeWidth={1.5} />}
-            label="Copy Relative Path"
-            onClick={() => void run(async () => window.orbital.writeClipboard(node.path))}
-          />
+          {!isRoot && (
+            <MenuItem
+              icon={<Clipboard size={13} strokeWidth={1.5} />}
+              label="Copy Relative Path"
+              onClick={() => void run(async () => window.orbital.writeClipboard(node.path))}
+            />
+          )}
 
           {/* The OS hand-offs pass the RELATIVE path and let main resolve it.
               Sending the absolute path resolvePath just handed back would work
@@ -302,7 +312,7 @@ export default function FileContextMenu({
           )}
 
           {/* Git actions only make sense for a row git has something to say about. */}
-          {node.gitState && (
+          {node.gitState && !isRoot && (
             <>
               <div className="my-1 h-px bg-soft" />
               <MenuItem
@@ -329,14 +339,18 @@ export default function FileContextMenu({
             </>
           )}
 
-          <div className="my-1 h-px bg-soft" />
-          <MenuItem
-            icon={<Trash2 size={13} strokeWidth={1.5} />}
-            label="Delete"
-            hint="to recycle bin"
-            danger
-            onClick={go('delete')}
-          />
+          {!isRoot && (
+            <>
+              <div className="my-1 h-px bg-soft" />
+              <MenuItem
+                icon={<Trash2 size={13} strokeWidth={1.5} />}
+                label="Delete"
+                hint="to recycle bin"
+                danger
+                onClick={go('delete')}
+              />
+            </>
+          )}
         </>
       )}
     </ContextMenu>

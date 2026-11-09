@@ -1102,6 +1102,29 @@ describe('EditorTab file mutations', () => {
     expect(bridge.readFile).toHaveBeenCalledWith('w1', 'src/fresh.txt')
   })
 
+  it('opens the root menu from the empty space under the tree rows', async () => {
+    await mount()
+    bridge.createFile.mockResolvedValueOnce('fresh.txt')
+    tree = [dirWith('src', ['notes.txt']), { name: 'fresh.txt', path: 'fresh.txt', type: 'file' }]
+
+    fireEvent.contextMenu(screen.getByTestId('file-tree-body'))
+    // Nothing is selected, so nothing row-specific is offered.
+    expect(screen.queryByText('Rename…')).toBeNull()
+    expect(screen.queryByText('Delete')).toBeNull()
+    fireEvent.click(screen.getByText('New File…'))
+    submitPrompt('New file in root', 'fresh.txt')
+    await flush()
+
+    expect(bridge.createFile).toHaveBeenCalledWith('w1', '', 'fresh.txt')
+    expect(pill('fresh.txt')).toBeTruthy()
+  })
+
+  it('keeps a row right-click on that row, not the root', async () => {
+    await mount()
+    fireEvent.contextMenu(treeRow('src'))
+    expect(screen.getByText('Rename…')).toBeTruthy()
+  })
+
   it('expands the folder a new folder landed in, without opening anything', async () => {
     await mount()
     tree = [{ ...dirWith('src', ['notes.txt']), children: [dirWith('src/sub', []), ...dirWith('src', ['notes.txt']).children!] }]

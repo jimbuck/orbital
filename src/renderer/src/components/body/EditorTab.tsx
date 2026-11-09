@@ -1933,7 +1933,13 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             <RefreshCw size={12} strokeWidth={1.5} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Right-clicking the empty space under the rows opens the same menu
+            on the checkout root (a row's own menu stops propagation first). */}
+        <div
+          data-testid="file-tree-body"
+          className="min-h-0 flex-1 overflow-y-auto"
+          onContextMenu={(e) => openMenu(e, ROOT_NODE)}
+        >
           {tree.length === 0 ? (
             <div className="px-3 py-2 text-xs text-faint">No files</div>
           ) : (
@@ -2153,6 +2159,9 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     </div>
   )
 }
+
+/** The checkout root, as the file menu sees it when the tree's background is right-clicked. */
+const ROOT_NODE: FileNode = { name: '', path: '', type: 'dir' }
 
 /* ---- File tree node ----------------------------------------------------- */
 
