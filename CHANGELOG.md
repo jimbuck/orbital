@@ -2,6 +2,13 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.44.0](https://github.com/jimbuck/orbital/compare/v1.43.2...v1.44.0) (2026-11-09)
+
+
+### Features
+
+* **editor:** right-click the file tree's empty space for a root menu ([c75f339](https://github.com/jimbuck/orbital/commit/c75f3394fb701391ce771b5337cab8c52502808e))
+
 ## [1.43.2](https://github.com/jimbuck/orbital/compare/v1.43.1...v1.43.2) (2026-11-06)
 
 
