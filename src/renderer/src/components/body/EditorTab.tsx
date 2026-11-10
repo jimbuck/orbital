@@ -2,11 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ChevronDown, ChevronRight, Folder, FolderOpen, RefreshCw, X } from 'lucide-react'
 import { fileIcon } from '@renderer/lib/fileIcons'
 import {
-  DEFAULT_TAB_SIZE,
   findError,
   findMatches,
   nextMatchIndex,
-  parseTabSize,
   replacementFor,
   selectionQuery,
   type FindMatch
@@ -15,8 +13,6 @@ import {
   applyDisplayChange,
   computeFoldRanges,
   displayToRealOffset,
-  editorLineHeight,
-  editorLineTop,
   filterHtmlLines,
   foldChips,
   pruneFolds,
@@ -48,11 +44,9 @@ import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import { clampTreeWidth, treeMaxWidth, TREE_DEFAULT_WIDTH, TREE_MIN_WIDTH } from '@renderer/lib/editorTreeWidth'
 import FolderView, { clearThumbnailCache } from './FolderView'
 import { promoteFile, showFile } from '@renderer/lib/openFiles'
+import { useTextSurface } from '@renderer/lib/textSurface'
 import { shortcutLabel } from '@renderer/lib/platform'
 
-// Enough lines that the 1/64px snapping shows up in the measured block height.
-const PITCH_LINES = 64
-const PITCH_TEXT = Array.from({ length: PITCH_LINES }, () => 'x').join('\n')
 const FOCUS = 'outline-none focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /** Single-letter git badge + tint for a changed file. */
@@ -94,10 +88,11 @@ function previewKind(path: string): PreviewKind {
 /**
  * Editable source view with live syntax highlighting: a transparent-text
  * textarea (caret + input) stacked over a shiki-rendered mirror of the draft,
- * scroll-synced, with a line-number gutter down the left. All three layers
- * share the exact font metrics, padding and line height, so the glyphs and
- * numbers line up. Falls back to a plain visible textarea when the grammar is
- * unknown or the file is too large to highlight.
+ * with a line-number gutter down the left and highlight layers on top. Where
+ * each of those goes, and how it follows the scroll, is lib/textSurface's
+ * business: every layer takes its box and its scroll follower from there. Falls
+ * back to a plain visible textarea when the grammar is unknown or the file is
+ * too large to highlight.
  *
  * The gutter is painted LAST (on top) with an opaque background: padding
  * scrolls with content in a textarea, so on a horizontal scroll the text would
@@ -142,15 +137,8 @@ export function CodeEditor({
 }): JSX.Element {
   const [html, setHtml] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ pos: MenuPos; hasSelection: boolean } | null>(null)
-  const mirrorRef = useRef<HTMLDivElement>(null)
-  const gutterRef = useRef<HTMLDivElement>(null)
-  const taRef = useRef<HTMLTextAreaElement>(null)
-  // The flash band over a revealed line. Its position is written straight to
-  // the node on every scroll rather than held in state — a setState per scroll
-  // event would re-render the whole editor at frame rate.
-  const bandRef = useRef<HTMLDivElement>(null)
-  const bandLineRef = useRef<number | null>(null)
-  const [banding, setBanding] = useState(false)
+  // The display row the flash band of a revealed line is over, while it shows.
+  const [bandRow, setBandRow] = useState<number | null>(null)
   const theme = useThemeId()
   // Find state. The query and the case toggle are kept SEPARATELY from whether
   // the bar is open, so closing it and reopening picks up what you last looked
@@ -167,41 +155,16 @@ export function CodeEditor({
   // Set by Replace: once the edit has landed and the matches are recomputed,
   // move on to the next one, the way VS Code's Replace does.
   const stepAfterReplaceRef = useRef(false)
-  const findLayerRef = useRef<HTMLDivElement>(null)
   // The selection, for highlighting its other occurrences. Display offsets.
   const [sel, setSel] = useState<{ start: number; end: number } | null>(null)
   const selTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const selLayerRef = useRef<HTMLDivElement | null>(null)
-  // A 1ch-wide probe, so the horizontal scroll can be worked out in the same
-  // unit the highlights are drawn in without measuring the font by hand.
-  const chRef = useRef<HTMLSpanElement>(null)
-  // The line pitch the text is really laid out at, off a hidden block of
-  // PITCH_LINES lines in the same font. Not 1.6em: Chromium snaps each line box
-  // to 1/64px, so overlays drawn in em drift off the text further down a file
-  // (see editorLineTop). A ResizeObserver catches zoom and font changes.
-  const pitchRef = useRef<HTMLDivElement>(null)
-  const [linePx, setLinePx] = useState<number | undefined>(undefined)
-  useLayoutEffect(() => {
-    const el = pitchRef.current
-    if (!el) return
-    const measure = (): void => {
-      const h = el.getBoundingClientRect().height / PITCH_LINES
-      setLinePx(h > 0 ? h : undefined)
-    }
-    measure()
-    if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-  // Read off the element rather than assumed: the highlights are drawn at
-  // tab-expanded columns, and a file indented with tabs would otherwise have
-  // every rectangle on the wrong side of the screen.
-  const [tabSize, setTabSize] = useState(DEFAULT_TAB_SIZE)
-  useEffect(() => {
-    const ta = taRef.current
-    if (ta) setTabSize(parseTabSize(getComputedStyle(ta).tabSize))
-  }, [])
+  const lines = useMemo(() => value.split('\n'), [value])
+  // One number per line. wrap="off" on the textarea means a source line is
+  // exactly one visual line, so a plain count is all the gutter needs.
+  const lineCount = lines.length
+  const surface = useTextSurface(lineCount)
+  const { geometry, tabSize } = surface
+  const taRef = surface.textareaRef
 
   // Folding. `foldState` holds the REAL line numbers of folded ranges, tagged
   // with the file so switching files starts unfolded. The textarea shows the
@@ -209,7 +172,6 @@ export function CodeEditor({
   // none of the mapping runs.
   const [foldState, setFoldState] = useState<{ path: string; starts: ReadonlySet<number> }>({ path, starts: NO_FOLDS })
   const lang = langFor(path)
-  const lines = useMemo(() => value.split('\n'), [value])
   const ranges = useMemo(() => computeFoldRanges(lines, tabSize, lang), [lines, tabSize, lang])
   const rawFolds = foldState.path === path ? foldState.starts : NO_FOLDS
   const folded = useMemo(() => (rawFolds.size === 0 ? NO_FOLDS : pruneFolds(rawFolds, ranges)), [rawFolds, ranges])
@@ -228,8 +190,6 @@ export function CodeEditor({
   )
   // What to put back after the display text is swapped under the caret.
   const pendingSelRef = useRef<{ start: number; end: number; top: number | null } | null>(null)
-  const foldLayerRef = useRef<HTMLDivElement>(null)
-  const markerLayerRef = useRef<HTMLDivElement | null>(null)
 
   // Find works on what is on screen: a match inside a fold has nowhere to be
   // drawn, and unfolding to reach it would fight the person who folded it.
@@ -255,18 +215,10 @@ export function CodeEditor({
   // An edit can shrink the match list under the current index.
   const current = matches.length === 0 ? -1 : Math.min(matchIndex, matches.length - 1)
 
-  // One number per line. wrap="off" on the textarea means a source line is
-  // exactly one visual line, so a plain count is all the gutter needs.
-  const lineCount = lines.length
   const lineNumbers = useMemo(
     () => (visible ? visible.map((i) => i + 1) : Array.from({ length: lineCount }, (_, i) => i + 1)).join('\n'),
     [lineCount, visible]
   )
-  // Widths are in `ch` of the shared monospace font, so the gutter grows with
-  // the digit count and the text columns move over by exactly the same amount.
-  const digits = Math.max(2, String(lineCount).length)
-  const gutterWidth = `calc(${digits}ch + 20px)`
-  const textPadLeft = `calc(${digits}ch + 32px)`
 
   useEffect(() => {
     const lang = langFor(path)
@@ -298,62 +250,6 @@ export function CodeEditor({
     [html, visible, lineCount]
   )
 
-  /**
-   * Line height and top padding in CSS pixels, read off the live element
-   * rather than hard-coded from the classes. The window has a user zoom, and
-   * `getComputedStyle` reports the same CSS pixels that `scrollTop` is measured
-   * in, so the arithmetic holds at any zoom level.
-   */
-  const metrics = (ta: HTMLTextAreaElement): { lineHeight: number; padTop: number } => {
-    const cs = getComputedStyle(ta)
-    const lineHeight = linePx ?? parseFloat(cs.lineHeight)
-    const padTop = parseFloat(cs.paddingTop)
-    return {
-      lineHeight: Number.isFinite(lineHeight) && lineHeight > 0 ? lineHeight : 19.2,
-      padTop: Number.isFinite(padTop) ? padTop : 12
-    }
-  }
-
-  /** Put the flash band over its line, in viewport coordinates. */
-  const positionBand = (): void => {
-    const ta = taRef.current
-    const band = bandRef.current
-    const line = bandLineRef.current
-    if (!ta || !band || line === null) return
-    const { lineHeight, padTop } = metrics(ta)
-    band.style.top = `${padTop + (line - 1) * lineHeight - ta.scrollTop}px`
-    band.style.height = `${lineHeight}px`
-  }
-
-  const syncScroll = (): void => {
-    const ta = taRef.current
-    if (!ta) return
-    // The mirror and gutter are moved by transform, not by copying scrollTop
-    // across: they have no scrollbar, so their scroll range is shorter than the
-    // textarea's by the horizontal scrollbar's height, and at the very bottom
-    // their scrollTop clamps while the textarea's keeps going. The text then
-    // sat lower than the caret and selection the textarea draws.
-    const mirrorPre = mirrorRef.current?.firstElementChild as HTMLElement | null | undefined
-    if (mirrorPre) mirrorPre.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
-    const gutter = gutterRef.current?.firstElementChild as HTMLElement | null | undefined
-    if (gutter) gutter.style.transform = `translateY(${-ta.scrollTop}px)`
-    // The whole highlight layer moves as one transform rather than every
-    // rectangle being repositioned: a thousand style writes per scroll frame is
-    // exactly the jank the reveal band's direct-to-the-node trick avoids.
-    const layer = findLayerRef.current
-    if (layer) layer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
-    const selLayer = selLayerRef.current
-    if (selLayer) selLayer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
-    const foldLayer = foldLayerRef.current
-    if (foldLayer) foldLayer.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
-    const markers = markerLayerRef.current
-    if (markers) markers.style.transform = `translateY(${-ta.scrollTop}px)`
-    positionBand()
-  }
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(syncScroll, [shownHtml, lineCount, matches, occurrences, visible])
-
   // Centre the requested line and flash it. Runs on `seq` so the same line can
   // be asked for again; the band clears itself after a beat.
   const revealSeq = reveal?.seq ?? 0
@@ -372,21 +268,13 @@ export function CodeEditor({
       setFoldState({ path, starts: next })
       return
     }
-    const displayLine = visible ? visible.indexOf(revealLine - 1) + 1 : revealLine
-    const { lineHeight, padTop } = metrics(ta)
-    const top = padTop + (displayLine - 1) * lineHeight
-    // Centre it, but never scroll past the top for a line near the start.
-    ta.scrollTop = Math.max(0, top - ta.clientHeight / 2 + lineHeight / 2)
-    bandLineRef.current = displayLine
-    setBanding(true)
-    syncScroll()
-    const timer = setTimeout(() => {
-      setBanding(false)
-      bandLineRef.current = null
-    }, 1800)
+    const row = visible ? visible.indexOf(revealLine - 1) : revealLine - 1
+    surface.centreRow(row)
+    setBandRow(row)
+    const timer = setTimeout(() => setBandRow(null), 1800)
     return () => clearTimeout(timer)
-    // syncScroll is redefined every render and would re-run this on every
-    // keystroke, re-scrolling away from wherever the user had moved to.
+    // Keyed on the request alone: re-running on every fold or keystroke would
+    // re-scroll away from wherever the user had moved to.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealSeq, revealLine, revealHidden])
 
@@ -464,8 +352,8 @@ export function CodeEditor({
           // Keep focus (and the caret) in the textarea.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => toggleFold(real)}
-          style={{ top: editorLineTop(d, linePx), height: editorLineHeight(linePx) }}
-          className={`pointer-events-auto absolute inset-x-0 flex items-center justify-center hover:text-accent ${
+          style={geometry.rowBox(d)}
+          className={`pointer-events-auto inset-x-0 flex items-center justify-center hover:text-accent ${
             isFolded ? 'text-accent' : 'text-faint opacity-0 group-hover:opacity-100'
           }`}
         >
@@ -476,7 +364,7 @@ export function CodeEditor({
     return out
     // toggleFold closes over the current fold set, which is already in the deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranges, folded, visible, lineCount])
+  }, [ranges, folded, visible, lineCount, geometry])
 
   /**
    * Put a match on screen and leave the caret on it.
@@ -495,23 +383,7 @@ export function CodeEditor({
     setMatchIndex(index)
     if (!ta || !match) return
     ta.setSelectionRange(match.start, match.end)
-    const { lineHeight, padTop } = metrics(ta)
-    const top = padTop + (match.line - 1) * lineHeight
-    if (top < ta.scrollTop || top + lineHeight > ta.scrollTop + ta.clientHeight) {
-      ta.scrollTop = Math.max(0, top - ta.clientHeight / 2 + lineHeight / 2)
-    }
-    // Horizontally too: a match past the right edge of a long line is no more
-    // found than one below the fold. The column is in `ch`, so it needs the
-    // one number CSS will not do the arithmetic for — the glyph's advance.
-    const charWidth = chRef.current?.getBoundingClientRect().width ?? 0
-    if (charWidth > 0) {
-      const left = parseFloat(getComputedStyle(ta).paddingLeft) + match.column * charWidth
-      const right = left + match.width * charWidth
-      if (left - ta.scrollLeft < 0 || right - ta.scrollLeft > ta.clientWidth) {
-        ta.scrollLeft = Math.max(0, left - ta.clientWidth / 3)
-      }
-    }
-    syncScroll()
+    surface.showCell(match.line - 1, match.column, match.width)
   }
 
   const step = (forward: boolean): void => {
@@ -716,12 +588,16 @@ export function CodeEditor({
     <div className="group relative h-full w-full font-mono text-[12px] leading-[1.6]">
       {shownHtml !== null && (
         <div
-          ref={mirrorRef}
           aria-hidden
-          className="shiki-view pointer-events-none absolute inset-0 overflow-hidden whitespace-pre py-3 pr-4"
-          style={{ paddingLeft: textPadLeft }}
-          dangerouslySetInnerHTML={{ __html: shownHtml }}
-        />
+          data-testid="highlight-mirror"
+          className="shiki-view pointer-events-none absolute inset-0 overflow-hidden whitespace-pre pr-4"
+          style={geometry.textBox}
+        >
+          {/* The follower is this wrapper, not shiki's own <pre>: the markup is
+              replaced on every re-highlight, and a transform on the old <pre>
+              would go with it. */}
+          <div ref={surface.follow.both} dangerouslySetInnerHTML={{ __html: shownHtml }} />
+        </div>
       )}
       <textarea
         ref={taRef}
@@ -747,7 +623,7 @@ export function CodeEditor({
           setFoldState({ path, starts: shiftFolds(folded, r.startLine, r.endLine, r.lineDelta) })
           onChange(r.value)
         }}
-        onScroll={syncScroll}
+        onScroll={surface.sync}
         onSelect={(e) => {
           const { selectionStart: start, selectionEnd: end } = e.currentTarget
           if (selTimerRef.current) clearTimeout(selTimerRef.current)
@@ -777,22 +653,18 @@ export function CodeEditor({
         }}
         spellCheck={false}
         wrap="off"
-        style={{ paddingLeft: textPadLeft }}
-        className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent py-3 pr-4 font-mono text-[12px] leading-[1.6] ${
+        style={geometry.textBox}
+        className={`allow-select absolute inset-0 h-full w-full resize-none whitespace-pre bg-transparent pr-4 font-mono text-[12px] leading-[1.6] ${
           shownHtml !== null
             ? 'text-transparent caret-text'
             : 'text-text-2'
         } ${FOCUS}`}
       />
-      {/* Measured, not assumed — see chRef. Kept in the flow of the same font
-          context as the textarea so it reports that font's advance width. */}
-      <span ref={chRef} aria-hidden className="pointer-events-none absolute left-0 top-0 block h-0 w-[1ch] opacity-0" />
-      <div ref={pitchRef} aria-hidden className="pointer-events-none invisible absolute left-0 top-0 whitespace-pre">
-        {PITCH_TEXT}
-      </div>
+      {/* In the same font context as the textarea, which is what they measure. */}
+      {surface.probes}
       {findOpen && matches.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
-          <div ref={findLayerRef} className="absolute left-0 top-0">
+          <div ref={surface.follow.both} className="absolute left-0 top-0">
             {(current >= MAX_HIGHLIGHTS && matches[current]
               ? [...matches.slice(0, MAX_HIGHLIGHTS), matches[current]]
               : matches.slice(0, MAX_HIGHLIGHTS)
@@ -800,16 +672,7 @@ export function CodeEditor({
               <span
                 key={m.start}
                 data-testid={i === current ? 'find-match-current' : 'find-match'}
-                style={{
-                  position: 'absolute',
-                  // em and ch, the units the text itself is laid out in, so the
-                  // rectangles track the line height and the glyph advance at
-                  // any zoom without a second set of numbers to keep in step.
-                  top: editorLineTop(m.line - 1, linePx),
-                  height: editorLineHeight(linePx),
-                  left: `calc(${textPadLeft} + ${m.column}ch)`,
-                  width: `${m.width}ch`
-                }}
+                style={geometry.cellBox(m.line - 1, m.column, m.width)}
                 className={`rounded-[2px] ${
                   i === current ? 'bg-amber/45 ring-1 ring-amber/70' : 'bg-amber/20'
                 }`}
@@ -820,27 +683,12 @@ export function CodeEditor({
       )}
       {occurrences.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
-          <div
-            ref={(el) => {
-              selLayerRef.current = el
-              // Mounts on a selection, after any scroll, so it has to pick the
-              // current offset up itself.
-              const ta = taRef.current
-              if (el && ta) el.style.transform = `translate(${-ta.scrollLeft}px, ${-ta.scrollTop}px)`
-            }}
-            className="absolute left-0 top-0"
-          >
+          <div ref={surface.follow.both} className="absolute left-0 top-0">
             {occurrences.slice(0, MAX_HIGHLIGHTS).map((m) => (
               <span
                 key={m.start}
                 data-testid="selection-match"
-                style={{
-                  position: 'absolute',
-                  top: editorLineTop(m.line - 1, linePx),
-                  height: editorLineHeight(linePx),
-                  left: `calc(${textPadLeft} + ${m.column}ch)`,
-                  width: `${m.width}ch`
-                }}
+                style={geometry.cellBox(m.line - 1, m.column, m.width)}
                 className="rounded-[2px] bg-accent/20 ring-1 ring-accent/35"
               />
             ))}
@@ -869,19 +717,14 @@ export function CodeEditor({
       )}
       {chips.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
-          <div ref={foldLayerRef} className="absolute left-0 top-0">
+          <div ref={surface.follow.both} className="absolute left-0 top-0">
             {chips.map((c) => (
-              // The anchor keeps the editor's font so its em/ch offsets match
-              // the text; only the chip inside it gets the smaller label size.
+              // The anchor takes the box and so keeps the editor's font (see
+              // lib/textSurface); only the chip inside it gets the label size.
               <span
                 key={c.line}
                 data-testid="fold-chip-anchor"
-                style={{
-                  position: 'absolute',
-                  top: editorLineTop(c.displayLine, linePx),
-                  height: editorLineHeight(linePx),
-                  left: `calc(${textPadLeft} + ${c.column}ch)`
-                }}
+                style={geometry.cellBox(c.displayLine, c.column)}
                 className="flex items-center"
               >
                 <button
@@ -900,41 +743,35 @@ export function CodeEditor({
           </div>
         </div>
       )}
-      {banding && (
-        <div
-          ref={bandRef}
-          aria-hidden
-          data-testid="reveal-band"
-          style={{ animation: 'revealFade 1.8s ease-out forwards' }}
-          className="pointer-events-none absolute inset-x-0 z-[5] border-y border-accent/40 bg-accent/15"
-        />
+      {bandRow !== null && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-[5] overflow-hidden">
+          <div ref={surface.follow.vertical} className="absolute inset-x-0 top-0">
+            <div
+              data-testid="reveal-band"
+              style={{ ...geometry.rowBox(bandRow), animation: 'revealFade 1.8s ease-out forwards' }}
+              className="inset-x-0 border-y border-accent/40 bg-accent/15"
+            />
+          </div>
+        </div>
       )}
       <div
-        ref={gutterRef}
         aria-hidden
         data-testid="line-gutter"
-        style={{ width: gutterWidth }}
-        className="pointer-events-none absolute inset-y-0 left-0 z-10 select-none overflow-hidden whitespace-pre border-r border-line bg-pane py-3 pr-2 text-right text-faint"
+        style={geometry.gutterBox}
+        className="pointer-events-none absolute inset-y-0 left-0 z-10 select-none overflow-hidden whitespace-pre border-r border-line bg-pane pr-2 text-right text-faint"
       >
-        <div>{lineNumbers}</div>
+        <div ref={surface.follow.vertical}>{lineNumbers}</div>
       </div>
       {/* The fold strip: opaque like the gutter, so horizontally scrolled text
-          slides under it rather than through the chevrons. Sits in the 12px
-          between the gutter rule and the first column of text. */}
+          slides under it rather than through the chevrons. Sits between the
+          gutter rule and the first column of text. */}
       {markers.length > 0 && (
         <div
           data-testid="fold-strip"
-          className="pointer-events-none absolute inset-y-0 z-10 w-3 overflow-hidden bg-pane"
-          style={{ left: gutterWidth }}
+          className="pointer-events-none absolute inset-y-0 z-10 overflow-hidden bg-pane"
+          style={geometry.foldStripBox}
         >
-          <div
-            ref={(el) => {
-              markerLayerRef.current = el
-              // Mounts lazily, so it has to pick the scroll up itself.
-              if (el && taRef.current) el.style.transform = `translateY(${-taRef.current.scrollTop}px)`
-            }}
-            className="absolute inset-x-0 top-0"
-          >
+          <div ref={surface.follow.vertical} className="absolute inset-x-0 top-0">
             {markers}
           </div>
         </div>

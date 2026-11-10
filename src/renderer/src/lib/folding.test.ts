@@ -3,8 +3,6 @@ import {
   applyDisplayChange,
   computeFoldRanges,
   displayToRealOffset,
-  editorLineHeight,
-  editorLineTop,
   filterHtmlLines,
   foldChips,
   pruneFolds,
@@ -111,7 +109,7 @@ describe('offset mapping', () => {
   })
 })
 
-describe('foldChips / editorLineTop', () => {
+describe('foldChips', () => {
   // Four blocks; the third holds a nested one.
   const src = [
     'function a() {', //  0
@@ -162,17 +160,5 @@ describe('foldChips / editorLineTop', () => {
   it('shows only the outer chip of a nested fold, and the inner one again once the outer opens', () => {
     expect(chipsFor([6, 7]).map((c) => c.line)).toEqual([6])
     expect(chipsFor([7]).map((c) => [c.line, c.displayLine])).toEqual([[7, 7]])
-  })
-
-  it('offsets lines by the top padding plus whole line heights', () => {
-    expect(editorLineTop(0)).toBe('calc(0.75rem + 0 * 1.6em)')
-    expect(editorLineTop(8)).toBe('calc(0.75rem + 8 * 1.6em)')
-  })
-
-  it('uses the measured line pitch when there is one', () => {
-    // 19.1875 is what Chromium lays 12px at 1.6 out at; 1.6em would be 19.2.
-    expect(editorLineTop(1600, 19.1875)).toBe('calc(0.75rem + 30700px)')
-    expect(editorLineHeight(19.1875)).toBe('19.1875px')
-    expect(editorLineHeight()).toBe('1.6em')
   })
 })

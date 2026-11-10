@@ -9,6 +9,7 @@ import {
   __setMarkdownAssetBridge,
   __setMarkdownAssetCacheTtl
 } from '@renderer/lib/markdownAssets'
+import { FALLBACK_METRICS, textGeometry } from '@renderer/lib/textSurface'
 import EditorTab, { CodeEditor, PREVIEW_TYPING_DEBOUNCE_MS, Preview } from './EditorTab'
 import { clearThumbnailCache } from './FolderView'
 
@@ -518,18 +519,138 @@ describe('CodeEditor', () => {
       fireEvent.click(screen.getAllByTestId('fold-marker')[0])
       fireEvent.click(screen.getAllByTestId('fold-marker').find((m) => m.dataset.folded === 'false')!)
       const anchors = screen.getAllByTestId('fold-chip-anchor')
-      // `bb {` is real line 4 but display line 2 once the first block is
-      // folded: two 1.6em lines down, not four (jsdom normalises the calc).
-      expect(anchors.map((a) => a.style.top)).toEqual(['calc(0em + 0.75rem)', 'calc(3.2em + 0.75rem)'])
-      expect(anchors[1].style.left).toBe('calc(5ch + calc(2ch + 32px))') // past `bb {` + 1
-      // The em/ch offsets live on the anchor, which must not change the font
-      // size they resolve against; the small label size is the chip's alone.
+      // `bb {` is real line 4 but display row 2 once the first block is folded:
+      // two lines down, not four. Same boxes the surface hands every layer.
+      const g = textGeometry(FALLBACK_METRICS, 8)
+      expect(anchors.map((a) => a.style.top)).toEqual([g.cellBox(0, 4).top, g.cellBox(2, 5).top])
+      expect(anchors[1].style.top).toBe('50.4px')
+      expect(anchors[1].style.left).toBe('calc(7ch + 32px)') // 2 gutter digits, then past `bb {` + 1
+      // `ch` resolves against the element it is set on, so the box belongs on
+      // the anchor and the small label size on the chip inside it.
       for (const a of anchors) {
-        expect(a.className).not.toMatch(/text-\[/)
         const chip = a.querySelector('[data-testid=fold-chip]') as HTMLElement
         expect(chip.style.top).toBe('')
         expect(chip.style.left).toBe('')
       }
+    })
+
+    it('puts each fold marker on its display row', () => {
+      render(<CodeEditor path={PATH} value={['a {', '  1', '}', 'bb {', '  2', '}'].join('\n')} onChange={noop} />)
+      fireEvent.click(screen.getAllByTestId('fold-marker')[0])
+      // `bb {` is real line 3 and, with the first block folded, display row 2.
+      expect(screen.getAllByTestId('fold-marker').map((m) => m.style.top)).toEqual(['12px', '50.4px'])
+    })
+  })
+
+  describe('text surface', () => {
+    const LONG = Array.from({ length: 400 }, (_, i) => (i % 10 === 0 ? `block ${i} {` : '  body')).join('\n')
+
+    /** jsdom lays nothing out, so a viewport size has to be handed to it. */
+    function sized(ta: HTMLTextAreaElement, clientHeight: number, clientWidth: number): void {
+      Object.defineProperty(ta, 'clientHeight', { configurable: true, value: clientHeight })
+      Object.defineProperty(ta, 'clientWidth', { configurable: true, value: clientWidth })
+    }
+    function scrollTo(ta: HTMLTextAreaElement, top: number, left: number): void {
+      ta.scrollTop = top
+      ta.scrollLeft = left
+      fireEvent.scroll(ta)
+    }
+    const follower = (testId: string): HTMLElement => screen.getAllByTestId(testId)[0].parentElement as HTMLElement
+
+    it('moves every layer with the text when it scrolls', () => {
+      const { ta, gutter } = renderEditor(LONG)
+      fireEvent.click(screen.getAllByTestId('fold-marker')[0])
+      scrollTo(ta, 300, 40)
+
+      // Pinned to the left edge: follow vertically only.
+      expect((gutter.firstElementChild as HTMLElement).style.transform).toBe('translateY(-300px)')
+      expect(follower('fold-marker').style.transform).toBe('translateY(-300px)')
+      // Laid out in text coordinates: follow both ways.
+      expect(follower('fold-chip-anchor').style.transform).toBe('translate(-40px, -300px)')
+    })
+
+    it('starts a layer that mounts after a scroll at the scrolled position', async () => {
+      const { ta } = renderEditor('item one item\nitem')
+      scrollTo(ta, 120, 16)
+      // The occurrence layer only exists once there is a selection. React
+      // builds onSelect from key/mouse events, and the editor waits a beat.
+      ta.focus()
+      ta.setSelectionRange(0, 4)
+      fireEvent.keyUp(ta)
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 100))
+      })
+      expect(follower('selection-match').style.transform).toBe('translate(-16px, -120px)')
+    })
+
+    it('centres a revealed line and bands its row', () => {
+      const { rerender } = render(<CodeEditor path={PATH} value={LONG} onChange={noop} />)
+      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+      sized(ta, 200, 600)
+      rerender(<CodeEditor path={PATH} value={LONG} onChange={noop} reveal={{ line: 250, seq: 1 }} />)
+
+      const g = textGeometry(FALLBACK_METRICS, 400)
+      expect(ta.scrollTop).toBe(g.scrollTopToCentre(249, 200))
+      const band = screen.getByTestId('reveal-band')
+      expect(band.style.top).toBe(g.rowBox(249).top)
+      expect(band.style.height).toBe(g.rowBox(249).height)
+      // The band is in content coordinates and rides the scroll like any layer.
+      expect((band.parentElement as HTMLElement).style.transform).toBe(`translateY(${-ta.scrollTop}px)`)
+    })
+
+    it('opens the folds around a revealed line and bands the row it ends up on', () => {
+      const { rerender } = render(<CodeEditor path={PATH} value={LONG} onChange={noop} />)
+      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+      sized(ta, 200, 600)
+      // Fold `block 0` (hides lines 2-10) and `block 10` (hides 12-20).
+      fireEvent.click(screen.getAllByTestId('fold-marker')[0])
+      fireEvent.click(screen.getAllByTestId('fold-marker')[1])
+      expect(ta.value.split('\n')).toHaveLength(400 - 18)
+
+      // Line 15 is inside the second fold: that one opens, the first stays shut.
+      rerender(<CodeEditor path={PATH} value={LONG} onChange={noop} reveal={{ line: 15, seq: 1 }} />)
+      expect(ta.value.split('\n')).toHaveLength(400 - 9)
+      // Nine lines are still hidden above it, so line 15 is display row 5.
+      expect(screen.getByTestId('reveal-band').style.top).toBe(textGeometry(FALLBACK_METRICS, 400).rowBox(5).top)
+    })
+
+    describe('with the text measured', () => {
+      // What Chromium reports for 12px at 1.6: line boxes snap to 1/64px.
+      const PITCH = 19.1875
+      const CHAR = 7.2
+      let rects: ReturnType<typeof vi.spyOn>
+
+      beforeEach(() => {
+        rects = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+          const id = this.dataset.testid
+          const height = id === 'pitch-probe' ? PITCH * (this.textContent ?? '').split('\n').length : 0
+          const width = id === 'char-probe' ? CHAR : 0
+          return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: height, width, height, toJSON: () => ({}) }
+        })
+      })
+      afterEach(() => rects.mockRestore())
+
+      it('places rows at the measured pitch, not the nominal line height', () => {
+        render(<CodeEditor path={PATH} value={LONG} onChange={noop} />)
+        fireEvent.click(screen.getAllByTestId('fold-marker')[1])
+        // `block 10 {` is row 10: 12px of padding and ten measured lines.
+        expect(screen.getAllByTestId('fold-marker')[1].style.top).toBe(`${12 + 10 * PITCH}px`)
+        expect(screen.getByTestId('fold-chip-anchor').style.top).toBe(`${12 + 10 * PITCH}px`)
+        expect(screen.getByTestId('fold-chip-anchor').style.height).toBe(`${PITCH}px`)
+      })
+
+      it('scrolls a match past the right edge into view', () => {
+        const wide = `${'x'.repeat(300)}needle`
+        const { rerender } = render(<CodeEditor path={PATH} value={wide} onChange={noop} findSeq={0} />)
+        const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+        sized(ta, 200, 600)
+        rerender(<CodeEditor path={PATH} value={wide} onChange={noop} findSeq={1} />)
+        fireEvent.change(screen.getByLabelText('Find in file'), { target: { value: 'needle' } })
+
+        const left = 2 * CHAR + 32 + 300 * CHAR
+        expect(ta.scrollLeft).toBe(left - 600 / 3)
+        expect(follower('find-match-current').style.transform).toBe(`translate(${-ta.scrollLeft}px, 0px)`)
+      })
     })
   })
 
@@ -688,13 +809,19 @@ describe('CodeEditor find', () => {
 
     expect(screen.getAllByTestId('find-match-current')).toHaveLength(1)
     expect(screen.getAllByTestId('find-match')).toHaveLength(1)
-    // Drawn in the units the text is laid out in, so they track the glyphs at
-    // any zoom: the gutter's own padding, plus the match's column in `ch`.
-    const rect = screen.getByTestId('find-match-current')
-    expect(rect.style.left).toContain('2ch + 32px')
-    expect(rect.style.width).toBe('5ch')
-    // The second match is a line down, so its box is one line-height lower.
-    expect(screen.getByTestId('find-match').style.top).toContain('1.6em')
+    // Each sits in the box the text surface gives for its row, column and
+    // width: `alpha` at the start of row 0, `Alpha` five columns into row 1.
+    const g = textGeometry(FALLBACK_METRICS, 3)
+    const style = (el: HTMLElement): object => ({
+      top: el.style.top,
+      height: el.style.height,
+      left: el.style.left,
+      width: el.style.width
+    })
+    expect(g.cellBox(0, 0, 5)).toMatchObject(style(screen.getByTestId('find-match-current')))
+    expect(g.cellBox(1, 5, 5)).toMatchObject(style(screen.getByTestId('find-match')))
+    expect(screen.getByTestId('find-match').style.top).toBe('31.2px')
+    expect(screen.getByTestId('find-match').style.left).toBe('calc(7ch + 32px)')
   })
 
   it('closes on Escape and hands focus back to the text', () => {
@@ -920,7 +1047,8 @@ describe('CodeEditor selection highlight', () => {
     // Case-sensitive and not the selection itself: "item" twice more, not "Item".
     const marks = screen.getAllByTestId('selection-match')
     expect(marks).toHaveLength(2)
-    expect(marks.map((m) => m.style.left)).toEqual([expect.stringContaining('7ch'), expect.stringContaining('13ch')])
+    // Columns 7 and 13, past a two-digit gutter.
+    expect(marks.map((m) => m.style.left)).toEqual(['calc(9ch + 32px)', 'calc(15ch + 32px)'])
   })
 
   it('clears when the selection collapses or is only whitespace', () => {
