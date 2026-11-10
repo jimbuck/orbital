@@ -18,7 +18,14 @@ import { primaryModHeld } from './services/shortcut-mod'
 import { applicationMenu } from './services/app-menu'
 import { adoptLoginShellPath } from './services/login-env'
 import { appImageShimPath } from './services/agents/paths'
-import { registerIpc, handleControl, resumeProjects, resumeTerminals, stopWorktreesWatchers } from './ipc'
+import {
+  registerIpc,
+  handleControl,
+  resumeProjects,
+  resumeTerminals,
+  stopWorktreesWatchers,
+  watchPtyExits
+} from './ipc'
 
 const RENDERER_URL = process.env['ELECTRON_RENDERER_URL']
 
@@ -178,6 +185,7 @@ if (!gotLock) {
       console.error(reason)
     })
     runtime.init()
+    watchPtyExits()
     registerIpc()
 
     const win = createWindow()

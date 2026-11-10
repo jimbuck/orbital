@@ -1,19 +1,16 @@
 import {
   IPC,
-  isPtyTabType,
   type TabType,
   type TabConfig,
   type Tab,
   type SplitDirection,
   type SplitWhere
 } from '@shared/types'
-import { runtime, repo } from '../runtime'
+import { repo } from '../runtime'
 import { writeTx } from '../db/database'
-import { splitAt, removePane, setRatio, edgeToSplit } from '../services/layout'
-import { deleteBriefing } from '../services/agents/briefing'
-import { collapseIfEmpty, createTabInWorktree, killPaneTerminals } from '../tabs'
-import { forgetTabStatus } from '../status'
-import { handle, broadcast, broadcastAll } from './handle'
+import { splitAt, setRatio, edgeToSplit } from '../services/layout'
+import { closePane, closeTab, collapseIfEmpty, createTabInWorktree } from '../tabs'
+import { handle, broadcast } from './handle'
 
 /** Tabs and panes: open / close / move / split, and the split ratios. */
 export function register(): void {
@@ -24,18 +21,7 @@ export function register(): void {
     return tab
   })
 
-  h(IPC.closeTab, (_e, tabId: string) => {
-    const tab = repo.tabs.get(tabId)
-    if (!tab) return
-    if (isPtyTabType(tab.type)) runtime.terminals.kill(tabId)
-    if (tab.type === 'agent') deleteBriefing(tab.worktreeId, tabId)
-    forgetTabStatus(tabId)
-    repo.tabs.remove(tabId)
-    // Closing the last tab leaves the (now empty) pane in place — it shows the
-    // "Open a terminal" prompt. Panes only collapse when a tab is dragged out.
-    repo.worktrees.recomputeStatus(tab.worktreeId)
-    broadcastAll()
-  })
+  h(IPC.closeTab, (_e, tabId: string) => closeTab(tabId))
 
   h(IPC.renameTab, (_e, tabId: string, title: string) => {
     const tab = repo.tabs.get(tabId)
@@ -96,17 +82,7 @@ export function register(): void {
     return pane
   })
 
-  h(IPC.closePane, (_e, worktreeId: string, paneId: string) => {
-    const worktree = repo.worktrees.get(worktreeId)
-    if (!worktree) return
-    if (worktree.panes.length <= 1) throw new Error('cannot close the last pane')
-    killPaneTerminals(paneId)
-    const next = removePane(worktree.layout, paneId)
-    if (next) repo.worktrees.setLayout(worktreeId, next)
-    repo.panes.remove(paneId) // cascades the pane's tabs
-    repo.worktrees.recomputeStatus(worktreeId)
-    broadcastAll()
-  })
+  h(IPC.closePane, (_e, worktreeId: string, paneId: string) => closePane(worktreeId, paneId))
 
   h(IPC.moveTabToEdge, (_e, tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom') => {
     const tab = repo.tabs.get(tabId)

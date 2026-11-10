@@ -1,7 +1,7 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { ENV, SUPPORTED_AGENTS, resolveAgentRef, type Worktree, type Tab } from '@shared/types'
 import { runtime, repo } from '../../runtime'
-import { setTabStatus } from '../../status'
+import { launchFailed } from '../../status'
 import { cliDir } from './paths'
 import { getProvider, type AgentProvider, type AgentSession, type SessionLookup } from './provider'
 import { agentProfileDir, defaultProfileDir } from './profiles'
@@ -226,7 +226,7 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
       tab.id,
       `\r\n\x1b[31mOrbital could not launch ${provider.displayName}:\x1b[0m\r\n  ${msg}\r\n`
     )
-    setTabStatus(tab.id, worktree.id, 'error')
+    launchFailed(tab.id)
   }
 }
 

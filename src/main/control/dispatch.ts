@@ -18,15 +18,7 @@ import { updater } from '../services/updater'
 import { recordAgentSession } from '../services/agents/launch'
 import { createTabInWorktree } from '../tabs'
 import { beginWorktreeSetup, syncWorktreeEnv } from '../worktree-lifecycle'
-import {
-  acceptStatusEvent,
-  clearAttentionKind,
-  hookEventToStatus,
-  isUnpromptedIdle,
-  setAttentionKind,
-  setTabStatus,
-  trackPromptLifecycle
-} from '../status'
+import { hookFired, statusReported } from '../status'
 import { normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
 
 /**
@@ -60,11 +52,7 @@ const handlers: Record<ControlCommand, Handler> = {
     if (!req.terminalId) return { ok: false, error: 'no ORBITAL_TERMINAL_ID in environment' }
     const tab = repo.tabs.get(req.terminalId)
     if (!tab) return { ok: false, error: 'terminal not found' }
-    if (acceptStatusEvent(req.terminalId, req.args.firedAt)) {
-      // CLI-set needs-attention has no prompt kind — typing then resets to idle.
-      clearAttentionKind(req.terminalId)
-      setTabStatus(req.terminalId, tab.worktreeId, status)
-    }
+    statusReported(req.terminalId, status, req.args.firedAt)
     return { ok: true, data: { status } }
   },
   whoami: async (req) => {
@@ -218,21 +206,8 @@ const handlers: Record<ControlCommand, Handler> = {
     // — after a `/clear` mid-session that is a different id from the one
     // Orbital launched with.
     recordAgentSession(tab, payload.session_id)
-    trackPromptLifecycle(req.terminalId, event, req.args.firedAt)
-    const status = hookEventToStatus(event, payload)
-    if (!status) return { ok: true }
-    // An empty session (just `/clear`ed, or launched bare) idling at its prompt
-    // is not waiting on anyone.
-    if (status === 'needs_attention' && isUnpromptedIdle(req.terminalId, payload)) return { ok: true }
-    // Async hooks race over the pipe — drop an event a later-fired one beat here.
-    if (!acceptStatusEvent(req.terminalId, req.args.firedAt)) return { ok: true }
-    if (status === 'needs_attention') {
-      setAttentionKind(req.terminalId, String(payload.notification_type ?? ''))
-    } else {
-      clearAttentionKind(req.terminalId)
-    }
-    setTabStatus(req.terminalId, tab.worktreeId, status)
-    return { ok: true, data: { status } }
+    const status = hookFired(req.terminalId, event, payload, req.args.firedAt)
+    return status ? { ok: true, data: { status } } : { ok: true }
   },
   'task-add': async (req) => {
     if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }

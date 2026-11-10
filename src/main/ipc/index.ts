@@ -11,7 +11,7 @@ import * as window from './window'
 
 export { handleControl } from '../control/dispatch'
 export { resumeProjects, stopWorktreesWatchers, reconcileProjectWorktrees } from '../worktree-lifecycle'
-export { resumeTerminals } from '../tabs'
+export { resumeTerminals, watchPtyExits } from '../tabs'
 
 /**
  * Register every renderer-facing IPC channel. Each domain module registers

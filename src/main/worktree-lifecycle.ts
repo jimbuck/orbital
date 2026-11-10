@@ -4,11 +4,10 @@ import { runtime, repo } from './runtime'
 import { git } from './services/git'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
 import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
-import { deleteBriefing } from './services/agents/briefing'
 import { logger } from './services/logger'
 import { getSettings } from './services/settings'
-import { killWorktreeTerminals } from './tabs'
-import { forgetTabStatus } from './status'
+import { releaseTabRuntime } from './tabs'
+import { forgetTabs } from './status'
 
 /**
  * Project and Worktree lifecycle: registration, background setup after
@@ -145,17 +144,13 @@ export function stopWorktreesWatchers(): void {
 
 /** Tear down everything the runtime holds for a Worktree (PTYs, watchers, servers, briefings). */
 export function releaseWorktreeRuntime(worktree: Worktree): void {
-  killWorktreeTerminals(worktree.id)
+  const tabs = worktree.panes.flatMap((pane) => pane.tabs)
+  for (const tab of tabs) releaseTabRuntime(tab)
   runtime.clearDevServers(worktree.id)
   if (worktree.kind === 'linked') {
     runtime.gitWatcher.unwatch(worktree.path)
   }
-  for (const pane of worktree.panes) {
-    for (const tab of pane.tabs) {
-      if (tab.type === 'agent') deleteBriefing(worktree.id, tab.id)
-      forgetTabStatus(tab.id)
-    }
-  }
+  forgetTabs(tabs.map((t) => t.id))
 }
 
 /**

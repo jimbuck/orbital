@@ -5,7 +5,7 @@ import { createLinkedWorktree, removeWorktree } from '../services/worktree'
 import { startPtyTab } from '../services/agents/launch'
 import { killWorktreeTerminals } from '../tabs'
 import { beginWorktreeSetup, releaseWorktreeRuntime, syncWorktreeEnv } from '../worktree-lifecycle'
-import { clearAttentionKind, markHumanAction } from '../status'
+import { resetWorktree } from '../status'
 import { handle, broadcast, broadcastAll } from './handle'
 
 /** Worktrees: create / remove / rename, env resync, and the force status clear. */
@@ -79,20 +79,5 @@ export function register(): void {
 
   h(IPC.syncWorktreeEnv, (_e, worktreeId: string) => syncWorktreeEnv(worktreeId))
 
-  h(IPC.clearWorktreeStatus, (_e, worktreeId: string) => {
-    const worktree = repo.worktrees.get(worktreeId)
-    if (!worktree) return
-    for (const pane of worktree.panes) {
-      for (const tab of pane.tabs) {
-        if (!isPtyTabType(tab.type)) continue
-        // The user's force-clear supersedes anything already in flight: hook
-        // events fired before this moment must not re-set the status below.
-        markHumanAction(tab.id)
-        clearAttentionKind(tab.id)
-        repo.tabs.updateStatus(tab.id, 'idle')
-      }
-    }
-    repo.worktrees.recomputeStatus(worktreeId)
-    broadcastAll()
-  })
+  h(IPC.clearWorktreeStatus, (_e, worktreeId: string) => resetWorktree(worktreeId))
 }

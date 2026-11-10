@@ -5,10 +5,9 @@ import { ControlChannel } from './services/control-channel'
 import { AlertManager } from './services/alerts'
 import * as repo from './db/repositories'
 import { safeWrite } from './db/database'
-import { deleteBriefing } from './services/agents/briefing'
 import { getSettings } from './services/settings'
 import { invalidate as invalidateFileIndex } from './services/file-index'
-import { IPC, isPtyTabType, type AppState, type GitChangedEvent } from '@shared/types'
+import { IPC, type AppState, type GitChangedEvent } from '@shared/types'
 
 /**
  * The main-process service hub. Owns the long-lived service singletons and the
@@ -45,35 +44,9 @@ class Runtime {
     )
 
     this.terminals.on('data', (e) => this.send(IPC.evtTerminalData, e))
-    this.terminals.on('exit', (e) => {
-      this.send(IPC.evtTerminalExit, e)
-      // Nothing awaits this handler, so a DB failure here has nowhere to go but
-      // uncaughtException — log it instead (safeWrite) and let the next event
-      // re-derive the worktree's status.
-      safeWrite('terminal exit', () => {
-        const tab = repo.tabs.get(e.tabId)
-        if (!tab) return
-        // An agent (Claude) session that exits on its own closes its tab. Note that
-        // TerminalManager.kill() does NOT emit 'exit', so this fires only on a real
-        // process exit (e.g. `/exit` or a crash), never on worktree/app teardown.
-        if (tab.type === 'agent') {
-          deleteBriefing(tab.worktreeId, tab.id)
-          repo.tabs.remove(tab.id)
-          repo.worktrees.recomputeStatus(tab.worktreeId)
-          this.broadcastState()
-          this.broadcastAlert()
-          return
-        }
-        // A dead terminal PTY keeps its tab but must stop contributing a stale status
-        // to the Worktree aggregate (else the rail/taskbar stay stuck on working/needs-you).
-        if (isPtyTabType(tab.type)) {
-          repo.tabs.updateStatus(e.tabId, 'idle')
-          repo.worktrees.recomputeStatus(tab.worktreeId)
-          this.broadcastState()
-          this.broadcastAlert()
-        }
-      })
-    })
+    // What an exit means for the tab (close it, or idle it) is tabs.ts's
+    // watchPtyExits; this is only the push that tells the renderer it happened.
+    this.terminals.on('exit', (e) => this.send(IPC.evtTerminalExit, e))
 
     // External git activity. Only a HEAD/index move can rename the branch that
     // lives in AppState, so only that kind re-reads HEAD and re-pushes state; a
