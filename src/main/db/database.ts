@@ -3,7 +3,8 @@ import { mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { logger } from '../services/logger'
-import { DEFAULT_ENV_SYNC_PATTERNS, WORKSPACE_SETTING_KEYS } from '@shared/types'
+import { DEFAULT_ENV_SYNC_PATTERNS } from '@shared/types'
+import { WORKSPACE_SETTING_KEYS } from '@shared/settings'
 
 let db: Database.Database | null = null
 let dbDir: string | null = null

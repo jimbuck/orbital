@@ -10,6 +10,7 @@ import type {
 } from '@shared/types'
 import ThemePicker from '../ThemePicker'
 import { setFontLigatures, useFontLigatures } from '@renderer/lib/theme'
+import { settingOf } from '@renderer/lib/settings'
 import { previewAccentColor, setAccentColor, useAccentColor } from '@renderer/lib/accent'
 import { AccentPicker } from '../AccentPicker'
 import {
@@ -31,8 +32,6 @@ import { isWindows } from '@renderer/lib/platform'
 const SHELL_OPTIONS = isWindows
   ? ['pwsh.exe', 'powershell.exe', 'cmd.exe', 'wsl.exe', 'bash.exe', 'git-bash.exe']
   : ['/bin/zsh', '/bin/bash', '/bin/sh', 'fish', 'pwsh']
-
-const DEFAULT_ALERTS: SettingsModel['alerts'] = { indicator: true, sound: true, taskbarBadge: false, taskbarFlash: false }
 
 /** A 34×19 pill switch — accent track + white knob when on, dim otherwise. */
 export function Toggle({
@@ -450,15 +449,15 @@ export default function Settings(): React.JSX.Element {
 
   // Editable working copies seeded from the current store state.
   const [workspaceName, setWorkspaceName] = useState(() => workspace?.name ?? '')
-  const [patterns, setPatterns] = useState<string[]>(() => settings?.envSyncPatterns ?? [])
-  const [defaultShell, setDefaultShell] = useState(() => settings?.defaultShell ?? SHELL_OPTIONS[0])
-  const [externalEditor, setExternalEditor] = useState(() => settings?.externalEditor ?? '')
-  const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settings?.alerts ?? DEFAULT_ALERTS)
-  const [periodicFetch, setPeriodicFetch] = useState(() => settings?.periodicFetch ?? true)
-  const [defaultOpenAction, setDefaultOpenAction] = useState<OpenAction>(
-    () => settings?.defaultOpenAction ?? 'right'
+  const [patterns, setPatterns] = useState<string[]>(() => settingOf(settings, 'envSyncPatterns'))
+  const [defaultShell, setDefaultShell] = useState(() => settingOf(settings, 'defaultShell'))
+  const [externalEditor, setExternalEditor] = useState(() => settingOf(settings, 'externalEditor'))
+  const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settingOf(settings, 'alerts'))
+  const [periodicFetch, setPeriodicFetch] = useState(() => settingOf(settings, 'periodicFetch'))
+  const [defaultOpenAction, setDefaultOpenAction] = useState<OpenAction>(() =>
+    settingOf(settings, 'defaultOpenAction')
   )
-  const [debugLogging, setDebugLogging] = useState(() => settings?.debugLogging ?? false)
+  const [debugLogging, setDebugLogging] = useState(() => settingOf(settings, 'debugLogging'))
   // Read live from the store rather than copied into a working copy, for the
   // same reason the theme is: it applies on click, so a Save that wrote this
   // modal's opening snapshot back could only ever undo a later change.

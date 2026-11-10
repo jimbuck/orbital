@@ -486,7 +486,7 @@ export interface Task {
 
 /**
  * The renderer-facing settings shape. Every field belongs to the workspace and
- * persists on its row; see {@link WORKSPACE_SETTING_KEYS}.
+ * persists on its row. Defaults and validation live in `settings.ts`.
  */
 export interface Settings {
   defaultShell: string
@@ -553,29 +553,6 @@ export interface Settings {
    */
   externalEditor: string
 }
-
-/**
- * Every settings key. All of them are workspace-scoped: each workspace runs in
- * its own window, and each window is configured on its own. Written as the keys
- * of a `satisfies Record<keyof Settings>` object so adding a field to
- * {@link Settings} without listing it here fails typecheck, rather than silently
- * making that field unreadable and unwritable.
- */
-export const WORKSPACE_SETTING_KEYS = Object.keys({
-  defaultShell: true,
-  alerts: true,
-  envSyncPatterns: true,
-  periodicFetch: true,
-  debugLogging: true,
-  agents: true,
-  theme: true,
-  systemDarkTheme: true,
-  systemLightTheme: true,
-  fontLigatures: true,
-  defaultOpenAction: true,
-  externalEditor: true,
-  accentColor: true
-} satisfies Record<keyof Settings, true>) as readonly (keyof Settings)[]
 
 /**
  * Coerce a stored or imported accent value to `#rrggbb` lowercase, or null when

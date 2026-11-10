@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ComponentType, type JSX } from 'react'
 import { Orbit, Terminal, Globe, FileText, TextSearch } from 'lucide-react'
 import type { Worktree, Pane, LayoutNode, DropEdge, TabConfig, TabType } from '@shared/types'
-import { defaultAgentConfigs } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon, type BrandIconProps } from '../icons'
 import { useStore, activeWorktree } from '@renderer/store'
+import { useSetting } from '@renderer/lib/settings'
 import { fireAndForget } from '@renderer/lib/bridge'
 import TabStrip from './TabStrip'
 import TerminalTab from './TerminalTab'
@@ -180,7 +180,7 @@ function PaneView({ pane, worktree }: { pane: Pane; worktree: Worktree }): JSX.E
   const searchTabs = pane.tabs.filter((t) => t.type === 'search')
   // The workspace's agent profiles (Settings → Agents) fill the agent openers,
   // in list order. Undefined (state not loaded yet) means the default lineup.
-  const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
+  const agents = useSetting('agents')
   const setActivePane = useStore((s) => s.setActivePane)
   const openers = [
     OPENERS[0],

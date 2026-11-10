@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Settings, SettingsPatch, ThemeMode } from '@shared/types'
+import type { ThemeMode } from '@shared/types'
 import {
   DEFAULT_THEME_ID,
   THEMES,
@@ -12,6 +12,7 @@ import {
   type ThemeSpec
 } from '@shared/themes'
 import { useStore } from '../store'
+import { saveSetting, useSetting } from './settings'
 
 /** The concrete appearance actually applied to the DOM — 'system' has been resolved away. */
 export type ResolvedTheme = ThemeAppearance
@@ -44,62 +45,12 @@ export function useThemeMode(): ThemeMode {
 }
 
 /**
- * Persist ONE theme setting, applying it immediately.
- *
- * Sends that key and nothing else. Writing a whole Settings object here would
- * push this window's snapshot of every other field over whatever had changed
- * meanwhile (a Save in the Settings modal, say). A one-click control writing a
- * dozen unrelated fields is exactly how a lost update happens.
- * Every theme control funnels through here, so the View menu, the Settings
- * modal and the palette cannot drift apart: there is only one write path.
- *
- * The store is updated optimistically: the write round-trips through the main
- * process before the state broadcast that would normally update it lands, and
- * re-theming the whole app should track the click rather than lag an IPC hop
- * behind it. The broadcast then overwrites this with the authoritative value.
- *
- * No-ops until settings have loaded — with nothing to update optimistically the
- * app would not re-theme until the next broadcast anyway, and there is no user
- * to please before the first state arrives.
- *
- * If the write fails the optimistic apply is rolled back. That is the deliberate
- * choice here, over both alternatives:
- *
- * - Leaving the new theme applied is the worst option. The user is shown a
- *   success that never happened, and the app then contradicts it minutes later,
- *   when some unrelated state broadcast lands and snaps the theme back with no
- *   apparent cause. Rolling back puts the failure where the user can connect it
- *   to something — the click they just made visibly did not take.
- * - Popping a message would mean inventing an app-wide notification surface,
- *   which Orbital does not have; this control is also reachable from the View
- *   menu, where there is nothing to render one into. That is disproportionate for
- *   a failure that needs the settings row to be locked by another process for
- *   several seconds. The console line is for whoever is debugging that case.
- *
- * The rollback is conditional: if the store has since moved on (a later click,
- * or a broadcast carrying another instance's change), that value is newer than
- * what this call knows and is left alone.
+ * Pin a theme, or hand the choice back to the OS with 'system'. Every theme
+ * control funnels through the setters below, and they through `saveSetting`,
+ * so the View menu, the Settings modal and the palette cannot drift apart.
  */
-function persistThemeSetting<K extends 'theme' | 'systemDarkTheme' | 'systemLightTheme' | 'fontLigatures'>(
-  key: K,
-  value: Settings[K]
-): void {
-  const settings = useStore.getState().settings
-  if (!settings || settings[key] === value) return
-  const previous = settings[key]
-  useStore.setState({ settings: { ...settings, [key]: value } })
-  void window.orbital.setSettings({ [key]: value } as SettingsPatch).catch((err: unknown) => {
-    const current = useStore.getState().settings
-    if (current && current[key] === value) {
-      useStore.setState({ settings: { ...current, [key]: previous } })
-    }
-    console.error("Couldn't save the theme — it has been reverted.", err)
-  })
-}
-
-/** Pin a theme, or hand the choice back to the OS with 'system'. */
 export function setThemeMode(mode: ThemeMode): void {
-  persistThemeSetting('theme', mode)
+  saveSetting('theme', mode)
 }
 
 /**
@@ -111,7 +62,7 @@ export function setThemeMode(mode: ThemeMode): void {
  * window white to acknowledge the click would be a poor way to say so.
  */
 export function setSystemTheme(appearance: ThemeAppearance, theme: ThemeId): void {
-  persistThemeSetting(appearance === 'dark' ? 'systemDarkTheme' : 'systemLightTheme', theme)
+  saveSetting(appearance === 'dark' ? 'systemDarkTheme' : 'systemLightTheme', theme)
 }
 
 /**
@@ -120,12 +71,12 @@ export function setSystemTheme(appearance: ThemeAppearance, theme: ThemeId): voi
  * and what the app has always shipped.
  */
 export function useFontLigatures(): boolean {
-  return useStore((s) => s.settings?.fontLigatures) ?? true
+  return useSetting('fontLigatures')
 }
 
-/** Turn the coding ligatures on or off, through the same one write path. */
+/** Turn the coding ligatures on or off. */
 export function setFontLigatures(on: boolean): void {
-  persistThemeSetting('fontLigatures', on)
+  saveSetting('fontLigatures', on)
 }
 
 /**

@@ -2,6 +2,7 @@ import { normalizeAccentColor } from '@shared/types'
 import { accentTokens as deriveAccentTokens, themeById, type AccentTokens } from '@shared/themes'
 import { contrast } from '@shared/color'
 import { useStore } from '../store'
+import { saveSetting, useSetting } from './settings'
 import type { ResolvedTheme } from './theme'
 
 export { contrast }
@@ -100,7 +101,7 @@ export function applyAccentColor(
 
 /** The persisted accent for this workspace, or null for the built-in blue. */
 export function useAccentColor(): string | null {
-  return useStore((s) => s.settings?.accentColor) ?? null
+  return useSetting('accentColor')
 }
 
 /**
@@ -118,23 +119,10 @@ export function previewAccentColor(color: string | null): void {
 
 /**
  * Persist a new accent colour, applying it immediately and rolling back if the
- * write fails. Sends `accentColor` and nothing else, and mirrors setThemeMode
- * in lib/theme.ts in every respect — see there for why the optimistic apply,
- * the rollback, and its being conditional are each the right call. One
- * difference in kind: the accent is workspace-scoped, so unlike the theme it is
- * this window's alone and no other instance can move it under us.
+ * write fails (see `saveSetting`). Always writes, even when the store already
+ * shows this colour: a drag previews through the store, so its last value is
+ * one the store has and main does not.
  */
 export function setAccentColor(color: string | null): void {
-  const settings = useStore.getState().settings
-  if (!settings) return
-  const next = normalizeAccentColor(color)
-  const previous = settings.accentColor
-  if (previous !== next) useStore.setState({ settings: { ...settings, accentColor: next } })
-  void window.orbital.setSettings({ accentColor: next }).catch((err: unknown) => {
-    const current = useStore.getState().settings
-    if (current && current.accentColor === next) {
-      useStore.setState({ settings: { ...current, accentColor: previous } })
-    }
-    console.error("Couldn't save the accent colour — it has been reverted.", err)
-  })
+  saveSetting('accentColor', normalizeAccentColor(color), { always: true })
 }

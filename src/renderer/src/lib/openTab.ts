@@ -1,5 +1,6 @@
 import type { GitFileState, Pane, Tab, TabConfig, TabType } from '@shared/types'
 import { useStore, activePaneId } from '@renderer/store'
+import { settingOf } from '@renderer/lib/settings'
 import { resolveOpenTarget } from './paneTarget'
 
 /**
@@ -27,7 +28,7 @@ export async function openTab(
 ): Promise<Tab | undefined> {
   const s = useStore.getState()
   const worktree = s.worktrees.find((w) => w.id === worktreeId)
-  const action = s.settings?.defaultOpenAction ?? 'right'
+  const action = settingOf(s.settings, 'defaultOpenAction')
   const target = worktree
     ? resolveOpenTarget(worktree.layout, activePaneId(s, worktreeId), action, avoidPaneId)
     : null

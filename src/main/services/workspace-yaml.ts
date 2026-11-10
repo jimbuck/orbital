@@ -2,16 +2,8 @@ import { dirname, basename } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { parse, stringify } from 'yaml'
-import {
-  WORKSPACE_CONFIG_VERSION,
-  normalizeAccentColor,
-  normalizeAgentConfigs,
-  normalizeOpenAction,
-  type Settings,
-  type WorkspaceConfig,
-  type WorkspaceProjectConfig
-} from '@shared/types'
-import { isThemeId, normalizeSystemTheme } from '@shared/themes'
+import { WORKSPACE_CONFIG_VERSION, type WorkspaceConfig, type WorkspaceProjectConfig } from '@shared/types'
+import { parseSettings } from '@shared/settings'
 
 /**
  * The Export/Import Workspace YAML format. Workspaces live in the global DB —
@@ -65,45 +57,7 @@ export function normalize(raw: unknown): WorkspaceConfig {
   }
 
   // Workspace-scoped settings: keep only recognizably-typed fields.
-  let settings: WorkspaceConfig['settings']
-  if (r.settings && typeof r.settings === 'object') {
-    const s = r.settings as Record<string, unknown>
-    settings = {}
-    if (Array.isArray(s.envSyncPatterns) && s.envSyncPatterns.every((x) => typeof x === 'string')) {
-      settings.envSyncPatterns = s.envSyncPatterns
-    }
-    if (typeof s.periodicFetch === 'boolean') settings.periodicFetch = s.periodicFetch
-    const accent = normalizeAccentColor(s.accentColor)
-    if (accent) settings.accentColor = accent
-    if (s.theme === 'system' || isThemeId(s.theme)) settings.theme = s.theme
-    if (typeof s.fontLigatures === 'boolean') settings.fontLigatures = s.fontLigatures
-    if (typeof s.defaultShell === 'string') settings.defaultShell = s.defaultShell
-    if (typeof s.externalEditor === 'string') settings.externalEditor = s.externalEditor
-    if (typeof s.debugLogging === 'boolean') settings.debugLogging = s.debugLogging
-    const openAction = normalizeOpenAction(s.defaultOpenAction)
-    if (openAction) settings.defaultOpenAction = openAction
-    // Alerts: only the toggles that are booleans; getSettings fills the rest.
-    if (s.alerts && typeof s.alerts === 'object' && !Array.isArray(s.alerts)) {
-      const alerts = Object.fromEntries(
-        Object.entries(s.alerts).filter(
-          ([k, v]) => ['indicator', 'sound', 'taskbarBadge', 'taskbarFlash'].includes(k) && typeof v === 'boolean'
-        )
-      )
-      if (Object.keys(alerts).length > 0) settings.alerts = alerts as Settings['alerts']
-    }
-    // Only a half of the right appearance; see normalizeSystemTheme.
-    if (isThemeId(s.systemDarkTheme) && normalizeSystemTheme(s.systemDarkTheme, 'dark') === s.systemDarkTheme) {
-      settings.systemDarkTheme = s.systemDarkTheme
-    }
-    if (isThemeId(s.systemLightTheme) && normalizeSystemTheme(s.systemLightTheme, 'light') === s.systemLightTheme) {
-      settings.systemLightTheme = s.systemLightTheme
-    }
-    // Modern `agents` entries, or a legacy `enabledAgents` id array from an
-    // export written before agents were configurable.
-    const agents = normalizeAgentConfigs(s.agents, s.enabledAgents)
-    if (agents) settings.agents = agents
-    if (Object.keys(settings).length === 0) settings = undefined
-  }
+  const settings: WorkspaceConfig['settings'] = parseSettings(r.settings)
 
   return { version: WORKSPACE_CONFIG_VERSION, id, name, settings, projects }
 }

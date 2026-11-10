@@ -36,10 +36,11 @@ import {
   ZoomOut
 } from 'lucide-react'
 import type { AgentConfig, Pane, Tab, TabType, ThemeMode, Worktree } from '@shared/types'
-import { OPEN_ACTIONS, defaultAgentConfigs } from '@shared/types'
+import { OPEN_ACTIONS } from '@shared/types'
 import { useStore, activePaneId, type Store } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { openTab } from '@renderer/lib/openTab'
+import { saveSetting, settingOf } from '@renderer/lib/settings'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
 import { setFontLigatures, setThemeMode, systemThemeId, themeModeLabel } from '@renderer/lib/theme'
 import { THEMES } from '@shared/themes'
@@ -123,9 +124,9 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   const project = s.projects.find((p) => p.id === s.activeProjectId)
   const pane = currentPane(s, worktree)
   const tab = currentTab(pane)
-  const agents: AgentConfig[] = s.settings?.agents ?? defaultAgentConfigs()
+  const agents: AgentConfig[] = settingOf(s.settings, 'agents')
   const servers = worktree ? (s.devServers[worktree.id] ?? []) : []
-  const openAction = s.settings?.defaultOpenAction ?? 'right'
+  const openAction = settingOf(s.settings, 'defaultOpenAction')
   const wid = worktree?.id
 
   const out: PaletteCommand[] = []
@@ -418,7 +419,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       // System names the half of the pair it would pick, so the row is not a
       // blind choice; which half is a question for the OS, not the settings.
       hint: spec ? undefined : themeModeLabel(systemThemeId()),
-      checked: (s.settings?.theme ?? 'dark') === mode,
+      checked: settingOf(s.settings, 'theme') === mode,
       run: () => setThemeMode(mode)
     })
   }
@@ -428,8 +429,8 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     label: 'Code Ligatures',
     keywords: 'font glyph jetbrains mono arrow appearance',
     icon: Sun,
-    checked: s.settings?.fontLigatures ?? true,
-    run: () => setFontLigatures(!(s.settings?.fontLigatures ?? true))
+    checked: settingOf(s.settings, 'fontLigatures'),
+    run: () => setFontLigatures(!settingOf(s.settings, 'fontLigatures'))
   })
   for (const action of OPEN_ACTIONS) {
     add({
@@ -439,7 +440,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       keywords: 'default open action pane placement split',
       icon: CornerDownLeft,
       checked: openAction === action.value,
-      run: () => fireAndForget(window.orbital.setSettings({ defaultOpenAction: action.value }))
+      run: () => saveSetting('defaultOpenAction', action.value)
     })
   }
   add({

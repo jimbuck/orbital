@@ -13,9 +13,10 @@ import {
   TextSearch
 } from 'lucide-react'
 import type { AgentConfig, Worktree, Pane, Tab, TabConfig, TabType } from '@shared/types'
-import { defaultAgentConfigs, providerLabel, resolveAgentRef } from '@shared/types'
+import { providerLabel, resolveAgentRef } from '@shared/types'
 import { ClaudeIcon, CodexIcon, CursorIcon } from '../icons'
 import { useStore } from '@renderer/store'
+import { useSetting } from '@renderer/lib/settings'
 import { StatusDot } from '@renderer/lib/status'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from '../rail/menu'
 import { dropSlot, isNoopDrop } from '@shared/tabOrder'
@@ -128,7 +129,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   // The workspace's agent profiles (Settings → Agents) fill the popover's agent
   // entries, in list order. Undefined (state not loaded yet) means the default
   // lineup.
-  const agents = useStore((s) => s.settings?.agents) ?? defaultAgentConfigs()
+  const agents = useSetting('agents')
   const addOptions = [
     ADD_OPTIONS[0],
     ...agents.map((a) => ({
