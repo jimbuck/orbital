@@ -1,4 +1,4 @@
-import { IPC, type CreateWorktreeOptions, type RemoveWorktreeOptions } from '@shared/types'
+import { IPC } from '@shared/contract'
 import { repo } from '../runtime'
 import { createWorktree, removeWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
 import { resetWorktree } from '../status'
@@ -8,7 +8,7 @@ import { handle, broadcast } from './handle'
 export function register(): void {
   const h = handle
   // ---- worktrees / panes / tabs ----
-  h(IPC.createWorktree, (_e, projectId: string, opts: CreateWorktreeOptions) =>
+  h(IPC.createWorktree, (_e, projectId, opts) =>
     createWorktree({
       projectId,
       branch: opts.branch,
@@ -19,16 +19,16 @@ export function register(): void {
     })
   )
 
-  h(IPC.removeWorktree, (_e, worktreeId: string, opts: RemoveWorktreeOptions) => removeWorktree(worktreeId, opts))
+  h(IPC.removeWorktree, (_e, worktreeId, opts) => removeWorktree(worktreeId, opts))
 
-  h(IPC.renameWorktree, (_e, worktreeId: string, name: string) => {
+  h(IPC.renameWorktree, (_e, worktreeId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.worktrees.rename(worktreeId, trimmed)
     broadcast()
   })
 
-  h(IPC.syncWorktreeEnv, (_e, worktreeId: string) => syncWorktreeEnv(worktreeId))
+  h(IPC.syncWorktreeEnv, (_e, worktreeId) => syncWorktreeEnv(worktreeId))
 
-  h(IPC.clearWorktreeStatus, (_e, worktreeId: string) => resetWorktree(worktreeId))
+  h(IPC.clearWorktreeStatus, (_e, worktreeId) => resetWorktree(worktreeId))
 }

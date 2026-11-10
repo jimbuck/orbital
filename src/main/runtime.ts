@@ -7,7 +7,8 @@ import * as repo from './db/repositories'
 import { safeWrite } from './db/database'
 import { getSettings } from './services/settings'
 import { invalidate as invalidateFileIndex } from './services/file-index'
-import { IPC, type AppState, type GitChangedEvent } from '@shared/types'
+import { IPC, type Push } from '@shared/contract'
+import { type AppState, type GitChangedEvent } from '@shared/types'
 
 /**
  * The main-process service hub. Owns the long-lived service singletons and the
@@ -84,7 +85,8 @@ class Runtime {
     this.window.setTitle(name !== 'Default' ? `${name} - Orbital` : 'Orbital')
   }
 
-  send(channel: string, payload: unknown): void {
+  /** Push an event to the window (dropped when there is none). Typed by the contract. */
+  send: Push = (channel, payload) => {
     if (this.window && !this.window.isDestroyed()) {
       this.window.webContents.send(channel, payload)
     }

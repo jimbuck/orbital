@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, Menu } from 'electron'
-import { IPC } from '@shared/types'
+import { IPC } from '@shared/contract'
 import { closeDb } from './db/database'
 import { runtime } from './runtime'
 import { updater } from './services/updater'

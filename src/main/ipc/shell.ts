@@ -1,5 +1,5 @@
 import { shell, webContents } from 'electron'
-import { IPC } from '@shared/types'
+import { IPC } from '@shared/contract'
 import { isOpenableExternalUrl } from '@shared/urls'
 import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
@@ -16,14 +16,14 @@ export function register(): void {
   const h = handle
   // ---- browser / window ----
   // Renderer-supplied and OS-launched: only schemes a browser handles (see urls.ts).
-  h(IPC.openExternal, (_e, url: string) => {
+  h(IPC.openExternal, (_e, url) => {
     if (!isOpenableExternalUrl(url)) throw new Error(`refusing to open ${JSON.stringify(url)}: not a web or mail link`)
     return shell.openExternal(url)
   })
   // A <webview>'s popups (Ctrl/Cmd-click, target=_blank, window.open) can only be
   // intercepted on the guest's webContents in main. Route them to a NEW internal
   // browser tab in the same worktree/pane and deny the real popup window.
-  h(IPC.registerBrowserView, (_e, webContentsId: number, worktreeId: string, paneId: string) => {
+  h(IPC.registerBrowserView, (_e, webContentsId, worktreeId, paneId) => {
     const wc = webContents.fromId(webContentsId)
     if (!wc) return
     wc.setWindowOpenHandler((details) => {
@@ -95,7 +95,7 @@ export function register(): void {
   const worktreePath = (worktreeId: string, path: string): string =>
     git.resolveInRepo(worktreeRepoPath(worktreeId), path)
 
-  h(IPC.openPath, async (_e, worktreeId: string, path: string) => {
+  h(IPC.openPath, async (_e, worktreeId, path) => {
     // `shell.openPath` reports failure by RESOLVING with a message rather than
     // rejecting, so without this an unopenable file is a silent no-op — the
     // context menu closes and nothing happens. Rethrowing puts the OS's own
@@ -108,7 +108,7 @@ export function register(): void {
   // showItemInFolder, not openPath: this opens the CONTAINING folder with the
   // item selected, which is what "Reveal in File Explorer" means for a file
   // (openPath on a file would launch its default application instead).
-  h(IPC.revealPath, (_e, worktreeId: string, path: string) => {
+  h(IPC.revealPath, (_e, worktreeId, path) => {
     shell.showItemInFolder(worktreePath(worktreeId, path))
   })
   h(IPC.openLogFolder, async () => {
@@ -117,10 +117,10 @@ export function register(): void {
     // renderer's — there is nothing here for a caller to influence.
     await shell.openPath(logger.dir)
   })
-  h(IPC.openInTerminal, (_e, worktreeId: string, path: string) => {
+  h(IPC.openInTerminal, (_e, worktreeId, path) => {
     spawnExternalTerminal(worktreePath(worktreeId, path))
   })
-  h(IPC.openInEditor, (_e, worktreeId: string, path: string) =>
+  h(IPC.openInEditor, (_e, worktreeId, path) =>
     spawnExternalEditor(getSettings().externalEditor, worktreePath(worktreeId, path))
   )
 
@@ -144,13 +144,13 @@ export function register(): void {
    * alternative — letting the renderer pass the absolute path it can see in the
    * rail — is the exact shape this PR removed, and is not coming back.
    */
-  h(IPC.openProjectPath, async (_e, projectId: string) => {
+  h(IPC.openProjectPath, async (_e, projectId) => {
     // Same resolve-with-a-message quirk as `IPC.openPath` above; rethrowing is
     // what puts "the folder is gone" in front of a user whose repo moved.
     const err = await shell.openPath(projectRepoPath(projectId))
     if (err) throw new Error(err)
   })
-  h(IPC.openProjectInTerminal, (_e, projectId: string) => {
+  h(IPC.openProjectInTerminal, (_e, projectId) => {
     spawnExternalTerminal(projectRepoPath(projectId))
   })
 }

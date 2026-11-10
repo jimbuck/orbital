@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { app, dialog } from 'electron'
-import { IPC, type SettingsPatch } from '@shared/types'
+import { IPC } from '@shared/contract'
 import { runtime, repo } from '../runtime'
 import { logger } from '../services/logger'
 import { patchTouches, setSettings } from '../services/settings'
@@ -29,7 +29,7 @@ export function register(): void {
   const h = handle
   // ---- state / settings ----
   h(IPC.getState, () => runtime.appState())
-  h(IPC.setSettings, (_e, patch: SettingsPatch) => {
+  h(IPC.setSettings, (_e, patch) => {
     // Merges the patch's keys into the workspace's settings behind the facade,
     // leaving every key the renderer did not send untouched.
     const s = setSettings(patch)
@@ -54,7 +54,7 @@ export function register(): void {
   // ---- workspaces ----
   h(IPC.listWorkspaces, () => repo.workspaces.list())
 
-  h(IPC.openWorkspace, (_e, workspaceId: string) => {
+  h(IPC.openWorkspace, (_e, workspaceId) => {
     const info = repo.workspaces.get(workspaceId)
     if (!info) throw new Error('workspace not found')
     // Opening the workspace this instance already runs just means "focus me".
@@ -70,7 +70,7 @@ export function register(): void {
     return info
   })
 
-  h(IPC.createWorkspace, (_e, name: string) => {
+  h(IPC.createWorkspace, (_e, name) => {
     const trimmed = name.trim()
     if (!trimmed) return null
     const info = repo.workspaces.create(trimmed)
@@ -78,7 +78,7 @@ export function register(): void {
     return info
   })
 
-  h(IPC.renameWorkspace, (_e, workspaceId: string, name: string) => {
+  h(IPC.renameWorkspace, (_e, workspaceId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.workspaces.rename(workspaceId, trimmed)
@@ -91,7 +91,7 @@ export function register(): void {
     refreshJumpList()
   })
 
-  h(IPC.removeWorkspace, (_e, workspaceId: string) => {
+  h(IPC.removeWorkspace, (_e, workspaceId) => {
     // Deleting the workspace out from under this window would strand it; the
     // picker greys out the current workspace instead. (An instance of ANOTHER
     // workspace being open while it's deleted is the user's call — its window
@@ -104,7 +104,7 @@ export function register(): void {
     return repo.workspaces.list()
   })
 
-  h(IPC.exportWorkspace, async (_e, workspaceId: string) => {
+  h(IPC.exportWorkspace, async (_e, workspaceId) => {
     const ws = repo.workspaces.get(workspaceId)
     if (!ws) throw new Error('workspace not found')
     const win = runtime.window ?? undefined

@@ -1,9 +1,8 @@
 import { dialog, BrowserWindow } from 'electron'
-import { IPC, type ProjectAgentPatch } from '@shared/types'
+import { IPC } from '@shared/contract'
 import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
 import { github } from '../services/github'
-import type { GithubAccountRef, GithubCreateRepoOptions } from '@shared/github'
 import { addProject, removeProject } from '../worktree-lifecycle'
 import { handle, broadcast } from './handle'
 
@@ -29,7 +28,7 @@ export function register(): void {
     return addProject(dir)
   })
 
-  h(IPC.pickDirectory, async (_e, title?: string) => {
+  h(IPC.pickDirectory, async (_e, title) => {
     const win = runtime.window ?? undefined
     const opts = { properties: ['openDirectory' as const], title: title || 'Choose a folder' }
     const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
@@ -38,16 +37,16 @@ export function register(): void {
   })
 
   // ---- github (gh CLI) ----
-  h(IPC.githubContext, (_e, account?: GithubAccountRef) => github.getContext(account))
-  h(IPC.githubListRepos, (_e, owner: string, account?: GithubAccountRef) => github.listRepos(owner, account))
-  h(IPC.githubCheckRepoName, (_e, owner: string, name: string, account?: GithubAccountRef) =>
+  h(IPC.githubContext, (_e, account) => github.getContext(account))
+  h(IPC.githubListRepos, (_e, owner, account) => github.listRepos(owner, account))
+  h(IPC.githubCheckRepoName, (_e, owner, name, account) =>
     github.checkRepoName(owner, name, account)
   )
-  h(IPC.githubCreateRepo, (_e, opts: GithubCreateRepoOptions) => github.createRepo(opts))
+  h(IPC.githubCreateRepo, (_e, opts) => github.createRepo(opts))
 
   // Clone into <parentDir>/<repo>, then register it exactly as addProject does
   // for a folder picked by hand.
-  h(IPC.githubCloneRepo, async (_e, nameWithOwner: string, parentDir: string, account?: GithubAccountRef) => {
+  h(IPC.githubCloneRepo, async (_e, nameWithOwner, parentDir, account) => {
     const repoName = String(nameWithOwner).split('/').pop() ?? ''
     const dest = github.resolveCloneTarget(String(parentDir), repoName)
     await github.cloneRepo(String(nameWithOwner), dest, account)
@@ -57,16 +56,16 @@ export function register(): void {
     return addProject(dest)
   })
 
-  h(IPC.removeProject, (_e, projectId: string) => removeProject(projectId))
+  h(IPC.removeProject, (_e, projectId) => removeProject(projectId))
 
-  h(IPC.renameProject, (_e, projectId: string, name: string) => {
+  h(IPC.renameProject, (_e, projectId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.projects.rename(projectId, trimmed)
     broadcast()
   })
 
-  h(IPC.listBranches, async (_e, projectId: string) => {
+  h(IPC.listBranches, async (_e, projectId) => {
     const project = repo.projects.get(projectId)
     if (!project) return { branches: [], remotes: [], head: 'HEAD' }
     const [branches, allRemotes, head] = await Promise.all([
@@ -81,7 +80,7 @@ export function register(): void {
     return { branches, remotes, head }
   })
 
-  h(IPC.setProjectAgent, (_e, projectId: string, patch: ProjectAgentPatch) => {
+  h(IPC.setProjectAgent, (_e, projectId, patch) => {
     repo.projects.updateAgent(projectId, patch)
     broadcast()
   })

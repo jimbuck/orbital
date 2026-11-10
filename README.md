@@ -256,14 +256,16 @@ self-update from those releases in the background — see
 
 ```
 src/
-  shared/types.ts          Shared contract (domain types, IPC channels, CLI protocol)
+  shared/types.ts          Domain types + CLI protocol
+  shared/contract.ts       The window contract: every window.orbital operation, stated once
   main/                    Electron main process
     index.ts               App lifecycle + frameless window
-    ipc.ts                 IPC handlers + CLI control dispatcher
+    ipc/                   IPC handlers, typed from the contract
+    control/               CLI control dispatcher
     runtime.ts             Service hub + renderer broadcasts
     db/                    better-sqlite3 schema + repositories
     services/              git · worktree · env-sync · terminals · control-channel · alerts · updater
-  preload/index.ts         contextBridge -> window.orbital
+  preload/index.ts         contextBridge -> window.orbital, built from the contract
   renderer/                React + Tailwind cockpit
   cli/orbital.ts           The `orbital` CLI (bundled to resources/cli)
 design/                    The source design (cockpit + Tailwind guide) as HTML

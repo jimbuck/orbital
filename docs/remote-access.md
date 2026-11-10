@@ -61,6 +61,11 @@ a request over the control stream. Every push event the host's main process
 would send to its own renderer is sent instead to the client's main, which
 re-emits it to the window.
 
+The forwarder does not have to list those channels. `src/shared/contract.ts`
+states every operation once, with its kind (request, one-way message, pushed
+event, or local to the preload), and is a runtime value: the forwarder walks
+it the same way the preload bridge does.
+
 The renderer does not know it is remote. The preload bridge is unchanged. This
 avoids threading a `hostId` through a hundred channels and every id-carrying
 type in `src/shared/types.ts`, which is what a single merged window would have

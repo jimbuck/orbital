@@ -1,4 +1,4 @@
-import { IPC, type TaskPatch } from '@shared/types'
+import { IPC } from '@shared/contract'
 import { repo } from '../runtime'
 import { handle, broadcast } from './handle'
 
@@ -6,21 +6,21 @@ import { handle, broadcast } from './handle'
 export function register(): void {
   const h = handle
   // ---- tasks ----
-  h(IPC.createTask, (_e, projectId: string, title: string, description?: string, tags?: string[]) => {
+  h(IPC.createTask, (_e, projectId, title, description, tags) => {
     const t = repo.tasks.create({ projectId, title, description, tags, createdBy: 'user' })
     broadcast()
     return t
   })
-  h(IPC.updateTask, (_e, taskId: string, patch: TaskPatch) => {
+  h(IPC.updateTask, (_e, taskId, patch) => {
     const t = repo.tasks.update(taskId, patch)
     broadcast()
     return t
   })
-  h(IPC.archiveTask, (_e, taskId: string) => {
+  h(IPC.archiveTask, (_e, taskId) => {
     repo.tasks.archive(taskId)
     broadcast()
   })
-  h(IPC.unarchiveTask, (_e, taskId: string) => {
+  h(IPC.unarchiveTask, (_e, taskId) => {
     repo.tasks.unarchive(taskId)
     broadcast()
   })

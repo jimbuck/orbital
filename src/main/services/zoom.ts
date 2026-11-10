@@ -1,5 +1,6 @@
 import type { BrowserWindow, Input } from 'electron'
-import { IPC, type WorkspaceSettings } from '@shared/types'
+import { IPC } from '@shared/contract'
+import { type WorkspaceSettings } from '@shared/types'
 import { getDb } from '../db/database'
 import { requireWorkspaceId, workspaces } from '../db/repositories'
 import { primaryModHeld } from './shortcut-mod'

@@ -1,11 +1,5 @@
-import {
-  IPC,
-  type TabType,
-  type TabConfig,
-  type Tab,
-  type SplitDirection,
-  type SplitWhere
-} from '@shared/types'
+import { IPC } from '@shared/contract'
+import { type Tab } from '@shared/types'
 import { repo } from '../runtime'
 import { writeTx } from '../db/database'
 import { splitAt, setRatio, edgeToSplit } from '../services/layout'
@@ -15,15 +9,15 @@ import { handle, broadcast } from './handle'
 /** Tabs and panes: open / close / move / split, and the split ratios. */
 export function register(): void {
   const h = handle
-  h(IPC.createTab, (_e, worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig) => {
+  h(IPC.createTab, (_e, worktreeId, paneId, type, config) => {
     const tab = createTabInWorktree(worktreeId, paneId, type, config)
     broadcast()
     return tab
   })
 
-  h(IPC.closeTab, (_e, tabId: string) => closeTab(tabId))
+  h(IPC.closeTab, (_e, tabId) => closeTab(tabId))
 
-  h(IPC.renameTab, (_e, tabId: string, title: string) => {
+  h(IPC.renameTab, (_e, tabId, title) => {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
     // An empty title clears the override; JSON.stringify drops the undefined key.
@@ -31,14 +25,14 @@ export function register(): void {
     broadcast()
   })
 
-  h(IPC.updateTabConfig, (_e, tabId: string, patch: Partial<TabConfig>) => {
+  h(IPC.updateTabConfig, (_e, tabId, patch) => {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
     repo.tabs.updateConfig(tabId, { ...tab.config, ...patch })
     broadcast()
   })
 
-  h(IPC.setActiveTab, (_e, paneId: string, tabId: string) => {
+  h(IPC.setActiveTab, (_e, paneId, tabId) => {
     repo.tabs.setActive(paneId, tabId)
     broadcast()
   })
@@ -59,7 +53,7 @@ export function register(): void {
 
   // `slot` places the tab at an insertion point in the target pane's strip
   // (see shared/tabOrder); a same-pane move with a slot is a reorder.
-  h(IPC.moveTab, (_e, tabId: string, targetPaneId: string, slot?: number) => {
+  h(IPC.moveTab, (_e, tabId, targetPaneId, slot) => {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
     if (tab.paneId === targetPaneId && slot === undefined) return
@@ -70,7 +64,7 @@ export function register(): void {
     broadcast()
   })
 
-  h(IPC.splitPane, (_e, worktreeId: string, paneId: string, dir: SplitDirection, where: SplitWhere) => {
+  h(IPC.splitPane, (_e, worktreeId, paneId, dir, where) => {
     const worktree = repo.worktrees.get(worktreeId)
     if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
     const pane = writeTx(() => {
@@ -82,9 +76,9 @@ export function register(): void {
     return pane
   })
 
-  h(IPC.closePane, (_e, worktreeId: string, paneId: string) => closePane(worktreeId, paneId))
+  h(IPC.closePane, (_e, worktreeId, paneId) => closePane(worktreeId, paneId))
 
-  h(IPC.moveTabToEdge, (_e, tabId: string, targetPaneId: string, edge: 'left' | 'right' | 'top' | 'bottom') => {
+  h(IPC.moveTabToEdge, (_e, tabId, targetPaneId, edge) => {
     const tab = repo.tabs.get(tabId)
     if (!tab) return
     const worktree = repo.worktrees.get(tab.worktreeId)
@@ -104,7 +98,7 @@ export function register(): void {
     broadcast()
   })
 
-  h(IPC.setSplitRatio, (_e, worktreeId: string, splitId: string, ratio: number) => {
+  h(IPC.setSplitRatio, (_e, worktreeId, splitId, ratio) => {
     const worktree = repo.worktrees.get(worktreeId)
     if (!worktree) return
     repo.worktrees.setLayout(worktreeId, setRatio(worktree.layout, splitId, ratio))

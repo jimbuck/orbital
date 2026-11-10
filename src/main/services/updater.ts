@@ -1,6 +1,7 @@
 import { app, dialog, type BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { IPC, controlPipePath, type UpdateStatus } from '@shared/types'
+import { IPC, type Push } from '@shared/contract'
+import { controlPipePath, type UpdateStatus } from '@shared/types'
 import { requireWorkspaceId, workspaces } from '../db/repositories'
 import { logger } from './logger'
 import { findLivePeers, peerUpdatePrompt, quitPeers } from './peer-instances'
@@ -22,12 +23,12 @@ const CHECK_INTERVAL = 4 * 60 * 60 * 1000
  */
 class UpdaterService {
   private current: UpdateStatus = { phase: 'idle' }
-  private send: (channel: string, payload: unknown) => void = () => {}
+  private send: Push = () => {}
   private timer: ReturnType<typeof setInterval> | null = null
   /** Set while an Update click is confirming / closing peers, so a second click is a no-op. */
   private installing = false
 
-  init(send: (channel: string, payload: unknown) => void): void {
+  init(send: Push): void {
     this.send = send
 
     if (!app.isPackaged) {
@@ -156,7 +157,7 @@ class UpdaterService {
 
   private setStatus(status: UpdateStatus): void {
     this.current = status
-    this.send(IPC.evtUpdate, status)
+    this.send(IPC.evtUpdateStatus, status)
   }
 }
 

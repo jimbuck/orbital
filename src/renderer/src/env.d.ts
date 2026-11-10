@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { OrbitalApi } from '@shared/types'
+import type { OrbitalApi } from '@shared/contract'
 
 declare global {
   interface Window {
