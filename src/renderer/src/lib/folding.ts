@@ -303,12 +303,24 @@ export function foldProjection(
     return out
   }
 
-  /** The folds after an edit that replaced lines `startLine..endLine`, changing the count by `delta`. */
-  const shifted = (startLine: number, endLine: number, delta: number): ReadonlySet<number> => {
+  /**
+   * The folds after an edit that replaced lines `startLine..endLine`, changing
+   * the count by `delta`. A fold above the edit stays, one below moves with its
+   * line, and one whose header the edit ran through is dropped — except the
+   * header on `startLine`, which was edited in place and keeps its fold for as
+   * long as it still starts a block.
+   *
+   * `endLineIntact` says the edit stopped at the very start of `endLine` and
+   * left it a whole line: lines inserted in front of it, or whole lines deleted
+   * above it. That line was pushed, not edited, so a fold on it moves too. It
+   * matters because of how a textarea reports Enter at the end of a line: as a
+   * newline inserted at the start of the NEXT line.
+   */
+  const shifted = (startLine: number, endLine: number, delta: number, endLineIntact: boolean): ReadonlySet<number> => {
     const out = new Set<number>()
     for (const f of folds) {
-      if (f <= startLine) out.add(f)
-      else if (f > endLine) out.add(f + delta)
+      if (f > endLine || (f === endLine && endLineIntact)) out.add(f + delta)
+      else if (f <= startLine) out.add(f)
     }
     return out
   }
@@ -356,10 +368,14 @@ export function foldProjection(
       }
     }
     const lineDelta = countNewlines(ins) - countNewlines(value.slice(from, to))
+    // Whether what follows the edit is still line `toLine`, whole: the edit
+    // ended at its first character, and what now precedes it ends a line.
+    const endLineIntact =
+      to === docStarts[toLine] && (ins === '' ? from === docStarts[fromLine] : ins.endsWith('\n'))
     return {
       value: value.slice(0, from) + ins + value.slice(to),
       caret: from + ins.length,
-      folds: shifted(fromLine, toLine, lineDelta),
+      folds: shifted(fromLine, toLine, lineDelta, endLineIntact),
       rejected: false
     }
   }

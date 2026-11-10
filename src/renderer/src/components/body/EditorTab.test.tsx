@@ -514,6 +514,33 @@ describe('CodeEditor', () => {
       expect(seen).toHaveBeenLastCalledWith('head\n  one\n  two\ntail!')
     })
 
+    it('keeps a block folded when Enter is pressed at the end of the line above it', () => {
+      const seen = vi.fn()
+      function Above(): JSX.Element {
+        const [v, setV] = useState(['top', 'head', '  one', '  two', 'tail'].join('\n'))
+        return (
+          <CodeEditor
+            path={PATH}
+            value={v}
+            onChange={(n) => {
+              setV(n)
+              seen(n)
+            }}
+          />
+        )
+      }
+      render(<Above />)
+      const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+      fireEvent.click(screen.getByTestId('fold-marker'))
+      expect(ta.value).toBe('top\nhead\ntail')
+      // What the textarea holds after Enter with the caret at the end of `top`.
+      fireEvent.change(ta, { target: { value: 'top\n\nhead\ntail' } })
+      expect(seen).toHaveBeenLastCalledWith(['top', '', 'head', '  one', '  two', 'tail'].join('\n'))
+      // The new line pushed the block down; it did not open it.
+      expect(ta.value).toBe('top\n\nhead\ntail')
+      expect(screen.getByTestId('line-gutter').textContent).toBe('1\n2\n3\n6')
+    })
+
     it('anchors each chip on its header DISPLAY line, in the editor font', () => {
       render(<CodeEditor path={PATH} value={['a {', '  1', '  2', '}', 'bb {', '  3', '  4', '}'].join('\n')} onChange={noop} />)
       fireEvent.click(screen.getAllByTestId('fold-marker')[0])

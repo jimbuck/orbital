@@ -214,6 +214,53 @@ describe('foldProjection: edits made in the display text', () => {
     expect([...project([...removed.folds], removed.value).folds]).toEqual([2])
   })
 
+  describe('a fold whose header line is pushed around but not touched', () => {
+    const src = ['top', 'head', 'a {', '  1', '}', 'tail'].join('\n')
+    const q = project([2], src)
+    // q.text: "top\nhead\na {\n}\ntail"
+    const after = (e: ReturnType<FoldProjection['edit']>): FoldProjection => project([...e.folds], e.value)
+
+    it('stays folded when Enter is pressed at the end of the line above it', () => {
+      // A textarea reports this as a newline inserted at the START of the header
+      // line: the common prefix runs through the newline already there.
+      const e = q.edit(q.text.replace('head', 'head\n'))
+      expect(e.value).toBe(['top', 'head', '', 'a {', '  1', '}', 'tail'].join('\n'))
+      expect([...e.folds]).toEqual([3])
+      expect(after(e).text).toBe('top\nhead\n\na {\n}\ntail')
+    })
+
+    it('stays folded when lines are pasted in front of it', () => {
+      const e = q.edit(q.text.replace('a {', 'x\ny\na {'))
+      expect([...e.folds]).toEqual([4])
+      expect(after(e).text).toBe('top\nhead\nx\ny\na {\n}\ntail')
+    })
+
+    it('stays folded when the line above it is deleted whole', () => {
+      const e = q.edit(q.text.replace('head\n', ''))
+      expect(e.value).toBe(['top', 'a {', '  1', '}', 'tail'].join('\n'))
+      expect([...e.folds]).toEqual([1])
+      expect(after(e).text).toBe('top\na {\n}\ntail')
+    })
+
+    it('stays folded when several whole lines above it are replaced', () => {
+      const e = q.edit(q.text.replace('top\nhead\n', 'one\n'))
+      expect([...e.folds]).toEqual([1])
+      expect(after(e).text).toBe('one\na {\n}\ntail')
+    })
+
+    it('still drops the fold when its header is joined onto the line above', () => {
+      // Backspace at the start of the header: the header line is gone.
+      const e = q.edit(q.text.replace('head\na {', 'heada {'))
+      expect(e.value).toBe(['top', 'heada {', '  1', '}', 'tail'].join('\n'))
+      expect([...e.folds]).toEqual([])
+    })
+
+    it('still keeps the fold in place when text is typed into its header', () => {
+      const e = q.edit(q.text.replace('a {', 'ab {'))
+      expect([...e.folds]).toEqual([2])
+    })
+  })
+
   it('is a plain replace with nothing folded', () => {
     const e = project().edit('new text')
     expect(e).toMatchObject({ value: 'new text', rejected: false })
