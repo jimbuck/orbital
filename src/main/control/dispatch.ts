@@ -11,13 +11,12 @@ import {
   type ControlResponse
 } from '@shared/types'
 import { runtime, repo } from '../runtime'
-import { createLinkedWorktree } from '../services/worktree'
 import { getSettings } from '../services/settings'
 import { logger } from '../services/logger'
 import { updater } from '../services/updater'
 import { recordAgentSession } from '../services/agents/launch'
 import { createTabInWorktree } from '../tabs'
-import { beginWorktreeSetup, syncWorktreeEnv } from '../worktree-lifecycle'
+import { createWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
 import { hookFired, statusReported } from '../status'
 import { normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
 
@@ -111,31 +110,22 @@ const handlers: Record<ControlCommand, Handler> = {
     if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
     const project = repo.projects.get(req.projectId)
     if (!project) return { ok: false, error: 'project not found' }
-    // A task number/id may come along, both to seed the branch name and to
-    // link the task — same as the cockpit's "start a worktree from a task".
+    // A task number/id may come along: the Worktree is then started from that
+    // task, same as the cockpit's "start a worktree from a task".
     let task: ReturnType<typeof repo.tasks.get> | undefined
     if (req.args.task !== undefined) {
       const resolved = resolveTask(req.projectId, String(req.args.task).trim())
       if (!resolved.task) return { ok: false, error: resolved.error }
       task = resolved.task
     }
-    const existingBranch = req.args.existingBranch ? String(req.args.existingBranch) : undefined
-    const branch = String(req.args.worktree ?? req.args.name ?? task?.title ?? `worktree-${Date.now()}`)
-    const worktree = await createLinkedWorktree({
-      project,
-      branch,
-      existingBranch,
-      name: req.args.name ? String(req.args.name) : task?.title,
+    const worktree = await createWorktree({
+      projectId: project.id,
+      branch: req.args.worktree !== undefined ? String(req.args.worktree) : undefined,
+      existingBranch: req.args.existingBranch ? String(req.args.existingBranch) : undefined,
+      name: req.args.name ? String(req.args.name) : undefined,
       baseRef: req.args.base ? String(req.args.base) : undefined,
-      taskId: task?.id ?? null
+      taskId: task?.id
     })
-    // createLinkedWorktree linked the task both ways; start it too.
-    if (task && task.status !== 'in_progress' && task.status !== 'done') {
-      repo.tasks.update(task.id, { status: 'in_progress' })
-    }
-    runtime.gitWatcher.watch(worktree.path)
-    beginWorktreeSetup(worktree, project.repoPath)
-    runtime.broadcastState()
     return {
       ok: true,
       data: {

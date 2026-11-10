@@ -4,8 +4,8 @@ import { runtime, repo } from '../runtime'
 import { git } from '../services/git'
 import { github } from '../services/github'
 import type { GithubAccountRef, GithubCreateRepoOptions } from '@shared/github'
-import { registerProject, reconcileProjectWorktrees, releaseWorktreeRuntime, removeWorktreesWatcher } from '../worktree-lifecycle'
-import { handle, broadcast, broadcastAll } from './handle'
+import { addProject, removeProject } from '../worktree-lifecycle'
+import { handle, broadcast } from './handle'
 
 /** Projects: add / remove / rename, their branches and their agent defaults. */
 export function register(): void {
@@ -26,12 +26,7 @@ export function register(): void {
       })
       return null
     }
-    await registerProject(dir)
-    const project = repo.projects.getByPath(dir)!
-    // Adopt any worktrees the repo already has — they show up immediately.
-    await reconcileProjectWorktrees(project.id)
-    broadcastAll()
-    return project
+    return addProject(dir)
   })
 
   h(IPC.pickDirectory, async (_e, title?: string) => {
@@ -59,24 +54,10 @@ export function register(): void {
     if (!(await git.isRepo(dest))) {
       throw new Error(`Cloned ${nameWithOwner}, but ${dest} is not a git repository.`)
     }
-    await registerProject(dest)
-    const project = repo.projects.getByPath(dest)!
-    await reconcileProjectWorktrees(project.id)
-    broadcastAll()
-    return project
+    return addProject(dest)
   })
 
-  h(IPC.removeProject, (_e, projectId: string) => {
-    const project = repo.projects.get(projectId)
-    if (!project) return
-    for (const w of repo.worktrees.list()) {
-      if (w.projectId === projectId) releaseWorktreeRuntime(w)
-    }
-    runtime.gitWatcher.unwatch(project.repoPath)
-    removeWorktreesWatcher(projectId)
-    repo.projects.remove(projectId)
-    broadcastAll()
-  })
+  h(IPC.removeProject, (_e, projectId: string) => removeProject(projectId))
 
   h(IPC.renameProject, (_e, projectId: string, name: string) => {
     const trimmed = name.trim()

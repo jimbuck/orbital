@@ -1,19 +1,149 @@
 import { existsSync } from 'node:fs'
-import type { Worktree } from '@shared/types'
+import { isPtyTabType, type Project, type RemoveWorktreeOptions, type Worktree } from '@shared/types'
 import { runtime, repo } from './runtime'
 import { git } from './services/git'
+import { createLinkedWorktree, removeWorktree as removeCheckout } from './services/worktree'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
 import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
+import { startPtyTab } from './services/agents/launch'
 import { logger } from './services/logger'
 import { getSettings } from './services/settings'
-import { releaseTabRuntime } from './tabs'
+import { killWorktreeTerminals, releaseTabRuntime } from './tabs'
 import { forgetTabs } from './status'
 
 /**
- * Project and Worktree lifecycle: registration, background setup after
- * creation, env resync, discovery of checkouts made outside Orbital, teardown
- * of everything the runtime holds for a Worktree, and boot-time resume.
+ * Project and Worktree lifecycle. The window's IPC handlers and the CLI's
+ * control handlers both come through here to add or remove a Project and to
+ * create or remove a Worktree, so each of those is one sequence: the git
+ * checkout, the rows, the task link, the watchers, background setup, teardown
+ * with rollback, and the pushes that tell the window it happened.
+ *
+ * Also here: env resync, discovery of checkouts made outside Orbital, and
+ * boot-time resume.
  */
+
+/** What a caller says to start a Worktree; everything else is decided here. */
+export interface CreateWorktreeInput {
+  projectId: string
+  /** New branch to create (slugified). Defaults to the name, then the task's title. */
+  branch?: string
+  /** Check out this existing branch (local, or `origin/x` remote) instead of creating one. */
+  existingBranch?: string
+  /** Display name. Defaults to the task's title, then the branch. */
+  name?: string
+  /** Ref the new branch forks from (defaults to HEAD). */
+  baseRef?: string
+  /** The task this Worktree is started from. */
+  taskId?: string
+}
+
+/**
+ * Create a linked Worktree: a real `git worktree` on its own branch, its row
+ * and first pane, env files copied in, the git watcher on, and the heavy
+ * node_modules copy started in the background.
+ *
+ * Started from a task, the two are linked both ways and the task moves to
+ * in-progress (unless it is already there, or done): opening a Worktree for a
+ * task is starting it, whichever door the request came through.
+ */
+export async function createWorktree(input: CreateWorktreeInput): Promise<Worktree> {
+  const project = repo.projects.get(input.projectId)
+  if (!project) throw new Error(`project ${input.projectId} not found`)
+  const task = input.taskId ? repo.tasks.get(input.taskId) : undefined
+  if (input.taskId && !task) throw new Error(`task ${input.taskId} not found`)
+
+  const name = input.name?.trim() || task?.title
+  const branch = input.branch?.trim() || name || `worktree-${Date.now()}`
+  const created = await createLinkedWorktree({
+    project,
+    branch,
+    existingBranch: input.existingBranch,
+    name,
+    baseRef: input.baseRef,
+    taskId: task?.id ?? null
+  })
+  if (task && task.status !== 'in_progress' && task.status !== 'done') {
+    repo.tasks.update(task.id, { status: 'in_progress' })
+  }
+  runtime.gitWatcher.watch(created.path)
+  beginWorktreeSetup(created, project.repoPath)
+  announce()
+  return repo.worktrees.get(created.id) ?? created
+}
+
+/**
+ * Remove a Worktree from the cockpit and, with `removeWorktree`, delete its
+ * git checkout too. The root Worktree cannot be removed.
+ *
+ * Deleting the checkout refuses a dirty working tree unless forced, and
+ * checks BEFORE tearing anything down, so a refused removal leaves the
+ * Worktree fully intact and its unpushed work is not silently orphaned
+ * (PRD §5 unpushed-work guard). If git still cannot remove it, the Worktree
+ * is put back in a usable state (watcher on, fresh PTYs) and the error is
+ * rethrown.
+ */
+export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOptions = {}): Promise<void> {
+  const worktree = repo.worktrees.get(worktreeId)
+  if (!worktree) return
+  if (worktree.kind === 'root') throw new Error('the root Worktree cannot be removed')
+  const project = opts.removeWorktree ? repo.projects.get(worktree.projectId) : undefined
+  if (project) {
+    if (!opts.force && !(await git.status(worktree.path)).clean) {
+      throw new Error('The worktree has uncommitted changes.')
+    }
+    // Release everything holding handles inside the worktree before git
+    // deletes it — on Windows a PTY cwd'd there (or a directory watcher)
+    // locks the folder and makes the removal fail on the first attempt.
+    runtime.gitWatcher.unwatch(worktree.path)
+    killWorktreeTerminals(worktreeId)
+    try {
+      await removeCheckout(project.repoPath, worktree.path, opts.force)
+    } catch (err) {
+      runtime.gitWatcher.watch(worktree.path)
+      for (const pane of worktree.panes) {
+        for (const tab of pane.tabs) if (isPtyTabType(tab.type)) startPtyTab(worktree, tab)
+      }
+      announce()
+      throw err
+    }
+  }
+  releaseWorktreeRuntime(worktree)
+  repo.worktrees.remove(worktreeId)
+  announce()
+}
+
+/**
+ * Add a git repository as a Project: its root Worktree, its watchers, and any
+ * worktrees the repo already has (they show up immediately). Adding a path
+ * that is already a Project returns that Project.
+ */
+export async function addProject(repoPath: string): Promise<Project> {
+  await registerProject(repoPath)
+  const project = repo.projects.getByPath(repoPath)
+  if (!project) throw new Error(`project at ${repoPath} was not registered`)
+  await reconcileProjectWorktrees(project.id)
+  announce()
+  return project
+}
+
+/** Remove a Project from the cockpit. Its checkouts stay on disk. */
+export function removeProject(projectId: string): void {
+  const project = repo.projects.get(projectId)
+  if (!project) return
+  for (const w of repo.worktrees.list()) {
+    if (w.projectId === projectId) releaseWorktreeRuntime(w)
+  }
+  runtime.gitWatcher.unwatch(project.repoPath)
+  removeWorktreesWatcher(projectId)
+  repo.projects.remove(projectId)
+  announce()
+}
+
+/** The set of Worktrees changed: push the state, and the alert their statuses feed. */
+function announce(): void {
+  runtime.broadcastState()
+  runtime.broadcastAlert()
+}
 
 /**
  * Kick off a freshly created linked Worktree's background setup: bulk-copy
@@ -27,7 +157,7 @@ import { forgetTabs } from './status'
  * say — so the report (files, bytes, errors, duration) is what a "why is my
  * worktree missing packages" question gets answered from.
  */
-export function beginWorktreeSetup(worktree: Worktree, repoPath: string): void {
+function beginWorktreeSetup(worktree: Worktree, repoPath: string): void {
   if (worktree.kind !== 'linked') return
   if (!targetsNodeModules(getSettings().envSyncPatterns)) return
   runtime.markSettingUp(worktree.id)
@@ -96,7 +226,7 @@ export async function syncWorktreeEnv(worktreeId: string): Promise<{ copied: str
 }
 
 /** Register a project: create its root Worktree and start its watchers. */
-export async function registerProject(repoPath: string): Promise<Worktree | null> {
+async function registerProject(repoPath: string): Promise<Worktree | null> {
   const existing = repo.projects.getByPath(repoPath)
   if (existing) {
     runtime.gitWatcher.watch(repoPath)
@@ -131,7 +261,7 @@ function ensureWorktreesWatcher(project: { id: string; repoPath: string }): void
   void watcher.start()
 }
 
-export function removeWorktreesWatcher(projectId: string): void {
+function removeWorktreesWatcher(projectId: string): void {
   worktreesWatchers.get(projectId)?.stop()
   worktreesWatchers.delete(projectId)
 }
@@ -143,7 +273,7 @@ export function stopWorktreesWatchers(): void {
 }
 
 /** Tear down everything the runtime holds for a Worktree (PTYs, watchers, servers, briefings). */
-export function releaseWorktreeRuntime(worktree: Worktree): void {
+function releaseWorktreeRuntime(worktree: Worktree): void {
   const tabs = worktree.panes.flatMap((pane) => pane.tabs)
   for (const tab of tabs) releaseTabRuntime(tab)
   runtime.clearDevServers(worktree.id)
@@ -206,8 +336,7 @@ export async function reconcileProjectWorktrees(projectId: string): Promise<void
   }
   for (const u of plan.branchUpdates) repo.worktrees.updateBranchByPath(u.path, u.branch)
 
-  runtime.broadcastState()
-  runtime.broadcastAlert()
+  announce()
 }
 
 /** On startup, resume watchers for already-registered projects and their worktrees. */
