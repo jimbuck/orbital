@@ -1694,6 +1694,52 @@ describe('EditorTab open-file pills', () => {
     expect(pillPaths()).toEqual(['a.txt'])
   })
 
+  it('acts on an ask that was made before the tab had mounted', async () => {
+    // A search hit with no editor to land in creates the tab first, and has
+    // asked for its line by the time that tab renders.
+    act(() => useStore.getState().openInEditor('E1', { path: 'b.txt', line: 1 }))
+    render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
+    await flush()
+
+    expect(pillPaths()).toEqual(['b.txt'])
+    expect(activePill()).toBe('b.txt')
+    expect(editor().value).toBe('beta\n')
+  })
+
+  it('does not act on the same ask again when the tab is remounted', async () => {
+    await open('a.txt')
+    askToOpen('E1', 'b.txt')
+    await flush()
+    expect(pillPaths()).toEqual(['a.txt', 'b.txt'])
+
+    // The ask is still the last thing in the store; a remount (the tab moved
+    // to another pane) must not replay it.
+    cleanup()
+    render(<EditorTab tab={{ ...editorTab('w1'), config: {} }} active />)
+    await flush()
+    expect(pillPaths()).toEqual([])
+  })
+
+  it('lands a search hit in the file view of a changed file it did not have open', async () => {
+    __setFileTreeBridge({
+      fileTree: async () => [
+        { name: 'a.txt', path: 'a.txt', type: 'file' as const },
+        { name: 'b.txt', path: 'b.txt', type: 'file' as const, gitState: 'modified' as const }
+      ],
+      onGitChanged: () => () => {}
+    })
+    await open('a.txt')
+    // A line is a working-tree line: it means the file, not its diff.
+    act(() => useStore.getState().openInEditor('E1', { path: 'b.txt', line: 1 }))
+    await flush()
+
+    expect(activePill()).toBe('b.txt')
+    expect(editor().value).toBe('beta\n')
+    expect(bridge.gitDiff).not.toHaveBeenCalled()
+    // The diff is still one click away.
+    expect(screen.getByText('Diff')).toBeTruthy()
+  })
+
   it('shows the active file path as a breadcrumb', async () => {
     disk['src/deep/x.txt'] = 'x\n'
     __setFileTreeBridge({

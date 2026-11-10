@@ -1055,6 +1055,20 @@ function ImageView({ src, alt }: { src: string; alt: string }): JSX.Element {
 
 /* ---- Open files ---------------------------------------------------------- */
 
+/**
+ * The open requests (store.editorOpen) an editor tab has already acted on.
+ *
+ * The store keeps the last request for good, so a tab has to know which ones
+ * it has dealt with — and that memory has to outlive the component: a tab that
+ * is remounted (moved to another pane) must not replay a request it answered
+ * before, while a tab mounting for the FIRST time must answer the one waiting
+ * for it. A search hit with no editor to land in creates the tab and asks for
+ * its line straight away, before the new tab has rendered. Kept by request
+ * object, so nothing has to be cleared: a request is dropped with the store's
+ * reference to it.
+ */
+const answeredRequests = new WeakSet<object>()
+
 const baseName = (path: string): string => path.split('/').pop() || path
 
 /** Depth-first search for a node by its path. */
@@ -1364,16 +1378,14 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
    * tree is consulted for what git says about the file, when it knows.
    */
   const editorOpen = useStore((s) => s.editorOpen)
-  // Requests made before this tab mounted were for some other editor.
-  const handledSeqRef = useRef(editorOpen?.seq ?? 0)
   // Ctrl+F presses, counted. The editor opens its find bar when this moves; a
   // second press with the bar already open re-selects the query.
   const [findSeq, setFindSeq] = useState(0)
   // Ctrl+H presses: the same bar, opened with its replace row.
   const [replaceSeq, setReplaceSeq] = useState(0)
   useEffect(() => {
-    if (!editorOpen || editorOpen.tabId !== tab.id || editorOpen.seq === handledSeqRef.current) return
-    handledSeqRef.current = editorOpen.seq
+    if (!editorOpen || editorOpen.tabId !== tab.id || answeredRequests.has(editorOpen)) return
+    answeredRequests.add(editorOpen)
     const ask = editorOpen
     const ref = findNode(tree, ask.path) ?? { path: ask.path }
     setOpen((s) => request(s, ask, ref))

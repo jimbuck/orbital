@@ -171,6 +171,13 @@ describe('requests from outside the editor', () => {
     expect(request(s, ask('a.ts', {}, 8), { path: 'a.ts' }).reveal).toBeNull()
   })
 
+  it('opens a file it did not have on the file view when a line is asked for, changed or not', () => {
+    const s = request(NOTHING_OPEN, ask('a.ts', { line: 12 }, 3), { path: 'a.ts', gitState: 'modified' })
+    // Git still knows it changed (the Diff toggle is offered); the line wins the mode.
+    expect(activeFile(s)).toMatchObject({ mode: 'file', gitState: 'modified', preview: false })
+    expect(s.reveal).toEqual({ path: 'a.ts', line: 12, seq: 3 })
+  })
+
   it('leaves the folder view and drops a pending close prompt', () => {
     let s = edit(withContent(open(NOTHING_OPEN, 'a'), 'a', 'x'), 'a', 'xy')
     s = showFolder(requestClose(s, 'a'), 'src')

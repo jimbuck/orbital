@@ -207,6 +207,11 @@ export function request(
 ): OpenFiles {
   const { path, staged, gitState, line } = ask
   const wantsDiff = line === undefined && (staged || gitState !== undefined)
+  const fresh = (): OpenFile => {
+    const f = freshFile({ path, gitState: ref.gitState ?? gitState }, staged, false)
+    // A changed file opens on its diff, unless it is a line that was asked for.
+    return line === undefined ? f : { ...f, mode: 'file' }
+  }
   const files = s.files.some(at(path))
     ? s.files.map((f) =>
         f.path === path
@@ -222,7 +227,7 @@ export function request(
             }
           : f
       )
-    : [...s.files, freshFile({ path, gitState: ref.gitState ?? gitState }, staged, false)]
+    : [...s.files, fresh()]
   return {
     files,
     activePath: path,
