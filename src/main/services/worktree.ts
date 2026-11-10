@@ -155,7 +155,7 @@ async function buildWorktree(
   if (existing) {
     // The adopted row is named after the directory; the caller's name wins.
     if (existing.name !== name) worktreeRepo.rename(existing.id, name)
-    if (input.taskId) worktreeRepo.setTaskId(existing.id, input.taskId)
+    if (input.taskId) worktreeRepo.linkTask(existing.id, input.taskId)
     worktree = worktreeRepo.get(existing.id) ?? existing
   } else {
     worktree = worktreeRepo.create({

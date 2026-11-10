@@ -344,22 +344,39 @@ export const worktrees = {
           `INSERT INTO worktrees (id, project_id, kind, name, path, branch, status, task_id, split_direction, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
         )
-        .run(wid, input.projectId, input.kind, input.name, input.path, input.branch, input.taskId ?? null, now())
+        .run(wid, input.projectId, input.kind, input.name, input.path, input.branch, null, now())
       // Every Worktree starts with one empty pane (a single-leaf layout) for its first tab.
       const pane = panes.create(wid)
       worktrees.setLayout(wid, leaf(pane.id))
+      if (input.taskId) worktrees.linkTask(wid, input.taskId)
       return worktrees.get(wid)!
     })
   },
+  /**
+   * Delete a Worktree row (panes and tabs cascade) and unlink any task that
+   * was started in it. `tasks.worktree_id` has no foreign key, so without the
+   * unlink the task would keep pointing at a Worktree that no longer exists:
+   * the board would show it as neither linked nor startable.
+   */
   remove(wid: string): void {
-    getDb().prepare('DELETE FROM worktrees WHERE id = ?').run(wid)
+    writeTx(() => {
+      getDb().prepare('UPDATE tasks SET worktree_id = NULL, updated_at = ? WHERE worktree_id = ?').run(now(), wid)
+      getDb().prepare('DELETE FROM worktrees WHERE id = ?').run(wid)
+    })
   },
   rename(wid: string, name: string): void {
     getDb().prepare('UPDATE worktrees SET name = ? WHERE id = ?').run(name, wid)
   },
-  /** Link (or unlink) the task a Worktree was started from. */
-  setTaskId(wid: string, taskId: string | null): void {
-    getDb().prepare('UPDATE worktrees SET task_id = ? WHERE id = ?').run(taskId, wid)
+  /**
+   * Link a Worktree and the task it was started from. The link is stored on
+   * both rows (`worktrees.task_id`, `tasks.worktree_id`); they are written
+   * together so neither side can point at the other alone.
+   */
+  linkTask(wid: string, taskId: string): void {
+    writeTx(() => {
+      getDb().prepare('UPDATE worktrees SET task_id = ? WHERE id = ?').run(taskId, wid)
+      getDb().prepare('UPDATE tasks SET worktree_id = ?, updated_at = ? WHERE id = ?').run(wid, now(), taskId)
+    })
   },
   updateStatus(wid: string, status: TerminalStatus): void {
     getDb().prepare('UPDATE worktrees SET status = ? WHERE id = ?').run(status, wid)
@@ -599,9 +616,6 @@ export const tasks = {
         )
       return tasks.get(tid)!
     })
-  },
-  setWorktree(tid: string, worktreeId: string | null): void {
-    getDb().prepare('UPDATE tasks SET worktree_id = ?, updated_at = ? WHERE id = ?').run(worktreeId, now(), tid)
   },
   /**
    * Tasks are archived, never deleted: the row (and its number) stays, it just

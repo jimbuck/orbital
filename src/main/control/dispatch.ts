@@ -129,12 +129,9 @@ const handlers: Record<ControlCommand, Handler> = {
       baseRef: req.args.base ? String(req.args.base) : undefined,
       taskId: task?.id ?? null
     })
-    // Link the task both ways and start it, matching the play-button flow.
-    if (task) {
-      repo.tasks.setWorktree(task.id, worktree.id)
-      if (task.status !== 'in_progress' && task.status !== 'done') {
-        repo.tasks.update(task.id, { status: 'in_progress' })
-      }
+    // createLinkedWorktree linked the task both ways; start it too.
+    if (task && task.status !== 'in_progress' && task.status !== 'done') {
+      repo.tasks.update(task.id, { status: 'in_progress' })
     }
     runtime.gitWatcher.watch(worktree.path)
     beginWorktreeSetup(worktree, project.repoPath)

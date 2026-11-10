@@ -181,6 +181,7 @@ function migrate(d: Database.Database): void {
   // NULL = active; a timestamp = archived (hidden from the default views).
   addColumnIfMissing(d, 'tasks', 'archived_at', 'INTEGER')
   backfillTaskSeqs(d)
+  unlinkTasksFromMissingWorktrees(d)
   d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')
   const defaultWorkspaceId = ensureDefaultWorkspace(d)
   scopeProjectsToWorkspaces(d, defaultWorkspaceId)
@@ -344,6 +345,20 @@ function backfillTaskSeqs(d: Database.Database): void {
     for (const r of rows) update.run(next++, r.id)
   })
   tx.immediate()
+}
+
+/**
+ * Clear `tasks.worktree_id` where the Worktree it names is gone. Removing a
+ * Worktree used to leave its task pointing at the deleted row (the column has
+ * no foreign key), and such a task shows on the board as neither linked nor
+ * startable. New removals unlink in the repository; this heals the rows left
+ * behind by older builds. Idempotent: a no-op once nothing dangles.
+ */
+function unlinkTasksFromMissingWorktrees(d: Database.Database): void {
+  d.exec(
+    `UPDATE tasks SET worktree_id = NULL
+     WHERE worktree_id IS NOT NULL AND worktree_id NOT IN (SELECT id FROM worktrees)`
+  )
 }
 
 function tableExists(d: Database.Database, name: string): boolean {

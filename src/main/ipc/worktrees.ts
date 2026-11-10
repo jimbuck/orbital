@@ -24,9 +24,6 @@ export function register(): void {
       baseRef: opts.baseRef,
       taskId: opts.taskId
     })
-    // Link the originating task to this Worktree (so it shows the Worktree ref and
-    // drops out of the "unlinked tasks" picker).
-    if (opts.taskId) repo.tasks.setWorktree(opts.taskId, worktree.id)
     runtime.gitWatcher.watch(worktree.path)
     beginWorktreeSetup(worktree, project.repoPath)
     broadcastAll()

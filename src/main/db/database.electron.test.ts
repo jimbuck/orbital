@@ -241,6 +241,44 @@ describe('repositories', () => {
     expect(edited.createdAt).toBe(t.createdAt)
   })
 
+  it('links a task and the worktree started from it on both rows, and unlinks the task when the worktree goes', () => {
+    const task = repo.tasks.create({ projectId, title: 'do it', createdBy: 'user' })
+    const w = repo.worktrees.create({
+      projectId,
+      kind: 'linked',
+      name: 'do it',
+      path: 'C:/p-wt',
+      branch: 'do-it',
+      taskId: task.id
+    })
+    expect(w.taskId).toBe(task.id)
+    expect(repo.tasks.get(task.id)!.worktreeId).toBe(w.id)
+
+    repo.worktrees.remove(w.id)
+    expect(repo.worktrees.get(w.id)).toBeUndefined()
+    // No dangling link: the task is startable again.
+    expect(repo.tasks.get(task.id)!.worktreeId).toBeNull()
+  })
+
+  it('links a task to a worktree that already exists', () => {
+    const task = repo.tasks.create({ projectId, title: 'adopted', createdBy: 'user' })
+    const w = repo.worktrees.create({ projectId, kind: 'linked', name: 'x', path: 'C:/p-x', branch: 'x' })
+    repo.worktrees.linkTask(w.id, task.id)
+    expect(repo.worktrees.get(w.id)!.taskId).toBe(task.id)
+    expect(repo.tasks.get(task.id)!.worktreeId).toBe(w.id)
+  })
+
+  it('heals a task left pointing at a removed worktree by an older build, on the next boot', () => {
+    const task = repo.tasks.create({ projectId, title: 'stranded', createdBy: 'user' })
+    const kept = repo.tasks.create({ projectId, title: 'linked', createdBy: 'user' })
+    const w = repo.worktrees.create({ projectId, kind: 'linked', name: 'y', path: 'C:/p-y', branch: 'y', taskId: kept.id })
+    getDb().prepare('UPDATE tasks SET worktree_id = ? WHERE id = ?').run('gone-worktree', task.id)
+    closeDb()
+    initDb(dir)
+    expect(repo.tasks.get(task.id)!.worktreeId).toBeNull()
+    expect(repo.tasks.get(kept.id)!.worktreeId).toBe(w.id)
+  })
+
   it('makes a new tab the active one in its pane and moves it with its activation', () => {
     const w = repo.worktrees.create({ projectId, kind: 'root', name: 'main', path: 'C:/p', branch: 'main' })
     const pane = w.panes[0].id
