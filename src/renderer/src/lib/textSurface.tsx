@@ -29,7 +29,7 @@
  * set on. A layer that wants smaller text puts it on a child.
  */
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
-import { DEFAULT_TAB_SIZE, parseTabSize } from './findInFile'
+import { DEFAULT_TAB_SIZE, parseTabSize } from './columns'
 
 /** What has to be read off the rendered text; everything else follows from it. */
 export interface TextMetrics {

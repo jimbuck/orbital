@@ -1,14 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  DEFAULT_TAB_SIZE,
-  findError,
-  findMatches,
-  nextMatchIndex,
-  parseTabSize,
-  replaceAll,
-  replacementFor,
-  selectionQuery
-} from './findInFile'
+import { findError, findMatches, nextMatchIndex, replacementFor, selectionQuery } from './findInFile'
 
 const opts = { caseSensitive: false, tabSize: 4 }
 
@@ -87,17 +78,6 @@ describe('nextMatchIndex', () => {
   })
 })
 
-describe('parseTabSize', () => {
-  it('reads a column count and falls back for anything it cannot use', () => {
-    expect(parseTabSize('4')).toBe(4)
-    // A length value ("32px") is indistinguishable from a huge column count
-    // once parsed, so anything out of range takes the CSS default instead.
-    expect(parseTabSize('32px')).toBe(DEFAULT_TAB_SIZE)
-    expect(parseTabSize(undefined)).toBe(DEFAULT_TAB_SIZE)
-    expect(parseTabSize('0')).toBe(DEFAULT_TAB_SIZE)
-  })
-})
-
 describe('whole word and regex', () => {
   const spans = (text: string, query: string, extra: object): number[][] =>
     findMatches(text, query, { ...opts, ...extra }).map((m) => [m.start, m.end])
@@ -141,7 +121,7 @@ describe('whole word and regex', () => {
   })
 })
 
-describe('replacementFor / replaceAll', () => {
+describe('replacementFor', () => {
   it('is literal for a plain query, even with $ in it', () => {
     const [m] = findMatches('price', 'price', opts)
     expect(replacementFor('price', m, 'price', '$1 cost', opts)).toBe('$1 cost')
@@ -152,14 +132,16 @@ describe('replacementFor / replaceAll', () => {
     const o = { ...opts, regex: true }
     const ms = findMatches(text, 'let (\\w)', o)
     expect(ms.map((m) => replacementFor(text, m, 'let (\\w)', 'const $1', o))).toEqual(['const a', 'const b'])
-    expect(replaceAll(text, ms, 'let (\\w)', 'const $1', o)).toBe('const a = 1; const b = 2')
   })
 
   it('evaluates lookbehinds in the full text', () => {
     const text = 'xa ya'
     const o = { ...opts, regex: true }
+    // Only the `a` after `y` matches, and replacing it must not lose sight of
+    // the `y` in front of it: the pattern is run against the whole text.
     const ms = findMatches(text, '(?<=y)a', o)
-    expect(replaceAll(text, ms, '(?<=y)a', 'B', o)).toBe('xa yB')
+    expect(ms.map((m) => [m.start, m.end])).toEqual([[4, 5]])
+    expect(replacementFor(text, ms[0], '(?<=y)a', 'B$&', o)).toBe('Ba')
   })
 })
 

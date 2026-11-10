@@ -9,18 +9,7 @@ import {
   selectionQuery,
   type FindMatch
 } from '@renderer/lib/findInFile'
-import {
-  applyDisplayChange,
-  computeFoldRanges,
-  displayToRealOffset,
-  filterHtmlLines,
-  foldChips,
-  pruneFolds,
-  rangeToFold,
-  realToDisplayOffset,
-  shiftFolds,
-  visibleLines
-} from '@renderer/lib/folding'
+import { foldProjection, NO_FOLDS } from '@renderer/lib/folding'
 import FindBar, { type FindToggles } from './FindBar'
 import { marked } from 'marked'
 import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
@@ -107,7 +96,12 @@ function previewKind(path: string): PreviewKind {
  */
 const MAX_HIGHLIGHTS = 1000
 
-const NO_FOLDS: ReadonlySet<number> = new Set()
+/** Lines in a text, without splitting it. */
+function countLines(text: string): number {
+  let n = 1
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) n++
+  return n
+}
 
 export function CodeEditor({
   path,
@@ -158,37 +152,32 @@ export function CodeEditor({
   // The selection, for highlighting its other occurrences. Display offsets.
   const [sel, setSel] = useState<{ start: number; end: number } | null>(null)
   const selTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lines = useMemo(() => value.split('\n'), [value])
-  // One number per line. wrap="off" on the textarea means a source line is
-  // exactly one visual line, so a plain count is all the gutter needs.
-  const lineCount = lines.length
+  // wrap="off" on the textarea means a source line is exactly one visual line,
+  // so a plain count is all the gutter's width needs.
+  const lineCount = useMemo(() => countLines(value), [value])
   const surface = useTextSurface(lineCount)
   const { geometry, tabSize } = surface
   const taRef = surface.textareaRef
 
-  // Folding. `foldState` holds the REAL line numbers of folded ranges, tagged
-  // with the file so switching files starts unfolded. The textarea shows the
-  // DISPLAY text (see lib/folding.ts); with no folds that is `value` itself and
-  // none of the mapping runs.
+  // Folding. `foldState` holds the DOCUMENT lines of the folded ranges, tagged
+  // with the file so switching files starts unfolded. `view` is the text with
+  // those folded away, and the only thing here that knows how a position in the
+  // textarea (the DISPLAY: `view.text`, its rows and offsets) relates to one in
+  // `value` — see lib/folding. Whatever speaks to the textarea — the selection,
+  // find matches, highlight rows — is in display terms; whatever outlives a
+  // change of folds — the fold lines, a caret being carried across — is in
+  // document terms.
   const [foldState, setFoldState] = useState<{ path: string; starts: ReadonlySet<number> }>({ path, starts: NO_FOLDS })
   const lang = langFor(path)
-  const ranges = useMemo(() => computeFoldRanges(lines, tabSize, lang), [lines, tabSize, lang])
   const rawFolds = foldState.path === path ? foldState.starts : NO_FOLDS
-  const folded = useMemo(() => (rawFolds.size === 0 ? NO_FOLDS : pruneFolds(rawFolds, ranges)), [rawFolds, ranges])
+  const view = useMemo(() => foldProjection(value, rawFolds, { tabSize, lang }), [value, rawFolds, tabSize, lang])
+  const display = view.text
   // An edit can leave a fold pointing at a line that no longer starts a block.
   useEffect(() => {
-    if (folded.size !== rawFolds.size) setFoldState({ path, starts: folded })
-  }, [folded, rawFolds, path])
-  const visible = useMemo(
-    () => (folded.size === 0 ? null : visibleLines(lines.length, ranges, folded)),
-    [folded, ranges, lines]
-  )
-  const display = useMemo(() => (visible ? visible.map((i) => lines[i]).join('\n') : value), [visible, lines, value])
-  const chips = useMemo(
-    () => (visible ? foldChips(lines, visible, ranges, folded, tabSize) : []),
-    [visible, lines, ranges, folded, tabSize]
-  )
-  // What to put back after the display text is swapped under the caret.
+    if (view.folds.size !== rawFolds.size) setFoldState({ path, starts: view.folds })
+  }, [view, rawFolds, path])
+  // What to put back after the display text is swapped under the caret:
+  // document offsets, and the scroll position when it should not move.
   const pendingSelRef = useRef<{ start: number; end: number; top: number | null } | null>(null)
 
   // Find works on what is on screen: a match inside a fold has nowhere to be
@@ -215,10 +204,7 @@ export function CodeEditor({
   // An edit can shrink the match list under the current index.
   const current = matches.length === 0 ? -1 : Math.min(matchIndex, matches.length - 1)
 
-  const lineNumbers = useMemo(
-    () => (visible ? visible.map((i) => i + 1) : Array.from({ length: lineCount }, (_, i) => i + 1)).join('\n'),
-    [lineCount, visible]
-  )
+  const lineNumbers = useMemo(() => Array.from({ length: view.rowCount }, (_, row) => view.lineAt(row) + 1).join('\n'), [view])
 
   useEffect(() => {
     const lang = langFor(path)
@@ -245,30 +231,23 @@ export function CodeEditor({
     }
     // theme is a dep so the mirror re-highlights when the app theme flips.
   }, [path, value, theme])
-  const shownHtml = useMemo(
-    () => (html !== null && visible ? filterHtmlLines(html, visible, lineCount) : html),
-    [html, visible, lineCount]
-  )
+  const shownHtml = useMemo(() => (html === null ? null : view.filterHtml(html)), [html, view])
 
   // Centre the requested line and flash it. Runs on `seq` so the same line can
   // be asked for again; the band clears itself after a beat.
   const revealSeq = reveal?.seq ?? 0
   const revealLine = reveal?.line
   // A hit inside a fold opens the fold(s) around it first.
-  const revealHidden = revealLine !== undefined && visible !== null && !visible.includes(revealLine - 1)
+  const revealRow = revealLine === undefined ? 0 : view.rowOf(revealLine - 1)
+  const revealHidden = revealRow === -1
   useEffect(() => {
     const ta = taRef.current
     if (!ta || revealLine === undefined || revealLine < 1) return
     if (revealHidden) {
-      const next = new Set(folded)
-      for (const f of folded) {
-        const r = ranges.get(f)
-        if (r && r.start < revealLine - 1 && revealLine - 1 <= r.end) next.delete(f)
-      }
-      setFoldState({ path, starts: next })
+      setFoldState({ path, starts: view.reveal(revealLine - 1) })
       return
     }
-    const row = visible ? visible.indexOf(revealLine - 1) : revealLine - 1
+    const row = revealRow
     surface.centreRow(row)
     setBandRow(row)
     const timer = setTimeout(() => setBandRow(null), 1800)
@@ -281,36 +260,30 @@ export function CodeEditor({
   /**
    * Swap folds, keeping the caret and scroll position. The textarea's value is
    * about to change under it, which would otherwise dump the caret at the end,
-   * so the selection is carried across in REAL offsets and re-applied by the
-   * layout effect below once the new display text is in.
+   * so the selection is carried across in DOCUMENT offsets and re-applied by
+   * the layout effect below once the new display text is in.
    */
   const commitFolds = (next: ReadonlySet<number>): void => {
     const ta = taRef.current
     if (ta) {
       pendingSelRef.current = {
-        start: displayToRealOffset(value, visible, ta.selectionStart),
-        end: displayToRealOffset(value, visible, ta.selectionEnd),
+        start: view.toDocument(ta.selectionStart),
+        end: view.toDocument(ta.selectionEnd),
         top: ta.scrollTop
       }
     }
     setFoldState({ path, starts: next })
   }
-  const toggleFold = (line: number): void => {
-    const next = new Set(folded)
-    if (!next.delete(line)) next.add(line)
-    commitFolds(next)
-  }
+  const toggleFold = (line: number): void => commitFolds(view.toggle(line))
   /** Ctrl+Shift+[ folds the block around the caret, Ctrl+Shift+] opens the one on its line. */
   const foldAtCaret = (fold: boolean): void => {
     const ta = taRef.current
     if (!ta) return
-    let displayLine = 0
-    for (let i = ta.value.indexOf('\n'); i !== -1 && i < ta.selectionStart; i = ta.value.indexOf('\n', i + 1)) displayLine++
-    const line = visible ? visible[displayLine] : displayLine
+    const line = view.lineAtOffset(ta.selectionStart)
     if (fold) {
-      const r = rangeToFold(ranges, folded, line)
-      if (r) commitFolds(new Set(folded).add(r.start))
-    } else if (folded.has(line)) {
+      const next = view.fold(line)
+      if (next) commitFolds(next)
+    } else if (view.folds.has(line)) {
       toggleFold(line)
     }
   }
@@ -319,8 +292,8 @@ export function CodeEditor({
     pendingSelRef.current = null
     const ta = taRef.current
     if (!pending || !ta) return
-    const start = realToDisplayOffset(value, visible, pending.start)
-    const end = realToDisplayOffset(value, visible, pending.end)
+    const start = view.toDisplay(pending.start)
+    const end = view.toDisplay(pending.end)
     if (ta.selectionStart !== start || ta.selectionEnd !== end) ta.setSelectionRange(start, end)
     if (pending.top !== null) ta.scrollTop = pending.top
     // Keyed on the display text only: it is the swap that needs the caret put back.
@@ -331,18 +304,12 @@ export function CodeEditor({
     pendingSelRef.current = null
   })
 
-  // Fold markers, drawn in the strip just right of the line numbers. Memoised:
-  // a keystroke that changes no fold structure reuses every element.
-  const markers = useMemo(() => {
-    const out: JSX.Element[] = []
-    const count = visible ? visible.length : lineCount
-    for (let d = 0; d < count; d++) {
-      const real = visible ? visible[d] : d
-      if (!ranges.has(real)) continue
-      const isFolded = folded.has(real)
-      out.push(
+  // Fold markers, drawn in the strip just right of the line numbers.
+  const markers = useMemo(
+    () =>
+      view.markers.map(({ row, line, folded: isFolded }) => (
         <button
-          key={real}
+          key={line}
           type="button"
           tabIndex={-1}
           data-testid="fold-marker"
@@ -351,20 +318,19 @@ export function CodeEditor({
           title={shortcutLabel(isFolded ? 'Unfold (Ctrl+Shift+])' : 'Fold (Ctrl+Shift+[)')}
           // Keep focus (and the caret) in the textarea.
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => toggleFold(real)}
-          style={geometry.rowBox(d)}
+          onClick={() => toggleFold(line)}
+          style={geometry.rowBox(row)}
           className={`pointer-events-auto inset-x-0 flex items-center justify-center hover:text-accent ${
             isFolded ? 'text-accent' : 'text-faint opacity-0 group-hover:opacity-100'
           }`}
         >
           {isFolded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
         </button>
-      )
-    }
-    return out
-    // toggleFold closes over the current fold set, which is already in the deps.
+      )),
+    // toggleFold closes over the current view, which is already in the deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranges, folded, visible, lineCount, geometry])
+    [view, geometry]
+  )
 
   /**
    * Put a match on screen and leave the caret on it.
@@ -414,7 +380,7 @@ export function CodeEditor({
    * native undo step like any other edit. That needs the edit to be a single
    * contiguous range of what is on screen — always true unfolded, and true for
    * one span (a match is one line). Replace All across folds would have that
-   * range swallow the hidden lines, so it is applied to the real text instead.
+   * range swallow the hidden lines, so it is applied to the document instead.
    */
   const replaceSpans = (spans: readonly { start: number; end: number; text: string }[]): void => {
     const ta = taRef.current
@@ -426,7 +392,7 @@ export function CodeEditor({
       stitched += spans[i].text + (i + 1 < spans.length ? display.slice(spans[i].end, spans[i + 1].start) : '')
     }
 
-    if (!visible || spans.length === 1) {
+    if (!view.isFolded || spans.length === 1) {
       const back = document.activeElement as HTMLElement | null
       ta.focus()
       ta.setSelectionRange(first.start, last.end)
@@ -440,17 +406,16 @@ export function CodeEditor({
       if (ok) return
     }
 
-    // Fallback (or across folds): rebuild the real text and put the caret back.
+    // Fallback (or across folds): rebuild the document and put the caret back.
     let next = ''
-    let lastReal = 0
+    let done = 0
     for (const s of spans) {
-      const start = displayToRealOffset(value, visible, s.start)
-      next += value.slice(lastReal, start) + s.text
-      lastReal = displayToRealOffset(value, visible, s.end)
+      next += value.slice(done, view.toDocument(s.start)) + s.text
+      done = view.toDocument(s.end)
     }
-    next += value.slice(lastReal)
-    const realCaret = displayToRealOffset(value, visible, last.end) + (next.length - value.length)
-    pendingSelRef.current = { start: realCaret, end: realCaret, top: ta.scrollTop }
+    next += value.slice(done)
+    const caret = done + (next.length - value.length)
+    pendingSelRef.current = { start: caret, end: caret, top: ta.scrollTop }
     onChange(next)
   }
 
@@ -606,22 +571,15 @@ export function CodeEditor({
           // The selection's text just changed under it; the next select event
           // says where it is now.
           setSel(null)
-          if (!visible) {
+          if (!view.isFolded) {
             onChange(e.target.value)
             return
           }
           // Folded: the textarea holds the display text, so map the edit back.
-          const r = applyDisplayChange(value, visible, e.target.value)
-          pendingSelRef.current = { start: r.caret, end: r.caret, top: null }
-          if (r.rejected && r.unfold) {
-            const { from, to } = r.unfold
-            const next = new Set(folded)
-            for (const f of folded) if (f >= from && f < to) next.delete(f)
-            setFoldState({ path, starts: next })
-            return
-          }
-          setFoldState({ path, starts: shiftFolds(folded, r.startLine, r.endLine, r.lineDelta) })
-          onChange(r.value)
+          const edit = view.edit(e.target.value)
+          pendingSelRef.current = { start: edit.caret, end: edit.caret, top: null }
+          setFoldState({ path, starts: edit.folds })
+          if (!edit.rejected) onChange(edit.value)
         }}
         onScroll={surface.sync}
         onSelect={(e) => {
@@ -715,16 +673,16 @@ export function CodeEditor({
           onClose={closeFind}
         />
       )}
-      {chips.length > 0 && (
+      {view.chips.length > 0 && (
         <div aria-hidden className="pointer-events-none absolute inset-0 z-[4] overflow-hidden">
           <div ref={surface.follow.both} className="absolute left-0 top-0">
-            {chips.map((c) => (
+            {view.chips.map((c) => (
               // The anchor takes the box and so keeps the editor's font (see
               // lib/textSurface); only the chip inside it gets the label size.
               <span
                 key={c.line}
                 data-testid="fold-chip-anchor"
-                style={geometry.cellBox(c.displayLine, c.column)}
+                style={geometry.cellBox(c.row, c.column)}
                 className="flex items-center"
               >
                 <button

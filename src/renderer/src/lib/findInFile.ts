@@ -10,9 +10,10 @@
  * already make.
  *
  * Columns are TAB-EXPANDED, i.e. what the browser actually renders, not the
- * character index. A file indented with tabs would otherwise have every
- * highlight on the wrong side of the screen.
+ * character index (see lib/columns). A file indented with tabs would otherwise
+ * have every highlight on the wrong side of the screen.
  */
+import { columnAfter } from './columns'
 
 export interface FindMatch {
   /** Offsets into the source text — what setSelectionRange takes. */
@@ -34,18 +35,6 @@ export interface FindOptions {
   regex?: boolean
   /** Columns a tab advances to the next multiple of — the CSS `tab-size`. */
   tabSize: number
-}
-
-/** The CSS initial value for `tab-size`, and what the editor renders with. */
-export const DEFAULT_TAB_SIZE = 8
-
-/** Read a computed `tab-size` (`"8"`, or a length this code cannot use) as columns. */
-export function parseTabSize(value: string | undefined): number {
-  const n = Number.parseInt(value ?? '', 10)
-  // A length value ("32px") parses to a number that is not a column count, but
-  // there is no way to tell the two apart from the string alone — clamping to a
-  // sane range is enough to keep the arithmetic from going strange.
-  return Number.isFinite(n) && n >= 1 && n <= 16 ? n : DEFAULT_TAB_SIZE
 }
 
 /** A word character, in the sense "Match Whole Word" draws its boundaries with. */
@@ -150,10 +139,8 @@ export function findMatches(text: string, query: string, options: FindOptions): 
       if (ch === '\n') {
         line += 1
         column = 0
-      } else if (ch === '\t') {
-        column = (Math.floor(column / tabSize) + 1) * tabSize
       } else {
-        column += 1
+        column = columnAfter(column, ch, tabSize)
       }
     }
   }
@@ -188,23 +175,6 @@ export function replacementFor(
   re.lastIndex = match.start
   const out = text.replace(re, replacement)
   return out.slice(match.start, out.length - (text.length - match.end))
-}
-
-/** `text` with every match swapped for its replacement, in one pass. */
-export function replaceAll(
-  text: string,
-  matches: readonly Pick<FindMatch, 'start' | 'end'>[],
-  query: string,
-  replacement: string,
-  options: FindOptions
-): string {
-  let out = ''
-  let last = 0
-  for (const m of matches) {
-    out += text.slice(last, m.start) + replacementFor(text, m, query, replacement, options)
-    last = m.end
-  }
-  return out + text.slice(last)
 }
 
 /**
