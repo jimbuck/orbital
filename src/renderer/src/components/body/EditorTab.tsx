@@ -12,7 +12,7 @@ import {
 import { foldProjection, NO_FOLDS } from '@renderer/lib/folding'
 import FindBar, { type FindToggles } from './FindBar'
 import { marked } from 'marked'
-import type { Tab, FileNode, FileDiff, GitFileState } from '@shared/types'
+import type { Tab, FileNode, GitFileState } from '@shared/types'
 import { useTheme, useThemeId } from '@renderer/lib/theme'
 import { themeTokens, type ThemeSpec } from '@shared/themes'
 import { useFileTree } from '@renderer/lib/fileTree'
@@ -32,7 +32,35 @@ import PanelResizeHandle from '../PanelResizeHandle'
 import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import { clampTreeWidth, treeMaxWidth, TREE_DEFAULT_WIDTH, TREE_MIN_WIDTH } from '@renderer/lib/editorTreeWidth'
 import FolderView, { clearThumbnailCache } from './FolderView'
-import { promoteFile, showFile } from '@renderer/lib/openFiles'
+import {
+  NOTHING_OPEN,
+  cancelClose,
+  close,
+  edit,
+  fileAt,
+  followGit,
+  isDirty,
+  keep,
+  loadFailed,
+  loadNeeds,
+  loadSettled,
+  loadStarted,
+  loaded,
+  movedPath,
+  remove,
+  rename,
+  request,
+  requestClose,
+  saveFailed,
+  saved,
+  select,
+  setMode,
+  show,
+  showFolder,
+  type OpenFile,
+  type OpenFiles,
+  type ViewMode
+} from '@renderer/lib/openFiles'
 import { useTextSurface } from '@renderer/lib/textSurface'
 import { shortcutLabel } from '@renderer/lib/platform'
 
@@ -60,7 +88,6 @@ function gitBadge(state: GitFileState): { letter: string; cls: string } {
 
 /* ---- View modes ---------------------------------------------------------- */
 
-type ViewMode = 'file' | 'diff' | 'preview'
 type PreviewKind = 'markdown' | 'html' | 'svg' | null
 
 /** Files that get a rendered Preview mode. */
@@ -1028,53 +1055,6 @@ function ImageView({ src, alt }: { src: string; alt: string }): JSX.Element {
 
 /* ---- Open files ---------------------------------------------------------- */
 
-/**
- * One open buffer: the file's identity plus everything fetched or typed for
- * it. A buffer lives as long as its pill is in the strip, so switching between
- * files is instant and an unsaved draft survives a trip to another file — the
- * VS Code tab model, in miniature. Everything is per file, view mode included:
- * peeking at one file's Diff must not flip another's editor.
- */
-interface OpenFile {
-  path: string
-  /** The one replaceable, italic preview pill (see lib/openFiles). */
-  preview: boolean
-  gitState?: GitFileState
-  /** Viewing the staged (index) side of the diff (from tab config). */
-  staged: boolean
-  mode: ViewMode
-  diff: FileDiff | null
-  content: string | null
-  imageData: string | null
-  draft: string
-  loading: boolean
-  /** Why the last content/diff/image fetch failed (main's message, e.g. the size cap), if it did. */
-  loadError: string | null
-  /** Why the last save failed, if it did. The draft is kept; the message sits by the path. */
-  saveError: string | null
-}
-
-function freshFile(node: FileNode, staged: boolean): OpenFile {
-  return {
-    path: node.path,
-    preview: false,
-    gitState: node.gitState,
-    staged,
-    // Images open on the rendered image — their "diff" is just a binary notice.
-    mode: !imageMime(node.path) && (staged || node.gitState) ? 'diff' : 'file',
-    diff: null,
-    content: null,
-    imageData: null,
-    draft: '',
-    loading: false,
-    loadError: null,
-    saveError: null
-  }
-}
-
-/** Edits not yet written to disk. */
-const isDirty = (f: OpenFile): boolean => f.content !== null && f.draft !== f.content
-
 const baseName = (path: string): string => path.split('/').pop() || path
 
 /** Depth-first search for a node by its path. */
@@ -1321,30 +1301,14 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     handleEdge: 'right'
   })
   const treeWidth = clampTreeWidth(treePane.width, rootWidth)
-  /** Open buffers, in pill order. */
-  const [files, setFiles] = useState<OpenFile[]>([])
-  const [activePath, setActivePath] = useState<string | null>(null)
-  /**
-   * The folder whose tiles fill the content area, or null when it shows the
-   * active file. Opening or selecting any file clears it.
-   */
-  const [folder, setFolder] = useState<string | null>(null)
-  /** Path of the dirty file whose close is waiting on the save / discard prompt. */
-  const [closing, setClosing] = useState<string | null>(null)
+  // The open files and everything keyed to them — see lib/openFiles. Each
+  // handler below is one of its transitions; this component adds the I/O.
+  const [open, setOpen] = useState<OpenFiles>(NOTHING_OPEN)
+  const { files, activePath, folder, closing, reveal } = open
   const [closeBusy, setCloseBusy] = useState(false)
   const [menu, setMenu] = useState<{ node: FileNode; pos: MenuPos } | null>(null)
-  // Latest fetch id per path, so a slow response for a buffer that has since
-  // been closed (or closed and reopened) is dropped rather than applied.
-  const reqRef = useRef(new Map<string, number>())
-  const bumpReq = (path: string): number => {
-    const id = (reqRef.current.get(path) ?? 0) + 1
-    reqRef.current.set(path, id)
-    return id
-  }
-
-  const patch = useCallback((path: string, fn: (f: OpenFile) => OpenFile): void => {
-    setFiles((fs) => fs.map((f) => (f.path === path ? fn(f) : f)))
-  }, [])
+  // Names each fetch, so its results reach only a buffer still waiting on it.
+  const loadIdRef = useRef(0)
 
   // Directories containing at least one changed file get a dot in the tree.
   const changedDirs = useMemo(() => {
@@ -1386,33 +1350,22 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
    * An already-open file just comes to the front — promoted if kept.
    */
   const showNode = useCallback((node: FileNode, preview: boolean, staged = false): void => {
-    setFiles((fs) => showFile(fs, node.path, () => freshFile(node, staged), preview).files)
-    setActivePath(node.path)
-    setFolder(null)
+    setOpen((s) => show(s, node, { preview, staged }))
   }, [])
   const openFile = useCallback((node: FileNode, staged = false): void => showNode(node, false, staged), [showNode])
   const previewFile = useCallback((node: FileNode): void => showNode(node, true), [showNode])
-  const keepFile = useCallback((path: string): void => setFiles((fs) => promoteFile(fs, path)), [])
+  const keepFile = useCallback((path: string): void => setOpen((s) => keep(s, path)), [])
+  const enterFolder = useCallback((path: string): void => setOpen((s) => showFolder(s, path)), [])
 
   /**
    * Something outside this editor asked it to show a file (store.editorOpen):
-   * the git panel's change list, or the command palette's file search.
-   *
-   * What the request carries says which of the two it is. The git panel names a
-   * side (`staged`) and the file's git state, because it is asking for a DIFF —
-   * and it travels with the request so the file opens straight onto that diff
-   * even if the tree has not caught up with the change yet. The palette sends
-   * neither, because it is asking for the file. That distinction only matters
-   * for a file that is ALREADY open: forcing diff mode there would answer "go
-   * to file" on an unchanged file with an empty diff.
+   * the git panel's change list, the command palette's file search, a
+   * content-search hit. What the request means is `request`'s business; the
+   * tree is consulted for what git says about the file, when it knows.
    */
   const editorOpen = useStore((s) => s.editorOpen)
   // Requests made before this tab mounted were for some other editor.
   const handledSeqRef = useRef(editorOpen?.seq ?? 0)
-  // The line a content-search hit asked for, held until that file's contents
-  // have actually loaded — scrolling to line 400 of an empty buffer just pins
-  // it at the top, and by the time the text arrives nothing would re-scroll.
-  const [reveal, setReveal] = useState<{ path: string; line: number; seq: number } | null>(null)
   // Ctrl+F presses, counted. The editor opens its find bar when this moves; a
   // second press with the bar already open re-selects the query.
   const [findSeq, setFindSeq] = useState(0)
@@ -1421,64 +1374,10 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   useEffect(() => {
     if (!editorOpen || editorOpen.tabId !== tab.id || editorOpen.seq === handledSeqRef.current) return
     handledSeqRef.current = editorOpen.seq
-    const { path, staged, gitState, line } = editorOpen
-    // A line number is a working-tree line. A diff renumbers everything around
-    // its hunks, so revealing one inside a diff would land somewhere arbitrary
-    // — a request carrying a line means the file view.
-    const wantsDiff = line === undefined && (staged || gitState !== undefined)
-    setReveal(line === undefined ? null : { path, line, seq: editorOpen.seq })
-    const node = findNode(tree, path) ?? { name: baseName(path), path, type: 'file' as const }
-    setFiles((fs) => {
-      if (!fs.some((f) => f.path === path)) {
-        return [...fs, freshFile({ ...node, gitState: node.gitState ?? gitState }, staged)]
-      }
-      return fs.map((f) =>
-        f.path === path
-          ? {
-              ...f,
-              // Asked for by name, so it stays: never a replaceable preview.
-              preview: false,
-              staged,
-              gitState: f.gitState ?? gitState,
-              // Drop the cached diff only when one was asked for: the panel's
-              // row is fresher than anything cached here.
-              diff: wantsDiff ? null : f.diff,
-              mode: wantsDiff && !imageMime(path) ? 'diff' : line !== undefined ? 'file' : f.mode
-            }
-          : f
-      )
-    })
-    setActivePath(path)
-    setFolder(null)
-    setClosing(null)
+    const ask = editorOpen
+    const ref = findNode(tree, ask.path) ?? { path: ask.path }
+    setOpen((s) => request(s, ask, ref))
   }, [editorOpen, tab.id, tree])
-
-  /**
-   * Close every open file matching `gone`. If the active one goes, the pill
-   * after it takes over (or the one before, at the end of the strip).
-   */
-  const dropFiles = (gone: (path: string) => boolean): void => {
-    for (const f of files) if (gone(f.path)) bumpReq(f.path)
-    setFiles((fs) => fs.filter((f) => !gone(f.path)))
-    if (closing !== null && gone(closing)) setClosing(null)
-    if (activePath !== null && gone(activePath)) {
-      const i = files.findIndex((f) => f.path === activePath)
-      const after = files.slice(i + 1).find((f) => !gone(f.path))
-      const before = files
-        .slice(0, Math.max(i, 0))
-        .reverse()
-        .find((f) => !gone(f.path))
-      setActivePath((after ?? before)?.path ?? null)
-    }
-  }
-
-  /** Close a pill — straight away when clean, via the prompt when it has edits. */
-  const requestClose = (path: string): void => {
-    const f = files.find((x) => x.path === path)
-    if (!f) return
-    if (isDirty(f)) setClosing(path)
-    else dropFiles((p) => p === path)
-  }
 
   const openMenu = useCallback((e: React.MouseEvent, node: FileNode): void => {
     e.preventDefault()
@@ -1507,36 +1406,28 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
         openFile({ name: m.path.slice(slash + 1), path: m.path, type: 'file' })
       }
     } else if (m.kind === 'renamed') {
-      // Follow every open file to its new path — including the case where an
-      // ANCESTOR directory was what got renamed.
-      const moved = (p: string): string | null =>
-        p === m.from ? m.to : p.startsWith(`${m.from}/`) ? m.to + p.slice(m.from.length) : null
-      setFiles((fs) => fs.map((f) => ({ ...f, path: moved(f.path) ?? f.path })))
-      setActivePath((p) => (p && moved(p)) || p)
-      setClosing((p) => (p && moved(p)) || p)
-      setFolder((p) => (p && moved(p)) || p)
+      // The open files follow it — including when what was renamed is a
+      // directory above them.
+      setOpen((s) => rename(s, m.from, m.to))
       // Expansion is keyed by path, so a renamed directory (or one under it)
       // has to carry its open/closed state across to the new key — otherwise
       // renaming an expanded folder snaps it shut in the user's face.
       setExpanded((e) => {
         let changed = false
         const out: Record<string, boolean> = {}
-        for (const [key, open] of Object.entries(e)) {
-          const next = moved(key)
+        for (const [key, isOpen] of Object.entries(e)) {
+          const next = movedPath(key, m.from, m.to)
           if (next !== null) changed = true
-          out[next ?? key] = open
+          out[next ?? key] = isOpen
         }
         return changed ? out : e
       })
     } else {
-      // Deleted. Keeping a binned file open in an editable buffer would invite
-      // saving it back into existence, so close it.
-      dropFiles((p) => p === m.path || p.startsWith(`${m.path}/`))
-      setFolder((p) => (p !== null && (p === m.path || p.startsWith(`${m.path}/`)) ? null : p))
+      setOpen((s) => remove(s, m.path))
     }
   }
 
-  const activeFile = files.find((f) => f.path === activePath) ?? null
+  const activeFile = fileAt(open, activePath)
 
   // Fetch whatever the active file's mode needs and doesn't have yet. The
   // effect keys on the fields that decide that, not on the buffer object:
@@ -1544,61 +1435,44 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
   // after a failure, loop forever).
   const aPath = activeFile?.path ?? null
   const aStaged = !!activeFile?.staged
-  const aMode = activeFile?.mode ?? 'file'
-  const hasDiff = !!activeFile && activeFile.diff !== null
-  const hasImage = !!activeFile && activeFile.imageData !== null
-  const hasContent = !!activeFile && activeFile.content !== null
+  const needs = activeFile ? loadNeeds(activeFile) : null
+  const needDiff = !!needs?.diff
+  const needImage = !!needs?.image
+  const needContent = !!needs?.content
   useEffect(() => {
-    if (!aPath) return
+    if (!aPath || (!needDiff && !needImage && !needContent)) return
     const path = aPath
-    const mime = imageMime(path)
-    const needDiff = aMode === 'diff' && !hasDiff
-    const needImage = aMode !== 'diff' && !!mime && !hasImage
-    const needContent = aMode !== 'diff' && !mime && !hasContent
-    if (!needDiff && !needImage && !needContent) return
-    const id = (reqRef.current.get(path) ?? 0) + 1
-    reqRef.current.set(path, id)
-    const current = (): boolean => reqRef.current.get(path) === id
-    patch(path, (f) => ({ ...f, loading: true, loadError: null }))
+    const id = ++loadIdRef.current
+    setOpen((s) => loadStarted(s, path, id))
     void (async () => {
       try {
         if (needDiff) {
           const d = await window.orbital.gitDiff(worktreeId, path, aStaged)
-          if (current()) patch(path, (f) => ({ ...f, diff: d }))
+          setOpen((s) => loaded(s, id, { diff: d }))
         }
         if (needImage) {
           const b64 = await window.orbital.readFileBase64(worktreeId, path)
-          if (current()) patch(path, (f) => ({ ...f, imageData: `data:${mime};base64,${b64}` }))
+          setOpen((s) => loaded(s, id, { imageData: `data:${imageMime(path)};base64,${b64}` }))
         }
         if (needContent) {
           const c = await window.orbital.readFile(worktreeId, path)
-          if (current()) patch(path, (f) => ({ ...f, content: c, draft: c }))
+          setOpen((s) => loaded(s, id, { content: c }))
         }
       } catch (err) {
         // Unreadable (deleted since the tree was fetched, over the size cap,
         // ...) — the body shows the reason; content stays null and this effect
         // doesn't re-run.
-        if (current()) patch(path, (f) => ({ ...f, loadError: cleanIpcError(err) }))
+        const reason = cleanIpcError(err)
+        setOpen((s) => loadFailed(s, id, reason))
       } finally {
-        if (current()) patch(path, (f) => ({ ...f, loading: false }))
+        setOpen((s) => loadSettled(s, id))
       }
     })()
-  }, [worktreeId, aPath, aStaged, aMode, hasDiff, hasImage, hasContent, patch])
+  }, [worktreeId, aPath, aStaged, needDiff, needImage, needContent])
 
-  // When a tree refresh changes an open file's git state, follow it: the Diff
-  // toggle appears/disappears and a stale diff is refetched. File contents
-  // (possibly mid-edit) are left alone.
+  // A tree refresh can change what git says about an open file.
   useEffect(() => {
-    setFiles((fs) => {
-      let changed = false
-      const out = fs.map((f) => {
-        const gs = findNode(tree, f.path)?.gitState
-        if (gs === f.gitState) return f
-        changed = true
-        return { ...f, gitState: gs, diff: null, mode: !gs && !f.staged && f.mode === 'diff' ? 'file' : f.mode }
-      })
-      return changed ? out : fs
-    })
+    setOpen((s) => followGit(s, (path) => findNode(tree, path)?.gitState))
   }, [tree])
 
   // Auto-open the tab's configured file once the tree is available.
@@ -1617,29 +1491,23 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
     try {
       await window.orbital.writeFile(worktreeId, f.path, written)
       const c = await window.orbital.readFile(worktreeId, f.path)
-      patch(f.path, (x) => ({
-        ...x,
-        content: c,
-        // Keystrokes that landed during the write stay ahead of what was saved.
-        draft: x.draft === written ? c : x.draft,
-        diff: null, // saved content invalidates any cached diff
-        saveError: null
-      }))
+      setOpen((s) => saved(s, f.path, written, c))
       return true
     } catch (err) {
-      patch(f.path, (x) => ({ ...x, saveError: cleanIpcError(err) }))
+      const reason = cleanIpcError(err)
+      setOpen((s) => saveFailed(s, f.path, reason))
       return false
     }
   }
 
-  const closingFile = closing !== null ? (files.find((f) => f.path === closing) ?? null) : null
-  const cancelClose = useCallback(() => setClosing(null), [])
+  const closingFile = fileAt(open, closing)
+  const closeFile = (path: string): void => setOpen((s) => close(s, (p) => p === path))
   const saveAndClose = async (): Promise<void> => {
     if (!closingFile) return
     setCloseBusy(true)
     const ok = await save(closingFile)
     setCloseBusy(false)
-    if (ok) dropFiles((p) => p === closingFile.path)
+    if (ok) closeFile(closingFile.path)
   }
 
   // Ctrl+S / Cmd+S saves the active file from anywhere in the tab — the
@@ -1747,7 +1615,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 toggle={(p) => setExpanded((e) => ({ ...e, [p]: !e[p] }))}
                 onSelect={previewFile}
                 onKeep={openFile}
-                onShowFolder={setFolder}
+                onShowFolder={enterFolder}
                 selectedPath={folder ?? activePath}
                 changedDirs={changedDirs}
                 lazyChildren={lazyChildren}
@@ -1803,12 +1671,9 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                     key={f.path}
                     file={f}
                     active={f.path === activePath && folder === null}
-                    onSelect={() => {
-                      setActivePath(f.path)
-                      setFolder(null)
-                    }}
+                    onSelect={() => setOpen((s) => select(s, f.path))}
                     onKeep={() => keepFile(f.path)}
-                    onClose={() => requestClose(f.path)}
+                    onClose={() => setOpen((s) => requestClose(s, f.path))}
                   />
                 ))}
               </div>
@@ -1827,9 +1692,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                     {modes.map((m) => (
                       <button
                         key={m.id}
-                        // The draft survives mode switches — unsaved edits are
-                        // not discarded by peeking at the Diff or Preview.
-                        onClick={() => patch(activeFile.path, (f) => ({ ...f, mode: m.id }))}
+                        onClick={() => setOpen((s) => setMode(s, activeFile.path, m.id))}
                         className={`rounded-[5px] px-2 py-[3px] text-[10.5px] font-semibold ${
                           activeFile.mode === m.id ? 'bg-accent/15 text-blue' : 'text-muted hover:text-text-2'
                         } ${FOCUS}`}
@@ -1855,7 +1718,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                       // Every folder on the way is a way into its tiles.
                       <button
                         type="button"
-                        onClick={() => setFolder(crumbs.slice(0, i + 1).join('/'))}
+                        onClick={() => enterFolder(crumbs.slice(0, i + 1).join('/'))}
                         className={`rounded-[3px] hover:text-text-2 hover:underline ${FOCUS}`}
                       >
                         {seg}
@@ -1879,7 +1742,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                   selectedPath={activePath}
                   onOpenFile={(node, keep) => showNode(node, !keep)}
                   onEnterDir={(p) => {
-                    setFolder(p)
+                    enterFolder(p)
                     // Reveal it in the tree: open it and every folder above it.
                     setExpanded((e) => {
                       const next = { ...e }
@@ -1924,8 +1787,7 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
                 <CodeEditor
                   path={activeFile.path}
                   value={activeFile.draft}
-                  // Editing commits to the file: it stops being a preview.
-                  onChange={(next) => patch(activeFile.path, (f) => ({ ...f, draft: next, preview: false }))}
+                  onChange={(next) => setOpen((s) => edit(s, activeFile.path, next))}
                   // Only once the text is here — see `reveal` above.
                   reveal={
                     reveal && reveal.path === activeFile.path && activeFile.content !== null
@@ -1946,8 +1808,8 @@ export default function EditorTab({ tab, active }: { tab: Tab; active: boolean }
             busy={closeBusy}
             error={closingFile.saveError}
             onSave={() => void saveAndClose()}
-            onDiscard={() => dropFiles((p) => p === closingFile.path)}
-            onCancel={cancelClose}
+            onDiscard={() => closeFile(closingFile.path)}
+            onCancel={() => setOpen(cancelClose)}
           />
         )}
       </div>

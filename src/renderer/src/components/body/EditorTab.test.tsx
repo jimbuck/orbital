@@ -1191,6 +1191,32 @@ describe('EditorTab file mutations', () => {
     expect(screen.queryByRole('tab', { name: 'src/notes.txt' })).toBeNull()
   })
 
+  it('finishes loading a file that is renamed while its contents are on the way', async () => {
+    // Hold the first read open until after the rename.
+    let release!: (text: string) => void
+    bridge.readFile.mockImplementationOnce(() => new Promise<string>((resolve) => (release = resolve)))
+    await mount()
+    fireEvent.click(treeRow('src'))
+    fireEvent.click(treeRow('notes.txt'))
+    await flush()
+    expect(screen.getByText('Loading…')).toBeTruthy()
+
+    bridge.renamePath.mockResolvedValueOnce('src/renamed.txt')
+    tree = [dirWith('src', ['renamed.txt'])]
+    menu('notes.txt', 'Rename…')
+    submitPrompt('Rename file', 'renamed.txt')
+    await flush()
+
+    // The read that was in flight answers — for a name the buffer no longer has.
+    await act(async () => {
+      release('hello\n')
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(pill('src/renamed.txt')).toBeTruthy()
+    expect(screen.queryByText('Loading…')).toBeNull()
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('hello\n')
+  })
+
   it('follows the open file when an ancestor folder is renamed, and keeps that folder open', async () => {
     await openNotes()
     bridge.renamePath.mockResolvedValueOnce('lib')
