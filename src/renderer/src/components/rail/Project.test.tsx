@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { Project as ProjectModel, Worktree } from '@shared/types'
+import type { Project as ProjectModel, ProjectFolder, RailItem, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 import Project from './Project'
@@ -48,7 +48,9 @@ beforeEach(() => {
     openProjectInTerminal: vi.fn(async () => undefined),
     clearWorktreeStatus: vi.fn(async () => undefined),
     renameProject: vi.fn(async () => undefined),
-    removeProject: vi.fn(async () => undefined)
+    removeProject: vi.fn(async () => undefined),
+    placeProject: vi.fn(async () => undefined),
+    createProjectFolder: vi.fn(async () => undefined)
   }
   vi.stubGlobal('orbital', bridge)
 })
@@ -58,10 +60,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** Render the header with `worktrees` seeded, then right-click it open. */
-function openMenu(worktrees: Worktree[]): void {
+/** Render the header with `worktrees` (and rail `folders`) seeded, then right-click it open. */
+function openMenu(worktrees: Worktree[], folders: ProjectFolder[] = [], rail: RailItem[] = []): void {
   useStore.setState({
     projects: [project],
+    projectFolders: folders,
+    projectRail: rail,
     worktrees,
     tasks: [],
     activeProjectId: project.id,
@@ -106,6 +110,7 @@ describe('project context menu', () => {
     openMenu([])
     expect(items()).toEqual([
       'Rename',
+      'Move to Folder',
       'New Worktree',
       'Open in File Explorer',
       'Open in External Terminal',
@@ -119,6 +124,7 @@ describe('project context menu', () => {
     openMenu([rootWorktree])
     expect(items()).toEqual([
       'Rename',
+      'Move to Folder',
       'New Worktree',
       'Clear Status',
       'Open in File Explorer',
@@ -146,6 +152,58 @@ describe('project context menu', () => {
     openMenu([rootWorktree])
     fireEvent.click(screen.getByText('Clear Status'))
     expect(bridge.clearWorktreeStatus).toHaveBeenCalledWith(rootWorktree.id)
+  })
+})
+
+describe('project context menu — Move to Folder', () => {
+  const work: ProjectFolder = { id: 'f-work', name: 'Work', collapsed: false, projectIds: [] }
+  const play: ProjectFolder = { id: 'f-play', name: 'Play', collapsed: false, projectIds: [project.id] }
+
+  it('lists the folders in place of the menu and files the project in the one picked', () => {
+    openMenu([], [work, play])
+    fireEvent.click(screen.getByText('Move to Folder'))
+
+    expect(items()).toEqual(['Work', 'Playcurrent', 'New Folder…', 'Remove from Folder'])
+    // The folder it is already in is shown, but is not a move.
+    expect((screen.getByRole('menuitem', { name: /Play/ }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByText('Work'))
+    // A project id and a folder id (last in it), and nothing else: no path, no setting.
+    expect(bridge.placeProject.mock.calls).toEqual([[project.id, work.id, null]])
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('takes the project out of its folder, to the top level just below it', () => {
+    openMenu([], [work, play], [
+      { kind: 'folder', id: play.id },
+      { kind: 'folder', id: work.id }
+    ])
+    fireEvent.click(screen.getByText('Move to Folder'))
+    fireEvent.click(screen.getByText('Remove from Folder'))
+    // Below Play is before Work, the row that follows it.
+    expect(bridge.placeProject).toHaveBeenCalledWith(project.id, null, work.id)
+  })
+
+  it('takes the project out to the end when its folder is the last row', () => {
+    openMenu([], [work, play], [
+      { kind: 'folder', id: work.id },
+      { kind: 'folder', id: play.id }
+    ])
+    fireEvent.click(screen.getByText('Move to Folder'))
+    fireEvent.click(screen.getByText('Remove from Folder'))
+    expect(bridge.placeProject).toHaveBeenCalledWith(project.id, null, null)
+  })
+
+  it('offers only New Folder when there is none yet, and creates one holding the project', () => {
+    openMenu([])
+    fireEvent.click(screen.getByText('Move to Folder'))
+    expect(items()).toEqual(['New Folder…'])
+
+    fireEvent.click(screen.getByText('New Folder…'))
+    fireEvent.change(screen.getByPlaceholderText('Folder name'), { target: { value: 'Clients' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(bridge.createProjectFolder).toHaveBeenCalledWith('Clients', project.id)
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 })
 

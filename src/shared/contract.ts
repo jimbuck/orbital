@@ -20,6 +20,7 @@ import type {
   ProfileDirInfo,
   Project,
   ProjectAgentPatch,
+  ProjectFolder,
   RemoveWorktreeOptions,
   SearchQuery,
   SearchResults,
@@ -125,6 +126,26 @@ export const contract = {
   renameProject: invoke<(projectId: string, name: string) => Promise<void>>(),
   /** Native folder picker; `null` when cancelled. */
   pickDirectory: invoke<(title?: string) => Promise<string | null>>(),
+
+  // project folders: how the rail groups projects. None of these touch a
+  // project's own row, its repo path, its worktrees or any setting.
+  /**
+   * Add a folder. With `projectId` it takes that project's place in the rail
+   * and holds it; without, it goes at the top.
+   */
+  createProjectFolder: invoke<(name: string, projectId?: string) => Promise<ProjectFolder>>(),
+  renameProjectFolder: invoke<(folderId: string, name: string) => Promise<void>>(),
+  /** Delete a folder. Its projects stay in Orbital, loose in the rail where the folder was. */
+  removeProjectFolder: invoke<(folderId: string) => Promise<void>>(),
+  setProjectFolderCollapsed: invoke<(folderId: string, collapsed: boolean) => Promise<void>>(),
+  /**
+   * Put a project in `folderId` (`null` = the rail's top level), just before
+   * `beforeId` or last when that is null. `beforeId` names a project in that
+   * folder or, at the top level, a folder or a loose project.
+   */
+  placeProject: invoke<(projectId: string, folderId: string | null, beforeId: string | null) => Promise<void>>(),
+  /** Put a folder just before the top-level row `beforeId` (a folder or a loose project), or last when null. */
+  placeProjectFolder: invoke<(folderId: string, beforeId: string | null) => Promise<void>>(),
 
   // github (via the gh CLI)
   /**

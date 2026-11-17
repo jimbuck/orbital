@@ -1,13 +1,34 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import { ChevronDown, ChevronRight, CircleOff, FolderOpen, Pencil, Plus, Terminal, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  CircleOff,
+  Folder,
+  FolderInput,
+  FolderMinus,
+  FolderOpen,
+  FolderPlus,
+  Pencil,
+  Plus,
+  Terminal,
+  Trash2
+} from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Project as ProjectModel, type TerminalStatus } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import WorktreeRow from './WorktreeRow'
-import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
+import { ContextMenu, MenuItem, MenuConfirm, MenuPrompt, clampMenuPos, type MenuPos } from './menu'
+import { beginRailDrag } from './folders'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { fileManagerName } from '@renderer/lib/platform'
+
+/**
+ * What the context menu is showing: its items, or one of the steps that swap in
+ * place of them (see ./menu). `move` is the folder picker and `newFolder` the
+ * name prompt it leads to.
+ */
+type MenuStep = 'items' | 'confirmRemove' | 'move' | 'newFolder'
 
 /**
  * The expand/collapse chevron, carrying what the hidden Worktrees add up to.
@@ -22,7 +43,7 @@ import { fileManagerName } from '@renderer/lib/platform'
  * Expanded, every child row already shows its own dot; a second animation over
  * the top of them is noise, and the tint alone still summarises the group.
  */
-function GroupChevron({ expanded, status }: { expanded: boolean; status: TerminalStatus }): JSX.Element {
+export function GroupChevron({ expanded, status }: { expanded: boolean; status: TerminalStatus }): JSX.Element {
   const Chevron = expanded ? ChevronDown : ChevronRight
   const idleTint = expanded ? 'text-muted' : 'text-faint'
   const tint = status === 'idle' ? idleTint : worktreeStatusTextClass(status)
@@ -34,9 +55,11 @@ function GroupChevron({ expanded, status }: { expanded: boolean; status: Termina
  * A project (repo) header in the rail. The header row IS the root Worktree:
  * clicking it selects the project's root Worktree directly. Linked Worktrees
  * live in the collapsible list below — the chevron only renders when there
- * are any. Right-click opens a context menu to rename the project inline,
- * start a new Worktree, clear a stuck root status, open the repo in Explorer or
- * an external terminal, or remove the project.
+ * are any. Right-click opens a context menu to rename the project inline, file
+ * it in a rail folder, start a new Worktree, clear a stuck root status, open the
+ * repo in Explorer or an external terminal, or remove the project. The header
+ * can also be dragged: up and down its list to reorder it, onto a folder, or out
+ * of one. The Rail owns the drop.
  */
 export default function Project({ project }: { project: ProjectModel }): JSX.Element {
   const worktrees = useStore(useShallow((s) => s.worktrees.filter((w) => w.projectId === project.id)))
@@ -46,6 +69,8 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
   const setActiveProject = useStore((s) => s.setActiveProject)
   const toggleExpanded = useStore((s) => s.toggleExpanded)
   const openModal = useStore((s) => s.openModal)
+  const folders = useStore((s) => s.projectFolders)
+  const folderId = folders.find((f) => f.projectIds.includes(project.id))?.id ?? null
   const root = worktrees.find((w) => w.kind === 'root')
   const linked = worktrees.filter((w) => w.kind !== 'root')
   const rootActive = !!root && activeWorktreeId === root.id
@@ -66,7 +91,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
   const needsAttention = linked.filter((w) => w.status === 'needs_attention').length
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
-  const [confirming, setConfirming] = useState(false)
+  const [step, setStep] = useState<MenuStep>('items')
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(project.name)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -77,14 +102,30 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
 
   const closeMenu = (): void => {
     setMenu(null)
-    setConfirming(false)
+    setStep('items')
   }
 
   const openMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    setConfirming(false)
-    setMenu(clampMenuPos(e, 210, 200))
+    setStep('items')
+    setMenu(clampMenuPos(e, 210, 240))
+  }
+
+  // Filing a project is a rail arrangement only: main records where the row
+  // sits and leaves the project itself untouched. It goes last in the folder
+  // it is moved to.
+  const moveTo = (target: string): void => {
+    fireAndForget(window.orbital.placeProject(project.id, target, null))
+    closeMenu()
+  }
+  // Out of its folder, it lands at the top level just below that folder, which
+  // is the nearest place to where it was.
+  const removeFromFolder = (): void => {
+    const rail = useStore.getState().projectRail
+    const at = rail.findIndex((item) => item.kind === 'folder' && item.id === folderId)
+    fireAndForget(window.orbital.placeProject(project.id, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
+    closeMenu()
   }
 
   const startRename = (): void => {
@@ -117,13 +158,16 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
   }
 
   return (
-    <div className="mb-1">
+    // The data attribute is how the Rail tells which project a drag is over.
+    <div data-project-id={project.id} className="mb-1">
       <div
         role="button"
         tabIndex={0}
         onClick={() => !renaming && activate()}
         onKeyDown={onHeaderKey}
         onContextMenu={openMenu}
+        draggable={!renaming}
+        onDragStart={(e) => beginRailDrag(e, { kind: 'project', id: project.id })}
         className={`group flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
           rootActive ? 'bg-panel-2' : isActive ? 'bg-hover' : 'hover:bg-hover'
         }`}
@@ -218,9 +262,14 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
 
       {menu && (
         <ContextMenu pos={menu} width={210} onClose={closeMenu}>
-          {!confirming ? (
+          {step === 'items' && (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
+              <MenuItem
+                icon={<FolderInput size={13} strokeWidth={1.5} />}
+                label="Move to Folder"
+                onClick={() => setStep('move')}
+              />
               <MenuItem
                 icon={<Plus size={13} strokeWidth={1.5} />}
                 label="New Worktree"
@@ -276,10 +325,56 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
                 label="Remove project"
                 danger
-                onClick={() => setConfirming(true)}
+                onClick={() => setStep('confirmRemove')}
               />
             </>
-          ) : (
+          )}
+
+          {step === 'move' && (
+            <>
+              <div className="truncate px-2 py-1.5 text-[11.5px] font-semibold text-text-2">
+                Move {project.name} to
+              </div>
+              {folders.map((folder) => (
+                <MenuItem
+                  key={folder.id}
+                  icon={<Folder size={13} strokeWidth={1.5} />}
+                  label={folder.name}
+                  hint={folder.id === folderId ? 'current' : undefined}
+                  disabled={folder.id === folderId}
+                  onClick={() => moveTo(folder.id)}
+                />
+              ))}
+              {folders.length > 0 && <div className="my-1 h-px bg-soft" />}
+              <MenuItem
+                icon={<FolderPlus size={13} strokeWidth={1.5} />}
+                label="New Folder…"
+                onClick={() => setStep('newFolder')}
+              />
+              {folderId !== null && (
+                <MenuItem
+                  icon={<FolderMinus size={13} strokeWidth={1.5} />}
+                  label="Remove from Folder"
+                  onClick={removeFromFolder}
+                />
+              )}
+            </>
+          )}
+
+          {step === 'newFolder' && (
+            <MenuPrompt
+              label={`New folder for ${project.name}`}
+              placeholder="Folder name"
+              confirmLabel="Create"
+              onSubmit={(name) => {
+                fireAndForget(window.orbital.createProjectFolder(name, project.id))
+                closeMenu()
+              }}
+              onCancel={closeMenu}
+            />
+          )}
+
+          {step === 'confirmRemove' && (
             <MenuConfirm
               message={`Remove "${project.name}" from Orbital?`}
               hint="The repo and its worktrees stay on disk; open terminals close."

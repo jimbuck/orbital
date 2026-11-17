@@ -365,6 +365,32 @@ export interface Project {
 }
 
 /**
+ * A folder in the rail: a named, collapsible group of projects.
+ *
+ * It arranges the Projects panel and does nothing else. A project's row, repo
+ * path, worktree locations, agent defaults and settings are the same in a
+ * folder as out of one, which is why membership lives here and not as a field
+ * on {@link Project}; folders are also left out of the workspace export.
+ */
+export interface ProjectFolder {
+  id: string
+  name: string
+  /** Whether its projects are hidden. Persisted, so the rail comes back as it was left. */
+  collapsed: boolean
+  /** The projects filed here, in the order the rail lists them. A project is in at most one folder. */
+  projectIds: string[]
+}
+
+/**
+ * One row at the rail's top level: a folder, or a project that is in no folder.
+ * The two share one order, so a folder can sit anywhere among the loose projects.
+ */
+export interface RailItem {
+  kind: 'folder' | 'project'
+  id: string
+}
+
+/**
  * Default env-sync globs (a global setting shared by every project): env
  * files, agent config directories, and installed dependencies. Directory
  * patterns use `/**` since sync matching runs against relative file paths.
@@ -587,6 +613,10 @@ export type SettingsPatch = Partial<Settings>
 /** Full application state pushed to / pulled by the renderer. */
 export interface AppState {
   projects: Project[]
+  /** The rail's folders, each with the projects filed in it. */
+  projectFolders: ProjectFolder[]
+  /** The rail's top level, in order: every folder and every project that is in none. */
+  projectRail: RailItem[]
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings

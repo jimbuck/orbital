@@ -6,7 +6,7 @@ import { github } from '../services/github'
 import { addProject, removeProject } from '../worktree-lifecycle'
 import { handle, broadcast } from './handle'
 
-/** Projects: add / remove / rename, their branches and their agent defaults. */
+/** Projects: add / remove / rename, the rail folders they are filed in, their branches and their agent defaults. */
 export function register(): void {
   const h = handle
   // ---- projects ----
@@ -62,6 +62,40 @@ export function register(): void {
     const trimmed = name.trim()
     if (!trimmed) return
     repo.projects.rename(projectId, trimmed)
+    broadcast()
+  })
+
+  // ---- folders (the rail's grouping; see repo.projectFolders) ----
+  h(IPC.createProjectFolder, (_e, name, projectId) => {
+    const folder = repo.projectFolders.create(String(name ?? '').trim() || 'New Folder', projectId || undefined)
+    broadcast()
+    return folder
+  })
+
+  h(IPC.renameProjectFolder, (_e, folderId, name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    repo.projectFolders.rename(folderId, trimmed)
+    broadcast()
+  })
+
+  h(IPC.removeProjectFolder, (_e, folderId) => {
+    repo.projectFolders.remove(folderId)
+    broadcast()
+  })
+
+  h(IPC.setProjectFolderCollapsed, (_e, folderId, collapsed) => {
+    repo.projectFolders.setCollapsed(folderId, !!collapsed)
+    broadcast()
+  })
+
+  h(IPC.placeProject, (_e, projectId, folderId, beforeId) => {
+    repo.projectFolders.placeProject(projectId, folderId ?? null, beforeId ?? null)
+    broadcast()
+  })
+
+  h(IPC.placeProjectFolder, (_e, folderId, beforeId) => {
+    repo.projectFolders.placeFolder(folderId, beforeId ?? null)
     broadcast()
   })
 

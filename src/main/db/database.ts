@@ -112,6 +112,29 @@ function migrate(d: Database.Database): void {
       added_at               INTEGER NOT NULL
     );
 
+    -- Rail folders: how the Projects panel is arranged, and nothing more. Kept
+    -- in tables of their own so filing a project never touches its row.
+    CREATE TABLE IF NOT EXISTS project_folders (
+      id           TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name         TEXT NOT NULL,
+      position     INTEGER NOT NULL,
+      collapsed    INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_folders_workspace ON project_folders(workspace_id);
+
+    -- Where a project sits in the rail: in which folder (NULL = the top level,
+    -- where it shares project_folders.position's order with the folders) and
+    -- how far down. project_id is the key, so a project is in one place. A
+    -- project with no row has never been arranged and is listed last.
+    CREATE TABLE IF NOT EXISTS project_rail_positions (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      folder_id  TEXT REFERENCES project_folders(id) ON DELETE CASCADE,
+      position   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_rail_positions_folder ON project_rail_positions(folder_id);
+
     CREATE TABLE IF NOT EXISTS worktrees (
       id              TEXT PRIMARY KEY,
       project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

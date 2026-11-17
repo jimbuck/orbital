@@ -1,8 +1,11 @@
 import { create } from 'zustand'
+import { fireAndForget } from './lib/bridge'
 import type {
   AppState,
   GitFileState,
   Project,
+  ProjectFolder,
+  RailItem,
   Worktree,
   Task,
   Settings,
@@ -95,6 +98,10 @@ export interface EditorOpenRequest extends EditorOpenTarget {
 
 interface Data {
   projects: Project[]
+  /** The rail's folders, in rail order (see ProjectFolder). */
+  projectFolders: ProjectFolder[]
+  /** The rail's top level in order: folders and the projects in none of them. */
+  projectRail: RailItem[]
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings | null
@@ -181,9 +188,25 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
   return same ? prev : out
 }
 
+/**
+ * Open the rail folder hiding `projectId`, if one is.
+ *
+ * A project can be selected from places that are not its rail row (the command
+ * palette, the needs-attention banner), and a selection the rail cannot show
+ * reads as nothing having happened. Called only from the two explicit select
+ * actions, never from applyState: a folder the user collapsed stays collapsed
+ * through every state push, including the one at boot.
+ */
+function revealProject(folders: ProjectFolder[], projectId: string): void {
+  const hiding = folders.find((f) => f.collapsed && f.projectIds.includes(projectId))
+  if (hiding) fireAndForget(window.orbital.setProjectFolderCollapsed(hiding.id, false))
+}
+
 export const useStore = create<Store>((set, get) => ({
   // data
   projects: [],
+  projectFolders: [],
+  projectRail: [],
   worktrees: [],
   tasks: [],
   settings: null,
@@ -246,6 +269,8 @@ export const useStore = create<Store>((set, get) => ({
     // Keep previous references wherever the content did not change (see shareById).
     set({
       projects: shareById(prev.projects, s.projects),
+      projectFolders: shareById(prev.projectFolders, s.projectFolders),
+      projectRail: share(prev.projectRail, s.projectRail),
       worktrees: shareById(prev.worktrees, s.worktrees),
       tasks: shareById(prev.tasks, s.tasks),
       settings: share(prev.settings, s.settings),
@@ -260,6 +285,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setActiveProject(id) {
+    revealProject(get().projectFolders, id)
     const projectWorktrees = get().worktrees.filter((w) => w.projectId === id)
     const activeWorktreeId = (projectWorktrees.find((w) => w.kind === 'root') ?? projectWorktrees[0])?.id ?? null
     set((s) => ({
@@ -271,6 +297,7 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveWorktree(id) {
     const worktree = get().worktrees.find((w) => w.id === id)
+    if (worktree) revealProject(get().projectFolders, worktree.projectId)
     set({ activeWorktreeId: id, activeProjectId: worktree ? worktree.projectId : get().activeProjectId })
   },
 

@@ -82,9 +82,21 @@ const tables = (): string[] =>
     .map((r) => r.name)
     .filter((n) => !n.startsWith('sqlite_'))
 
+const ALL_TABLES = [
+  'panes',
+  'project_folders',
+  'project_rail_positions',
+  'projects',
+  'settings',
+  'tabs',
+  'tasks',
+  'workspaces',
+  'worktrees'
+]
+
 describe('a fresh database', () => {
   it('creates the schema, WAL mode and exactly one Default workspace, and stays that way on reopen', () => {
-    expect(tables()).toEqual(['panes', 'projects', 'settings', 'tabs', 'tasks', 'workspaces', 'worktrees'])
+    expect(tables()).toEqual(ALL_TABLES)
     expect(getDb().pragma('journal_mode', { simple: true })).toBe('wal')
     expect(getDb().pragma('foreign_keys', { simple: true })).toBe(1)
     const first = repo.workspaces.list()
@@ -101,7 +113,7 @@ describe('migrating a pre-revamp database', () => {
     writeLegacyDb(join(dir, 'orbital.db'))
     initDb(dir)
     const d = getDb()
-    expect(tables()).toEqual(['panes', 'projects', 'settings', 'tabs', 'tasks', 'workspaces', 'worktrees'])
+    expect(tables()).toEqual(ALL_TABLES)
 
     const ws = repo.workspaces.list()
     expect(ws.map((w) => w.name)).toEqual(['Default'])
@@ -277,6 +289,211 @@ describe('repositories', () => {
     initDb(dir)
     expect(repo.tasks.get(task.id)!.worktreeId).toBeNull()
     expect(repo.tasks.get(kept.id)!.worktreeId).toBe(w.id)
+  })
+
+  describe('rail folders', () => {
+    const projectRow = (pid: string): unknown => getDb().prepare('SELECT * FROM projects WHERE id = ?').get(pid)
+    const add = (name: string): string => repo.projects.create({ name, repoPath: `C:/${name}` }).id
+    /**
+     * The rail as it would be drawn, by name: a loose project is its name, a
+     * folder is `Name[its projects]`. Read through getAppState, so this is what
+     * the renderer is sent.
+     */
+    const rail = (): string[] => {
+      const state = repo.getAppState()
+      const name = (pid: string): string => state.projects.find((p) => p.id === pid)?.name ?? '?'
+      return state.projectRail.map((item) => {
+        if (item.kind === 'project') return name(item.id)
+        const folder = state.projectFolders.find((f) => f.id === item.id)!
+        return `${folder.name}[${folder.projectIds.map(name).join(' ')}]`
+      })
+    }
+
+    it('files a project without changing anything about the project itself', () => {
+      const before = projectRow(projectId)
+      const stateBefore = repo.projects.get(projectId)
+      const listBefore = repo.projects.list()
+      const folder = repo.projectFolders.create('Work')
+      expect(folder).toEqual({ id: folder.id, name: 'Work', collapsed: false, projectIds: [] })
+
+      repo.projectFolders.placeProject(projectId, folder.id, null)
+      expect(repo.projectFolders.get(folder.id)!.projectIds).toEqual([projectId])
+      // Same row, byte for byte, and the same entity over the bridge: where the
+      // project sits is recorded beside it, never on it.
+      expect(projectRow(projectId)).toEqual(before)
+      expect(repo.projects.get(projectId)).toEqual(stateBefore)
+      expect(repo.projects.list()).toEqual(listBefore)
+      expect(repo.getAppState().projectFolders).toEqual(repo.projectFolders.list())
+      expect(repo.getAppState().projectRail).toEqual(repo.projectFolders.rail())
+    })
+
+    it('lists projects nobody has arranged oldest first, with a new folder above them', () => {
+      add('a')
+      add('b')
+      expect(rail()).toEqual(['p', 'a', 'b'])
+      repo.projectFolders.create('Work')
+      expect(rail()).toEqual(['Work[]', 'p', 'a', 'b'])
+      // A project added afterwards still lands at the end.
+      add('c')
+      expect(rail()).toEqual(['Work[]', 'p', 'a', 'b', 'c'])
+    })
+
+    it('keeps a project in one place: one folder, or the top level', () => {
+      const a = repo.projectFolders.create('A')
+      const b = repo.projectFolders.create('B')
+      repo.projectFolders.placeProject(projectId, a.id, null)
+      repo.projectFolders.placeProject(projectId, b.id, null)
+      expect(rail()).toEqual(['B[p]', 'A[]'])
+
+      repo.projectFolders.placeProject(projectId, null, a.id)
+      expect(rail()).toEqual(['B[]', 'p', 'A[]'])
+      expect(getDb().prepare('SELECT COUNT(*) AS n FROM project_rail_positions').get()).toEqual({ n: 1 })
+    })
+
+    it('orders the top level by hand, with a folder anywhere among the projects', () => {
+      const a = add('a')
+      const b = add('b')
+      const work = repo.projectFolders.create('Work').id
+      expect(rail()).toEqual(['Work[]', 'p', 'a', 'b'])
+
+      // A folder between two projects, then last, then back before a project.
+      repo.projectFolders.placeFolder(work, b)
+      expect(rail()).toEqual(['p', 'a', 'Work[]', 'b'])
+      repo.projectFolders.placeFolder(work, null)
+      expect(rail()).toEqual(['p', 'a', 'b', 'Work[]'])
+      repo.projectFolders.placeFolder(work, a)
+      expect(rail()).toEqual(['p', 'Work[]', 'a', 'b'])
+
+      // A project before a folder, before another project, and last.
+      repo.projectFolders.placeProject(b, null, work)
+      expect(rail()).toEqual(['p', 'b', 'Work[]', 'a'])
+      repo.projectFolders.placeProject(a, null, projectId)
+      expect(rail()).toEqual(['a', 'p', 'b', 'Work[]'])
+      repo.projectFolders.placeProject(a, null, null)
+      expect(rail()).toEqual(['p', 'b', 'Work[]', 'a'])
+
+      // Before itself changes nothing; before something that is not there goes last.
+      repo.projectFolders.placeFolder(work, work)
+      repo.projectFolders.placeProject(b, null, b)
+      expect(rail()).toEqual(['p', 'b', 'Work[]', 'a'])
+      repo.projectFolders.placeFolder(work, 'missing')
+      expect(rail()).toEqual(['p', 'b', 'a', 'Work[]'])
+
+      // A second folder is its own row in the same order.
+      const play = repo.projectFolders.create('Play').id
+      repo.projectFolders.placeFolder(play, work)
+      expect(rail()).toEqual(['p', 'b', 'a', 'Play[]', 'Work[]'])
+      // A project added once the rail is arranged still lands at the end.
+      add('z')
+      expect(rail()).toEqual(['p', 'b', 'a', 'Play[]', 'Work[]', 'z'])
+    })
+
+    it('orders the projects inside a folder by hand', () => {
+      const a = add('a')
+      const b = add('b')
+      const work = repo.projectFolders.create('Work').id
+      for (const pid of [projectId, a, b]) repo.projectFolders.placeProject(pid, work, null)
+      expect(rail()).toEqual(['Work[p a b]'])
+
+      repo.projectFolders.placeProject(b, work, projectId)
+      expect(rail()).toEqual(['Work[b p a]'])
+      repo.projectFolders.placeProject(b, work, a)
+      expect(rail()).toEqual(['Work[p b a]'])
+      repo.projectFolders.placeProject(projectId, work, null)
+      expect(rail()).toEqual(['Work[b a p]'])
+
+      // Out to the top level and back in at a chosen place.
+      repo.projectFolders.placeProject(a, null, work)
+      expect(rail()).toEqual(['a', 'Work[b p]'])
+      repo.projectFolders.placeProject(a, work, projectId)
+      expect(rail()).toEqual(['Work[b a p]'])
+
+      // From one folder straight into the middle of another.
+      const play = repo.projectFolders.create('Play').id
+      repo.projectFolders.placeProject(a, play, null)
+      repo.projectFolders.placeProject(b, play, a)
+      expect(rail()).toEqual(['Play[b a]', 'Work[p]'])
+    })
+
+    it('puts a folder made for a project where that project was', () => {
+      const a = add('a')
+      add('b')
+      repo.projectFolders.create('Work', a)
+      expect(rail()).toEqual(['p', 'Work[a]', 'b'])
+      // Made for a project that is already filed, it sits just below that folder.
+      repo.projectFolders.create('Other', a)
+      expect(rail()).toEqual(['p', 'Work[]', 'Other[a]', 'b'])
+    })
+
+    it('deleting a folder only ungroups: its projects take its place, and nothing else goes', () => {
+      const w = repo.worktrees.create({ projectId, kind: 'root', name: 'main', path: 'C:/p', branch: 'main' })
+      const a = add('a')
+      const b = add('b')
+      const folder = repo.projectFolders.create('Work')
+      repo.projectFolders.placeProject(b, folder.id, null)
+      repo.projectFolders.placeProject(projectId, folder.id, null)
+      repo.projectFolders.placeFolder(folder.id, null)
+      repo.projectFolders.placeProject(a, null, null)
+      expect(rail()).toEqual(['Work[b p]', 'a'])
+      const rowsBefore = [projectId, a, b].map(projectRow)
+
+      repo.projectFolders.remove(folder.id)
+      expect(repo.projectFolders.list()).toEqual([])
+      expect(rail()).toEqual(['b', 'p', 'a'])
+      expect([projectId, a, b].map(projectRow)).toEqual(rowsBefore)
+      expect(repo.worktrees.get(w.id)).toBeDefined()
+    })
+
+    it('removing a project takes it out of the rail and leaves its folder', () => {
+      const folder = repo.projectFolders.create('Work')
+      repo.projectFolders.placeProject(projectId, folder.id, null)
+      repo.projects.remove(projectId)
+      expect(repo.projectFolders.list()).toEqual([{ ...folder, projectIds: [] }])
+      expect(getDb().prepare('SELECT COUNT(*) AS n FROM project_rail_positions').get()).toEqual({ n: 0 })
+    })
+
+    it('remembers names, collapsed folders and the whole arrangement across a reopen', () => {
+      const a = add('a')
+      const b = add('b')
+      const folder = repo.projectFolders.create('Work')
+      repo.projectFolders.rename(folder.id, 'Clients')
+      repo.projectFolders.setCollapsed(folder.id, true)
+      repo.projectFolders.placeProject(b, folder.id, null)
+      repo.projectFolders.placeProject(a, folder.id, b)
+      repo.projectFolders.placeFolder(folder.id, null)
+      closeDb()
+      initDb(dir)
+      expect(repo.projectFolders.list()).toEqual([
+        { id: folder.id, name: 'Clients', collapsed: true, projectIds: [a, b] }
+      ])
+      expect(rail()).toEqual(['p', 'Clients[a b]'])
+    })
+
+    it('keeps folders and the rail order to their own workspace', () => {
+      const here = repo.projectFolders.create('Here')
+      const other = repo.workspaces.create('Other')
+      const foreign = repo.projects.create({ name: 'x', repoPath: 'C:/x', workspaceId: other.id })
+
+      // A project from another workspace cannot be placed in this one's rail,
+      // and a move to a folder that is not there leaves a project where it was.
+      repo.projectFolders.placeProject(foreign.id, here.id, null)
+      repo.projectFolders.placeProject(foreign.id, null, null)
+      repo.projectFolders.placeProject(projectId, here.id, null)
+      repo.projectFolders.placeProject(projectId, 'missing', null)
+      expect(rail()).toEqual(['Here[p]'])
+
+      const home = repo.workspaces.list().find((w) => w.id !== other.id)!.id
+      repo.setActiveWorkspaceId(other.id)
+      expect(rail()).toEqual(['x'])
+      // Nor can that workspace move this one's folder.
+      repo.projectFolders.placeFolder(here.id, foreign.id)
+      repo.setActiveWorkspaceId(home)
+      expect(rail()).toEqual(['Here[p]'])
+
+      // Deleting a workspace takes its folders with it.
+      repo.workspaces.remove(other.id)
+      expect(repo.projectFolders.list().map((f) => f.name)).toEqual(['Here'])
+    })
   })
 
   it('makes a new tab the active one in its pane and moves it with its activation', () => {
