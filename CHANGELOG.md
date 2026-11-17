@@ -2,6 +2,20 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.45.0](https://github.com/jimbuck/orbital/compare/v1.44.0...v1.45.0) (2026-11-17)
+
+
+### Bug Fixes
+
+* **editor:** keep a block folded when the line above it gets a new line ([29ef436](https://github.com/jimbuck/orbital/commit/29ef436ebcc16836b301943be8ae385ace9fdb23))
+* **editor:** land a search hit on its line when it has to open the editor first ([ac1573b](https://github.com/jimbuck/orbital/commit/ac1573bf2213d69449386a42284747af966bcfa2))
+* **tasks:** unlink a task when its worktree is removed ([30d2be7](https://github.com/jimbuck/orbital/commit/30d2be79a7ae6bd5bfd8ebd18bd00b266ed0cc76))
+
+
+### Features
+
+* **rail:** group projects in folders and order the rail by hand ([c92929e](https://github.com/jimbuck/orbital/commit/c92929e481440f8b6bac90546afeefd625ea86b6))
+
 # [1.44.0](https://github.com/jimbuck/orbital/compare/v1.43.2...v1.44.0) (2026-11-09)
 
 
