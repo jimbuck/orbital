@@ -121,7 +121,7 @@ export default function Rail(): JSX.Element {
     confirm: DissolveConfirm
   } | null>(null)
 
-  if (collapsed) return <CollapsedPane edge="right" label="repos panel" onExpand={toggleCollapsed} />
+  if (collapsed) return <CollapsedPane edge="right" label="projects panel" onExpand={toggleCollapsed} />
 
   const newFolder = (): void => {
     fireAndForget(window.orbital.createRailFolder('New Folder').then((folder) => setRenamingFolderId(folder.id)))
@@ -179,9 +179,9 @@ export default function Rail(): JSX.Element {
     <aside style={{ width }} className="relative flex flex-none flex-col border-r border-line bg-rail">
       <div className="flex items-center justify-between border-b border-soft px-[14px] pb-3 pt-[14px]">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-[0.9px] text-faint">Repos</div>
+          <div className="text-[11px] font-bold uppercase tracking-[0.9px] text-faint">Projects</div>
           <div className="mt-[3px] text-[11px] text-dim">
-            {repos.length} repo{repos.length === 1 ? '' : 's'} · get work done from orbit
+            {projects.length} project{projects.length === 1 ? '' : 's'} · get work done from orbit
           </div>
         </div>
         <div className="flex flex-none items-center gap-[6px]">
@@ -259,7 +259,7 @@ export default function Rail(): JSX.Element {
 
       <RailFooter />
       <PanelResizeHandle edge="right" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
-      <PaneCollapseTab edge="right" label="repos panel" onCollapse={toggleCollapsed} />
+      <PaneCollapseTab edge="right" label="projects panel" onCollapse={toggleCollapsed} />
     </aside>
   )
 }

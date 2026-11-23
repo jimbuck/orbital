@@ -129,7 +129,7 @@ describe('rail folders — layout', () => {
     expect(within(folderBox('work')).queryByText('alpha')).toBeNull()
     expect(names()).toEqual(['beta', 'alpha', 'gamma'])
     // Still three repos: a folder is not a repo and is not counted as one.
-    expect(screen.getByText(/3 repos/)).toBeTruthy()
+    expect(screen.getByText(/3 projects/)).toBeTruthy()
   })
 
   it('lists the top level in its own order, with a folder between loose repos', () => {
