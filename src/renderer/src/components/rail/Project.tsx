@@ -177,7 +177,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
             type="button"
             // The tint is a colour, and colour alone is not a status. The label
             // is where a screen reader (and the tooltip) gets the same news.
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} project${
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} repo${
               linkedStatus === 'idle' ? '' : ` — worktrees ${worktreeStatusLabel(linkedStatus)}`
             }`}
             title={linkedStatus === 'idle' ? undefined : `Worktrees ${worktreeStatusLabel(linkedStatus)}`}
@@ -323,7 +323,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
               <div className="my-1 h-px bg-soft" />
               <MenuItem
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
-                label="Remove project"
+                label="Remove repo"
                 danger
                 onClick={() => setStep('confirmRemove')}
               />

@@ -136,7 +136,7 @@ export default function Folder({
   }
 
   const Icon = expanded ? FolderOpen : FolderClosed
-  const count = `${projects.length} project${projects.length === 1 ? '' : 's'}`
+  const count = `${projects.length} repo${projects.length === 1 ? '' : 's'}`
 
   return (
     // The data attribute is how the Rail tells which folder a drag is over. The
@@ -214,7 +214,7 @@ export default function Folder({
                 {dropSlot === projects.length && <SlotMarker />}
               </>
             ) : (
-              <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">Empty. Drag a project here.</div>
+              <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">Empty. Drag a repo here.</div>
             )}
           </div>
         )}

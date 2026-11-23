@@ -121,7 +121,7 @@ export default function TitleBar(): JSX.Element {
       id: 'file',
       label: 'File',
       items: [
-        { label: 'Add Project…', onClick: () => openModal('addProject') },
+        { label: 'Add Repo…', onClick: () => openModal('addProject') },
         { label: 'New Worktree…', onClick: () => openModal('newWorktree', { project }), disabled: !project },
         { sep: true, label: '' },
         { label: 'Open Recent Workspace', submenu: recentItems },

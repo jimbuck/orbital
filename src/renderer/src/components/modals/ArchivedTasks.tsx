@@ -48,7 +48,7 @@ export default function ArchivedTasks(): JSX.Element {
             <tr className="text-left text-[10.5px] font-bold uppercase tracking-[0.5px] text-muted">
               <th className="px-2 py-1.5 font-bold">#</th>
               <th className="px-2 py-1.5 font-bold">Title</th>
-              <th className="px-2 py-1.5 font-bold">Project</th>
+              <th className="px-2 py-1.5 font-bold">Repo</th>
               <th className="px-2 py-1.5 font-bold">Status</th>
               <th className="px-2 py-1.5 font-bold">Archived</th>
               <th className="px-2 py-1.5" />

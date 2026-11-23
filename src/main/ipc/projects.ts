@@ -21,7 +21,7 @@ export function register(): void {
       await dialog.showMessageBox(win ?? new BrowserWindow({ show: false }), {
         type: 'warning',
         message: 'Not a git repository',
-        detail: `${dir} is not inside a git repository. Orbital projects must be git repos.`
+        detail: `${dir} is not inside a git repository. Orbital can only add git repos.`
       })
       return null
     }

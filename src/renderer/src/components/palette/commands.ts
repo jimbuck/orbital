@@ -312,8 +312,8 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   /* ---- Project & workspace --------------------------------------------- */
   add({
     id: 'project.add',
-    group: 'Project',
-    label: 'Add Project…',
+    group: 'Repo',
+    label: 'Add Repo…',
     keywords: 'repo clone folder open',
     icon: FolderPlus,
     run: () => s.openModal('addProject')
@@ -321,16 +321,16 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   if (project) {
     add({
       id: 'project.explorer',
-      group: 'Project',
-      label: `Open Project in ${fileManagerName}`,
+      group: 'Repo',
+      label: `Open Repo in ${fileManagerName}`,
       keywords: 'reveal folder repo',
       icon: FolderOpen,
       run: () => fireAndForget(window.orbital.openProjectPath(project.id))
     })
     add({
       id: 'project.terminal',
-      group: 'Project',
-      label: 'Open Project in External Terminal',
+      group: 'Repo',
+      label: 'Open Repo in External Terminal',
       keywords: 'shell repo',
       icon: SquareTerminal,
       run: () => fireAndForget(window.orbital.openProjectInTerminal(project.id))
@@ -338,7 +338,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   }
   add({
     id: 'workspace.manage',
-    group: 'Project',
+    group: 'Repo',
     label: 'Workspaces…',
     keywords: 'switch import export',
     icon: Boxes,

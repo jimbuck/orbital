@@ -206,7 +206,7 @@ function FullBoard(): React.JSX.Element {
     >
       <header className="flex flex-none items-center justify-between px-[18px] py-[15px] border-b border-soft">
         <div className="min-w-0">
-          <div className="text-[15px] font-bold text-text">All tasks across your projects</div>
+          <div className="text-[15px] font-bold text-text">All tasks across your repos</div>
           <div className="mt-0.5 text-[11.5px] text-dim">
             {projects.length} project{projects.length === 1 ? '' : 's'} · {tasks.length} task
             {tasks.length === 1 ? '' : 's'}
@@ -236,7 +236,7 @@ function FullBoard(): React.JSX.Element {
 
       <div className="min-h-0 flex-1 overflow-auto p-[18px]">
         {projects.length === 0 ? (
-          <div className="text-[12px] text-faint">No projects yet.</div>
+          <div className="text-[12px] text-faint">No repos yet.</div>
         ) : (
           <div className="min-w-[820px]">
             {/* Status column headers, offset by the project-label gutter.

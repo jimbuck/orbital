@@ -83,7 +83,7 @@ export default function Rail(): JSX.Element {
   // that one created from the header button opens straight into its name.
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
 
-  if (collapsed) return <CollapsedPane edge="right" label="projects panel" onExpand={toggleCollapsed} />
+  if (collapsed) return <CollapsedPane edge="right" label="repos panel" onExpand={toggleCollapsed} />
 
   const newFolder = (): void => {
     fireAndForget(window.orbital.createProjectFolder('New Folder').then((folder) => setRenamingFolderId(folder.id)))
@@ -132,7 +132,7 @@ export default function Rail(): JSX.Element {
     <aside style={{ width }} className="relative flex flex-none flex-col border-r border-line bg-rail">
       <div className="flex items-center justify-between border-b border-soft px-[14px] pb-3 pt-[14px]">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-[0.9px] text-faint">Projects</div>
+          <div className="text-[11px] font-bold uppercase tracking-[0.9px] text-faint">Repos</div>
           <div className="mt-[3px] text-[11px] text-dim">
             {projects.length} repo{projects.length === 1 ? '' : 's'} · get work done from orbit
           </div>
@@ -143,8 +143,8 @@ export default function Rail(): JSX.Element {
           </button>
           <button
             type="button"
-            aria-label="Add project"
-            title="Add project"
+            aria-label="Add repo"
+            title="Add repo"
             onClick={() => openModal('addProject')}
             className={HEADER_BUTTON}
           >
@@ -184,7 +184,7 @@ export default function Rail(): JSX.Element {
 
       <RailFooter />
       <PanelResizeHandle edge="right" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
-      <PaneCollapseTab edge="right" label="projects panel" onCollapse={toggleCollapsed} />
+      <PaneCollapseTab edge="right" label="repos panel" onCollapse={toggleCollapsed} />
     </aside>
   )
 }

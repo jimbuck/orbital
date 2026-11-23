@@ -119,7 +119,7 @@ describe('rail folders — layout', () => {
     expect(screen.queryByText('alpha')).toBeNull()
     expect(screen.queryByText('beta')).toBeNull()
     expect(header('work').getAttribute('aria-expanded')).toBe('false')
-    expect(within(header('work')).getByTitle('2 projects')).toBeTruthy()
+    expect(within(header('work')).getByTitle('2 repos')).toBeTruthy()
   })
 
   it('reports what a collapsed folder is hiding: a needs-you count and the status on the chevron', () => {
@@ -136,7 +136,7 @@ describe('rail folders — layout', () => {
 
   it('tells an empty folder apart from a collapsed one', () => {
     renderRail([folder('empty', [])])
-    expect(within(folderBox('empty')).getByText(/Drag a project here/)).toBeTruthy()
+    expect(within(folderBox('empty')).getByText(/Drag a repo here/)).toBeTruthy()
   })
 })
 

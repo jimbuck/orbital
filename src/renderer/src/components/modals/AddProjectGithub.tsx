@@ -421,7 +421,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
 
   return (
     <ModalShell
-      title="Add project"
+      title="Add repo"
       subtitle="Clone one of your GitHub repositories"
       width={ADD_PROJECT_WIDTH}
       onClose={onDone}
@@ -742,7 +742,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
 
   return (
     <ModalShell
-      title="Add project"
+      title="Add repo"
       subtitle="Create a repository on GitHub and clone it"
       width={ADD_PROJECT_WIDTH}
       onClose={onDone}
@@ -787,7 +787,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
             disabled={frozen}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={onEnter}
-            placeholder="my-project"
+            placeholder="my-repo"
             aria-invalid={check.state === 'invalid' || check.state === 'taken'}
             aria-describedby="gh-name-status"
             className={`font-mono ${inputBase} disabled:opacity-50`}

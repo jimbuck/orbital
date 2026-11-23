@@ -616,7 +616,7 @@ export default function Settings(): React.JSX.Element {
   return (
     <ModalShell
       title="Settings"
-      subtitle={`Project · ${project?.name ?? '—'}`}
+      subtitle={`Repo · ${project?.name ?? '—'}`}
       width={540}
       onClose={closeModal}
       footer={
@@ -999,7 +999,7 @@ export default function Settings(): React.JSX.Element {
       </div>
       <div className="mt-3 flex items-center justify-between gap-4">
         <span className="text-[12.5px] text-text-2">
-          Default agent <span className="text-faint">· this project</span>
+          Default agent <span className="text-faint">· this repo</span>
         </span>
         <div className="relative">
           <select
@@ -1023,7 +1023,7 @@ export default function Settings(): React.JSX.Element {
       </div>
       <label className={`${fieldLabel} mt-3.5 block`} htmlFor="agent-exec">
         Executable path{' '}
-        <span className="font-normal text-faint">· optional, this project only — wins over the agent&apos;s own path</span>
+        <span className="font-normal text-faint">· optional, this repo only — wins over the agent&apos;s own path</span>
       </label>
       <input
         id="agent-exec"

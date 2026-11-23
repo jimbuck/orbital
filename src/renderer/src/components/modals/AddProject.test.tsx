@@ -94,7 +94,7 @@ function seed(projects: Project[] = [project]): void {
 }
 
 function sourceRadio(name: string): HTMLElement {
-  return within(screen.getByRole('radiogroup', { name: 'Project source' })).getByRole('radio', { name })
+  return within(screen.getByRole('radiogroup', { name: 'Repo source' })).getByRole('radio', { name })
 }
 
 /** Render and, for a GitHub mode, wait for the context to land so the form is live. */

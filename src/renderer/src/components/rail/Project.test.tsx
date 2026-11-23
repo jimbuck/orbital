@@ -96,7 +96,7 @@ function renderHeader(worktrees: Worktree[], expanded = false): void {
 
 /** The chevron's className — where the group summary is painted. */
 function chevronClass(): string {
-  const button = screen.getByRole('button', { name: /project/ })
+  const button = screen.getByRole('button', { name: /^(Expand|Collapse) repo/ })
   return button.querySelector('svg')?.getAttribute('class') ?? ''
 }
 
@@ -114,7 +114,7 @@ describe('project context menu', () => {
       'New Worktree',
       'Open in File Explorer',
       'Open in External Terminal',
-      'Remove project'
+      'Remove repo'
     ])
     // Clear Status is the only item that needs the row, so it is the only one missing.
     expect(screen.queryByText('Clear Status')).toBeNull()
@@ -129,7 +129,7 @@ describe('project context menu', () => {
       'Clear Status',
       'Open in File Explorer',
       'Open in External Terminal',
-      'Remove project'
+      'Remove repo'
     ])
   })
 
@@ -223,7 +223,7 @@ describe('project header — whose status is whose', () => {
     renderHeader([rootWorktree, linked('w-a', 'working')])
     // The app's status vocabulary, not a second palette: working is blue.
     expect(chevronClass()).toContain('text-blue')
-    expect(screen.getByRole('button', { name: 'Expand project — worktrees working' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Expand repo — worktrees working' })).toBeTruthy()
   })
 
   it('pulses only for the states that are asking for a person', () => {
@@ -248,7 +248,7 @@ describe('project header — whose status is whose', () => {
     renderHeader([rootWorktree, linked('w-a', 'idle')])
 
     expect(chevronClass()).toContain('text-faint')
-    expect(screen.getByRole('button', { name: 'Expand project' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Expand repo' })).toBeTruthy()
   })
 
   it('counts only the hidden Worktrees in the needs-you badge', () => {

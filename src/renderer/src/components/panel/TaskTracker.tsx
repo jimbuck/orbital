@@ -85,7 +85,7 @@ export default function TaskTracker(): JSX.Element {
         <button
           type="button"
           onClick={() => openModal('board')}
-          title="Open full board — all projects"
+          title="Open full board — all repos"
           aria-label="Open full board"
           className="size-6 flex-none rounded-md border border-line-2 flex items-center justify-center text-muted hover:bg-hover hover:text-text transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
         >

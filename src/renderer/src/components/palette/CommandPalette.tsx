@@ -188,7 +188,7 @@ export default function CommandPalette(): JSX.Element | null {
   /* ---- Row assembly ------------------------------------------------------ */
 
   const projectName = useCallback(
-    (id: string): string => projects.find((p) => p.id === id)?.name ?? 'unknown project',
+    (id: string): string => projects.find((p) => p.id === id)?.name ?? 'unknown repo',
     [projects]
   )
 

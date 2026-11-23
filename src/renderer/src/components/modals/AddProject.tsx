@@ -41,7 +41,7 @@ export default function AddProject(): React.JSX.Element {
   const github = useGithubContext(mode !== 'local')
 
   const modeSwitch = (
-    <SegmentedControl label="Project source" options={MODES} value={mode} onChange={setMode} fill className="mb-4" />
+    <SegmentedControl label="Repo source" options={MODES} value={mode} onChange={setMode} fill className="mb-4" />
   )
 
   if (mode === 'clone') return <CloneFromGithub github={github} modeSwitch={modeSwitch} onDone={closeModal} />
@@ -63,14 +63,14 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
       if (project) onDone()
       else setBusy(false) // dialog cancelled — keep the modal open
     } catch (e) {
-      setError(cleanIpcError(e) || 'Could not open that folder as a project.')
+      setError(cleanIpcError(e) || 'Could not open that folder as a repo.')
       setBusy(false)
     }
   }
 
   return (
     <ModalShell
-      title="Add project"
+      title="Add repo"
       subtitle="Open a local git repo in Orbital"
       width={ADD_PROJECT_WIDTH}
       onClose={onDone}

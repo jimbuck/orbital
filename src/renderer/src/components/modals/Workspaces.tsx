@@ -79,7 +79,7 @@ export default function Workspaces(): React.JSX.Element {
   return (
     <ModalShell
       title="Workspaces"
-      subtitle="Group projects into workspaces — each opens in its own window"
+      subtitle="Group repos into workspaces — each opens in its own window"
       width={560}
       onClose={closeModal}
       footer={

@@ -89,7 +89,7 @@ export default function NewWorktree(): React.JSX.Element {
           </button>
         }
       >
-        <p className="text-[12.5px] text-text-3">Add a project first, then create a Worktree on it.</p>
+        <p className="text-[12.5px] text-text-3">Add a repo first, then create a Worktree on it.</p>
       </ModalShell>
     )
   }
