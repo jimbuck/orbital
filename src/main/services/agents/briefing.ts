@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { Repo, Worktree } from '@shared/types'
+import type { ProjectMap, RepoMapEntry, SessionRole } from '../project-map'
 
 function briefingDir(): string {
   return join(app.getPath('userData'), 'agent-briefings')
@@ -29,6 +30,12 @@ export interface BriefingInput {
   providerName?: string
   /** When true, the cockpit learns status from Claude hooks, so drop the self-report block. */
   hooksInstalled: boolean
+  /**
+   * The session's place in a multi-repo project (see project-map.ts) and the
+   * live map of that project; absent for a plain one-repo project, whose
+   * briefing has no project section.
+   */
+  project?: { role: SessionRole; map: ProjectMap | null; addDirs: string[] }
 }
 
 /** Write the briefing for an agent tab launch; returns the absolute file path. */
@@ -67,17 +74,20 @@ export function pruneBriefings(keep: Set<string>): void {
   }
 }
 
-function briefingText({ repo, worktree, providerName, hooksInstalled }: BriefingInput): string {
+export function briefingText({ repo, worktree, providerName, hooksInstalled, project }: BriefingInput): string {
+  const folder = worktree.kind === 'folder'
   const lines = [
     `You are ${providerName ?? 'Claude Code'} running inside an Orbital worktree — one checkout in the`,
     'Orbital cockpit, which runs several coding-agent sessions side by side, each in its own git',
     'worktree within a repo.',
     '',
     'Worktree context:',
-    `- Repo: ${repo.name}`,
-    `- Worktree: ${worktree.name}`,
-    `- Path: ${worktree.path}`,
-    `- Branch: ${worktree.branch}`,
+    ...(folder
+      ? [
+          `- Project: ${repo.name} (its folder session: no repo of its own, not a git checkout)`,
+          `- Path: ${worktree.path}`
+        ]
+      : [`- Repo: ${repo.name}`, `- Worktree: ${worktree.name}`, `- Path: ${worktree.path}`, `- Branch: ${worktree.branch}`]),
     '',
     'The `orbital` CLI is on your PATH — use it to work with the cockpit. Add `--json` to any',
     'command to get the raw payload instead of a table when you intend to parse it.',
@@ -95,6 +105,7 @@ function briefingText({ repo, worktree, providerName, hooksInstalled }: Briefing
     '- `orbital server add <url|port>` / `orbital server remove <url|port>` — tell the cockpit when you start or stop a dev server, so the human can open it in one click; `orbital server list` shows what is registered.',
     '- `orbital whoami` — this worktree at a glance: repo, branch, path, status, linked task, dev servers.'
   ]
+  if (project) lines.push('', ...projectSection(project.role, project.map, project.addDirs, worktree))
   if (!hooksInstalled) {
     lines.push(
       '',
@@ -106,4 +117,89 @@ function briefingText({ repo, worktree, providerName, hooksInstalled }: Briefing
     )
   }
   return lines.join('\n') + '\n'
+}
+
+/** "main, clean", "feat/x, dirty", or what is known of it. */
+function checkoutState(r: Pick<RepoMapEntry, 'branch' | 'dirty'>): string {
+  const branch = r.branch ? `branch ${r.branch}` : 'branch unknown'
+  const dirty = r.dirty === null ? '' : r.dirty ? ', uncommitted changes' : ', clean'
+  return `${branch}${dirty}`
+}
+
+/** One repo of the project session's map, a few lines long. */
+function repoLines(r: RepoMapEntry): string[] {
+  const where = r.relPath ? `${r.path} (${r.relPath}/ in the project root)` : r.path
+  const head = `- ${r.name}${r.home ? ' [home]' : ''}: ${where}`
+  const facts = [
+    r.remote ? `remote ${r.remote}` : 'no remote',
+    `root checkout on ${checkoutState(r)}`,
+    `${r.openTasks} open task${r.openTasks === 1 ? '' : 's'}`
+  ]
+  const out = [head, `  ${facts.join('; ')}`]
+  for (const w of r.worktrees) {
+    out.push(`  worktree ${w.name} (${w.branch}) at ${w.path}${w.task !== null ? `, task #${w.task}` : ''}`)
+  }
+  if (r.steering.length) out.push(`  Has ${r.steering.join(' and ')}: read it before changing this repo.`)
+  return out
+}
+
+/** The project part of the briefing: the full map for the project session, a pointer for a member repo. */
+function projectSection(
+  role: SessionRole,
+  map: ProjectMap | null,
+  addDirs: string[],
+  worktree: Pick<Worktree, 'kind' | 'path'>
+): string[] {
+  const name = role.project.name
+  // A folder session gets every member; a home session every member but its own repo.
+  const reachable = !addDirs.length
+    ? ''
+    : addDirs.length >= role.members.length
+      ? 'They are added to this session, so you can read and edit them without leaving it.'
+      : 'The others are added to this session, so you can read and edit them without leaving it.'
+  if (role.kind === 'project') {
+    const where =
+      worktree.kind === 'folder'
+        ? `This session runs in the project's root folder (${role.project.rootPath}); the project has no home repo.`
+        : `This session runs in the home repo, ${role.home?.name ?? ''}. Its AGENTS.md / CLAUDE.md is the project's shared steering.`
+    const lines = [
+      `Project "${name}": this is the project session, the place to plan work that spans its repos.`,
+      where,
+      '',
+      `Repos in this project (root ${role.project.rootPath}). ${reachable}`.trimEnd()
+    ]
+    if (map) for (const r of map.repos) lines.push(...repoLines(r))
+    else for (const r of role.members) lines.push(`- ${r.name}${r.id === role.home?.id ? ' [home]' : ''}: ${r.repoPath}`)
+    lines.push(
+      '',
+      'Working across these repos:',
+      '- `orbital project` — this map, refreshed (branches, changes, worktrees).',
+      '- `orbital worktree new --repo <name> [--task <n>] [--worktree <branch>]` — open a worktree in one repo for a piece of the work.',
+      '- `orbital tab new agent --repo <name> [--worktree <name|branch>] --prompt "<instructions>"` — start an agent in that repo (its root checkout, or the named worktree) with its instructions.',
+      '- `orbital task add "<title>" --repo <name>` — file work against one repo.',
+      'Plan here, then hand each repo its part. Prefer a worktree per change over editing a root checkout directly.'
+    )
+    if (worktree.kind === 'folder') {
+      lines.push('Task and worktree commands need `--repo <name>` here: the folder session has no repo of its own.')
+    }
+    return lines
+  }
+  const lines = [`Project "${name}": this repo is one of ${role.members.length} in it (root ${role.project.rootPath}).`]
+  if (role.home) {
+    lines.push(
+      `- Home repo: ${role.home.name} at ${role.home.repoPath}. It holds the project's shared docs and skills${addDirs.length ? ', and is added to this session (its AGENTS.md / CLAUDE.md and skills are loaded)' : ''}.`
+    )
+  }
+  const siblings = (map?.repos ?? role.members.map((r) => ({ id: r.id, name: r.name, path: r.repoPath, branch: null, dirty: null })))
+    .filter((r) => r.id !== role.repo.id && r.id !== role.home?.id)
+  if (siblings.length) {
+    lines.push('- Other repos:')
+    for (const r of siblings) {
+      lines.push(`  - ${r.name}: ${r.path}${r.branch !== null || r.dirty !== null ? ` (${checkoutState(r)})` : ''}`)
+    }
+  }
+  lines.push(
+    '- `orbital project` lists them live. Work that spans repos is better planned from the project session; stay in this repo unless the task needs more.'
+  )
+  return lines
 }

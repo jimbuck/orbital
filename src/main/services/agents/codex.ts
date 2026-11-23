@@ -13,7 +13,7 @@
  */
 import { join } from 'node:path'
 import type { AgentContext, AgentProvider, ResolvedCommand, SessionLookup } from './provider'
-import { resolveExecutable } from './executable'
+import { resolveExecutable, shimSafeArg } from './executable'
 import { UUID_RE, files, mtimeMs, readHead, samePath, subdirs } from './sessions'
 
 /** Where Codex files its (unarchived) sessions under the profile dir. */
@@ -164,6 +164,7 @@ export const codexProvider: AgentProvider = {
   // No --append-system-prompt-file equivalent: Codex reads its instructions from
   // AGENTS.md, so Orbital's go in the profile's global one (codex-instructions.ts).
   acceptsBriefingFile: false,
+  acceptsPrompt: true,
 
   sessions: {
     // Codex picks the thread id itself; it is read back from the rollout file.
@@ -181,8 +182,15 @@ export const codexProvider: AgentProvider = {
   async resolveCommand(ctx: AgentContext): Promise<ResolvedCommand> {
     const { file, prefixArgs } = await resolveExecutable(ctx.execPath, 'codex')
     const args = [...prefixArgs]
+    // Write access to the project's other repos. Root-level flags, before the
+    // `resume` subcommand: Codex carries them into a resumed session. Unlike
+    // Claude, Codex does not read AGENTS.md or skills from these directories.
+    for (const dir of ctx.addDirs ?? []) args.push('--add-dir', dir)
     // `resume` is a subcommand, so it leads; a fresh session has no id to pass.
     if (ctx.session?.resume) args.push('resume', ctx.session.id)
-    return { file, args }
+    const cmd: ResolvedCommand = { file, args }
+    // `codex [PROMPT]` opens the interactive session with it.
+    if (ctx.prompt && !ctx.session?.resume) cmd.tail = ['--', shimSafeArg(ctx.prompt, prefixArgs)]
+    return cmd
   }
 }

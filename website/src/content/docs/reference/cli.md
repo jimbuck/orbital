@@ -28,10 +28,11 @@ pipeline (rail badge, title-bar banner, taskbar badge, optional chime).
 orbital whoami
 ```
 
-Everything the cockpit knows about the calling terminal — repo, worktree,
-branch, path, current status, linked task, and registered dev servers:
+Everything the cockpit knows about the calling terminal — project, repo,
+worktree, branch, path, current status, linked task, and registered dev servers:
 
 ```
+project      orbital
 repo         orbital
 worktree     Login flow (linked)
 branch       feature/login
@@ -40,6 +41,49 @@ status       working
 task         #12 Add checkout flow (in_progress)
 servers      http://localhost:5173/
 ```
+
+## Projects
+
+```sh
+orbital project
+```
+
+The calling terminal's project, read live: its root folder, its home repo, and
+each member repo with the branch of its root checkout, whether that checkout has
+uncommitted changes, how many worktrees Orbital has for it, and its path. The
+calling terminal's own repo is marked `*`.
+
+```
+project      platform
+root         C:\Projects\platform
+home         docs (C:\Projects\platform\docs)
+
+   NAME         BRANCH  STATE  WORKTREES  PATH
+   docs (home)  main    clean  0          C:\Projects\platform\docs
+*  api          main    dirty  2          C:\Projects\platform\api
+   web          main    clean  1          C:\Projects\platform\web
+```
+
+`--json` adds each repo's remote, its worktrees (name, branch, path, linked
+task), its open task count, and which of `AGENTS.md` / `CLAUDE.md` it has.
+
+### Working across repos in a project
+
+A project with more than one repo has a project session: its home repo's
+checkout, or, with no home repo, a session in the project's root folder. Plan
+work that spans repos there, then hand each repo its part:
+
+```sh
+orbital project                                                    # pick the repos
+orbital worktree new --repo api --task 12 --worktree feat/health   # a worktree in api, linked to task #12
+orbital tab new agent --repo api --worktree feat/health --prompt "Do task #12; run the tests"
+orbital task add "Update the client for the new endpoint" --repo web
+```
+
+The folder session has no repo of its own, so task and worktree commands there
+need `--repo`. Agents in the project session can read and edit every member repo
+without a prompt (Claude and Codex get them through `--add-dir`); agents in a
+member repo get the home repo the same way.
 
 ## Repos
 
@@ -108,18 +152,30 @@ root's copies have changed. Prints how many files it copied.
 ## Tabs
 
 ```sh
-orbital tab new <terminal|browser|editor|agent|search> [arg]
+orbital tab new <terminal|browser|editor|agent|search> [arg] [--repo <name|id>] [--worktree <name|branch>]
+orbital tab new agent [profile] --prompt "<text>" [--repo <name|id>] [--worktree <name|branch>]
 ```
 
 Opens a tab in the calling worktree. The argument is type-specific: a URL for
 `browser`, a file path for `editor`, the name of a configured agent profile for
 `agent`, a query for `search`.
 
+- `--repo` opens the tab in that repo's root checkout instead.
+- `--worktree` opens it in one of the repo's worktrees, by name, branch or id
+  (this terminal's repo unless `--repo` names another).
+- `--prompt` starts the agent with that prompt. It is sent on the tab's first
+  launch only; when the tab comes back after a restart it resumes the
+  conversation and does not send the prompt again. Claude and Codex take one;
+  Cursor does not. On Windows, when the agent runs through a `.cmd` shim, line
+  breaks in the prompt become spaces and double quotes become single quotes.
+
 ```sh
 orbital tab new browser http://localhost:3000
 orbital tab new editor src/lib/cart.ts
 orbital tab new agent "Claude (work)"
 orbital tab new search "TODO("
+orbital tab new terminal --repo api
+orbital tab new agent --repo api --prompt "Add the /health endpoint, then run the tests"
 ```
 
 ## Tasks
@@ -186,8 +242,8 @@ Orbital injects these into every worktree terminal:
 |---|---|
 | `ORBITAL_TERMINAL_ID` | The calling terminal's tab id |
 | `ORBITAL_WORKTREE_ID` | The worktree the terminal belongs to |
-| `ORBITAL_REPO_ID` | The worktree's repo |
-| `ORBITAL_PROJECT_ID` | Same value as `ORBITAL_REPO_ID`, kept for older scripts |
+| `ORBITAL_REPO_ID` | The worktree's repo; empty in a project's folder session, which has no repo |
+| `ORBITAL_PROJECT_ID` | The worktree's project |
 | `ORBITAL_SOCKET` | The control pipe the CLI connects to |
 
 `ORBITAL_WORKTREE_ID` is the reliable "am I inside Orbital?" check.
@@ -198,4 +254,8 @@ silently outside Orbital sessions and never blocks Claude.
 > `orbital flights` and `orbital flight new` still work as hidden aliases for the
 > renamed `worktrees` / `worktree new` commands, so existing scripts keep running.
 > Likewise, `orbital projects` and `--project <name|id>` are deprecated aliases for
-> `orbital repos` and `--repo <name|id>`.
+> `orbital repos` and `--repo <name|id>`: `--project` still names a repo.
+>
+> Before projects existed, `ORBITAL_PROJECT_ID` carried the repo id. The CLI
+> reads the repo from `ORBITAL_REPO_ID` whenever that variable is set, and falls
+> back to `ORBITAL_PROJECT_ID` only in a terminal an older build opened.

@@ -29,6 +29,17 @@ export interface AgentContext {
   execPath?: string
   /** Session to run under; only given to providers with {@link SessionSupport}. */
   session?: AgentSession
+  /**
+   * Directories besides the cwd the agent should reach: a project session's
+   * other member repos, or a member repo's home (see project-map.ts). Empty or
+   * absent for a plain repo. Providers without an equivalent flag ignore it.
+   */
+  addDirs?: string[]
+  /**
+   * A prompt to start the session with. Only ever set on a fresh session (never
+   * a resume), and only for providers with {@link AgentProvider.acceptsPrompt}.
+   */
+  prompt?: string
 }
 
 export interface ResolvedCommand {
@@ -36,6 +47,13 @@ export interface ResolvedCommand {
   file: string
   /** argv passed after the executable. */
   args: string[]
+  /**
+   * argv that must come LAST, after any extra args the agent profile adds (the
+   * starting prompt, behind `--` so nothing before it can swallow it).
+   */
+  tail?: string[]
+  /** Extra environment the CLI needs for this launch. */
+  env?: Record<string, string>
 }
 
 /** What a session lookup needs to know about the launch. */
@@ -87,6 +105,8 @@ export interface AgentProvider {
    * codex-instructions.ts).
    */
   acceptsBriefingFile: boolean
+  /** Whether the CLI can be started with a prompt on its command line (`orbital tab new agent --prompt`). */
+  acceptsPrompt: boolean
   /** Session resume support; absent when the CLI cannot resume by id. */
   sessions?: SessionSupport
   /** Resolve the executable + argv to spawn; throws a clear Error if unresolvable. */

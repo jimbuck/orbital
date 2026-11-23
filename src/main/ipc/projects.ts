@@ -2,15 +2,18 @@ import { dialog } from 'electron'
 import { IPC } from '@shared/contract'
 import { runtime, tables } from '../runtime'
 import { removeProject, settleProjectSessions } from '../worktree-lifecycle'
+import { scheduleProjectPointers } from '../services/project-pointers'
 import { handle, broadcast } from './handle'
 
 /**
  * After a change to a project's shape: open or close folder sessions to match
- * (tearing down the terminals of any that close), then push the state.
+ * (tearing down the terminals of any that close), push the state, and bring
+ * the home repos' managed repo lists in line (in the background).
  */
 function settled(): void {
   settleProjectSessions()
   broadcast()
+  scheduleProjectPointers()
 }
 
 /**
@@ -59,6 +62,7 @@ export function register(): void {
   h(IPC.setProjectManagedBlock, (_e, projectId, on) => {
     tables.projects.setManagedBlock(projectId, !!on)
     broadcast()
+    scheduleProjectPointers()
   })
 
   h(IPC.renameProject, (_e, projectId, name) => {

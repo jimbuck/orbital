@@ -14,13 +14,26 @@ import * as tables from '../db/repositories'
  */
 vi.mock('../runtime', async () => ({
   tables: await import('../db/repositories'),
-  runtime: { broadcastState: vi.fn() }
+  runtime: { broadcastState: vi.fn(), devServersFor: () => [] }
 }))
 vi.mock('../services/worktree', () => ({}))
-vi.mock('../services/settings', () => ({}))
-vi.mock('../services/logger', () => ({ logger: { cli: vi.fn(), error: vi.fn() } }))
+vi.mock('../services/settings', () => ({
+  getSettings: () => ({
+    agents: [
+      { id: 'claude', name: 'Claude', provider: 'claude' },
+      { id: 'cursor', name: 'Cursor', provider: 'cursor' }
+    ]
+  })
+}))
+vi.mock('../services/logger', () => ({ logger: { cli: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() } }))
 vi.mock('../services/agents/launch', () => ({}))
-vi.mock('../tabs', () => ({}))
+const createTabInWorktree = vi.fn((worktreeId: string, _pane: string | null, type: string, config: unknown) => ({
+  id: 'tab-new',
+  worktreeId,
+  type,
+  config
+}))
+vi.mock('../tabs', () => ({ createTabInWorktree }))
 vi.mock('../worktree-lifecycle', () => ({}))
 vi.mock('../status', () => ({}))
 
@@ -115,5 +128,97 @@ describe('cross-repo writes', () => {
     const res = await handleControl({ cmd: 'whoami', worktreeId: 'nope-not-real', args: {} })
     // Unknown ids fall through to the handler's own not-found.
     expect(res).toEqual({ ok: false, error: 'worktree not found' })
+  })
+})
+
+describe('projects', () => {
+  /** A no-home project of two repos with root checkouts, plus its folder session. */
+  function platform() {
+    const api = tables.repos.create({ name: 'api', repoPath: join(dir, 'api') })
+    const web = tables.repos.create({ name: 'web', repoPath: join(dir, 'web') })
+    const project = tables.projects.create({ name: 'Platform', rootPath: dir, repoIds: [api.id, web.id] })
+    const apiRoot = tables.worktrees.create({ repoId: api.id, kind: 'root', name: 'main', path: api.repoPath, branch: 'main' })
+    const apiLinked = tables.worktrees.create({
+      repoId: api.id,
+      kind: 'linked',
+      name: 'health',
+      path: join(dir, 'wt-health'),
+      branch: 'feat/health'
+    })
+    const folder = tables.worktrees.create({
+      repoId: null,
+      projectId: project.id,
+      kind: 'folder',
+      name: 'Platform',
+      path: dir,
+      branch: ''
+    })
+    return { api, web, project, apiRoot, apiLinked, folder }
+  }
+
+  beforeEach(() => createTabInWorktree.mockClear())
+
+  it('whoami answers from a folder session with its project and no repo', async () => {
+    const { folder, project } = platform()
+    const res = await handleControl({ cmd: 'whoami', worktreeId: folder.id, projectId: project.id, args: {} })
+    expect(res).toMatchObject({ ok: true, data: { project: 'Platform', projectId: project.id, repo: '', kind: 'folder' } })
+  })
+
+  it('project lists the members with their worktrees, marking the caller', async () => {
+    const { api, apiRoot, project } = platform()
+    const res = await handleControl({ cmd: 'project', worktreeId: apiRoot.id, repoId: api.id, args: {} })
+    expect(res.ok).toBe(true)
+    const data = res.data as { name: string; projectSession: boolean; repos: { name: string; current: boolean; worktrees: unknown[] }[] }
+    expect(data.name).toBe(project.name)
+    expect(data.projectSession).toBe(false)
+    expect(data.repos.map((r) => [r.name, r.current, r.worktrees.length])).toEqual([
+      ['api', true, 1],
+      ['web', false, 0]
+    ])
+  })
+
+  it('project knows it is the project session in the folder session', async () => {
+    const { folder } = platform()
+    const res = await handleControl({ cmd: 'project', worktreeId: folder.id, args: {} })
+    expect((res.data as { projectSession: boolean }).projectSession).toBe(true)
+  })
+
+  it("tab new --repo opens in that repo's root checkout, --worktree in one of its worktrees", async () => {
+    const { folder, apiRoot, apiLinked } = platform()
+    const atRoot = await handleControl({ cmd: 'tab-new', worktreeId: folder.id, args: { type: 'terminal', repo: 'api' } })
+    expect(atRoot).toMatchObject({ ok: true, data: { repo: 'api', worktree: 'main' } })
+    expect(createTabInWorktree).toHaveBeenLastCalledWith(apiRoot.id, null, 'terminal', {})
+
+    const inLinked = await handleControl({
+      cmd: 'tab-new',
+      worktreeId: folder.id,
+      args: { type: 'agent', repo: 'api', worktree: 'feat/health', prompt: 'Add /health' }
+    })
+    expect(inLinked).toMatchObject({ ok: true, data: { worktree: 'health' } })
+    expect(createTabInWorktree).toHaveBeenLastCalledWith(apiLinked.id, null, 'agent', { agentPrompt: 'Add /health' })
+  })
+
+  it('tab new explains what is wrong with a bad target or prompt', async () => {
+    const { folder } = platform()
+    expect(await handleControl({ cmd: 'tab-new', worktreeId: folder.id, args: { type: 'terminal', worktree: 'x' } })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/folder session .*orbital project/)
+    })
+    expect(
+      await handleControl({ cmd: 'tab-new', worktreeId: folder.id, args: { type: 'terminal', repo: 'api', worktree: 'nope' } })
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/no worktree 'nope' in repo 'api'/) })
+    expect(
+      await handleControl({ cmd: 'tab-new', worktreeId: folder.id, args: { type: 'browser', repo: 'api', prompt: 'x' } })
+    ).toEqual({ ok: false, error: '--prompt only applies to agent tabs' })
+    expect(
+      await handleControl({ cmd: 'tab-new', worktreeId: folder.id, args: { type: 'agent', arg: 'Cursor', repo: 'api', prompt: 'x' } })
+    ).toMatchObject({ ok: false, error: expect.stringMatching(/Cursor cannot be started with a prompt/) })
+    expect(createTabInWorktree).not.toHaveBeenCalled()
+  })
+
+  it('task commands from a folder session point at orbital project', async () => {
+    const { folder, project } = platform()
+    const res = await handleControl({ cmd: 'task-list', worktreeId: folder.id, projectId: project.id, args: {} })
+    expect(res.error).toMatch(/pass --repo <name\|id> \(`orbital project` lists its repos\)/)
   })
 })

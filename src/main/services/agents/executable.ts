@@ -80,3 +80,20 @@ export async function resolveExecutable(override: string | undefined, name: stri
   }
   return { file: exe, prefixArgs: [] }
 }
+
+/**
+ * A free-text argument (a starting prompt) made safe to pass through a shell
+ * shim. When `prefixArgs` is non-empty the CLI runs via `cmd.exe /c` or
+ * PowerShell, which re-parse the command line: a newline ends the command and
+ * a double quote can end the quoted argument early, letting `&` or `|` in the
+ * text run as shell syntax. So newlines become spaces and double quotes become
+ * single quotes there. node-pty only wraps an argument in quotes when it holds
+ * whitespace, and an unquoted `lint&&test` would reach cmd.exe as two
+ * commands, so text with no whitespace gets a trailing space to make sure it
+ * is quoted. A directly spawned executable gets the text unchanged.
+ */
+export function shimSafeArg(text: string, prefixArgs: string[]): string {
+  if (prefixArgs.length === 0) return text
+  const flat = text.replace(/\r?\n/g, ' ').replace(/"/g, "'")
+  return /\s/.test(flat) ? flat : `${flat} `
+}

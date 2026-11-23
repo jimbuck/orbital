@@ -2,6 +2,7 @@ import {
   normalizeStatus,
   normalizeTaskStatus,
   findAgentConfig,
+  resolveAgentRef,
   type TabType,
   type TabConfig,
   type TaskStatus,
@@ -15,6 +16,8 @@ import { getSettings } from '../services/settings'
 import { logger } from '../services/logger'
 import { updater } from '../services/updater'
 import { recordAgentSession } from '../services/agents/launch'
+import { getProvider } from '../services/agents/provider'
+import { loadProjectMap } from '../services/project-map'
 import { createTabInWorktree } from '../tabs'
 import { createWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
 import { hookFired, statusReported } from '../status'
@@ -44,6 +47,47 @@ async function archiveTask(req: ControlRequest, archive: boolean): Promise<Contr
 const repoName = (req: ControlRequest): string | undefined =>
   req.repoId ? tables.repos.get(req.repoId)?.name : undefined
 
+/**
+ * The project a request is about: the calling worktree's (it follows its repo
+ * when the repo moves), else the env project, else the env repo's.
+ */
+function projectIdOf(req: ControlRequest): string | undefined {
+  const wt = req.worktreeId ? tables.worktrees.get(req.worktreeId) : undefined
+  if (wt) return wt.projectId
+  if (req.projectId && tables.projects.get(req.projectId)) return req.projectId
+  return req.repoId ? tables.repos.get(req.repoId)?.projectId : undefined
+}
+
+/**
+ * The worktree `tab new` opens in. Without `--repo` / `--worktree` it is the
+ * calling one. `--repo` picks that repo's root checkout; `--worktree` picks one
+ * of the repo's worktrees (this terminal's repo when `--repo` is absent) by
+ * name, branch or id.
+ */
+function tabTarget(req: ControlRequest): { worktreeId?: string; error?: string } {
+  const repoGiven = req.args.repo !== undefined && req.args.repo !== null && req.args.repo !== ''
+  const ref = req.args.worktree !== undefined ? String(req.args.worktree).trim() : ''
+  if (!repoGiven && !ref) {
+    return req.worktreeId ? { worktreeId: req.worktreeId } : { error: 'no ORBITAL_WORKTREE_ID in environment' }
+  }
+  if (!req.repoId) return { error: noRepoError(req) }
+  const inRepo = tables.worktrees.list().filter((w) => w.repoId === req.repoId)
+  const name = tables.repos.get(req.repoId)?.name ?? req.repoId
+  if (!ref) {
+    const root = inRepo.find((w) => w.kind === 'root')
+    return root ? { worktreeId: root.id } : { error: `repo '${name}' has no root worktree in Orbital` }
+  }
+  const lower = ref.toLowerCase()
+  const byId = inRepo.find((w) => w.id === ref)
+  if (byId) return { worktreeId: byId.id }
+  const hits = inRepo.filter((w) => w.name.toLowerCase() === lower || w.branch === ref)
+  if (hits.length === 1) return { worktreeId: hits[0].id }
+  if (hits.length > 1) {
+    return { error: `worktree '${ref}' is ambiguous in repo '${name}' (${hits.map((w) => w.id).join(', ')})` }
+  }
+  return { error: `no worktree '${ref}' in repo '${name}' (see \`orbital worktrees --repo ${name}\`)` }
+}
+
 const handlers: Record<ControlCommand, Handler> = {
   status: async (req) => {
     const status = normalizeStatus(String(req.args.status ?? ''))
@@ -60,15 +104,18 @@ const handlers: Record<ControlCommand, Handler> = {
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     const worktree = tables.worktrees.get(req.worktreeId)
     if (!worktree) return { ok: false, error: 'worktree not found' }
-    if (!worktree.repoId) return { ok: false, error: noRepoError(req) }
-    const repo = tables.repos.get(worktree.repoId)
+    // A folder session has no repo: it answers with its project alone.
+    const repo = worktree.repoId ? tables.repos.get(worktree.repoId) : undefined
+    const project = tables.projects.get(worktree.projectId)
     const tab = req.terminalId ? tables.tabs.get(req.terminalId) : undefined
     const task = worktree.taskId ? tables.tasks.get(worktree.taskId) : undefined
     return {
       ok: true,
       data: {
+        project: project?.name ?? '',
+        projectId: worktree.projectId,
         repo: repo?.name ?? '',
-        repoId: worktree.repoId,
+        repoId: worktree.repoId ?? '',
         repoPath: repo?.repoPath ?? '',
         worktree: worktree.name,
         worktreeId: worktree.id,
@@ -91,6 +138,18 @@ const handlers: Record<ControlCommand, Handler> = {
       current: p.id === req.repoId
     }))
     return { ok: true, data: list }
+  },
+  project: async (req) => {
+    // The calling terminal's project, live: its root, home and member repos
+    // with their branches, changes and worktrees — the fan-out targets.
+    const pid = projectIdOf(req)
+    if (!pid) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
+    const map = await loadProjectMap(pid, req.repoId ?? null)
+    if (!map) return { ok: false, error: 'project not found' }
+    const wt = req.worktreeId ? tables.worktrees.get(req.worktreeId) : undefined
+    const projectSession =
+      wt?.kind === 'folder' || (map.home !== null && wt?.repoId === map.home.id && map.repos.length > 1)
+    return { ok: true, data: { ...map, projectSession } }
   },
   worktrees: async (req) => {
     const pid = req.repoId
@@ -148,26 +207,52 @@ const handlers: Record<ControlCommand, Handler> = {
     }
   },
   'tab-new': async (req) => {
-    if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     const type = String(req.args.type ?? 'terminal') as TabType
     if (!['terminal', 'browser', 'editor', 'agent', 'search'].includes(type)) {
       return { ok: false, error: `unknown tab type '${type}'` }
     }
+    const target = tabTarget(req)
+    if (!target.worktreeId) return { ok: false, error: target.error }
+    const worktreeId = target.worktreeId
     const arg = req.args.arg ? String(req.args.arg) : undefined
-    // For agents the argument names a configured profile — its id, its name
-    // (as typed in Settings, case-insensitively), or a provider id.
-    if (type === 'agent' && arg) {
-      const agents = getSettings().agents
-      const agent =
-        findAgentConfig(agents, arg) ?? agents.find((a) => a.name.toLowerCase() === arg.toLowerCase())
-      if (!agent) {
-        return { ok: false, error: `no agent '${arg}' is configured (try: ${agents.map((a) => a.name).join(', ')})` }
-      }
-      const tab = createTabInWorktree(req.worktreeId, null, type, { agentId: agent.id })
-      runtime.broadcastState()
-      return { ok: true, data: { id: tab.id, type: tab.type } }
+    const prompt = req.args.prompt !== undefined ? String(req.args.prompt).trim() : ''
+    if (prompt && type !== 'agent') return { ok: false, error: '--prompt only applies to agent tabs' }
+    // Name the destination when it is not the caller's own worktree.
+    const where = (): Record<string, unknown> => {
+      if (worktreeId === req.worktreeId) return {}
+      const wt = tables.worktrees.get(worktreeId)
+      return { worktree: wt?.name, repo: wt?.repoId ? tables.repos.get(wt.repoId)?.name : undefined }
     }
-    // A search tab's argument is the query, scoped to the calling Worktree —
+    if (type === 'agent') {
+      // The argument names a configured profile — its id, its name (as typed
+      // in Settings, case-insensitively), or a provider id. Without one the
+      // target repo's default runs.
+      const agents = getSettings().agents
+      let agentId: string | undefined
+      if (arg) {
+        const agent =
+          findAgentConfig(agents, arg) ?? agents.find((a) => a.name.toLowerCase() === arg.toLowerCase())
+        if (!agent) {
+          return { ok: false, error: `no agent '${arg}' is configured (try: ${agents.map((a) => a.name).join(', ')})` }
+        }
+        agentId = agent.id
+      }
+      if (prompt) {
+        const wt = tables.worktrees.get(worktreeId)
+        const repo = wt?.repoId ? tables.repos.get(wt.repoId) : undefined
+        const provider = getProvider(resolveAgentRef(agents, agentId, undefined, repo?.defaultAgentId ?? 'claude')?.provider)
+        if (!provider.acceptsPrompt) {
+          return { ok: false, error: `${provider.displayName} cannot be started with a prompt; open it without --prompt` }
+        }
+      }
+      const config: TabConfig = {}
+      if (agentId) config.agentId = agentId
+      if (prompt) config.agentPrompt = prompt
+      const tab = createTabInWorktree(worktreeId, null, type, config)
+      runtime.broadcastState()
+      return { ok: true, data: { id: tab.id, type: tab.type, ...where() } }
+    }
+    // A search tab's argument is the query, scoped to the target Worktree —
     // `orbital tab new search TODO` is how an agent hands its findings over.
     const config: TabConfig =
       type === 'browser'
@@ -175,11 +260,11 @@ const handlers: Record<ControlCommand, Handler> = {
         : type === 'editor'
           ? { filePath: arg }
           : type === 'search' && arg
-            ? { search: { query: arg, scope: 'worktree', worktreeId: req.worktreeId } }
+            ? { search: { query: arg, scope: 'worktree', worktreeId } }
             : {}
-    const tab = createTabInWorktree(req.worktreeId, null, type, config)
+    const tab = createTabInWorktree(worktreeId, null, type, config)
     runtime.broadcastState()
-    return { ok: true, data: { id: tab.id, type: tab.type } }
+    return { ok: true, data: { id: tab.id, type: tab.type, ...where() } }
   },
   hook: async (req) => {
     // Invoked by Claude Code hooks via `orbital hook <event>`. The CLI only

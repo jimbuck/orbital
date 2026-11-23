@@ -22,6 +22,7 @@ orbital whoami
 ```
 
 ```
+project      nebula-shop
 repo         nebula-shop
 worktree     Checkout flow (linked)
 branch       checkout-flow
@@ -79,6 +80,32 @@ orbital server remove 5173   # when you stop it
 own branch. Other agents are working in the sibling worktrees that
 `orbital worktrees` lists. Leave them alone.
 
+## Working across repos in a project
+
+A project groups repos that belong together, often with a home repo that
+holds the shared `AGENTS.md`, skills and standards. `orbital project` shows the
+project you're in: its root, its home repo, and each repo's branch, changes and
+worktrees.
+
+If you're in the project session (the home repo's checkout, or the project's
+root folder when it has no home), plan the work there and hand each repo its
+part:
+
+```sh
+orbital project
+orbital worktree new --repo api --task 12 --worktree feat/health
+orbital tab new agent --repo api --worktree feat/health --prompt "Do task #12, then run the tests"
+orbital task add "Use the new endpoint" --repo web
+```
+
+The root folder session has no repo of its own, so task and worktree commands
+there need `--repo`. Claude and Codex sessions there can read and edit every
+member repo without a permission prompt; Orbital passes them with `--add-dir`.
+
+If you're in one member repo, the home repo is added to your session the same
+way, and Claude also loads its `CLAUDE.md` and skills. Stay in your repo unless
+the task needs more; cross-repo work belongs in the project session.
+
 ## Useful beyond reporting
 
 ```sh
@@ -108,8 +135,30 @@ started:
 | Cursor, or anything else | Nothing automatic. `orbital help` prints the usage. |
 
 The briefing tells the agent its repo, worktree, path and branch, then the
-same conventions as above. It lives in Orbital's app-data folder and never in
-your repository.
+same conventions as above. In a project with more than one repo it adds a map of
+the project, written at launch: each repo's path, remote, branch, uncommitted
+changes, worktrees, open tasks, and whether it has an `AGENTS.md` or `CLAUDE.md`
+to read first. It lives in Orbital's app-data folder and never in your
+repository.
+
+A project with a home repo also gets a short repo list in the home repo's
+`AGENTS.md` (or its `CLAUDE.md` if that's the only one), between
+`<!-- orbital:repos:start -->` and `<!-- orbital:repos:end -->`, so agents
+started outside Orbital, and your teammates, find the other repos too:
+
+```md
+## Repos in this project
+
+<!-- Managed by Orbital: edits inside this block are overwritten. Turn it off per project in Orbital. -->
+
+- api: ../api. Clone from git@github.com:acme/api.git if missing. Read its AGENTS.md before changing it.
+- web: ../web. Clone from git@github.com:acme/web.git if missing.
+```
+
+It holds only names, paths relative to the home repo, remotes and the file to
+read, so it changes only when the project does. Orbital leaves it as an
+uncommitted change for you to commit. Turn it off per project with **Managed
+AGENTS.md Block** in the project's menu, which takes it out again.
 
 For a repository whose agents run both inside and outside Orbital, this line in
 your `CLAUDE.md` or `AGENTS.md` covers the gap:

@@ -436,8 +436,8 @@ export default function ProjectGroup({
                 <>
                   <div className="my-1 h-px bg-soft" />
                   <div className="px-2 pb-1 pt-1 text-[11px] leading-snug text-dim">
-                    Orbital keeps a repo list in the home repo&rsquo;s AGENTS.md. Turn it off with Managed AGENTS.md
-                    Block.
+                    Orbital keeps a repo list in the home repo&rsquo;s AGENTS.md (or its CLAUDE.md), left uncommitted
+                    for you. Turn it off with Managed AGENTS.md Block.
                   </div>
                 </>
               )}

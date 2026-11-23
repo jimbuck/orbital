@@ -4,6 +4,7 @@ import { runtime, tables } from '../runtime'
 import { git } from '../services/git'
 import { github } from '../services/github'
 import { addRepo, removeRepo } from '../worktree-lifecycle'
+import { scheduleProjectPointers } from '../services/project-pointers'
 import { handle, broadcast } from './handle'
 
 /** Repos: add / remove / rename, their branches and their agent defaults. (Projects and rail folders: ./projects.) */
@@ -70,6 +71,8 @@ export function register(): void {
       tables.projects.rename(project.id, trimmed)
     }
     broadcast()
+    // The home repo's managed list names its siblings.
+    scheduleProjectPointers()
   })
 
   h(IPC.listBranches, async (_e, repoId) => {

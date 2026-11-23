@@ -19,6 +19,7 @@ import {
   type ControlResponse,
   type ControlCommand
 } from '../shared/types'
+import { envIdentity } from './env'
 
 /* ------------------------------------------------------------------ usage -- */
 
@@ -27,11 +28,13 @@ const USAGE = `orbital — control the running Orbital cockpit from inside a wor
 Usage:
   orbital status <idle|working|needs-attention|error|done>
   orbital whoami
+  orbital project
   orbital repos
   orbital worktrees [--repo <name|id>]
   orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--repo <name|id>] [name]
   orbital worktree sync
-  orbital tab new <terminal|browser|editor|agent|search> [arg]
+  orbital tab new <terminal|browser|editor|agent|search> [arg] [--repo <name|id>] [--worktree <name|branch>]
+  orbital tab new agent [profile] --prompt "<text>" [--repo <name|id>] [--worktree <name|branch>]
   orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--repo <name|id>]
   orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--repo <name|id>]
   orbital task show <number|id> [--repo <name|id>]
@@ -47,9 +50,12 @@ Usage:
 
 Options:
   --json       print the raw JSON response instead of a table — use this when parsing
-  --repo       act on another repo in this workspace (name or id, see \`orbital repos\`).
-               Without it, task and worktree commands stay scoped to this terminal's
-               repo; passing it is the explicit opt-in, and writes are allowed.
+  --repo       act on another repo in this workspace (name or id, see \`orbital project\`
+               and \`orbital repos\`). Without it, task and worktree commands stay scoped to
+               this terminal's repo; passing it is the explicit opt-in, and writes are
+               allowed. On \`tab new\` it opens the tab in that repo's root checkout.
+  --worktree   on \`tab new\`: open the tab in that worktree (name, branch or id) instead.
+  --prompt     on \`tab new agent\`: start the agent with this prompt (first launch only).
 
 Examples:
   orbital status needs-attention
@@ -59,6 +65,9 @@ Examples:
   orbital worktree sync
   orbital tab new browser http://localhost:5173
   orbital tab new agent "Claude (work)"
+  orbital project
+  orbital tab new agent --repo api --prompt "Add the /health endpoint, then run the tests"
+  orbital tab new terminal --repo api --worktree feat/health
   orbital tab new search "TODO("
   orbital task add "Write tests" --description "cover the parser" --tags test
   orbital task list --status todo
@@ -131,7 +140,7 @@ function request(cmd: ControlCommand, args: Record<string, unknown>): ControlReq
     cmd,
     terminalId: process.env[ENV.terminalId],
     worktreeId: process.env[ENV.worktreeId],
-    repoId: process.env[ENV.repoId] || process.env[ENV.legacyRepoId],
+    ...envIdentity(process.env),
     args
   }
 }
@@ -195,6 +204,9 @@ function buildRequest(argv: string[]): ControlRequest {
     case 'whoami':
       return request('whoami', {})
 
+    case 'project':
+      return request('project', {})
+
     // `flights` is a hidden backward-compat alias for `worktrees`.
     case 'worktrees':
     case 'flights':
@@ -216,12 +228,21 @@ function buildRequest(argv: string[]): ControlRequest {
 
     case 'tab': {
       if (rest[0] !== 'new') usageError()
-      const { positionals } = parseArgs(rest.slice(1))
+      const { positionals, flags } = parseArgs(rest.slice(1))
       const type = positionals[0]
       if (!type || !TAB_TYPES.includes(type as (typeof TAB_TYPES)[number])) usageError()
       const args: Record<string, unknown> = { type }
       if (positionals[1]) args.arg = positionals[1]
-      return request('tab-new', args)
+      if ('worktree' in flags) {
+        if (!flags.worktree) usageError()
+        args.worktree = flags.worktree
+      }
+      if ('prompt' in flags) {
+        if (!flags.prompt) usageError()
+        if (type !== 'agent') fail('--prompt only applies to `tab new agent`')
+        args.prompt = flags.prompt
+      }
+      return request('tab-new', withRepo(args, flags))
     }
 
     case 'task': {
@@ -343,6 +364,42 @@ function printWorktrees(data: unknown): void {
   )
 }
 
+/** `orbital project`: the project's header, then one row per member repo. */
+function printProject(data: unknown): void {
+  const o = (data ?? {}) as Record<string, unknown>
+  const home = (o.home ?? null) as { name?: string; path?: string } | null
+  const repos = Array.isArray(o.repos) ? (o.repos as Record<string, unknown>[]) : []
+  printFields([
+    ['project', String(o.name ?? '')],
+    ['root', String(o.rootPath ?? '')],
+    ['home', home ? `${String(home.name ?? '')} (${String(home.path ?? '')})` : '(none; the project session runs in the root folder)']
+  ])
+  process.stdout.write('\n')
+  if (repos.length === 0) {
+    process.stdout.write('No repos in this project yet.\n')
+    return
+  }
+  printTable(
+    [
+      { key: 'current', head: '' },
+      { key: 'name', head: 'NAME' },
+      { key: 'branch', head: 'BRANCH' },
+      { key: 'state', head: 'STATE' },
+      { key: 'worktrees', head: 'WORKTREES' },
+      { key: 'path', head: 'PATH' }
+    ],
+    repos.map((r) => ({
+      // Marks the calling terminal's own repo.
+      current: r.current ? '*' : '',
+      name: `${String(r.name ?? '')}${r.home ? ' (home)' : ''}`,
+      branch: r.branch == null ? '?' : String(r.branch),
+      state: r.dirty == null ? '?' : r.dirty ? 'dirty' : 'clean',
+      worktrees: String(Array.isArray(r.worktrees) ? r.worktrees.length : 0),
+      path: String(r.path ?? '')
+    }))
+  )
+}
+
 function printRepos(data: unknown): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
@@ -411,7 +468,8 @@ function printWhoami(data: unknown): void {
   const task = (o.task ?? null) as { seq?: number; title?: string; status?: string } | null
   const servers = Array.isArray(o.servers) ? o.servers : []
   printFields([
-    ['repo', String(o.repo ?? '')],
+    ['project', String(o.project ?? '')],
+    ['repo', String(o.repo ?? '') || '(none; project session)'],
     ['worktree', `${String(o.worktree ?? '')}${o.kind ? ` (${String(o.kind)})` : ''}`],
     ['branch', String(o.branch ?? '')],
     ['path', String(o.path ?? '')],
@@ -477,8 +535,10 @@ function confirmation(req: ControlRequest, data: unknown): string {
       return `synced ${copied.length} env file${copied.length === 1 ? '' : 's'} from the root checkout:\n` +
         copied.map((f) => `  ${String(f)}`).join('\n')
     }
-    case 'tab-new':
-      return `opened ${String(req.args.type ?? '')} tab`
+    case 'tab-new': {
+      const where = d.repo || d.worktree ? ` in ${[d.repo, d.worktree].filter(Boolean).map(String).join(' / ')}` : ''
+      return `opened ${String(req.args.type ?? '')} tab${where}${req.args.prompt ? ' with its prompt' : ''}`
+    }
     case 'task-add':
       return `task added${to}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
     case 'task-update':
@@ -609,6 +669,8 @@ function handleResponse(req: ControlRequest, lineText: string): void {
     printWhoami(res.data)
   } else if (req.cmd === 'repos') {
     printRepos(res.data)
+  } else if (req.cmd === 'project') {
+    printProject(res.data)
   } else if (req.cmd === 'worktrees') {
     printWorktrees(res.data)
   } else if (req.cmd === 'task-list') {

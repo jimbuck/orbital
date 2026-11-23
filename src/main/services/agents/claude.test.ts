@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Repo, Worktree } from '@shared/types'
 
-vi.mock('./executable', () => ({
+vi.mock('./executable', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./executable')>()),
   resolveExecutable: async () => ({ file: 'cmd.exe', prefixArgs: ['/c', 'claude.cmd'] })
 }))
 
@@ -40,6 +41,46 @@ describe('claudeProvider.resolveCommand', () => {
       '--append-system-prompt-file',
       'C:\\app\\brief.txt'
     ])
+  })
+
+  it('adds each project dir with its own --add-dir, first, and loads their CLAUDE.md', async () => {
+    const cmd = await claudeProvider.resolveCommand({
+      repo,
+      worktree,
+      briefingPath: 'C:\\app\\brief.txt',
+      addDirs: ['C:\\work\\api', 'C:\\Program Files\\web'],
+      session: { id: 'aaaaaaaa-0000-4000-8000-000000000001', resume: false }
+    })
+    expect(cmd.args).toEqual([
+      '/c',
+      'claude.cmd',
+      '--add-dir',
+      'C:\\work\\api',
+      '--add-dir',
+      'C:\\Program Files\\web',
+      '--session-id',
+      'aaaaaaaa-0000-4000-8000-000000000001',
+      '--append-system-prompt-file',
+      'C:\\app\\brief.txt'
+    ])
+    expect(cmd.env).toEqual({ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1' })
+  })
+
+  it('sets no env and no --add-dir for a plain repo', async () => {
+    const cmd = await claudeProvider.resolveCommand({ repo, worktree, briefingPath: null, addDirs: [] })
+    expect(cmd.env).toBeUndefined()
+    expect(cmd.args).not.toContain('--add-dir')
+  })
+
+  it('puts a starting prompt in the tail, behind --', async () => {
+    const cmd = await claudeProvider.resolveCommand({
+      repo,
+      worktree,
+      briefingPath: null,
+      prompt: 'Plan "it" & ship\r\nit',
+      session: { id: 'aaaaaaaa-0000-4000-8000-000000000001', resume: false }
+    })
+    expect(cmd.tail).toEqual(['--', "Plan 'it' & ship it"])
   })
 
   it('passes no session flag when none is given', async () => {

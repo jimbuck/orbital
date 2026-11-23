@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Repo, Worktree } from '@shared/types'
 
-vi.mock('./executable', () => ({
+vi.mock('./executable', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./executable')>()),
   resolveExecutable: async () => ({ file: 'cmd.exe', prefixArgs: ['/c', 'codex.cmd'] })
 }))
 
@@ -64,6 +65,51 @@ describe('codexProvider.resolveCommand', () => {
   it('launches plain `codex` when there is nothing to resume', async () => {
     const cmd = await codexProvider.resolveCommand({ repo, worktree, briefingPath: null })
     expect(cmd.args).toEqual(['/c', 'codex.cmd'])
+  })
+
+  it('grants the project dirs with one --add-dir each, ahead of `resume`', async () => {
+    const addDirs = ['C:\\work\\api', 'C:\\work\\my web']
+    const fresh = await codexProvider.resolveCommand({ repo, worktree, briefingPath: null, addDirs })
+    expect(fresh.args).toEqual(['/c', 'codex.cmd', '--add-dir', 'C:\\work\\api', '--add-dir', 'C:\\work\\my web'])
+    const resumed = await codexProvider.resolveCommand({
+      repo,
+      worktree,
+      briefingPath: null,
+      addDirs,
+      session: { id: ID_A, resume: true }
+    })
+    expect(resumed.args).toEqual([
+      '/c',
+      'codex.cmd',
+      '--add-dir',
+      'C:\\work\\api',
+      '--add-dir',
+      'C:\\work\\my web',
+      'resume',
+      ID_A
+    ])
+  })
+
+  it('opens a fresh session with its prompt last, made safe for the cmd shim', async () => {
+    const cmd = await codexProvider.resolveCommand({
+      repo,
+      worktree,
+      briefingPath: null,
+      prompt: 'Fix "the" bug\nthen test'
+    })
+    expect(cmd.args).toEqual(['/c', 'codex.cmd'])
+    expect(cmd.tail).toEqual(['--', "Fix 'the' bug then test"])
+  })
+
+  it('never sends the prompt into a resumed session', async () => {
+    const cmd = await codexProvider.resolveCommand({
+      repo,
+      worktree,
+      briefingPath: null,
+      prompt: 'again',
+      session: { id: ID_A, resume: true }
+    })
+    expect(cmd.tail).toBeUndefined()
   })
 
   it('cannot choose an id before launch', async () => {

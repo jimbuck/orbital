@@ -11,12 +11,14 @@ const worktrees = new Map<string, { id: string; repoId: string | null; projectId
 const tabs = new Map<string, { id: string; worktreeId: string }>()
 // This workspace's projects (list is workspace-scoped, get is not).
 const workspaceProjects = [{ id: 'proj-platform', name: 'Platform' }]
+// A project of another workspace: `get` finds it, `list` does not.
+const foreignProjects = [{ id: 'proj-foreign', name: 'Elsewhere' }]
 vi.mock('../runtime', () => ({
   tables: {
     repos: { list: () => workspaceRepos },
     projects: {
       list: () => workspaceProjects,
-      get: (id: string) => workspaceProjects.find((p) => p.id === id)
+      get: (id: string) => [...workspaceProjects, ...foreignProjects].find((p) => p.id === id)
     },
     worktrees: { get: (id: string) => worktrees.get(id) },
     tabs: { get: (id: string) => tabs.get(id) }
@@ -176,5 +178,26 @@ describe("a project's folder session (no repo)", () => {
 
   it('still reaches a sibling repo with --repo', () => {
     expect(scopeRequest(req({ worktreeId: 'wt-folder', args: { repo: 'web' } })).req?.repoId).toBe('aaaa1111-0000')
+  })
+})
+
+describe('ORBITAL_PROJECT_ID', () => {
+  it('passes a project of this workspace, and a stale one that matches nothing', () => {
+    expect(scopeRequest(req({ projectId: 'proj-platform' })).req?.projectId).toBe('proj-platform')
+    expect(scopeRequest(req({ projectId: 'proj-gone' })).req).toBeDefined()
+  })
+
+  it("rejects another workspace's project", () => {
+    expect(scopeRequest(req({ projectId: 'proj-foreign' })).error).toMatch(/project 'proj-foreign' is not in this workspace/)
+  })
+
+  it('reads a project id that arrived as the repo (an empty ORBITAL_REPO_ID a shell dropped) as the project', () => {
+    const scoped = scopeRequest(req({ repoId: 'proj-platform' }))
+    expect(scoped.req?.repoId).toBeUndefined()
+    expect(scoped.req?.projectId).toBe('proj-platform')
+  })
+
+  it('still rejects a repo id that is neither a repo nor a project here', () => {
+    expect(scopeRequest(req({ repoId: 'proj-foreign' })).error).toMatch(/repo 'proj-foreign' is not in this workspace/)
   })
 })

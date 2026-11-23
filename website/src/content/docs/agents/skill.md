@@ -20,10 +20,11 @@ a skill or a `CLAUDE.md` yourself.
 ````md
 ---
 name: orbital
-description: Report status, file and progress tasks, list sibling worktrees, open tabs, and register dev servers in the Orbital cockpit via the `orbital` CLI. Use when working inside an Orbital worktree terminal (ORBITAL_WORKTREE_ID is set) and you need to tell the human something, capture follow-up work, or spin up a worktree.
+description: Report status, file and progress tasks, list sibling worktrees and the project's repos, open tabs and agents, and register dev servers in the Orbital cockpit via the `orbital` CLI. Use when working inside an Orbital worktree terminal (ORBITAL_WORKTREE_ID is set) and you need to tell the human something, capture follow-up work, spin up a worktree, or hand work to another repo in the project.
 allowed-tools:
   - Bash(orbital status *)
   - Bash(orbital whoami *)
+  - Bash(orbital project *)
   - Bash(orbital repos *)
   - Bash(orbital worktrees *)
   - Bash(orbital task list *)
@@ -50,7 +51,7 @@ set there; if it is absent, you are in an ordinary terminal and every command
 below will fail with `not connected to Orbital`. Check once rather than guessing:
 
 ```sh
-orbital whoami          # repo, worktree, branch, path, status, dev servers
+orbital whoami          # project, repo, worktree, branch, path, status, dev servers
 ```
 
 Add `--json` to any command to get machine-readable output instead of a table —
@@ -129,20 +130,39 @@ checkout's copies have changed, `orbital worktree sync` copies them again
 cockpit's play button: it creates the worktree, links the task to it, and moves
 the task to `in-progress`.
 
-## Other repos in this workspace
+## Other repos
 
 ```sh
-orbital repos                                    # the workspace's repos: name, id, repo path (* = yours)
+orbital project                                  # this project: root, home repo, its repos (branch, changes, worktrees)
+orbital repos                                    # every repo in the workspace: name, id, repo path (* = yours)
 orbital task list --repo api                     # a sibling repo's open tasks
 orbital task add "Bump the client" --repo api    # file work against it
 orbital worktree new --repo api --worktree feat/x
 ```
 
 Task and worktree commands are scoped to this terminal's repo. `--repo <name|id>`
-(on `task list/show/add/update/start/done/delete`, `worktrees` and `worktree new`)
-points one at a sibling repo in the same workspace instead. Passing it is the
-opt-in, so writes go through. Reach across only when the work calls for it, such as
-filing a bug that belongs to another repo, and tell the human which repo you touched.
+(on `task list/show/add/update/start/done/delete`, `worktrees`, `worktree new`
+and `tab new`) points one at a sibling repo in the same workspace instead. Passing
+it is the opt-in, so writes go through. Reach across only when the work calls for it,
+such as filing a bug that belongs to another repo, and tell the human which repo you touched.
+
+## Working across repos in a project
+
+A project groups repos that belong together, often with a home repo that holds
+the shared docs. Its project session (the home repo's checkout, or the project's
+root folder when it has no home) is where to plan work that spans them. From there:
+
+```sh
+orbital project                                                    # pick the repos the work touches
+orbital worktree new --repo api --task 12 --worktree feat/health   # api's part, on its own branch, linked to task #12
+orbital tab new agent --repo api --worktree feat/health --prompt "Do task #12, then run the tests"
+orbital task add "Use the new endpoint" --repo web                 # file what is not started yet
+```
+
+Plan in the project session, then hand each repo its part: one worktree per
+change, one agent per worktree, a prompt that says what done looks like. The
+root folder session has no repo of its own, so task and worktree commands there
+need `--repo`. In a member repo, stay in that repo unless the task needs more.
 
 ## Tabs and dev servers
 
@@ -152,7 +172,12 @@ orbital tab new browser http://localhost:5173   # in-app browser tab
 orbital tab new editor src/lib/cart.ts          # open a file in the cockpit's editor
 orbital tab new agent claude                    # boot another agent (by its configured name) here
 orbital tab new search "TODO("                  # content search across this checkout
+orbital tab new terminal --repo api             # in another repo's root checkout
+orbital tab new agent --repo api --worktree feat/x --prompt "<what to do>"
 ```
+
+`--worktree <name|branch>` picks one of the repo's worktrees instead of its root
+checkout. `--prompt` starts the agent with that prompt on its first launch only.
 
 When you start or stop a long-running dev server, tell the cockpit — the human
 gets a one-click way to open it, and the tab menu lists it:
@@ -187,7 +212,7 @@ When `ORBITAL_WORKTREE_ID` is set, this session is running inside a worktree of
 the Orbital cockpit, and the `orbital` CLI on your PATH talks to it. If that
 variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 
-- `orbital whoami` — repo, worktree, branch, path, status, linked task, dev servers.
+- `orbital whoami` — project, repo, worktree, branch, path, status, linked task, dev servers.
 - `orbital status <working|needs-attention|idle|error|done>` — keep the cockpit honest
   about what you are doing. `needs-attention` is what makes the human look at this
   worktree, so set it when you are genuinely blocked on them.
@@ -196,9 +221,13 @@ variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 - `orbital task update <n> --status in-progress` the moment you start work on a task,
   and `orbital task done <n>` when it is finished. The board is how the human sees
   what is underway; a task left in `todo` while you work on it reads as unclaimed.
-- `orbital repos` lists the other repos in this workspace. Task and worktree
-  commands stay scoped to this repo unless you pass `--repo <name|id>`, which
-  is the explicit opt-in to read or write a sibling's tasks and worktrees.
+- `orbital project` lists this project's repos (branch, changes, worktrees);
+  `orbital repos` lists every repo in the workspace. Task and worktree commands
+  stay scoped to this repo unless you pass `--repo <name|id>`, which is the
+  explicit opt-in to read or write a sibling's tasks and worktrees.
+- Work that spans repos is planned in the project session, then handed out:
+  `orbital worktree new --repo <r> --task <n>`, then
+  `orbital tab new agent --repo <r> --worktree <name> --prompt "<what to do>"`.
 - `orbital server add <port>` when you start a dev server, `orbital server remove <port>`
   when you stop it, so the human can open it in one click.
 

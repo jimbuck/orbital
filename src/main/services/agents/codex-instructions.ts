@@ -41,7 +41,7 @@ When \`ORBITAL_WORKTREE_ID\` is set, this session is running inside a worktree o
 the Orbital cockpit, and the \`orbital\` CLI on your PATH talks to it. If that
 variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 
-- \`orbital whoami\` — repo, worktree, branch, path, status, linked task, dev servers.
+- \`orbital whoami\` — project, repo, worktree, branch, path, status, linked task, dev servers.
 - \`orbital status <working|needs-attention|idle|error|done>\` — keep the cockpit honest
   about what you are doing. \`needs-attention\` is what makes the human look at this
   worktree, so set it when you are genuinely blocked on them.
@@ -50,9 +50,13 @@ variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 - \`orbital task update <n> --status in-progress\` the moment you start work on a task,
   and \`orbital task done <n>\` when it is finished. The board is how the human sees
   what is underway; a task left in \`todo\` while you work on it reads as unclaimed.
-- \`orbital repos\` lists the other repos in this workspace. Task and worktree
-  commands stay scoped to this repo unless you pass \`--repo <name|id>\`, which
-  is the explicit opt-in to read or write a sibling's tasks and worktrees.
+- \`orbital project\` lists this project's repos (branch, changes, worktrees);
+  \`orbital repos\` lists every repo in the workspace. Task and worktree commands
+  stay scoped to this repo unless you pass \`--repo <name|id>\`, which is the
+  explicit opt-in to read or write a sibling's tasks and worktrees.
+- Work that spans repos is planned in the project session, then handed out:
+  \`orbital worktree new --repo <r> --task <n>\`, then
+  \`orbital tab new agent --repo <r> --worktree <name> --prompt "<what to do>"\`.
 - \`orbital server add <port>\` when you start a dev server, \`orbital server remove <port>\`
   when you stop it, so the human can open it in one click.
 

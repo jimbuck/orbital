@@ -6,6 +6,7 @@ import { createLinkedWorktree, removeWorktree as removeCheckout } from './servic
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
 import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
 import { startPtyTab } from './services/agents/launch'
+import { scheduleProjectPointers } from './services/project-pointers'
 import { logger } from './services/logger'
 import { getSettings } from './services/settings'
 import { killWorktreeTerminals, releaseTabRuntime } from './tabs'
@@ -132,6 +133,7 @@ export async function addRepo(repoPath: string, projectId?: string): Promise<Rep
   await reconcileRepoWorktrees(repo.id)
   settleProjectSessions()
   announce()
+  scheduleProjectPointers()
   return repo
 }
 
@@ -143,6 +145,7 @@ export function removeRepo(repoId: string): void {
   tables.repos.remove(repoId)
   settleProjectSessions()
   announce()
+  scheduleProjectPointers()
 }
 
 /**
@@ -160,6 +163,8 @@ export function removeProject(projectId: string): void {
   if (folder) releaseWorktreeRuntime(folder)
   tables.projects.remove(projectId)
   announce()
+  // Its home (if any) loses the managed repo list this instance wrote.
+  scheduleProjectPointers()
 }
 
 /* ---- project sessions ----------------------------------------------------- */
@@ -436,6 +441,8 @@ export function resumeRepos(): void {
   // Before anything reads the worktrees: a grouping written by an older build
   // (or one interrupted between its two writes) gets its folder sessions now.
   settleProjectSessions()
+  // Every home repo's managed repo list, written or refreshed (off the boot path).
+  scheduleProjectPointers()
   const checkouts = new Set<string>()
   for (const repo of tables.repos.list()) {
     runtime.gitWatcher.watch(repo.repoPath)

@@ -98,6 +98,9 @@ export const cursorProvider: AgentProvider = {
   // file; the only channel is `.cursor/rules` INSIDE the repo, which Orbital will
   // not write (zero git footprint). Cursor sessions learn the CLI from `orbital help`.
   acceptsBriefingFile: false,
+  // No documented way to hand cursor-agent's interactive session a first
+  // prompt, nor an `--add-dir` equivalent; it learns the project from `orbital project`.
+  acceptsPrompt: false,
 
   sessions: {
     mint: cursorCreateChat,

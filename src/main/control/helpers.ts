@@ -90,6 +90,19 @@ function validateEnvIds(req: ControlRequest, repoIds: Set<string>): string | und
 }
 
 /**
+ * ORBITAL_PROJECT_ID must name a project of this workspace (`projects.get` is
+ * not workspace-scoped). An id that matches nothing passes, as for the other
+ * ids: a project dropped when its last repo moved away leaves a stale id in
+ * terminals that are still open, and handlers read the project from the
+ * worktree anyway, which follows its repo.
+ */
+function validateProjectId(projectId: string): string | undefined {
+  if (!tables.projects.get(projectId)) return undefined
+  if (!tables.projects.list().some((p) => p.id === projectId)) return `project '${projectId}' is not in this workspace`
+  return undefined
+}
+
+/**
  * Settle which repo a request acts on, before any handler sees it.
  *
  * Without `--repo` a command stays scoped to the calling terminal's repo
@@ -104,7 +117,19 @@ function validateEnvIds(req: ControlRequest, repoIds: Set<string>): string | und
 export function scopeRequest(req: ControlRequest): { req?: ControlRequest; error?: string } {
   const repos = tables.repos.list()
   if (req.repoId && !repos.some((p) => p.id === req.repoId)) {
-    return { error: `repo '${req.repoId}' is not in this workspace` }
+    // ORBITAL_PROJECT_ID carried the repo id before projects existed, so a CLI
+    // that found no ORBITAL_REPO_ID reads it as the repo. A folder session sets
+    // ORBITAL_REPO_ID empty, but a shell may drop an empty variable on the way
+    // down; what arrives as the repo is then really the project.
+    if (!req.projectId && tables.projects.list().some((p) => p.id === req.repoId)) {
+      req = { ...req, repoId: undefined, projectId: req.repoId }
+    } else {
+      return { error: `repo '${req.repoId}' is not in this workspace` }
+    }
+  }
+  if (req.projectId) {
+    const error = validateProjectId(req.projectId)
+    if (error) return { error }
   }
   if (req.worktreeId || req.terminalId) {
     const error = validateEnvIds(req, new Set(repos.map((p) => p.id)))
@@ -128,7 +153,7 @@ export function noRepoError(req: ControlRequest): string {
   const wt = req.worktreeId ? tables.worktrees.get(req.worktreeId) : undefined
   if (wt?.kind === 'folder') {
     const project = tables.projects.get(wt.projectId)
-    return `this terminal is in the folder session of project '${project?.name ?? wt.name}', which has no repo of its own; pass --repo <name|id> (see \`orbital repos\`)`
+    return `this terminal is in the folder session of project '${project?.name ?? wt.name}', which has no repo of its own; pass --repo <name|id> (\`orbital project\` lists its repos)`
   }
   return 'no ORBITAL_REPO_ID in environment'
 }

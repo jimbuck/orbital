@@ -463,6 +463,12 @@ export interface TabConfig {
    */
   agentSessionId?: string
   /**
+   * agent: a prompt to start the session with (`orbital tab new agent --prompt`).
+   * Used on the tab's first launch only and cleared once that launch is under
+   * way, so a respawn resumes the conversation rather than sending it again.
+   */
+  agentPrompt?: string
+  /**
    * search: what this Search tab is searching for. Persisted so a tab restored
    * after a restart comes back on the query you left it on.
    */
@@ -1055,12 +1061,14 @@ export interface UpdateStatus {
 export const ENV = {
   terminalId: 'ORBITAL_TERMINAL_ID',
   worktreeId: 'ORBITAL_WORKTREE_ID',
+  /** The terminal's repo; set but empty in a project's folder session, which has no repo. */
   repoId: 'ORBITAL_REPO_ID',
   /**
-   * The repo id under its pre-rename name. Still set, so a CLI or hook run from
-   * a terminal opened before the rename (or a script that reads it) keeps working.
+   * The terminal's PROJECT. Before projects existed this carried the repo id,
+   * so a CLI reading a terminal opened by an older build falls back to it for
+   * the repo only when {@link ENV.repoId} is absent altogether.
    */
-  legacyRepoId: 'ORBITAL_PROJECT_ID',
+  projectId: 'ORBITAL_PROJECT_ID',
   /** Named-pipe path the CLI connects to. */
   socket: 'ORBITAL_SOCKET'
 } as const
@@ -1069,6 +1077,7 @@ export type ControlCommand =
   | 'status'
   | 'whoami'
   | 'repos'
+  | 'project'
   | 'worktrees'
   | 'worktree-new'
   | 'worktree-sync'
@@ -1094,6 +1103,8 @@ export interface ControlRequest {
   terminalId?: string
   worktreeId?: string
   repoId?: string
+  /** The terminal's project (ORBITAL_PROJECT_ID); absent from older terminals. */
+  projectId?: string
   /**
    * Command arguments. `repo` (a repo name or id, from `--repo`)
    * retargets a repo-scoped command at a sibling repo in the same

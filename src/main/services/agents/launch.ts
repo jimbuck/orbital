@@ -11,6 +11,7 @@ import * as claudeHooks from './claude-hooks'
 import { logger } from '../logger'
 import { activeControlPipePath } from '../workspaces'
 import { getSettings } from '../settings'
+import { agentAddDirs, loadProjectMap, roleOf, type ProjectMap } from '../project-map'
 
 /**
  * Launching the PTY behind a tab: a plain shell for a terminal tab, or a coding
@@ -27,7 +28,9 @@ function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> 
     // inherited from Orbital's own environment cannot stand in for one; the
     // CLI then answers repo-scoped commands with a clear "no repo" error.
     [ENV.repoId]: worktree.repoId ?? '',
-    [ENV.legacyRepoId]: worktree.repoId ?? '',
+    // The real project id. Older builds put the repo id here; the CLI reads
+    // the repo from ORBITAL_REPO_ID alone whenever that is set (even empty).
+    [ENV.projectId]: worktree.projectId,
     [ENV.socket]: activeControlPipePath(),
     PATH: path,
     Path: path
@@ -199,6 +202,17 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
     ? agentProfileDir(agentConfig)
     : expandUserPath((envVar && agentConfig?.env?.[envVar]) ?? '') || defaultProfileDir(provider.id)
   try {
+    // Where this session sits in its project: the directories it may reach
+    // (other member repos, or the home) and, for the briefing, the live map.
+    const role = roleOf(worktree)
+    const addDirs = agentAddDirs(role, worktree)
+    let map: ProjectMap | null = null
+    if (role && provider.acceptsBriefingFile) {
+      map = await loadProjectMap(role.project.id, worktree.repoId).catch((err: unknown) => {
+        logger.warn('could not map project for briefing', { tab: tab.id, error: String(err) })
+        return null
+      })
+    }
     // Only providers that can be handed a briefing get one written — the rest
     // would leave an unread file behind on every launch.
     const briefingPath = provider.acceptsBriefingFile
@@ -212,7 +226,8 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
           // Read the settings.json of THIS profile (the source of truth) — a
           // sibling Claude profile's install says nothing about this one.
           hooksInstalled:
-            provider.id === 'claude' && !!agentConfig && claudeHooks.status(agentConfig).installed
+            provider.id === 'claude' && !!agentConfig && claudeHooks.status(agentConfig).installed,
+          project: role ? { role, map, addDirs } : undefined
         })
       : null
     // A repo-level path is the more specific override; the workspace
@@ -220,8 +235,13 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
     const execPath = repo.agentExecPath || agentConfig?.execPath
     const lookup: SessionLookup = { profileDir, cwd: worktree.path, execPath }
     const session = await agentSession(tab, provider, lookup)
-    const command = await provider.resolveCommand({ repo, worktree, briefingPath, execPath, session })
+    // A starting prompt goes with the tab's first launch only: never into a
+    // resumed conversation, and it is cleared below once this launch is set up.
+    const prompt =
+      provider.acceptsPrompt && !session?.resume ? tab.config.agentPrompt?.trim() || undefined : undefined
+    const command = await provider.resolveCommand({ repo, worktree, briefingPath, execPath, session, addDirs, prompt })
     if (agentConfig?.args?.length) command.args.push(...agentConfig.args)
+    if (command.tail?.length) command.args.push(...command.tail)
     // The tab may have been closed during the async executable lookup; don't spawn
     // a PTY nothing references (it could never be killed before app exit).
     if (!tables.tabs.get(tab.id)) {
@@ -238,10 +258,13 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
         // The EXPANDED directory, which is also what the installers write into —
         // exporting the raw `~/…` would point the CLI at the worktree instead.
         ...(envVar && agentConfig?.configDir ? { [envVar]: agentProfileDir(agentConfig) } : {}),
+        ...command.env,
         ...terminalEnv(worktree, tab.id)
       },
-      command
+      command: { file: command.file, args: command.args }
     })
+    if (tab.config.agentPrompt !== undefined) clearAgentPrompt(tab.id)
+    if (addDirs.length) logger.info('agent launched with extra directories', { tab: tab.id, addDirs })
     // A provider that could not name the session up front: learn it from what
     // the CLI writes, so this tab too can resume next time.
     if (!session) discoverAgentSession(tab, provider, lookup, Date.now())
@@ -254,6 +277,14 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
     )
     launchFailed(tab.id)
   }
+}
+
+/** Drop a tab's starting prompt once its first launch has it, so no respawn sends it again. */
+function clearAgentPrompt(tabId: string): void {
+  const current = tables.tabs.get(tabId)
+  if (!current || current.config.agentPrompt === undefined) return
+  const { agentPrompt: _sent, ...rest } = current.config
+  tables.tabs.updateConfig(tabId, rest)
 }
 
 /** Start the PTY for a freshly created PTY-backed tab (terminal or agent). */
