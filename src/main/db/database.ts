@@ -199,10 +199,14 @@ function migrate(d: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_tabs_worktree ON tabs(worktree_id);
     CREATE INDEX IF NOT EXISTS idx_tabs_pane ON tabs(pane_id);
 
+    -- A task belongs to a project; repo_id is an optional tag naming one of
+    -- the project's repos (NULL = the whole project). See scopeTasksToProjects
+    -- for databases from when tasks belonged to a repo.
     CREATE TABLE IF NOT EXISTS tasks (
       id           TEXT PRIMARY KEY,
       seq          INTEGER,
-      repo_id      TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo_id      TEXT REFERENCES repos(id) ON DELETE SET NULL,
       title        TEXT NOT NULL,
       description  TEXT NOT NULL DEFAULT '',
       tags         TEXT NOT NULL DEFAULT '[]',
@@ -254,6 +258,10 @@ function migrate(d: Database.Database): void {
   // projects exist (its new column references them).
   addProjectSessionsToWorktrees(d)
   d.exec('CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id)')
+  // After groupReposIntoProjects (every repo has its project by then) and
+  // after every addColumnIfMissing on tasks (its rebuild copies them all).
+  scopeTasksToProjects(d)
+  d.exec('CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)')
   migrateEnvPatternsToSettings(d)
   migrateEnvPatternsRecursive(d)
 }
@@ -556,6 +564,94 @@ function addProjectSessionsToWorktrees(d: Database.Database): void {
   } finally {
     d.pragma('foreign_keys = ON')
   }
+}
+
+/** Whether `tasks` already has the project shape: a `project_id` and a nullable `repo_id`. */
+function tasksHaveProjects(d: Database.Database): boolean {
+  const cols = d.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string; notnull: number }>
+  const repoId = cols.find((c) => c.name === 'repo_id')
+  return cols.some((c) => c.name === 'project_id') && !!repoId && repoId.notnull === 0
+}
+
+/**
+ * Move tasks from repos to projects. A task used to belong to a repo
+ * (`repo_id NOT NULL`, deleted with it); it now belongs to a project, and its
+ * repo is an optional tag that removing the repo clears. SQLite cannot change
+ * a column's constraints in place, so this is the rebuild-and-rename that
+ * addProjectSessionsToWorktrees does, with foreign keys off for the swap.
+ * Nothing references `tasks` by foreign key (`worktrees.task_id` is a plain
+ * column), so dropping the old table strands nothing. Every column is copied
+ * as it was, numbers, links, tags and archive stamps included; `project_id` is
+ * the repo's project. A task whose repo is already gone (possible only if
+ * foreign keys were ever off) has no project to go to and was invisible
+ * anyway; it is dropped, and the count logged.
+ *
+ * Boot order: it runs after the rename chain, so the column it reads is
+ * `repo_id` whatever the database's age (a pre-revamp `tasks.workspace_id`
+ * has been renamed twice by then, and the `project_id` this adds can never be
+ * the legacy one); after every addColumnIfMissing on `tasks`, so the columns
+ * it copies all exist; and after groupReposIntoProjects, so every repo has a
+ * project to hand down. The guard is checked again under the write lock, as
+ * another instance may be booting the same file.
+ *
+ * Also, on every boot, the heal for a tagged task whose project is not its
+ * repo's: the repo moved and the task is meant to have moved with it. With
+ * nothing to mend it is one update that matches no rows.
+ */
+function scopeTasksToProjects(d: Database.Database): void {
+  if (!tasksHaveProjects(d)) {
+    d.pragma('foreign_keys = OFF')
+    try {
+      d.transaction(() => {
+        if (tasksHaveProjects(d)) return
+        const orphans = (
+          d
+            .prepare(
+              `SELECT COUNT(*) AS n FROM tasks t
+               WHERE NOT EXISTS (SELECT 1 FROM repos r WHERE r.id = t.repo_id AND r.project_id IS NOT NULL)`
+            )
+            .get() as { n: number }
+        ).n
+        if (orphans > 0) logger.warn('dropping tasks whose repo is gone', { count: orphans })
+        d.exec(`
+          CREATE TABLE tasks_new (
+            id           TEXT PRIMARY KEY,
+            seq          INTEGER,
+            project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            repo_id      TEXT REFERENCES repos(id) ON DELETE SET NULL,
+            title        TEXT NOT NULL,
+            description  TEXT NOT NULL DEFAULT '',
+            tags         TEXT NOT NULL DEFAULT '[]',
+            status       TEXT NOT NULL DEFAULT 'todo',
+            worktree_id  TEXT,
+            created_by   TEXT NOT NULL DEFAULT '',
+            created_at   INTEGER NOT NULL,
+            updated_at   INTEGER NOT NULL,
+            archived_at  INTEGER
+          );
+          INSERT INTO tasks_new
+            (id, seq, project_id, repo_id, title, description, tags, status, worktree_id, created_by,
+             created_at, updated_at, archived_at)
+            SELECT t.id, t.seq, r.project_id, t.repo_id, t.title, t.description, t.tags, t.status, t.worktree_id,
+                   t.created_by, t.created_at, t.updated_at, t.archived_at
+            FROM tasks t JOIN repos r ON r.id = t.repo_id
+            WHERE r.project_id IS NOT NULL
+            ORDER BY t.rowid;
+          DROP TABLE tasks;
+          ALTER TABLE tasks_new RENAME TO tasks;
+          CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo_id);
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq);
+        `)
+      }).immediate()
+    } finally {
+      d.pragma('foreign_keys = ON')
+    }
+  }
+  d.exec(
+    `UPDATE tasks SET project_id = (SELECT r.project_id FROM repos r WHERE r.id = tasks.repo_id)
+     WHERE repo_id IS NOT NULL AND EXISTS
+       (SELECT 1 FROM repos r WHERE r.id = tasks.repo_id AND r.project_id IS NOT NULL AND r.project_id <> tasks.project_id)`
+  )
 }
 
 /**

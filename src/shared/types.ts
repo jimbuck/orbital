@@ -529,7 +529,14 @@ export interface Task {
   id: string
   /** Human-facing task number: globally unique, assigned in creation order, never reused. */
   seq: number
-  repoId: string
+  /** The {@link Project} that owns it. Every task is in exactly one. */
+  projectId: string
+  /**
+   * The repo it is filed under, one of its project's repos, or null for work
+   * that spans the project. A tag, not an owner: removing the repo clears it,
+   * and while the task has a live worktree it follows that worktree's repo.
+   */
+  repoId: string | null
   title: string
   description: string
   tags: string[]
@@ -903,8 +910,12 @@ export interface TaskPatch {
   description?: string
   tags?: string[]
   status?: TaskStatus
-  /** Reassign the task to another repo (e.g. dragged across board swim-lanes). */
-  repoId?: string
+  /**
+   * File the task under another repo of its project (e.g. dragged across board
+   * lanes), or null to clear it. Refused while the task has a live worktree in
+   * a different repo. A task's project never changes through a patch.
+   */
+  repoId?: string | null
 }
 
 /** Per-repo agent settings update. */

@@ -46,14 +46,16 @@ variable is NOT set, ignore this section — the CLI has no cockpit to reach.
   about what you are doing. \`needs-attention\` is what makes the human look at this
   worktree, so set it when you are genuinely blocked on them.
 - \`orbital task add "<title>"\` — file follow-up work you notice instead of expanding
-  the current change; \`orbital task list\` to see the repo's open tasks.
+  the current change; \`orbital task list\` to see the open tasks. Tasks belong to the
+  project: from a repo's worktree both mean this repo, from the project session the
+  whole project. \`--repo <name>\` / \`--no-repo\` say otherwise, \`--all-repos\` lists all.
 - \`orbital task update <n> --status in-progress\` the moment you start work on a task,
   and \`orbital task done <n>\` when it is finished. The board is how the human sees
   what is underway; a task left in \`todo\` while you work on it reads as unclaimed.
 - \`orbital project\` lists this project's repos (branch, changes, worktrees);
-  \`orbital repos\` lists every repo in the workspace. Task and worktree commands
-  stay scoped to this repo unless you pass \`--repo <name|id>\`, which is the
-  explicit opt-in to read or write a sibling's tasks and worktrees.
+  \`orbital repos\` lists every repo in the workspace. Worktree commands stay scoped
+  to this repo, and task commands to this project, unless you pass \`--repo <name|id>\`,
+  which is the explicit opt-in to read or write a sibling's tasks and worktrees.
 - Work that spans repos is planned in the project session, then handed out:
   \`orbital worktree new --repo <r> --task <n>\`, then
   \`orbital tab new agent --repo <r> --worktree <name> --prompt "<what to do>"\`.

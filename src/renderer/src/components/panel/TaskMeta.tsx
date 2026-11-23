@@ -1,6 +1,6 @@
-import type { JSX } from 'react'
-import { Bot } from 'lucide-react'
-import type { Task, TaskCreator } from '@shared/types'
+import type { JSX, MouseEvent, ReactNode } from 'react'
+import { Bot, FolderGit2, House, Layers } from 'lucide-react'
+import type { Repo, Task, TaskCreator } from '@shared/types'
 
 /** Human wording for who filed a task. */
 export function taskCreatorLabel(createdBy: TaskCreator | null): string {
@@ -40,15 +40,70 @@ export function TaskCreatorMark({ task }: { task: Task }): JSX.Element | null {
   )
 }
 
+/** The glyph for where a task is filed: the home repo, another repo, or none (the project). */
+export function repoGlyph(repo: Repo | undefined, homeRepoId: string | null): typeof Layers {
+  return !repo ? Layers : repo.id === homeRepoId ? House : FolderGit2
+}
+
 /**
- * Read-only tag chips shown on a task card. Editing tags (and every other task
- * field) lives in the edit-task modal, opened by clicking the card title —
- * cards themselves only display.
+ * The scope chip on a tracker card in a list that mixes scopes: which repo the
+ * task is filed under, or `Project` (dashed) for none. Mono and unfilled, so it
+ * reads as metadata beside the filled tag chips. Clicking opens the card menu
+ * at its Repo step; a task pinned by its worktree gets a plain span instead.
  */
-export function TaskTagsDisplay({ task }: { task: Task }): JSX.Element | null {
-  if (task.tags.length === 0) return null
+export function TaskRepoChip({
+  repo,
+  homeRepoId,
+  locked,
+  onOpen
+}: {
+  /** The repo it is filed under (in its project), or undefined for none. */
+  repo: Repo | undefined
+  homeRepoId: string | null
+  locked: boolean
+  onOpen: (e: MouseEvent<HTMLButtonElement>) => void
+}): JSX.Element {
+  const Glyph = repoGlyph(repo, homeRepoId)
+  const cls = `inline-flex max-w-[130px] items-center gap-1 rounded-chip border border-line-2 px-[5px] py-px font-mono text-[9.5px] text-muted ${
+    repo ? '' : 'border-dashed'
+  }`
+  const body = (
+    <>
+      <Glyph size={10} strokeWidth={1.5} className="flex-none text-faint" aria-hidden />
+      <span className="truncate">{repo ? repo.name : 'Project'}</span>
+    </>
+  )
+  if (locked) {
+    return (
+      <span className={cls} title="Follows its worktree">
+        {body}
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      aria-haspopup="menu"
+      aria-label={repo ? `Repo: ${repo.name}. Change repo` : 'No repo, whole project. Change repo'}
+      onClick={onOpen}
+      className={`${cls} outline-none hover:bg-hover hover:text-text-2 focus-visible:ring-2 focus-visible:ring-accent/60`}
+    >
+      {body}
+    </button>
+  )
+}
+
+/**
+ * Read-only tag chips shown on a task card, after an optional `leading` item
+ * (the scope chip). Editing tags (and every other task field) lives in the
+ * edit-task modal, opened by clicking the card title — cards themselves only
+ * display.
+ */
+export function TaskTagsDisplay({ task, leading }: { task: Task; leading?: ReactNode }): JSX.Element | null {
+  if (task.tags.length === 0 && !leading) return null
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1">
+      {leading}
       {task.tags.map((tag) => (
         <span
           key={tag}

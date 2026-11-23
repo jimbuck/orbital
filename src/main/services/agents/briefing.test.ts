@@ -65,7 +65,8 @@ const map: ProjectMap = {
       openTasks: 2,
       steering: ['AGENTS.md']
     }
-  ]
+  ],
+  openTasks: 3
 }
 
 describe('briefingText', () => {
@@ -94,7 +95,9 @@ describe('briefingText', () => {
     expect(text).toContain('Has AGENTS.md: read it before changing this repo.')
     expect(text).toContain('They are added to this session')
     expect(text).toContain('orbital tab new agent --repo <name>')
-    expect(text).toContain('Task and worktree commands need `--repo <name>` here')
+    expect(text).toContain('Worktree commands need `--repo <name>` here')
+    expect(text).toContain('- Filed under no repo (work that spans the project): 3 open tasks.')
+    expect(text).toContain('`orbital task add "<title>" [--repo <name>]` — file work for the whole project')
   })
 
   it('points a member repo at its home and siblings', () => {

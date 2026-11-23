@@ -35,10 +35,10 @@ Usage:
   orbital worktree sync
   orbital tab new <terminal|browser|editor|agent|search> [arg] [--repo <name|id>] [--worktree <name|branch>]
   orbital tab new agent [profile] --prompt "<text>" [--repo <name|id>] [--worktree <name|branch>]
-  orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--repo <name|id>]
-  orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--repo <name|id>]
+  orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--repo <name|id> | --no-repo]
+  orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--repo <name|id> | --no-repo | --all-repos]
   orbital task show <number|id> [--repo <name|id>]
-  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--repo <name|id>]
+  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--repo <name|id> | --no-repo]
   orbital task start <number|id> [--worktree <branch>] [--base <ref>] [--repo <name|id>] [name]
   orbital task done <number|id> [--repo <name|id>]
   orbital task archive <number|id> [--repo <name|id>]      (alias: task delete)
@@ -51,9 +51,16 @@ Usage:
 Options:
   --json       print the raw JSON response instead of a table — use this when parsing
   --repo       act on another repo in this workspace (name or id, see \`orbital project\`
-               and \`orbital repos\`). Without it, task and worktree commands stay scoped to
-               this terminal's repo; passing it is the explicit opt-in, and writes are
-               allowed. On \`tab new\` it opens the tab in that repo's root checkout.
+               and \`orbital repos\`). Without it, worktree commands stay scoped to this
+               terminal's repo and task commands to its project; passing it is the
+               explicit opt-in, and writes are allowed. On \`tab new\` it opens the tab in
+               that repo's root checkout. On \`task add\` / \`task update\` it files the
+               task under that repo.
+  --no-repo    on \`task add\` / \`task update\`: file the task under no repo (work for
+               the whole project); on \`task list\`: list only those tasks.
+  --all-repos  on \`task list\`: every task of the project, whatever its repo. Without
+               it the list is this terminal's: its repo's tasks from a repo worktree,
+               the whole project's from the project session.
   --worktree   on \`tab new\`: open the tab in that worktree (name, branch or id) instead.
   --prompt     on \`tab new agent\`: start the agent with this prompt (first launch only).
 
@@ -72,7 +79,10 @@ Examples:
   orbital task add "Write tests" --description "cover the parser" --tags test
   orbital task list --status todo
   orbital task add "Bump the API client" --repo api
+  orbital task add "Agree the release plan" --no-repo
+  orbital task list --all-repos
   orbital task start 12
+  orbital task start 14 --repo api
   orbital task done 12
   orbital task archive 12
   orbital server add 5173
@@ -104,9 +114,15 @@ interface ParsedArgs {
 }
 
 /**
+ * Flags that never take a value, so the token after one stays a positional:
+ * `task add --no-repo "Title"` must not read "Title" as the flag's value.
+ */
+const BOOLEAN_FLAGS = new Set(['all', 'archived', 'no-repo', 'all-repos'])
+
+/**
  * Split tokens into positionals and `--flag value` / `--flag=value` pairs.
  * A `--flag` with no following value (or followed by another flag) is recorded
- * as an empty string.
+ * as an empty string, as is every {@link BOOLEAN_FLAGS} flag.
  */
 function parseArgs(tokens: string[]): ParsedArgs {
   const positionals: string[] = []
@@ -120,7 +136,7 @@ function parseArgs(tokens: string[]): ParsedArgs {
       } else {
         const name = token.slice(2)
         const next = tokens[i + 1]
-        if (next !== undefined && !next.startsWith('--')) {
+        if (next !== undefined && !next.startsWith('--') && !BOOLEAN_FLAGS.has(name)) {
           flags[name] = next
           i++
         } else {
@@ -167,6 +183,18 @@ function withRepo(args: Record<string, unknown>, flags: Record<string, string>):
     args.repo = flags[key]
   }
   return args
+}
+
+/**
+ * {@link withRepo}, plus `--no-repo` for the task commands that file a task
+ * (or list by where it is filed). The two together are a contradiction.
+ */
+function withRepoChoice(args: Record<string, unknown>, flags: Record<string, string>): Record<string, unknown> {
+  if ('no-repo' in flags) {
+    if ('repo' in flags || 'project' in flags) fail('pass --repo or --no-repo, not both')
+    args.noRepo = true
+  }
+  return withRepo(args, flags)
 }
 
 /**
@@ -255,13 +283,19 @@ function buildRequest(argv: string[]): ControlRequest {
         const args: Record<string, unknown> = { title }
         if (flags.description) args.description = flags.description
         if (flags.tags) args.tags = flags.tags
-        return request('task-add', withRepo(args, flags))
+        return request('task-add', withRepoChoice(args, flags))
       }
       if (sub === 'list') {
         const args: Record<string, unknown> = { all: 'all' in flags, archived: 'archived' in flags }
+        if ('all-repos' in flags) {
+          if ('repo' in flags || 'project' in flags || 'no-repo' in flags) {
+            fail('pass one of --repo, --no-repo and --all-repos')
+          }
+          args.allRepos = true
+        }
         if (flags.status) args.status = flags.status
         if (flags.tag) args.tag = flags.tag
-        return request('task-list', withRepo(args, flags))
+        return request('task-list', withRepoChoice(args, flags))
       }
       if (sub === 'start') {
         const id = positionals[0]
@@ -278,7 +312,10 @@ function buildRequest(argv: string[]): ControlRequest {
         if (flags.title !== undefined) args.title = flags.title
         if (flags.description !== undefined) args.description = flags.description
         if (flags.tags !== undefined) args.tags = flags.tags
-        return request('task-update', withRepo(args, flags))
+        // Here `--repo` also files the task under that repo; elsewhere
+        // (`task done`, `show`) it only says where to find it.
+        if ('repo' in flags || 'project' in flags) args.retag = true
+        return request('task-update', withRepoChoice(args, flags))
       }
       if (sub === 'show') {
         const id = positionals[0]
@@ -386,6 +423,7 @@ function printProject(data: unknown): void {
       { key: 'branch', head: 'BRANCH' },
       { key: 'state', head: 'STATE' },
       { key: 'worktrees', head: 'WORKTREES' },
+      { key: 'tasks', head: 'TASKS' },
       { key: 'path', head: 'PATH' }
     ],
     repos.map((r) => ({
@@ -395,9 +433,13 @@ function printProject(data: unknown): void {
       branch: r.branch == null ? '?' : String(r.branch),
       state: r.dirty == null ? '?' : r.dirty ? 'dirty' : 'clean',
       worktrees: String(Array.isArray(r.worktrees) ? r.worktrees.length : 0),
+      tasks: String(r.openTasks ?? 0),
       path: String(r.path ?? '')
     }))
   )
+  if (typeof o.openTasks === 'number') {
+    process.stdout.write(`\nOpen tasks filed under no repo (the whole project): ${o.openTasks}\n`)
+  }
 }
 
 function printRepos(data: unknown): void {
@@ -426,6 +468,9 @@ function printRepos(data: unknown): void {
   )
 }
 
+/** A task's repo as the CLI prints it: its name, or that it has none. */
+const repoLabel = (repo: unknown): string => (typeof repo === 'string' && repo ? repo : '(no repo)')
+
 function printTasks(data: unknown, archived: boolean): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
@@ -434,26 +479,29 @@ function printTasks(data: unknown, archived: boolean): void {
     )
     return
   }
+  const rows = list.map((task) => (task ?? {}) as Record<string, unknown>)
+  // A REPO column only when the list mixes where tasks are filed (the
+  // project session's list, `--all-repos`): one repo's list need not repeat it.
+  const mixed = new Set(rows.map((o) => repoLabel(o.repo))).size > 1
   printTable(
     [
       { key: 'id', head: 'ID' },
       { key: 'status', head: 'STATUS' },
+      ...(mixed ? [{ key: 'repo', head: 'REPO' }] : []),
       { key: 'title', head: 'TITLE' },
       { key: 'tags', head: 'TAGS' },
       { key: 'worktree', head: 'WORKTREE' }
     ],
-    list.map((task) => {
-      const o = (task ?? {}) as Record<string, unknown>
-      return {
-        // The task number addresses `orbital task update/done`; a uuid prefix
-        // is the fallback for rows from an app build that predates numbers.
-        id: o.seq != null ? `#${o.seq}` : String(o.id ?? '').slice(0, 8),
-        status: String(o.status ?? ''),
-        title: String(o.title ?? ''),
-        tags: Array.isArray(o.tags) ? o.tags.join(',') : '',
-        worktree: o.worktreeId ? 'linked' : ''
-      }
-    })
+    rows.map((o) => ({
+      // The task number addresses `orbital task update/done`; a uuid prefix
+      // is the fallback for rows from an app build that predates numbers.
+      id: o.seq != null ? `#${o.seq}` : String(o.id ?? '').slice(0, 8),
+      status: String(o.status ?? ''),
+      repo: repoLabel(o.repo),
+      title: String(o.title ?? ''),
+      tags: Array.isArray(o.tags) ? o.tags.join(',') : '',
+      worktree: o.worktreeId ? 'linked' : ''
+    }))
   )
 }
 
@@ -485,6 +533,8 @@ function printTaskDetail(data: unknown): void {
   printFields([
     ['number', o.seq != null ? `#${o.seq}` : '(none)'],
     ['id', String(o.id ?? '')],
+    ...(o.project ? [['project', String(o.project)] as [string, string]] : []),
+    ['repo', o.repo ? String(o.repo) : '(none; the whole project)'],
     ['status', String(o.status ?? '')],
     ['title', String(o.title ?? '')],
     ['description', String(o.description ?? '') || '(none)'],
@@ -539,10 +589,15 @@ function confirmation(req: ControlRequest, data: unknown): string {
       const where = d.repo || d.worktree ? ` in ${[d.repo, d.worktree].filter(Boolean).map(String).join(' / ')}` : ''
       return `opened ${String(req.args.type ?? '')} tab${where}${req.args.prompt ? ' with its prompt' : ''}`
     }
-    case 'task-add':
-      return `task added${to}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
-    case 'task-update':
-      return `task updated${inn}: ${String(d.title ?? '')} → ${String(d.status ?? '')}`
+    case 'task-add': {
+      // Always say where it was filed: the default depends on the terminal.
+      const where = d.repo ? ` to ${String(d.repo)}` : d.project ? ` to project ${String(d.project)} (no repo)` : to
+      return `task added${where}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? req.args.title ?? '')}`
+    }
+    case 'task-update': {
+      const filed = d.retagged ? ` (now filed under ${d.repo ? String(d.repo) : 'no repo'})` : ''
+      return `task updated${inn}: ${String(d.title ?? '')} → ${String(d.status ?? '')}${filed}`
+    }
     case 'task-archive':
     case 'task-delete':
       return `task archived${inn}: ${d.seq != null ? `#${d.seq} ` : ''}${String(d.title ?? '')}`

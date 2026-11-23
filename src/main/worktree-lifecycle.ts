@@ -1,5 +1,12 @@
 import { existsSync } from 'node:fs'
-import { isPtyTabType, type Project, type Repo, type RemoveWorktreeOptions, type Worktree } from '@shared/types'
+import {
+  isPtyTabType,
+  type Project,
+  type Repo,
+  type RemoveWorktreeOptions,
+  type TaskPatch,
+  type Worktree
+} from '@shared/types'
 import { runtime, tables } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree as removeCheckout } from './services/worktree'
@@ -52,6 +59,10 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
   if (!repo) throw new Error(`repo ${input.repoId} not found`)
   const task = input.taskId ? tables.tasks.get(input.taskId) : undefined
   if (input.taskId && !task) throw new Error(`task ${input.taskId} not found`)
+  // A tag never takes a task across projects, and a worktree pins its task's repo.
+  if (task && task.projectId !== repo.projectId) {
+    throw new Error(`task #${task.seq} is not in the project of repo ${repo.name}`)
+  }
 
   const name = input.name?.trim() || task?.title
   const branch = input.branch?.trim() || name || `worktree-${Date.now()}`
@@ -63,8 +74,13 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
     baseRef: input.baseRef,
     taskId: task?.id ?? null
   })
-  if (task && task.status !== 'in_progress' && task.status !== 'done') {
-    tables.tasks.update(task.id, { status: 'in_progress' })
+  if (task) {
+    // Starting it is also filing it: an untagged task (or one tagged with
+    // another repo) now lives where its worktree does.
+    const patch: TaskPatch = {}
+    if (task.status !== 'in_progress' && task.status !== 'done') patch.status = 'in_progress'
+    if (task.repoId !== repo.id) patch.repoId = repo.id
+    if (Object.keys(patch).length) tables.tasks.update(task.id, patch)
   }
   runtime.gitWatcher.watch(created.path)
   beginWorktreeSetup(created, repo.repoPath)

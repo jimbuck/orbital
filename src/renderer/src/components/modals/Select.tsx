@@ -9,6 +9,7 @@ export function Select({
   id,
   mono,
   disabled,
+  autoFocus,
   className = 'mt-1.5'
 }: {
   value: string
@@ -17,6 +18,7 @@ export function Select({
   id?: string
   mono?: boolean
   disabled?: boolean
+  autoFocus?: boolean
   /** Wrapper classes; defaults to the standard field gap. */
   className?: string
 }): React.JSX.Element {
@@ -26,6 +28,7 @@ export function Select({
         id={id}
         value={value}
         disabled={disabled}
+        autoFocus={autoFocus}
         onChange={(e) => onChange(e.target.value)}
         className={`${inputBase} ${mono ? 'font-mono' : ''} cursor-pointer appearance-none pr-8 [&_option]:bg-elev [&_option]:text-text disabled:cursor-not-allowed disabled:opacity-50`}
       >

@@ -148,7 +148,7 @@ describe('creating a Worktree', () => {
   })
 
   it('started from a task: named after it, linked both ways, and the task moves to in-progress', async () => {
-    const task = tables.tasks.create({ repoId: repo.id, title: 'Fix the flaky test', createdBy: 'user' })
+    const task = tables.tasks.create({ projectId: repo.projectId, repoId: repo.id, title: 'Fix the flaky test', createdBy: 'user' })
     expect(task.status).not.toBe('in_progress')
 
     const w = await createWorktree({ repoId: repo.id, taskId: task.id })
@@ -157,8 +157,24 @@ describe('creating a Worktree', () => {
     expect(tables.tasks.get(task.id)).toMatchObject({ worktreeId: w.id, status: 'in_progress' })
   })
 
+  it('files an untagged task under the repo it is started in, which then holds it there', async () => {
+    const task = tables.tasks.create({ projectId: repo.projectId, title: 'Project-wide', createdBy: 'user' })
+    expect(task.repoId).toBeNull()
+    const w = await createWorktree({ repoId: repo.id, taskId: task.id })
+    expect(tables.tasks.get(task.id)).toMatchObject({ worktreeId: w.id, repoId: repo.id, status: 'in_progress' })
+    // The live worktree pins it: it cannot be cleared while the worktree is there.
+    expect(() => tables.tasks.update(task.id, { repoId: null })).toThrow(/has a worktree in repo/)
+  })
+
+  it('refuses a task from another project and creates nothing', async () => {
+    const other = tables.repos.create({ name: 'other', repoPath: join(dir, 'other') })
+    const task = tables.tasks.create({ projectId: other.projectId, title: 'elsewhere', createdBy: 'user' })
+    await expect(createWorktree({ repoId: repo.id, taskId: task.id })).rejects.toThrow(/not in the project of repo repo/)
+    expect(tables.worktrees.list().filter((w) => w.repoId === repo.id).map((w) => w.id)).toEqual([root.id])
+  })
+
   it('links a task that is already done without reopening it', async () => {
-    const task = tables.tasks.create({ repoId: repo.id, title: 'Shipped', createdBy: 'user' })
+    const task = tables.tasks.create({ projectId: repo.projectId, repoId: repo.id, title: 'Shipped', createdBy: 'user' })
     tables.tasks.update(task.id, { status: 'done' })
     const w = await createWorktree({ repoId: repo.id, taskId: task.id, name: 'follow-up' })
     expect(tables.tasks.get(task.id)).toMatchObject({ worktreeId: w.id, status: 'done' })
@@ -199,7 +215,7 @@ describe('removing a Worktree', () => {
   })
 
   it('deletes a clean checkout: PTYs, watcher, briefing, row and task link all go', async () => {
-    const task = tables.tasks.create({ repoId: repo.id, title: 'feature', createdBy: 'user' })
+    const task = tables.tasks.create({ projectId: repo.projectId, repoId: repo.id, title: 'feature', createdBy: 'user' })
     const w = await createWorktree({ repoId: repo.id, taskId: task.id })
     const terminal = tables.tabs.create({ worktreeId: w.id, paneId: w.panes[0].id, type: 'terminal' })
     const agent = tables.tabs.create({ worktreeId: w.id, paneId: w.panes[0].id, type: 'agent' })

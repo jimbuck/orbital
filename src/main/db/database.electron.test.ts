@@ -481,10 +481,13 @@ describe('the boot-time project heal', () => {
 
 describe('repositories', () => {
   let repoId: string
+  let projectId: string
 
   beforeEach(() => {
     tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
-    repoId = tables.repos.create({ name: 'p', repoPath: 'C:/p' }).id
+    const repo = tables.repos.create({ name: 'p', repoPath: 'C:/p' })
+    repoId = repo.id
+    projectId = repo.projectId
   })
 
   it('creates a worktree with its first pane and a layout that covers it, atomically', () => {
@@ -506,17 +509,17 @@ describe('repositories', () => {
   })
 
   it('numbers tasks monotonically and never reuses a deleted number', () => {
-    const a = tables.tasks.create({ repoId, title: 'a', createdBy: 'user' })
-    const b = tables.tasks.create({ repoId, title: 'b', createdBy: 'user' })
+    const a = tables.tasks.create({ projectId, repoId, title: 'a', createdBy: 'user' })
+    const b = tables.tasks.create({ projectId, repoId, title: 'b', createdBy: 'user' })
     expect([a.seq, b.seq]).toEqual([1, 2])
-    // Only a repo removal still deletes task rows; simulate one going away.
+    // Only a project removal deletes task rows; simulate one going away.
     getDb().prepare('DELETE FROM tasks WHERE id = ?').run(b.id)
-    expect(tables.tasks.create({ repoId, title: 'c', createdBy: 'user' }).seq).toBe(3)
+    expect(tables.tasks.create({ projectId, repoId, title: 'c', createdBy: 'user' }).seq).toBe(3)
   })
 
   it('archives a task instead of deleting it: hidden from list(), kept with its number, reversible', () => {
-    const a = tables.tasks.create({ repoId, title: 'a', createdBy: 'user' })
-    const b = tables.tasks.create({ repoId, title: 'b', createdBy: 'user' })
+    const a = tables.tasks.create({ projectId, repoId, title: 'a', createdBy: 'user' })
+    const b = tables.tasks.create({ projectId, repoId, title: 'b', createdBy: 'user' })
     expect(a.archivedAt).toBeNull()
     getDb().prepare('UPDATE tasks SET updated_at = 0 WHERE id = ?').run(b.id)
 
@@ -529,7 +532,7 @@ describe('repositories', () => {
     expect(tables.tasks.list('archived').map((t) => t.id)).toEqual([b.id])
     expect(tables.tasks.list('all').map((t) => t.id).sort()).toEqual([a.id, b.id].sort())
     // Archiving does not free the number.
-    expect(tables.tasks.create({ repoId, title: 'c', createdBy: 'user' }).seq).toBe(3)
+    expect(tables.tasks.create({ projectId, repoId, title: 'c', createdBy: 'user' }).seq).toBe(3)
 
     getDb().prepare('UPDATE tasks SET updated_at = 0 WHERE id = ?').run(b.id)
     tables.tasks.unarchive(b.id)
@@ -539,8 +542,8 @@ describe('repositories', () => {
     expect(tables.tasks.list('archived')).toEqual([])
   })
 
-  it("still cascades a removed repo's tasks, archived ones included", () => {
-    const t = tables.tasks.create({ repoId, title: 'a', createdBy: 'user' })
+  it("removing a project's last repo still takes its tasks, archived ones included, with the project", () => {
+    const t = tables.tasks.create({ projectId, repoId, title: 'a', createdBy: 'user' })
     tables.tasks.archive(t.id)
     tables.repos.remove(repoId)
     expect(tables.tasks.get(t.id)).toBeUndefined()
@@ -548,7 +551,7 @@ describe('repositories', () => {
 
   it('records who filed a task and when, and bumps updated_at on edits', () => {
     const before = Date.now()
-    const t = tables.tasks.create({ repoId, title: 'from the cli', createdBy: 'agent' })
+    const t = tables.tasks.create({ projectId, repoId, title: 'from the cli', createdBy: 'agent' })
     expect(t.createdBy).toBe('agent')
     expect(t.createdAt).toBeGreaterThanOrEqual(before)
     expect(t.updatedAt).toBe(t.createdAt)
@@ -562,7 +565,7 @@ describe('repositories', () => {
   })
 
   it('links a task and the worktree started from it on both rows, and unlinks the task when the worktree goes', () => {
-    const task = tables.tasks.create({ repoId, title: 'do it', createdBy: 'user' })
+    const task = tables.tasks.create({ projectId, repoId, title: 'do it', createdBy: 'user' })
     const w = tables.worktrees.create({
       repoId,
       kind: 'linked',
@@ -581,7 +584,7 @@ describe('repositories', () => {
   })
 
   it('links a task to a worktree that already exists', () => {
-    const task = tables.tasks.create({ repoId, title: 'adopted', createdBy: 'user' })
+    const task = tables.tasks.create({ projectId, repoId, title: 'adopted', createdBy: 'user' })
     const w = tables.worktrees.create({ repoId, kind: 'linked', name: 'x', path: 'C:/p-x', branch: 'x' })
     tables.worktrees.linkTask(w.id, task.id)
     expect(tables.worktrees.get(w.id)!.taskId).toBe(task.id)
@@ -589,8 +592,8 @@ describe('repositories', () => {
   })
 
   it('heals a task left pointing at a removed worktree by an older build, on the next boot', () => {
-    const task = tables.tasks.create({ repoId, title: 'stranded', createdBy: 'user' })
-    const kept = tables.tasks.create({ repoId, title: 'linked', createdBy: 'user' })
+    const task = tables.tasks.create({ projectId, repoId, title: 'stranded', createdBy: 'user' })
+    const kept = tables.tasks.create({ projectId, repoId, title: 'linked', createdBy: 'user' })
     const w = tables.worktrees.create({ repoId, kind: 'linked', name: 'y', path: 'C:/p-y', branch: 'y', taskId: kept.id })
     getDb().prepare('UPDATE tasks SET worktree_id = ? WHERE id = ?').run('gone-worktree', task.id)
     closeDb()
@@ -960,7 +963,7 @@ describe('repositories', () => {
       tables.projects.addRepo(a.projectId, b.id, null)
       tables.projects.setHome(a.projectId, a.id)
       const w = tables.worktrees.create({ repoId: b.id, kind: 'root', name: 'main', path: 'C:/src/b', branch: 'main' })
-      const t = tables.tasks.create({ repoId: a.id, title: 't', createdBy: 'user' })
+      const t = tables.tasks.create({ projectId: a.projectId, repoId: a.id, title: 't', createdBy: 'user' })
       tables.railFolders.placeProject(a.projectId, null, null)
 
       tables.projects.remove(a.projectId)
@@ -1046,5 +1049,358 @@ describe('workspace export and import', () => {
       ['a', 'C:/a', ['ra']],
       ['b', 'C:/b', ['rb']]
     ])
+  })
+})
+
+describe('moving tasks from repos to projects', () => {
+  /** `tasks` as PRAGMA reports it: column name → NOT NULL. */
+  const taskShape = (): Record<string, number> =>
+    Object.fromEntries(
+      (getDb().prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string; notnull: number }>).map((c) => [
+        c.name,
+        c.notnull
+      ])
+    )
+  const taskIndexes = (): string[] =>
+    (
+      getDb().prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tasks'").all() as Array<{
+        name: string
+      }>
+    )
+      .map((r) => r.name)
+      .filter((n) => !n.startsWith('sqlite_'))
+      .sort()
+  const TASK_INDEXES = ['idx_tasks_project', 'idx_tasks_repo', 'idx_tasks_seq']
+  /** Every stored column but project_id, so a migrated row can be compared with its original. */
+  const rowsWithoutProject = (): Record<string, unknown>[] =>
+    (getDb().prepare('SELECT * FROM tasks ORDER BY seq').all() as Record<string, unknown>[]).map((r) => {
+      const rest = { ...r }
+      delete rest.project_id
+      return rest
+    })
+  const foreignKeys = (): Array<{ from: string; table: string; on_delete: string }> =>
+    getDb().prepare('PRAGMA foreign_key_list(tasks)').all() as Array<{ from: string; table: string; on_delete: string }>
+
+  /**
+   * Put `tasks` (and, unless `folderSessions`, `worktrees`) back the way a
+   * database from after projects but before this change had them: tasks owned
+   * by a repo, and (before folder sessions) worktrees with no project_id.
+   */
+  function downgrade(folderSessions: boolean): void {
+    const d = getDb()
+    d.pragma('foreign_keys = OFF')
+    d.exec(`
+      CREATE TABLE tasks_old (
+        id TEXT PRIMARY KEY, seq INTEGER, repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+        title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'todo', worktree_id TEXT, created_by TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER
+      );
+      INSERT INTO tasks_old SELECT id, seq, repo_id, title, description, tags, status, worktree_id, created_by,
+        created_at, updated_at, archived_at FROM tasks;
+      DROP TABLE tasks;
+      ALTER TABLE tasks_old RENAME TO tasks;
+      CREATE INDEX idx_tasks_repo ON tasks(repo_id);
+      CREATE UNIQUE INDEX idx_tasks_seq ON tasks(seq);
+    `)
+    if (!folderSessions) {
+      d.exec(`
+        CREATE TABLE worktrees_old (
+          id TEXT PRIMARY KEY, repo_id TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL, name TEXT NOT NULL, path TEXT NOT NULL, branch TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'idle', task_id TEXT, split_direction TEXT NOT NULL DEFAULT 'row',
+          layout TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+        );
+        INSERT INTO worktrees_old SELECT id, repo_id, kind, name, path, branch, status, task_id, split_direction,
+          layout, created_at FROM worktrees;
+        DROP TABLE worktrees;
+        ALTER TABLE worktrees_old RENAME TO worktrees;
+        CREATE INDEX idx_worktrees_repo ON worktrees(repo_id);
+      `)
+    }
+    d.pragma('foreign_keys = ON')
+  }
+
+  /** A grouped project (api, web; home api) and a flat one (docs), with tasks of every kind. */
+  function seedGrouped() {
+    tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
+    const api = tables.repos.create({ name: 'api', repoPath: 'C:/acme/api' })
+    const web = tables.repos.create({ name: 'web', repoPath: 'C:/acme/web' })
+    const docs = tables.repos.create({ name: 'docs', repoPath: 'C:/docs' })
+    tables.projects.addRepo(api.projectId, web.id, null)
+    tables.projects.setHome(api.projectId, api.id)
+    const wt = tables.worktrees.create({ repoId: web.id, kind: 'linked', name: 'feat', path: 'C:/acme/wt', branch: 'feat' })
+    const t1 = tables.tasks.create({ projectId: api.projectId, repoId: api.id, title: 'one', tags: ['x'], createdBy: 'agent' })
+    const t2 = tables.tasks.create({ projectId: api.projectId, repoId: web.id, title: 'two', description: 'd', createdBy: 'user' })
+    const t3 = tables.tasks.create({ projectId: docs.projectId, repoId: docs.id, title: 'three', createdBy: 'user' })
+    tables.worktrees.linkTask(wt.id, t2.id)
+    tables.tasks.update(t2.id, { status: 'in_progress' })
+    tables.tasks.archive(t3.id)
+    return { api, web, docs, wt, t1, t2, t3 }
+  }
+
+  it('makes a fresh database with the shape already: a required project, an optional repo', () => {
+    expect(taskShape()).toMatchObject({ project_id: 1, repo_id: 0 })
+    expect(taskIndexes()).toEqual(TASK_INDEXES)
+    expect(foreignKeys().map((k) => [k.from, k.table, k.on_delete]).sort()).toEqual([
+      ['project_id', 'projects', 'CASCADE'],
+      ['repo_id', 'repos', 'SET NULL']
+    ])
+  })
+
+  it("moves a pre-revamp database's tasks into the project their repo got", () => {
+    closeDb()
+    writeLegacyDb(join(dir, 'orbital.db'))
+    initDb(dir)
+    expect(taskShape()).toMatchObject({ project_id: 1, repo_id: 0 })
+    const project = (getDb().prepare("SELECT project_id FROM repos WHERE id = 'ws1'").get() as { project_id: string }).project_id
+    expect(getDb().prepare('SELECT id, seq, project_id, repo_id, worktree_id FROM tasks ORDER BY seq').all()).toEqual([
+      { id: 't1', seq: 1, project_id: project, repo_id: 'ws1', worktree_id: 'f2' },
+      { id: 't2', seq: 2, project_id: project, repo_id: 'ws1', worktree_id: null }
+    ])
+    expect(getDb().pragma('foreign_key_check')).toEqual([])
+  })
+
+  it.each([
+    ['from v1.45', true],
+    ['from after the rename but before projects', false]
+  ])('moves the tasks of a database %s, every column as it was', (_label, v145) => {
+    closeDb()
+    writePreProjectsDb(v145)
+    const raw = new Database(join(dir, 'orbital.db'))
+    const fk = v145 ? 'project_id' : 'repo_id'
+    raw.exec(`
+      INSERT INTO worktrees (id, ${fk}, kind, name, path, branch, created_at)
+        VALUES ('w2', 'r-web', 'linked', 'feat', 'C:/src/acme/wt', 'feat', 2);
+      INSERT INTO tasks (id, seq, ${fk}, title, description, tags, status, worktree_id, created_by, created_at, updated_at, archived_at)
+        VALUES ('t2', 7, 'r-web', 'b', 'desc', '["ui"]', 'done', 'w2', 'agent', 2, 3, 4);
+    `)
+    raw.close()
+    initDb(dir)
+    tables.setActiveWorkspaceId('ws')
+    expect(taskShape()).toMatchObject({ project_id: 1, repo_id: 0 })
+    expect(taskIndexes()).toEqual(TASK_INDEXES)
+    const t2 = getDb().prepare("SELECT * FROM tasks WHERE id = 't2'").get()
+    expect(t2).toEqual({
+      id: 't2',
+      seq: 7,
+      project_id: tables.repos.get('r-web')!.projectId,
+      repo_id: 'r-web',
+      title: 'b',
+      description: 'desc',
+      tags: '["ui"]',
+      status: 'done',
+      worktree_id: 'w2',
+      created_by: 'agent',
+      created_at: 2,
+      updated_at: 3,
+      archived_at: 4
+    })
+    expect(tables.tasks.get('t1')).toMatchObject({ projectId: tables.repos.get('r-api')!.projectId, repoId: 'r-api' })
+    expect(getDb().pragma('foreign_key_check')).toEqual([])
+    expect(getDb().pragma('foreign_keys', { simple: true })).toBe(1)
+  })
+
+  it.each([
+    ['from after projects, before folder sessions', false],
+    ['from after folder sessions', true]
+  ])('rebuilds the tasks of a database %s, keeping every row byte for byte', (_label, folderSessions) => {
+    const { api, web, docs, wt, t1, t2, t3 } = seedGrouped()
+    const before = rowsWithoutProject()
+    downgrade(folderSessions)
+    expect(taskShape()).not.toHaveProperty('project_id')
+    closeDb()
+    initDb(dir)
+    tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
+
+    expect(taskShape()).toMatchObject({ project_id: 1, repo_id: 0 })
+    expect(taskIndexes()).toEqual(TASK_INDEXES)
+    expect(rowsWithoutProject()).toEqual(before)
+    expect(tables.tasks.get(t1.id)).toMatchObject({ projectId: api.projectId, repoId: api.id, tags: ['x'], createdBy: 'agent' })
+    expect(tables.tasks.get(t2.id)).toMatchObject({ projectId: api.projectId, repoId: web.id, worktreeId: wt.id })
+    expect(tables.tasks.get(t3.id)).toMatchObject({ projectId: docs.projectId, archivedAt: expect.any(Number) })
+    expect(tables.worktrees.get(wt.id)).toMatchObject({ taskId: t2.id, projectId: api.projectId })
+    // Numbering carries on after the migrated ones.
+    expect(tables.tasks.create({ projectId: api.projectId, title: 'next', createdBy: 'user' }).seq).toBe(t3.seq + 1)
+    expect(getDb().pragma('foreign_key_check')).toEqual([])
+    expect(getDb().pragma('foreign_keys', { simple: true })).toBe(1)
+  })
+
+  it('drops a task whose repo is already gone, which no project can take', () => {
+    const { t1 } = seedGrouped()
+    downgrade(true)
+    getDb().pragma('foreign_keys = OFF')
+    getDb().prepare('UPDATE tasks SET repo_id = ? WHERE id = ?').run('vanished', t1.id)
+    getDb().pragma('foreign_keys = ON')
+    closeDb()
+    initDb(dir)
+    expect(tables.tasks.get(t1.id)).toBeUndefined()
+    expect(getDb().prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 2 })
+  })
+
+  it('is idempotent: a second boot leaves the rebuilt table and its rows alone', () => {
+    seedGrouped()
+    downgrade(true)
+    closeDb()
+    initDb(dir)
+    const snapshot = (): unknown => ({
+      sql: getDb().prepare("SELECT sql FROM sqlite_master WHERE name = 'tasks'").get(),
+      indexes: taskIndexes(),
+      rows: getDb().prepare('SELECT * FROM tasks ORDER BY id').all()
+    })
+    const first = snapshot()
+    closeDb()
+    initDb(dir)
+    expect(snapshot()).toEqual(first)
+  })
+
+  it('heals a tagged task left in a project its repo has left, on the next boot', () => {
+    const { docs, t1 } = seedGrouped()
+    getDb().prepare('UPDATE tasks SET project_id = ? WHERE id = ?').run(docs.projectId, t1.id)
+    closeDb()
+    initDb(dir)
+    expect(tables.tasks.get(t1.id)!.projectId).toBe(tables.repos.get(t1.repoId!)!.projectId)
+  })
+})
+
+describe('tasks in projects', () => {
+  beforeEach(() => {
+    tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
+  })
+
+  /** Acme: api (home), web and cli; plus a flat `docs`. One task under each repo and one with none. */
+  function acme() {
+    const api = tables.repos.create({ name: 'api', repoPath: 'C:/acme/api' })
+    const pid = api.projectId
+    const web = tables.repos.create({ name: 'web', repoPath: 'C:/acme/web', projectId: pid })
+    const cli = tables.repos.create({ name: 'cli', repoPath: 'C:/acme/cli', projectId: pid })
+    tables.projects.setHome(pid, api.id)
+    const docs = tables.repos.create({ name: 'docs', repoPath: 'C:/docs' })
+    const task = (repoId: string | null, title: string) =>
+      tables.tasks.create({ projectId: pid, repoId, title, createdBy: 'user' })
+    return {
+      pid,
+      api,
+      web,
+      cli,
+      docs,
+      tApi: task(api.id, 'api work'),
+      tWeb: task(web.id, 'web work'),
+      tCli: task(cli.id, 'cli work'),
+      tNone: task(null, 'spans')
+    }
+  }
+  const projectOf = (tid: string): string | undefined => tables.tasks.get(tid)?.projectId
+
+  it('files a task under one of its project repos or none, and refuses a repo of another project', () => {
+    const { pid, docs, tNone, tApi } = acme()
+    expect(tNone).toMatchObject({ projectId: pid, repoId: null })
+    expect(() => tables.tasks.create({ projectId: pid, repoId: docs.id, title: 'x', createdBy: 'user' })).toThrow(
+      /repo docs is not in this task's project/
+    )
+    expect(() => tables.tasks.update(tApi.id, { repoId: docs.id })).toThrow(/not in this task's project/)
+    expect(tables.tasks.list().filter((t) => t.projectId === pid).map((t) => t.title).sort()).toEqual([
+      'api work',
+      'cli work',
+      'spans',
+      'web work'
+    ])
+  })
+
+  it('retags and clears with a patch, and leaves the repo alone when the patch does not name it', () => {
+    const { web, tApi } = acme()
+    expect(tables.tasks.update(tApi.id, { repoId: web.id }).repoId).toBe(web.id)
+    expect(tables.tasks.update(tApi.id, { title: 'renamed' }).repoId).toBe(web.id)
+    expect(tables.tasks.update(tApi.id, { repoId: null }).repoId).toBeNull()
+  })
+
+  it('locks the repo of a task with a live worktree, and frees it when the worktree goes', () => {
+    const { api, web, tApi } = acme()
+    const wt = tables.worktrees.create({
+      repoId: api.id,
+      kind: 'linked',
+      name: 'f',
+      path: 'C:/acme/wt-f',
+      branch: 'f',
+      taskId: tApi.id
+    })
+    expect(() => tables.tasks.update(tApi.id, { repoId: web.id })).toThrow(
+      `task #${tApi.seq} has a worktree in api; its repo follows that worktree`
+    )
+    expect(() => tables.tasks.update(tApi.id, { repoId: null })).toThrow(/has a worktree in api/)
+    // Other edits, and naming the repo it already has, still go through.
+    expect(tables.tasks.update(tApi.id, { repoId: api.id, status: 'ready_for_review' }).status).toBe('ready_for_review')
+    tables.worktrees.remove(wt.id)
+    expect(tables.tasks.update(tApi.id, { repoId: web.id }).repoId).toBe(web.id)
+  })
+
+  it('a repo moving to another project takes its tagged tasks; the untagged ones stay', () => {
+    const { pid, web, docs, tWeb, tNone, tApi } = acme()
+    tables.projects.addRepo(docs.projectId, web.id, null)
+    expect(projectOf(tWeb.id)).toBe(docs.projectId)
+    expect(tables.tasks.get(tWeb.id)!.repoId).toBe(web.id)
+    expect(projectOf(tNone.id)).toBe(pid)
+    expect(projectOf(tApi.id)).toBe(pid)
+  })
+
+  it('so does a repo detached into a project of its own, and every repo of an ungrouped project', () => {
+    const { pid, api, cli, web, tCli, tWeb, tApi, tNone } = acme()
+    const own = tables.projects.detachRepo(cli.id, null, null)!
+    expect(projectOf(tCli.id)).toBe(own.id)
+    tables.projects.ungroup(pid)
+    expect(projectOf(tApi.id)).toBe(tables.repos.get(api.id)!.projectId)
+    expect(projectOf(tApi.id)).not.toBe(pid)
+    // The last repo keeps the group's project, and with it the untagged work.
+    expect(tables.repos.get(web.id)!.projectId).toBe(pid)
+    expect(projectOf(tWeb.id)).toBe(pid)
+    expect(projectOf(tNone.id)).toBe(pid)
+  })
+
+  it("a repo's tasks follow it into a new project made from it", () => {
+    const { web, tWeb } = acme()
+    const made = tables.projects.create({ name: 'Web', rootPath: 'C:/acme/web', repoIds: [web.id] })
+    expect(projectOf(tWeb.id)).toBe(made.id)
+  })
+
+  it('the untagged tasks of a project whose last repo moves away go with that repo, not down with the project', () => {
+    const { docs } = acme()
+    const solo = tables.repos.create({ name: 'solo', repoPath: 'C:/solo' })
+    const loose = tables.tasks.create({ projectId: solo.projectId, title: 'loose', createdBy: 'user' })
+    tables.projects.addRepo(docs.projectId, solo.id, null)
+    expect(projectOf(loose.id)).toBe(docs.projectId)
+  })
+
+  it('removing a repo keeps its tasks in the project with the repo cleared and the worktree link dropped', () => {
+    const { pid, web, tWeb } = acme()
+    const wt = tables.worktrees.create({
+      repoId: web.id,
+      kind: 'linked',
+      name: 'w',
+      path: 'C:/acme/wt-w',
+      branch: 'w',
+      taskId: tWeb.id
+    })
+    tables.repos.remove(web.id)
+    expect(tables.worktrees.get(wt.id)).toBeUndefined()
+    expect(tables.tasks.get(tWeb.id)).toMatchObject({ projectId: pid, repoId: null, worktreeId: null })
+  })
+
+  it("removing a project's last repo, or the project, still deletes its tasks", () => {
+    const { pid, tApi, tNone } = acme()
+    const solo = tables.repos.create({ name: 'solo', repoPath: 'C:/solo' })
+    const t = tables.tasks.create({ projectId: solo.projectId, title: 'x', createdBy: 'user' })
+    tables.repos.remove(solo.id)
+    expect(tables.tasks.get(t.id)).toBeUndefined()
+    tables.projects.remove(pid)
+    expect(tables.tasks.get(tApi.id)).toBeUndefined()
+    expect(tables.tasks.get(tNone.id)).toBeUndefined()
+  })
+
+  it("lists only this workspace's tasks, untagged ones included", () => {
+    const { tNone } = acme()
+    expect(tables.tasks.list().some((t) => t.id === tNone.id)).toBe(true)
+    const other = tables.workspaces.create('Other')
+    tables.setActiveWorkspaceId(other.id)
+    expect(tables.tasks.list()).toEqual([])
   })
 })

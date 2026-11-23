@@ -108,9 +108,14 @@ describe('assembleProjectMap', () => {
   it('joins rows and probes into one entry per member', () => {
     const linked = { ...wt('linked', 'api', 'C:\\wt\\api-x'), name: 'api-x', branch: 'feat/x', taskId: 't1' }
     const tasks = [
-      { id: 't1', seq: 12, repoId: 'api', status: 'in-progress', archivedAt: null },
-      { id: 't2', seq: 13, repoId: 'api', status: 'done', archivedAt: null },
-      { id: 't3', seq: 14, repoId: 'web', status: 'todo', archivedAt: null }
+      { id: 't1', seq: 12, projectId: 'p1', repoId: 'api', status: 'in-progress', archivedAt: null },
+      { id: 't2', seq: 13, projectId: 'p1', repoId: 'api', status: 'done', archivedAt: null },
+      { id: 't3', seq: 14, projectId: 'p1', repoId: 'web', status: 'todo', archivedAt: null },
+      // Filed under no repo, and under one that is no longer the project's: both span the project.
+      { id: 't4', seq: 15, projectId: 'p1', repoId: null, status: 'todo', archivedAt: null },
+      { id: 't5', seq: 16, projectId: 'p1', repoId: 'gone', status: 'draft', archivedAt: null },
+      // Another project's task never counts here.
+      { id: 't6', seq: 17, projectId: 'p2', repoId: 'web', status: 'todo', archivedAt: null }
     ] as unknown as Task[]
     const map = assembleProjectMap({
       project: project(),
@@ -136,5 +141,6 @@ describe('assembleProjectMap', () => {
     })
     // No probe: unknown rather than a guess.
     expect(map.repos.find((r) => r.id === 'web')).toMatchObject({ remote: null, dirty: null, openTasks: 1 })
+    expect(map.openTasks).toBe(2)
   })
 })

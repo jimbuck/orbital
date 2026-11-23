@@ -73,7 +73,8 @@ function mapTask(r: any): Task {
   return {
     id: r.id,
     seq: r.seq,
-    repoId: r.repo_id,
+    projectId: r.project_id,
+    repoId: r.repo_id ?? null,
     title: r.title,
     description: r.description ?? '',
     tags: JSON.parse(r.tags || '[]') as string[],
@@ -238,14 +239,23 @@ export const repos = {
     return repos.get(rid)!
   },
   /**
-   * Delete a repo's rows (its worktrees and tasks cascade; a project it was
-   * home of loses its home). Its project goes too if this was its last repo,
-   * and is demoted if one repo and no home are left.
+   * Delete a repo's rows (its worktrees cascade; a project it was home of
+   * loses its home). Its tasks stay in the project with the repo cleared, and
+   * unlinked from the worktrees that went with it. Its project goes too if
+   * this was its last repo (taking every task with it), and is demoted if one
+   * repo and no home are left.
    */
   remove(rid: string): void {
     writeTx(() => {
       const repo = repoRow(rid)
       if (!repo) return
+      // `tasks.worktree_id` has no foreign key: unlink by hand, as worktrees.remove does.
+      getDb()
+        .prepare(
+          `UPDATE tasks SET worktree_id = NULL, updated_at = ?
+           WHERE worktree_id IN (SELECT id FROM worktrees WHERE repo_id = ?)`
+        )
+        .run(now(), rid)
       getDb().prepare('DELETE FROM repos WHERE id = ?').run(rid)
       if (repo.project_id) settleAfterLeave(repo.project_id)
     })
@@ -326,10 +336,18 @@ function memberIds(pid: string): string[] {
   ).map((r) => r.id)
 }
 
-/** Record `repoIds` as the project's repos, in that order (moving any that were elsewhere). */
+/**
+ * Record `repoIds` as the project's repos, in that order (moving any that were
+ * elsewhere). A repo that moves takes the tasks filed under it along; its
+ * old project keeps its untagged ones.
+ */
 function writeMembers(pid: string, repoIds: string[]): void {
   const set = getDb().prepare('UPDATE repos SET project_id = ?, project_position = ? WHERE id = ?')
-  repoIds.forEach((rid, i) => set.run(pid, i, rid))
+  const follow = getDb().prepare('UPDATE tasks SET project_id = ? WHERE repo_id = ? AND project_id <> ?')
+  repoIds.forEach((rid, i) => {
+    set.run(pid, i, rid)
+    follow.run(pid, rid, pid)
+  })
 }
 
 function insertProject(workspaceId: string, name: string, rootPath: string): string {
@@ -361,14 +379,20 @@ function demote(pid: string, rid: string): void {
 
 /**
  * After a repo left `pid` (moved away or removed): delete the project if that
- * was its last repo, demote it if one repo and no home are left.
+ * was its last repo, demote it if one repo and no home are left. When its
+ * last repo moved to `heir`, the tasks still in it (the untagged ones; the
+ * tagged ones went with their repo) move there too rather than going down
+ * with the project. A removed last repo has no heir, and its project's tasks
+ * go with the project.
  */
-function settleAfterLeave(pid: string): void {
+function settleAfterLeave(pid: string, heir?: string): void {
   const project = projectRow(pid)
   if (!project) return
   const left = memberIds(pid)
-  if (left.length === 0) getDb().prepare('DELETE FROM projects WHERE id = ?').run(pid)
-  else if (left.length === 1 && project.home_repo_id === null) demote(pid, left[0])
+  if (left.length === 0) {
+    if (heir && heir !== pid) getDb().prepare('UPDATE tasks SET project_id = ? WHERE project_id = ?').run(heir, pid)
+    getDb().prepare('DELETE FROM projects WHERE id = ?').run(pid)
+  } else if (left.length === 1 && project.home_repo_id === null) demote(pid, left[0])
 }
 
 /**
@@ -435,7 +459,7 @@ export const projects = {
       for (const r of moving) {
         if (!r.project_id) continue
         dropHome(r.project_id, r.id)
-        settleAfterLeave(r.project_id)
+        settleAfterLeave(r.project_id, pid)
       }
       if (input.homeRepoId && moving.some((r) => r.id === input.homeRepoId)) {
         getDb().prepare('UPDATE projects SET home_repo_id = ? WHERE id = ?').run(input.homeRepoId, pid)
@@ -467,8 +491,8 @@ export const projects = {
     getDb().prepare('UPDATE projects SET managed_block = ? WHERE id = ?').run(on ? 1 : 0, pid)
   },
   /**
-   * Delete a project's rows and, through the cascade, its repos' (and their
-   * worktrees and tasks) and its rail position. Rows only: stop the repos'
+   * Delete a project's rows and, through the cascade, its tasks, its repos'
+   * (and their worktrees) and its rail position. Rows only: stop the repos'
    * watchers and terminals first (worktree-lifecycle.ts `removeProject`).
    */
   remove(pid: string): void {
@@ -495,7 +519,7 @@ export const projects = {
       if (source === pid) return
       if (source) {
         dropHome(source, rid)
-        settleAfterLeave(source)
+        settleAfterLeave(source, pid)
       }
       promoteIfFlat(target, before)
     })
@@ -520,7 +544,7 @@ export const projects = {
         writeMembers(pid, [rid])
         if (source) {
           dropHome(source.id, rid)
-          settleAfterLeave(source.id)
+          settleAfterLeave(source.id, pid)
         }
       }
       railFolders.placeProject(pid, folderId, beforeId)
@@ -1102,6 +1126,26 @@ function nextTaskSeq(db: ReturnType<typeof getDb>): number {
   return seq
 }
 
+/** Refuse a repo that is not one of the project's (a tag never takes a task across projects). */
+function assertRepoInProject(rid: string, pid: string): void {
+  const repo = repoRow(rid)
+  if (!repo) throw new Error(`repo ${rid} not found`)
+  if (repo.project_id !== pid) throw new Error(`repo ${repo.name} is not in this task's project`)
+}
+
+/**
+ * The repo a task is pinned to: while it has a live worktree in a repo (its
+ * link resolves to a worktree with a repo), its repo follows that worktree
+ * and nothing else may change it. Null when it is free to move.
+ */
+function repoLockOf(task: Task): { repoId: string; repoName: string } | null {
+  if (!task.worktreeId) return null
+  const row = getDb()
+    .prepare('SELECT w.repo_id, r.name FROM worktrees w JOIN repos r ON r.id = w.repo_id WHERE w.id = ?')
+    .get(task.worktreeId) as { repo_id: string; name: string } | undefined
+  return row ? { repoId: row.repo_id, repoName: row.name } : null
+}
+
 /**
  * Which tasks `tasks.list()` returns: active only (the default — the board,
  * the side panel and `task list`), archived only, or both.
@@ -1114,7 +1158,7 @@ export const tasks = {
       filter === 'active' ? ' AND t.archived_at IS NULL' : filter === 'archived' ? ' AND t.archived_at IS NOT NULL' : ''
     return getDb()
       .prepare(
-        `SELECT t.* FROM tasks t JOIN repos p ON p.id = t.repo_id
+        `SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id
          WHERE p.workspace_id = ?${archived} ORDER BY t.created_at, t.id`
       )
       .all(requireWorkspaceId())
@@ -1124,8 +1168,13 @@ export const tasks = {
     const r = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(tid)
     return r ? mapTask(r) : undefined
   },
+  /**
+   * File a task in a project, under `repoId` (one of the project's repos) or,
+   * with null, under none.
+   */
   create(input: {
-    repoId: string
+    projectId: string
+    repoId?: string | null
     title: string
     description?: string
     tags?: string[]
@@ -1139,12 +1188,16 @@ export const tasks = {
     // several instances sharing this DB — a deferred transaction could hand two
     // processes the same number.
     db.transaction(() => {
+      if (!projectRow(input.projectId)) throw new Error(`project ${input.projectId} not found`)
+      const repoId = input.repoId ?? null
+      if (repoId !== null) assertRepoInProject(repoId, input.projectId)
       db.prepare(
-        'INSERT INTO tasks (id, seq, repo_id, title, description, tags, status, worktree_id, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
+        'INSERT INTO tasks (id, seq, project_id, repo_id, title, description, tags, status, worktree_id, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
       ).run(
         tid,
         nextTaskSeq(db),
-        input.repoId,
+        input.projectId,
+        repoId,
         input.title,
         input.description ?? '',
         JSON.stringify(input.tags ?? []),
@@ -1162,6 +1215,14 @@ export const tasks = {
     return writeTx(() => {
       const cur = tasks.get(tid)
       if (!cur) throw new Error(`task ${tid} not found`)
+      const repoId = patch.repoId === undefined ? cur.repoId : patch.repoId
+      if (repoId !== cur.repoId) {
+        const lock = repoLockOf(cur)
+        if (lock && repoId !== lock.repoId) {
+          throw new Error(`task #${cur.seq} has a worktree in ${lock.repoName}; its repo follows that worktree`)
+        }
+        if (repoId !== null) assertRepoInProject(repoId, cur.projectId)
+      }
       getDb()
         .prepare(
           'UPDATE tasks SET title = ?, description = ?, tags = ?, status = ?, repo_id = ?, updated_at = ? WHERE id = ?'
@@ -1171,7 +1232,7 @@ export const tasks = {
           patch.description ?? cur.description,
           JSON.stringify(patch.tags ?? cur.tags),
           patch.status ?? cur.status,
-          patch.repoId ?? cur.repoId,
+          repoId,
           now(),
           tid
         )
@@ -1180,7 +1241,7 @@ export const tasks = {
   },
   /**
    * Tasks are archived, never deleted: the row (and its number) stays, it just
-   * drops out of the default views. Only removing its repo deletes it.
+   * drops out of the default views. Only removing its project deletes it.
    */
   archive(tid: string): void {
     const t = now()

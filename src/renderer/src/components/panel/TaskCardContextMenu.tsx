@@ -1,34 +1,56 @@
-import type { JSX } from 'react'
-import { Archive, ChevronRight, Pencil, Play } from 'lucide-react'
+import { useState, type JSX } from 'react'
+import { Archive, ChevronRight, FolderGit2, Pencil, Play } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import { TASK_STATUSES, taskStatusLabel, taskColumnDot } from '@renderer/lib/status'
+import { isSingleProject, repoLock, taskLaneKey, PROJECT_LANE } from '@renderer/lib/taskScope'
 import type { Task, TaskStatus } from '@shared/types'
 import { ContextMenu, MenuItem, type MenuPos } from '../rail/menu'
+import TaskRepoStep from './TaskRepoStep'
 
 /**
- * Right-click context menu for a task card: edit, bridge to a Worktree, quick
- * status changes, and archive (reversible, so unconfirmed). Shared by the panel tracker and
- * the full board so a card offers the same actions wherever it's shown. The
- * owning card holds the open/position state and renders this when set.
+ * Right-click context menu for a task card: edit, bridge to a Worktree, file
+ * it under a repo, quick status changes, and archive (reversible, so
+ * unconfirmed). Shared by the panel tracker and the full board so a card
+ * offers the same actions wherever it's shown. The owning card holds the
+ * open/position state and renders this when set; the tracker's scope chip
+ * opens it straight at the Repo step.
  */
 export default function TaskCardContextMenu({
   task,
   pos,
-  onClose
+  onClose,
+  initialStep = 'items'
 }: {
   task: Task
   pos: MenuPos
   onClose: () => void
+  initialStep?: 'items' | 'repo'
 }): JSX.Element {
   const openModal = useStore((s) => s.openModal)
   const setActiveWorktree = useStore((s) => s.setActiveWorktree)
-  const repo = useStore((s) => s.repos.find((p) => p.id === task.repoId))
-  const hasWorktree = useStore((s) => !!task.worktreeId && s.worktrees.some((w) => w.id === task.worktreeId))
+  const project = useStore((s) => s.projects.find((p) => p.id === task.projectId))
+  const repos = useStore((s) => s.repos)
+  const worktrees = useStore((s) => s.worktrees)
+  const hasWorktree = !!task.worktreeId && worktrees.some((w) => w.id === task.worktreeId)
+  const lock = repoLock(task, worktrees)
+  const [step, setStep] = useState<'items' | 'repo'>(lock ? 'items' : initialStep)
 
   const setStatus = (status: TaskStatus): void => {
     if (status !== task.status) void window.orbital.updateTask(task.id, { status })
     onClose()
   }
+
+  if (step === 'repo' && project) {
+    return (
+      <ContextMenu pos={pos} width={210} onClose={onClose}>
+        <TaskRepoStep task={task} project={project} repos={repos} onDone={onClose} />
+      </ContextMenu>
+    )
+  }
+
+  const laneKey = project ? taskLaneKey(task, project) : PROJECT_LANE
+  const repoName = laneKey === PROJECT_LANE ? 'none' : (repos.find((r) => r.id === laneKey)?.name ?? 'none')
+  const noRepos = !project || project.repoIds.length === 0
 
   return (
     <ContextMenu pos={pos} width={210} onClose={onClose}>
@@ -53,10 +75,22 @@ export default function TaskCardContextMenu({
         <MenuItem
           icon={<Play size={13} strokeWidth={1.5} />}
           label="Start Worktree"
+          hint={noRepos ? 'add a repo first' : undefined}
+          disabled={noRepos}
           onClick={() => {
-            openModal('newWorktree', { repo, task })
+            // New Worktree works out the repo (or asks for one).
+            openModal('newWorktree', { task })
             onClose()
           }}
+        />
+      )}
+      {project && !isSingleProject(project) && (
+        <MenuItem
+          icon={<FolderGit2 size={13} strokeWidth={1.5} />}
+          label="Repo"
+          hint={lock ? 'has worktree' : repoName}
+          disabled={!!lock}
+          onClick={() => setStep('repo')}
         />
       )}
 

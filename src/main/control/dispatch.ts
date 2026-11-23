@@ -7,6 +7,9 @@ import {
   type TabConfig,
   type TaskStatus,
   type TaskPatch,
+  type Project,
+  type Task,
+  type Worktree,
   type ControlCommand,
   type ControlRequest,
   type ControlResponse
@@ -21,7 +24,16 @@ import { loadProjectMap } from '../services/project-map'
 import { createTabInWorktree } from '../tabs'
 import { createWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
 import { hookFired, statusReported } from '../status'
-import { noRepoError, normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
+import {
+  noRepoError,
+  normalizeServerUrl,
+  parseTagList,
+  resolveTask,
+  scopeRequest,
+  sessionCaptureRepoId,
+  sessionFocusRepoId,
+  taskDto
+} from './helpers'
 
 /**
  * The `orbital` CLI's commands, one handler per ControlCommand. The table is
@@ -32,20 +44,50 @@ type Handler = (req: ControlRequest) => Promise<ControlResponse>
 
 /** `task archive` / `task unarchive` (and the legacy `task delete`). */
 async function archiveTask(req: ControlRequest, archive: boolean): Promise<ControlResponse> {
-  if (!req.repoId) return { ok: false, error: noRepoError(req) }
-  const idArg = String(req.args.id ?? '').trim()
-  if (!idArg) return { ok: false, error: 'task id required' }
-  const { task, error } = resolveTask(req.repoId, idArg)
-  if (!task) return { ok: false, error }
+  const found = findTask(req)
+  if (!found.task) return { ok: false, error: found.error }
+  const task = found.task
   if (archive) tables.tasks.archive(task.id)
   else tables.tasks.unarchive(task.id)
   runtime.broadcastState()
-  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoName(req) } }
+  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoNameOf(task.repoId) } }
 }
 
-/** The target repo's name, so the CLI can name it in a cross-repo confirmation. */
-const repoName = (req: ControlRequest): string | undefined =>
-  req.repoId ? tables.repos.get(req.repoId)?.name : undefined
+/** A repo's name, so the CLI can say where a task went; undefined for none. */
+const repoNameOf = (repoId: string | null | undefined): string | undefined =>
+  repoId ? tables.repos.get(repoId)?.name : undefined
+
+/** Whether `--repo` was passed (scopeRequest has then made it `req.repoId`). */
+const repoGiven = (req: ControlRequest): boolean =>
+  req.args.repo !== undefined && req.args.repo !== null && req.args.repo !== ''
+
+const flag = (v: unknown): boolean => v === true || v === 'true'
+
+/**
+ * The project task commands act in: `--repo`'s project when it is passed (the
+ * opt-in to reach another repo, which may be in another project), else the
+ * calling terminal's. Tasks belong to projects, so a folder session, which
+ * has no repo, works here like any other.
+ */
+function taskProject(req: ControlRequest): { project?: Project; error?: string } {
+  const pid = repoGiven(req) && req.repoId ? tables.repos.get(req.repoId)?.projectId : projectIdOf(req)
+  const project = pid ? tables.projects.get(pid) : undefined
+  return project ? { project } : { error: 'no ORBITAL_WORKTREE_ID in environment' }
+}
+
+/** The `id` argument resolved in the request's project. */
+function findTask(req: ControlRequest): { task?: Task; project?: Project; error?: string } {
+  const { project, error } = taskProject(req)
+  if (!project) return { error }
+  const idArg = String(req.args.id ?? '').trim()
+  if (!idArg) return { error: 'task id required' }
+  const found = resolveTask(project.id, idArg)
+  return found.task ? { task: found.task, project } : { error: found.error }
+}
+
+/** The calling terminal's worktree, when it is one of this workspace's. */
+const callerWorktree = (req: ControlRequest): Worktree | undefined =>
+  req.worktreeId ? tables.worktrees.get(req.worktreeId) : undefined
 
 /**
  * The project a request is about: the calling worktree's (it follows its repo
@@ -167,17 +209,36 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: list }
   },
   'worktree-new': async (req) => {
-    if (!req.repoId) return { ok: false, error: noRepoError(req) }
-    const repo = tables.repos.get(req.repoId)
-    if (!repo) return { ok: false, error: 'repo not found' }
     // A task number/id may come along: the Worktree is then started from that
-    // task, same as the cockpit's "start a worktree from a task".
-    let task: ReturnType<typeof tables.tasks.get> | undefined
+    // task, same as the cockpit's "start a worktree from a task". It goes in
+    // `--repo` when that is passed, else the task's repo, else the project's
+    // only repo; an untagged task in a project of several needs `--repo`.
+    let task: Task | undefined
+    let repoId = req.repoId
     if (req.args.task !== undefined) {
-      const resolved = resolveTask(req.repoId, String(req.args.task).trim())
+      const { project, error } = taskProject(req)
+      if (!project) return { ok: false, error }
+      const resolved = resolveTask(project.id, String(req.args.task).trim())
       if (!resolved.task) return { ok: false, error: resolved.error }
       task = resolved.task
+      if (!repoGiven(req)) {
+        repoId =
+          task.repoId && project.repoIds.includes(task.repoId)
+            ? task.repoId
+            : project.repoIds.length === 1
+              ? project.repoIds[0]
+              : undefined
+        if (!repoId) {
+          return {
+            ok: false,
+            error: `task #${task.seq} has no repo, so say where to start it: pass --repo <name|id> (\`orbital project\` lists the repos)`
+          }
+        }
+      }
     }
+    if (!repoId) return { ok: false, error: noRepoError(req) }
+    const repo = tables.repos.get(repoId)
+    if (!repo) return { ok: false, error: 'repo not found' }
     const worktree = await createWorktree({
       repoId: repo.id,
       branch: req.args.worktree !== undefined ? String(req.args.worktree) : undefined,
@@ -283,11 +344,18 @@ const handlers: Record<ControlCommand, Handler> = {
     return status ? { ok: true, data: { status } } : { ok: true }
   },
   'task-add': async (req) => {
-    if (!req.repoId) return { ok: false, error: noRepoError(req) }
     const title = String(req.args.title ?? '').trim()
     if (!title) return { ok: false, error: 'task title required' }
+    const noRepo = flag(req.args.noRepo)
+    if (noRepo && repoGiven(req)) return { ok: false, error: 'pass --repo or --no-repo, not both' }
+    const { project, error } = taskProject(req)
+    if (!project) return { ok: false, error }
+    // Not told otherwise, file it where the tracker's quick capture would:
+    // this repo from a repo session, no repo from the project session.
+    const repoId = noRepo ? null : repoGiven(req) ? (req.repoId ?? null) : sessionCaptureRepoId(project, callerWorktree(req))
     const task = tables.tasks.create({
-      repoId: req.repoId,
+      projectId: project.id,
+      repoId,
       title,
       description: req.args.description ? String(req.args.description) : undefined,
       tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined,
@@ -296,12 +364,33 @@ const handlers: Record<ControlCommand, Handler> = {
       createdBy: 'agent'
     })
     runtime.broadcastState()
-    return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoName(req) } }
+    return {
+      ok: true,
+      data: { id: task.id, seq: task.seq, title: task.title, repo: repoNameOf(task.repoId) ?? null, project: project.name }
+    }
   },
   'task-list': async (req) => {
-    if (!req.repoId) return { ok: false, error: noRepoError(req) }
-    const all = req.args.all === true || req.args.all === 'true'
-    const archived = req.args.archived === true || req.args.archived === 'true'
+    const { project, error } = taskProject(req)
+    if (!project) return { ok: false, error }
+    const all = flag(req.args.all)
+    const archived = flag(req.args.archived)
+    const noRepo = flag(req.args.noRepo)
+    const allRepos = flag(req.args.allRepos)
+    if ([noRepo, allRepos, repoGiven(req)].filter(Boolean).length > 1) {
+      return { ok: false, error: 'pass one of --repo, --no-repo and --all-repos' }
+    }
+    // Which repo's tasks: `--repo`'s, none (`--no-repo`), every one
+    // (`--all-repos`), or by default the terminal's: its repo's in a repo
+    // session, the whole project's in the project session.
+    const scope: { repoId: string | null } | 'all' = noRepo
+      ? { repoId: null }
+      : repoGiven(req)
+        ? { repoId: req.repoId ?? null }
+        : allRepos
+          ? 'all'
+          : ((focus) => (focus ? { repoId: focus } : 'all'))(sessionFocusRepoId(project, callerWorktree(req)))
+    // A tag naming a repo outside the project reads as none, as on the board.
+    const tagOf = (t: Task): string | null => (t.repoId && project.repoIds.includes(t.repoId) ? t.repoId : null)
     // Explicit --status implies --all: asking for `done` and getting nothing
     // because the default hides done tasks would just be confusing.
     let wanted: TaskStatus | null = null
@@ -314,27 +403,28 @@ const handlers: Record<ControlCommand, Handler> = {
     // everything else; the default is active, not-done tasks.
     const list = tables.tasks
       .list(archived ? 'archived' : all ? 'all' : 'active')
-      .filter((t) => t.repoId === req.repoId && (all || archived || wanted !== null || t.status !== 'done'))
+      .filter((t) => t.projectId === project.id && (scope === 'all' || tagOf(t) === scope.repoId))
+      .filter((t) => all || archived || wanted !== null || t.status !== 'done')
       .filter((t) => wanted === null || t.status === wanted)
       .filter((t) => !tag || t.tags.some((x) => x.toLowerCase() === tag))
       .map(taskDto)
     return { ok: true, data: list }
   },
   'task-show': async (req) => {
-    if (!req.repoId) return { ok: false, error: noRepoError(req) }
-    const idArg = String(req.args.id ?? '').trim()
-    if (!idArg) return { ok: false, error: 'task id required' }
-    const { task, error } = resolveTask(req.repoId, idArg)
-    if (!task) return { ok: false, error }
-    return { ok: true, data: taskDto(task) }
+    const { task, project, error } = findTask(req)
+    if (!task || !project) return { ok: false, error }
+    return { ok: true, data: { ...taskDto(task), project: project.name } }
   },
   'task-update': async (req) => {
-    if (!req.repoId) return { ok: false, error: noRepoError(req) }
-    const idArg = String(req.args.id ?? '').trim()
-    if (!idArg) return { ok: false, error: 'task id required' }
-    const { task, error } = resolveTask(req.repoId, idArg)
+    const { task, error } = findTask(req)
     if (!task) return { ok: false, error }
     const patch: TaskPatch = {}
+    // `task update --repo <r>` files it under r, `--no-repo` under none.
+    // (`task done` passes `--repo` only to find the task, never to move it.)
+    const noRepo = flag(req.args.noRepo)
+    if (noRepo && repoGiven(req)) return { ok: false, error: 'pass --repo or --no-repo, not both' }
+    if (noRepo) patch.repoId = null
+    else if (flag(req.args.retag) && repoGiven(req) && req.repoId) patch.repoId = req.repoId
     if (req.args.status !== undefined) {
       const status = normalizeTaskStatus(String(req.args.status))
       if (!status) return { ok: false, error: `unknown task status '${req.args.status}'` }
@@ -346,7 +436,17 @@ const handlers: Record<ControlCommand, Handler> = {
     if (Object.keys(patch).length === 0) return { ok: false, error: 'nothing to update' }
     const updated = tables.tasks.update(task.id, patch)
     runtime.broadcastState()
-    return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title, repo: repoName(req) } }
+    return {
+      ok: true,
+      data: {
+        id: updated.id,
+        seq: updated.seq,
+        status: updated.status,
+        title: updated.title,
+        repo: repoNameOf(updated.repoId) ?? null,
+        retagged: patch.repoId !== undefined && task.repoId !== updated.repoId
+      }
+    }
   },
   'task-archive': async (req) => archiveTask(req, true),
   'task-unarchive': async (req) => archiveTask(req, false),

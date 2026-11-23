@@ -50,18 +50,21 @@ orbital project
 
 The calling terminal's project, read live: its root folder, its home repo, and
 each member repo with the branch of its root checkout, whether that checkout has
-uncommitted changes, how many worktrees Orbital has for it, and its path. The
-calling terminal's own repo is marked `*`.
+uncommitted changes, how many worktrees Orbital has for it, how many open tasks
+are filed under it, and its path. The calling terminal's own repo is marked
+`*`. A last line counts the open tasks filed under no repo.
 
 ```
 project      platform
 root         C:\Projects\platform
 home         docs (C:\Projects\platform\docs)
 
-   NAME         BRANCH  STATE  WORKTREES  PATH
-   docs (home)  main    clean  0          C:\Projects\platform\docs
-*  api          main    dirty  2          C:\Projects\platform\api
-   web          main    clean  1          C:\Projects\platform\web
+   NAME         BRANCH  STATE  WORKTREES  TASKS  PATH
+   docs (home)  main    clean  0          1      C:\Projects\platform\docs
+*  api          main    dirty  2          4      C:\Projects\platform\api
+   web          main    clean  1          0      C:\Projects\platform\web
+
+Open tasks filed under no repo (the whole project): 2
 ```
 
 `--json` adds each repo's remote, its worktrees (name, branch, path, linked
@@ -78,10 +81,12 @@ orbital project                                                    # pick the re
 orbital worktree new --repo api --task 12 --worktree feat/health   # a worktree in api, linked to task #12
 orbital tab new agent --repo api --worktree feat/health --prompt "Do task #12; run the tests"
 orbital task add "Update the client for the new endpoint" --repo web
+orbital task add "Agree the release order"                         # no --repo: for the whole project
 ```
 
-The folder session has no repo of its own, so task and worktree commands there
-need `--repo`. Agents in the project session can read and edit every member repo
+The folder session has no repo of its own, so worktree commands there need
+`--repo`. Task commands work there as anywhere in the project; a task added
+without `--repo` is filed under no repo. Agents in the project session can read and edit every member repo
 without a prompt (Claude and Codex get them through `--add-dir`); agents in a
 member repo get the home repo the same way.
 
@@ -100,9 +105,9 @@ calling terminal's own repo is marked `*`.
    api   b82d4e61-0a3c-4f9e-8b5d-1c7a2e9f6d34  C:\Projects\api
 ```
 
-Task and worktree commands act on the calling terminal's repo. Add
-`--repo <name|id>` to `worktrees`, `worktree new`, or any `task` command to
-target a sibling repo in the same workspace instead. The name match ignores
+Worktree commands act on the calling terminal's repo, and task commands on its
+project. Add `--repo <name|id>` to `worktrees`, `worktree new`, or any `task`
+command to target a sibling repo in the same workspace instead. The name match ignores
 case, and a unique id prefix works too. Passing the flag is the opt-in: without
 it nothing reaches beyond your own repo, and with it reads and writes both go
 through. Repos in other workspaces are never reachable, and neither the
@@ -181,28 +186,45 @@ orbital tab new agent --repo api --prompt "Add the /health endpoint, then run th
 ## Tasks
 
 ```sh
-orbital task add "<title>" [--description <text>] [--tags <a,b,c>]
-orbital task list [--all | --archived] [--status <status>] [--tag <tag>]
+orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--repo <name|id> | --no-repo]
+orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--repo <name|id> | --no-repo | --all-repos]
 orbital task show <number|id>
-orbital task update <number|id> [--status <status>] [--title <text>] [--description <text>] [--tags <a,b,c>]
-orbital task start <number|id> [--worktree <branch>] [--base <ref>] [name]
+orbital task update <number|id> [--status <status>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--repo <name|id> | --no-repo]
+orbital task start <number|id> [--worktree <branch>] [--base <ref>] [--repo <name|id>] [name]
 orbital task done <number|id>
 orbital task archive <number|id>
 orbital task unarchive <number|id>
 ```
 
-Every `task` command also takes `--repo <name|id>` to work on a sibling
-repo's tasks (see [Repos](#repos)).
+A task belongs to a project and is filed under one of its repos, or under no
+repo when the work spans the project. The commands work from any terminal in
+the project, the project's folder session included, and reach every task in
+it. Every `task` command also takes `--repo <name|id>` to work in a sibling
+repo's project (see [Repos](#repos)).
 
+- `task add` files the task where the terminal works, the same as the task
+  panel's capture box: under the terminal's repo from a repo's worktree, under
+  no repo from the project session (the folder session, or the home repo's
+  root checkout). A project with one repo files everything under it.
+  `--repo <name|id>` files it under that repo, `--no-repo` under none.
 - `task list` prints open tasks by number (`--all` includes done and archived
   ones; an explicit `--status` also shows done ones; `--archived` shows only
-  archived tasks):
+  archived tasks). It lists the terminal's scope: its repo's tasks from a
+  repo's worktree, the whole project's from the project session.
+  `--all-repos` lists the whole project's from anywhere, `--repo` one repo's,
+  and `--no-repo` only those filed under no repo. A REPO column appears when
+  the list mixes repos:
 
   ```
-  ID   STATUS       TITLE                 TAGS       WORKTREE
-  #12  in_progress  Add checkout flow     ui,cart    linked
-  #13  todo         Fix cart badge count
+  ID   STATUS       REPO       TITLE                 TAGS       WORKTREE
+  #12  in_progress  web        Add checkout flow     ui,cart    linked
+  #13  todo         (no repo)  Agree the release order
   ```
+
+- `task update --repo <name|id>` refiles a task under that repo, and
+  `--no-repo` under none. A task with a live worktree is pinned to the
+  worktree's repo and refuses either. (`task done --repo <r>` and `task show
+  --repo <r>` only use the flag to find the task.)
 
 - `task show` prints every field, including who filed the task (`user` from
   the cockpit UI, `agent` from this CLI) and when it was created and last
@@ -218,8 +240,10 @@ repo's tasks (see [Repos](#repos)).
 - Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or
   underscores both accepted).
 - `task start` is the scriptable form of the task board's play button: it creates
-  a worktree named after the task, links the two, and moves the task to
-  *in progress*.
+  a worktree named after the task in the task's repo, links the two, and moves
+  the task to *in progress*. A task filed under no repo, in a project with more
+  than one repo, needs `--repo <name|id>` to say where; starting it files it
+  under that repo.
 
 ## Dev servers
 

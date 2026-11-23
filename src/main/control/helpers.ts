@@ -1,4 +1,4 @@
-import type { ControlRequest, Repo, Task } from '@shared/types'
+import type { ControlRequest, Project, Repo, Task, Worktree } from '@shared/types'
 import { tables } from '../runtime'
 
 /**
@@ -160,27 +160,61 @@ export function noRepoError(req: ControlRequest): string {
 
 /**
  * Resolve a task by number (`12` / `#12`), full id, or unique id prefix within a
- * repo. Archived tasks resolve too, so `task show` / `update` / `unarchive`
- * can still reach them — an archived #12 stays #12.
+ * project, whichever of its repos it is filed under (or none). Archived tasks
+ * resolve too, so `task show` / `update` / `unarchive` can still reach them —
+ * an archived #12 stays #12.
  */
-export function resolveTask(repoId: string, idArg: string): { task?: ReturnType<typeof tables.tasks.get>; error?: string } {
-  const inRepo = tables.tasks.list('all').filter((t) => t.repoId === repoId)
+export function resolveTask(projectId: string, idArg: string): { task?: ReturnType<typeof tables.tasks.get>; error?: string } {
+  const inProject = tables.tasks.list('all').filter((t) => t.projectId === projectId)
   if (/^#?\d+$/.test(idArg)) {
     const seq = Number.parseInt(idArg.replace('#', ''), 10)
-    const task = inRepo.find((t) => t.seq === seq)
+    const task = inProject.find((t) => t.seq === seq)
     return task ? { task } : { error: `no task matches number '${idArg}'` }
   }
-  const candidates = inRepo.filter((t) => t.id === idArg || t.id.startsWith(idArg))
+  const candidates = inProject.filter((t) => t.id === idArg || t.id.startsWith(idArg))
   if (candidates.length === 0) return { error: `no task matches id '${idArg}'` }
   if (candidates.length > 1) return { error: `id '${idArg}' is ambiguous (${candidates.length} matches)` }
   return { task: candidates[0] }
 }
 
-/** The task shape the CLI prints and `--json` emits. */
+/**
+ * The repo a session's task list leads with, or null for the whole project.
+ * Mirrors the tracker (renderer `trackerFocusRepoId`): null in a project of
+ * fewer than two repos (its tasks are one list), in the project session (the
+ * folder session, or the home repo's root checkout), and with no worktree to
+ * go on; otherwise the session's own repo.
+ */
+export function sessionFocusRepoId(
+  project: Pick<Project, 'repoIds' | 'homeRepoId'>,
+  worktree: Pick<Worktree, 'kind' | 'repoId'> | undefined
+): string | null {
+  if (project.repoIds.length < 2 || !worktree?.repoId || worktree.kind === 'folder') return null
+  if (worktree.kind === 'root' && worktree.repoId === project.homeRepoId) return null
+  return project.repoIds.includes(worktree.repoId) ? worktree.repoId : null
+}
+
+/**
+ * The repo `task add` files under when not told: what the tracker's quick
+ * capture does (renderer `captureRepoId`). A project of fewer than two repos
+ * files under its only repo (none with no repos); otherwise the session's
+ * focus repo, which is none in the project session.
+ */
+export function sessionCaptureRepoId(
+  project: Pick<Project, 'repoIds' | 'homeRepoId'>,
+  worktree: Pick<Worktree, 'kind' | 'repoId'> | undefined
+): string | null {
+  if (project.repoIds.length < 2) return project.repoIds[0] ?? null
+  return sessionFocusRepoId(project, worktree)
+}
+
+/** The task shape the CLI prints and `--json` emits. `repo` is the repo's name, or null with none. */
 export function taskDto(t: Task): Record<string, unknown> {
   return {
     id: t.id,
     seq: t.seq,
+    projectId: t.projectId,
+    repoId: t.repoId,
+    repo: t.repoId ? (tables.repos.get(t.repoId)?.name ?? null) : null,
     status: t.status,
     title: t.title,
     description: t.description,

@@ -158,7 +158,7 @@ export default function TitleBar(): JSX.Element {
         { label: 'Command Palette…', hint: 'Ctrl Shift P', onClick: () => openPalette('>') },
         { label: 'Go to File…', hint: 'Ctrl Shift O', onClick: () => openPalette('') },
         { sep: true, label: '' },
-        { label: 'All Tasks…', onClick: () => openModal('board') },
+        { label: 'Task Board…', onClick: () => openModal('board') },
         { label: 'Commit History…', onClick: () => openModal('commitHistory'), disabled: !activeWorktreeId },
         { label: 'Reload', onClick: () => window.location.reload() },
         { label: 'Toggle Developer Tools', onClick: () => window.orbital.toggleDevTools() },

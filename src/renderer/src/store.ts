@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { projectSessionOf } from './lib/taskScope'
 import { fireAndForget } from './lib/bridge'
 import type {
   AppState,
@@ -248,13 +249,7 @@ function repoSession(worktrees: Worktree[], repoId: string): Worktree | undefine
  * session. A plain one-repo project has neither, and its session is its repo's.
  */
 export function projectSession(projects: Project[], worktrees: Worktree[], projectId: string): Worktree | undefined {
-  const project = projects.find((p) => p.id === projectId)
-  if (!project) return undefined
-  if (project.homeRepoId) return repoSession(worktrees, project.homeRepoId)
-  return (
-    worktrees.find((w) => w.kind === 'folder' && w.projectId === projectId) ??
-    (project.repoIds.length === 1 ? repoSession(worktrees, project.repoIds[0]) : undefined)
-  )
+  return projectSessionOf(projects, worktrees, projectId)
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -479,8 +474,9 @@ export function activeWorktree(s: Store): Worktree | undefined {
   return s.worktrees.find((w) => w.id === s.activeWorktreeId)
 }
 
-export function tasksForRepo(s: Store, repoId: string): Task[] {
-  return s.tasks.filter((t) => t.repoId === repoId)
+/** A project's (active) tasks, in store order. */
+export function tasksForProject(s: Store, projectId: string): Task[] {
+  return s.tasks.filter((t) => t.projectId === projectId)
 }
 
 /**

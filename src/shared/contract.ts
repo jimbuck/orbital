@@ -374,7 +374,10 @@ export const contract = {
   cancelSearch: invoke<(searchId: string) => Promise<void>>(),
 
   // tasks
-  createTask: invoke<(repoId: string, title: string, description?: string, tags?: string[]) => Promise<Task>>(),
+  /** File a task in a project, under one of its repos or (null / omitted) none. */
+  createTask: invoke<
+    (projectId: string, title: string, repoId?: string | null, description?: string, tags?: string[]) => Promise<Task>
+  >(),
   updateTask: invoke<(taskId: string, patch: TaskPatch) => Promise<Task>>(),
   /** Tasks are archived, never deleted: hidden from the board and panel, but kept (with their number). */
   archiveTask: invoke<(taskId: string) => Promise<void>>(),

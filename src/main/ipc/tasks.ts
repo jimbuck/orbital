@@ -6,8 +6,10 @@ import { handle, broadcast } from './handle'
 export function register(): void {
   const h = handle
   // ---- tasks ----
-  h(IPC.createTask, (_e, repoId, title, description, tags) => {
-    const t = tables.tasks.create({ repoId, title, description, tags, createdBy: 'user' })
+  h(IPC.createTask, (_e, projectId, title, repoId, description, tags) => {
+    // The window only ever shows this workspace's projects; refuse anything else.
+    if (!tables.projects.list().some((p) => p.id === projectId)) throw new Error(`project ${projectId} is not in this workspace`)
+    const t = tables.tasks.create({ projectId, repoId: repoId ?? null, title, description, tags, createdBy: 'user' })
     broadcast()
     return t
   })

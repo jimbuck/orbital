@@ -102,6 +102,7 @@ export default function CommandPalette(): JSX.Element | null {
   const closePalette = useStore((s) => s.closePalette)
   const worktrees = useStore((s) => s.worktrees)
   const repos = useStore((s) => s.repos)
+  const projects = useStore((s) => s.projects)
   const tasks = useStore((s) => s.tasks)
   const settings = useStore((s) => s.settings)
   const devServers = useStore((s) => s.devServers)
@@ -282,7 +283,8 @@ export default function CommandPalette(): JSX.Element | null {
         label,
         ranges: term ? positionsToRanges(m.positions.filter((p) => p < label.length)) : undefined,
         detail: taskStatusLabel(t.status),
-        meta: repoName(t.repoId),
+        // Where it is filed: its repo, else its project (the palette lists every project's).
+        meta: t.repoId ? repoName(t.repoId) : (projects.find((p) => p.id === t.projectId)?.name ?? 'project'),
         run: () => openModal('editTask', { task: t }),
         score: m.score
       })
@@ -290,7 +292,7 @@ export default function CommandPalette(): JSX.Element | null {
     // Tie-break on recency: a task filed a minute ago is likelier to be the one
     // being looked for than one from last month.
     return rows.sort((a, b) => b.score - a.score)
-  }, [tasks, term, repoName, openModal])
+  }, [tasks, term, repoName, projects, openModal])
 
   const fileRows = useMemo((): Row[] => {
     const byId = new Map(worktrees.map((w) => [w.id, w]))

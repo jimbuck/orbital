@@ -91,14 +91,14 @@ export function briefingText({ repo, worktree, providerName, hooksInstalled, pro
     '',
     'The `orbital` CLI is on your PATH — use it to work with the cockpit. Add `--json` to any',
     'command to get the raw payload instead of a table when you intend to parse it.',
-    '- `orbital task add "<title>" [--description <text>] [--tags <a,b>]` — queue follow-up work you notice but should not tackle now.',
-    "- `orbital task list [--status <s>] [--tag <t>]` — the repo's open tasks (number, status, title). Done tasks are hidden unless you pass `--all` or ask for a status explicitly; archived tasks are hidden unless you pass `--all` or `--archived`.",
-    '- `orbital task show <number>` — full detail for one task (e.g. `orbital task show 12`).',
-    '- `orbital task update <number> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <number>` when it is finished; `orbital task archive <number>` to drop one from the board (it is kept, not deleted; `orbital task unarchive <number>` brings it back).',
+    '- `orbital task add "<title>" [--description <text>] [--tags <a,b>]` — queue follow-up work you notice but should not tackle now. Tasks belong to the project; this files it under this repo from a repo worktree and under no repo (the whole project) from the project session. `--repo <name>` or `--no-repo` says otherwise.',
+    "- `orbital task list [--status <s>] [--tag <t>]` — this terminal's open tasks (number, status, title): this repo's from a repo worktree, the whole project's from the project session. `--all-repos` lists the whole project's, `--no-repo` only those filed under no repo. Done tasks are hidden unless you pass `--all` or ask for a status explicitly; archived tasks are hidden unless you pass `--all` or `--archived`.",
+    '- `orbital task show <number>` — full detail for any task of the project (e.g. `orbital task show 12`).',
+    '- `orbital task update <number> --status <todo|in-progress|ready-for-review|done>` — progress a task you are working on; `orbital task done <number>` when it is finished; `orbital task archive <number>` to drop one from the board (it is kept, not deleted; `orbital task unarchive <number>` brings it back). `--repo <name>` / `--no-repo` on `task update` refiles a task, except while it has a worktree: its repo follows the worktree.',
     '  Move a task to `in-progress` the moment you start on it and off it when you finish — the board is how the human sees what is underway, and a task left in `todo` while you work reads as unclaimed. (A worktree opened with `orbital task start` has already done this.)',
-    '- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress.',
+    "- `orbital task start <number>` — open a worktree for a task, linked and moved to in-progress, in the task's repo. A task filed under no repo needs `--repo <name>` to say where.",
     "- `orbital worktrees` — list this repo's worktrees.",
-    "- `orbital repos` — the workspace's other repos (name, id, repo path). Task and worktree commands stay scoped to this repo; pass `--repo <name|id>` to read or write a sibling's instead. Passing it is the opt-in, so only reach across when the work calls for it.",
+    "- `orbital repos` — the workspace's other repos (name, id, repo path). Worktree commands stay scoped to this repo and task commands to this project; pass `--repo <name|id>` to read or write a sibling's instead. Passing it is the opt-in, so only reach across when the work calls for it.",
     '- `orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [name]` — open a new worktree, on a fresh branch, an existing one, or forked from a given ref.',
     "- `orbital worktree sync` — copy the root checkout's env files (.env, agent config) into this worktree again; they are copied once at creation and never kept in sync, so run this if the root's changed. Overwrites this worktree's copies.",
     '- `orbital tab new <terminal|browser|editor|agent|search> [arg]` — open a tab in this worktree (browser arg = URL, editor arg = file path, agent arg = the name of a configured agent, search arg = a query to run across the checkout).',
@@ -170,17 +170,18 @@ function projectSection(
     ]
     if (map) for (const r of map.repos) lines.push(...repoLines(r))
     else for (const r of role.members) lines.push(`- ${r.name}${r.id === role.home?.id ? ' [home]' : ''}: ${r.repoPath}`)
+    if (map) lines.push(`- Filed under no repo (work that spans the project): ${map.openTasks} open task${map.openTasks === 1 ? '' : 's'}.`)
     lines.push(
       '',
       'Working across these repos:',
       '- `orbital project` — this map, refreshed (branches, changes, worktrees).',
       '- `orbital worktree new --repo <name> [--task <n>] [--worktree <branch>]` — open a worktree in one repo for a piece of the work.',
       '- `orbital tab new agent --repo <name> [--worktree <name|branch>] --prompt "<instructions>"` — start an agent in that repo (its root checkout, or the named worktree) with its instructions.',
-      '- `orbital task add "<title>" --repo <name>` — file work against one repo.',
+      '- `orbital task add "<title>" [--repo <name>]` — file work for the whole project, or with `--repo` against one repo.',
       'Plan here, then hand each repo its part. Prefer a worktree per change over editing a root checkout directly.'
     )
     if (worktree.kind === 'folder') {
-      lines.push('Task and worktree commands need `--repo <name>` here: the folder session has no repo of its own.')
+      lines.push('Worktree commands need `--repo <name>` here: the folder session has no repo of its own.')
     }
     return lines
   }

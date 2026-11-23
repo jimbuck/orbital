@@ -112,7 +112,7 @@ export interface RepoMapEntry {
   current: boolean
   /** Its linked worktrees in Orbital. */
   worktrees: { name: string; branch: string; path: string; task: number | null }[]
-  /** Tasks not done and not archived. */
+  /** Tasks filed under this repo, not done and not archived. */
   openTasks: number
   /** Agent steering files at the repo root, in the order agents read them. */
   steering: string[]
@@ -124,6 +124,8 @@ export interface ProjectMap {
   rootPath: string
   home: { id: string; name: string; path: string } | null
   repos: RepoMapEntry[]
+  /** The project's open tasks filed under no repo: work that spans it. */
+  openTasks: number
 }
 
 /** What git said about one checkout. */
@@ -148,6 +150,7 @@ export function assembleProjectMap(input: {
   const { project, members, worktrees, tasks, probes, currentRepoId } = input
   const steering = input.steering ?? steeringFiles
   const seqOf = new Map(tasks.map((t) => [t.id, t.seq]))
+  const open = tasks.filter((t) => t.projectId === project.id && t.status !== 'done' && t.archivedAt == null)
   const home = project.homeRepoId ? members.find((r) => r.id === project.homeRepoId) : undefined
   return {
     id: project.id,
@@ -169,10 +172,12 @@ export function assembleProjectMap(input: {
         worktrees: worktrees
           .filter((w) => w.repoId === r.id && w.kind === 'linked')
           .map((w) => ({ name: w.name, branch: w.branch, path: w.path, task: w.taskId ? (seqOf.get(w.taskId) ?? null) : null })),
-        openTasks: tasks.filter((t) => t.repoId === r.id && t.status !== 'done' && t.archivedAt == null).length,
+        openTasks: open.filter((t) => t.repoId === r.id).length,
         steering: steering(r.repoPath)
       }
-    })
+    }),
+    // A tag naming a repo outside the project counts as none, as on the board.
+    openTasks: open.filter((t) => !t.repoId || !project.repoIds.includes(t.repoId)).length
   }
 }
 

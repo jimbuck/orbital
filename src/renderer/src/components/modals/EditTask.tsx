@@ -7,8 +7,10 @@ import { formatTaskTime, taskCreatorLabel } from '@renderer/components/panel/Tas
 import { enhanceMarkdownCode } from '@renderer/lib/markdownCode'
 import { useThemeId } from '@renderer/lib/theme'
 import { useArchivedTasks } from '@renderer/lib/useArchivedTasks'
+import { isSingleProject, projectRepos, repoLock, taskLaneKey, PROJECT_LANE } from '@renderer/lib/taskScope'
 import type { Task, TaskStatus, TaskPatch } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
+import { Select } from './Select'
 
 /** modalData payload for the Edit Task modal. */
 interface EditTaskData {
@@ -32,6 +34,16 @@ export default function EditTask(): JSX.Element {
   const allTasks = useStore((s) => s.tasks)
   const archivedTasks = useArchivedTasks()
   const task = data?.task
+  // The task's own project, not the active one: the palette can open any project's task.
+  const project = useStore((s) => (task ? s.projects.find((p) => p.id === task.projectId) : undefined))
+  const repos = useStore((s) => s.repos)
+  const worktrees = useStore((s) => s.worktrees)
+  // The lane value (a stale tag shows as none, and is only written if changed).
+  const shownRepoId = task && project ? taskLaneKey(task, project) : PROJECT_LANE
+  const initialRepoId = shownRepoId === PROJECT_LANE ? null : shownRepoId
+  const [repoId, setRepoId] = useState<string | null>(initialRepoId)
+  const locked = !!task && repoLock(task, worktrees) !== null
+  const showRepo = !!project && !isSingleProject(project)
 
   const [title, setTitle] = useState(task?.title ?? '')
   const [status, setStatus] = useState<TaskStatus>(task?.status ?? 'todo')
@@ -78,7 +90,7 @@ export default function EditTask(): JSX.Element {
     // For each tag, remember the most recent updatedAt of a task that carries it.
     const recency = new Map<string, number>()
     for (const t of [...allTasks, ...archivedTasks]) {
-      if (t.repoId !== task.repoId) continue
+      if (t.projectId !== task.projectId) continue
       for (const tag of t.tags) {
         if (selected.has(tag)) continue
         if (draft && !tag.toLowerCase().includes(draft)) continue
@@ -154,6 +166,7 @@ export default function EditTask(): JSX.Element {
     if (status !== task.status) patch.status = status
     if (nextDesc !== task.description) patch.description = nextDesc
     if (tagsChanged(nextTags, task.tags)) patch.tags = nextTags
+    if (showRepo && !locked && repoId !== initialRepoId) patch.repoId = repoId
 
     setBusy(true)
     setError(null)
@@ -199,6 +212,7 @@ export default function EditTask(): JSX.Element {
   return (
     <ModalShell
       title={`Edit task #${task.seq}`}
+      subtitle={project?.name}
       width={1040}
       minHeight={760}
       bodyClassName="flex flex-col"
@@ -238,25 +252,46 @@ export default function EditTask(): JSX.Element {
           Updated {formatTaskTime(task.updatedAt)}
         </div>
 
-        <div className={`${fieldLabel} mt-4`}>Status</div>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {TASK_STATUSES.map((s) => {
-            const dot = taskColumnDot(s)
-            const active = s === status
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStatus(s)}
-                className={`inline-flex items-center gap-1.5 rounded-btn border px-2.5 py-1.5 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
-                  active ? 'border-accent/50 bg-accent/[0.10]' : 'border-line-2 bg-bg hover:bg-hover'
-                }`}
-              >
-                <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
-                <span className={taskColumnHeadClass(s)}>{taskStatusLabel(s)}</span>
-              </button>
-            )
-          })}
+        {/* Status and Repo share one wrapping row, so the description keeps its height. */}
+        <div className="mt-4 flex flex-wrap items-start gap-x-6 gap-y-4">
+          <div>
+            <div className={fieldLabel}>Status</div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {TASK_STATUSES.map((s) => {
+                const dot = taskColumnDot(s)
+                const active = s === status
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setStatus(s)}
+                    className={`inline-flex items-center gap-1.5 rounded-btn border px-2.5 py-1.5 text-[11.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 ${
+                      active ? 'border-accent/50 bg-accent/[0.10]' : 'border-line-2 bg-bg hover:bg-hover'
+                    }`}
+                  >
+                    <span className={`flex-none size-[7px] rounded-full ${dot.className}`} style={dot.style} />
+                    <span className={taskColumnHeadClass(s)}>{taskStatusLabel(s)}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          {showRepo && project && (
+            <div className="w-[260px]">
+              <label className={fieldLabel} htmlFor="et-repo">
+                Repo <span className="font-normal text-faint">· {locked ? 'follows its worktree' : 'optional'}</span>
+              </label>
+              <Select id="et-repo" value={repoId ?? ''} onChange={(v) => setRepoId(v || null)} disabled={locked}>
+                <option value="">No repo — whole project</option>
+                {projectRepos(project, repos).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                    {r.id === project.homeRepoId ? ' (home)' : ''}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-2">

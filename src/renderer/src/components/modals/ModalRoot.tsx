@@ -1,6 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Archive, Plus, X } from 'lucide-react'
-import { useStore } from '@renderer/store'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Archive, FolderGit2, House, Layers, Plus, X } from 'lucide-react'
+import { useStore, activeProject } from '@renderer/store'
+import {
+  boardLanes,
+  captureRepoId,
+  projectRepos,
+  repoLock,
+  taskLaneKey,
+  type BoardLane
+} from '@renderer/lib/taskScope'
 import {
   TASK_STATUSES,
   taskStatusLabel,
@@ -118,30 +126,53 @@ export function ModalShell({
 }
 
 /* ============================================================================
- * Full-board modal ("All tasks") — tasks across all repos, by status.
+ * Task board — the active project's tasks, by status, in a lane per repo.
  * ========================================================================== */
 
-function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void }): React.JSX.Element {
+/** `4 tasks` / `1 task` / `no tasks`. */
+function taskCount(n: number): string {
+  return n === 0 ? 'no tasks' : `${n} task${n === 1 ? '' : 's'}`
+}
+
+/** What the board knows about the card being dragged. */
+interface BoardDrag {
+  taskId: string
+  /** The lane it was picked up from. */
+  fromKey: string
+  /** Pinned to its lane by a live worktree: it may change column, never lane. */
+  locked: boolean
+}
+
+function BoardTaskCard({
+  task,
+  canStart,
+  onDragStart,
+  onDragEnd
+}: {
+  task: Task
+  /** Whether the project has a repo to start a worktree in. */
+  canStart: boolean
+  onDragStart: (task: Task) => void
+  onDragEnd: () => void
+}): React.JSX.Element {
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
   const openModal = useStore((s) => s.openModal)
-  // Look up the card's repo the same way TaskCardContextMenu does, so the
-  // Create Worktree flow can seed the New Worktree modal with the right repo.
-  const repo = useStore((s) => s.repos.find((p) => p.id === task.repoId))
   // "No linked worktree" mirrors TaskCardContextMenu: a fresh todo with no Worktree
   // yet. If the task already has a matching Worktree, don't offer Create Worktree.
   const hasWorktree = useStore((s) => !!task.worktreeId && s.worktrees.some((w) => w.id === task.worktreeId))
-  const showCreateWorktree = task.status === 'todo' && !hasWorktree
+  const showCreateWorktree = canStart && task.status === 'todo' && !hasWorktree
   return (
     <div
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('text/plain', task.id)
         e.dataTransfer.effectAllowed = 'move'
+        onDragStart(task)
       }}
-      onDragEnd={() => onDragEnd?.()}
+      onDragEnd={onDragEnd}
       onContextMenu={(e) => {
         e.preventDefault()
-        setMenuPos(clampMenuPos(e, 210, 300))
+        setMenuPos(clampMenuPos(e, 210, 330))
       }}
       className="group cursor-grab rounded-card border border-line bg-bg p-3 active:cursor-grabbing"
     >
@@ -162,14 +193,15 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
       )}
       {showCreateWorktree && (
         // stopPropagation + a no-op mouseDown keep the click from starting a
-        // card drag. openModal now STACKS over the board (see ModalRoot), so
-        // New Worktree opens on top and closing it returns here.
+        // card drag. openModal STACKS over the board (see ModalRoot), so New
+        // Worktree opens on top and closing it returns here. It works out the
+        // repo from the task (or asks for one).
         <button
           type="button"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
-            openModal('newWorktree', { repo, task })
+            openModal('newWorktree', { task })
           }}
           className="mt-2 inline-flex items-center gap-1 rounded-btn border border-line-2 px-2 py-1 text-[10.5px] font-semibold text-accent hover:bg-hover transition-colors no-drag"
         >
@@ -182,35 +214,81 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
   )
 }
 
+const LANE_GLYPH = { project: Layers, home: House, repo: FolderGit2 } as const
+
+/**
+ * The task board for the active project (it follows the rail: switch project
+ * there and an open board re-scopes in place). A project of two or more repos
+ * gets a lane per repo under a Project lane for untagged work; dragging a card
+ * across lanes files it under that lane's repo. A project of fewer is one
+ * plain status board, and the repo tag never shows.
+ */
 function FullBoard(): React.JSX.Element {
+  const project = useStore(activeProject)
   const repos = useStore((s) => s.repos)
-  const tasks = useStore((s) => s.tasks)
+  const allTasks = useStore((s) => s.tasks)
+  const worktrees = useStore((s) => s.worktrees)
   const closeModal = useStore((s) => s.closeModal)
   const openModal = useStore((s) => s.openModal)
+  const singleRepoId = useStore(captureRepoId)
   const [hoverCell, setHoverCell] = useState<string | null>(null)
+  const [drag, setDrag] = useState<BoardDrag | null>(null)
+  const [announcement, setAnnouncement] = useState('')
 
-  // Dropping a card on a cell sets its status (column) and repo (lane).
-  const dropTask = (taskId: string, repoId: string, status: TaskStatus): void => {
-    const task = tasks.find((t) => t.id === taskId)
-    if (!task) return
+  const board = useMemo(() => (project ? boardLanes(project, repos, allTasks) : null), [project, repos, allTasks])
+  const taskTotal = board ? board.lanes.reduce((n, l) => n + l.tasks.length, 0) : 0
+  const repoTotal = project ? projectRepos(project, repos).length : 0
+
+  const endDrag = (): void => {
+    setDrag(null)
+    setHoverCell(null)
+  }
+
+  // Dropping a card on a cell sets its status (column) and, across lanes of a
+  // multi-repo project, its repo (null in the Project lane).
+  const dropTask = (taskId: string, lane: BoardLane, status: TaskStatus): void => {
+    const task = allTasks.find((t) => t.id === taskId)
+    if (!task || !project || !board) return
     const patch: TaskPatch = {}
     if (task.status !== status) patch.status = status
-    if (task.repoId !== repoId) patch.repoId = repoId
-    if (Object.keys(patch).length) void window.orbital.updateTask(taskId, patch)
+    const crossing = !board.single && taskLaneKey(task, project) !== lane.key
+    if (crossing) {
+      if (repoLock(task, worktrees)) return
+      patch.repoId = lane.repoId
+    }
+    if (!Object.keys(patch).length) return
+    const where = lane.kind === 'project' ? 'Project' : lane.name
+    const msg =
+      crossing && patch.status
+        ? `#${task.seq} moved to ${where}, ${taskStatusLabel(status)}.${lane.repoId === null ? ' Repo cleared.' : ''}`
+        : crossing
+          ? `#${task.seq} moved to ${where}.${lane.repoId === null ? ' Repo cleared.' : ''}`
+          : `#${task.seq} moved to ${taskStatusLabel(status)}.`
+    window.orbital.updateTask(taskId, patch).then(
+      () => setAnnouncement(msg),
+      () => setAnnouncement(`Could not move #${task.seq}.`)
+    )
   }
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="board-title"
       style={{ animation: 'panelIn .16s ease-out' }}
       className="flex h-[86vh] w-[2360px] max-w-[95vw] flex-col overflow-hidden bg-panel border border-line-strong rounded-modal elev-modal"
     >
       <header className="flex flex-none items-center justify-between px-[18px] py-[15px] border-b border-soft">
         <div className="min-w-0">
-          <div className="text-[15px] font-bold text-text">All tasks across your repos</div>
-          <div className="mt-0.5 text-[11.5px] text-dim">
-            {repos.length} repo{repos.length === 1 ? '' : 's'} · {tasks.length} task
-            {tasks.length === 1 ? '' : 's'}
+          <div id="board-title" className="truncate text-[15px] font-bold text-text">
+            {project ? `Tasks in ${project.name}` : 'Tasks'}
           </div>
+          {project && board && (
+            <div className="mt-0.5 text-[11.5px] text-dim">
+              {board.single ? '' : `${repoTotal} repos · `}
+              {taskTotal} task{taskTotal === 1 ? '' : 's'}
+            </div>
+          )}
         </div>
         <div className="flex flex-none items-center gap-2">
           {/* Archived tasks are left off the board; this opens them as a table
@@ -234,15 +312,24 @@ function FullBoard(): React.JSX.Element {
         </div>
       </header>
 
+      <div aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+
       <div className="min-h-0 flex-1 overflow-auto p-[18px]">
-        {repos.length === 0 ? (
-          <div className="text-[12px] text-faint">No repos yet.</div>
+        {!project || !board ? (
+          <div className="text-[12px] text-faint">No projects yet.</div>
         ) : (
           <div className="min-w-[820px]">
-            {/* Status column headers, offset by the repo-label gutter.
+            {taskTotal === 0 && (
+              <div className="mb-3 text-[12px] text-faint">
+                No tasks in {project.name} yet. Add one from any column.
+              </div>
+            )}
+            {/* Status column headers, offset by the lane-label gutter (multi only).
                 No bottom padding so the header sits flush on the first lane. */}
             <div className="sticky top-0 z-10 flex gap-2 bg-panel">
-              <div className="w-[150px] flex-none" />
+              {!board.single && <div className="w-[150px] flex-none" />}
               {TASK_STATUSES.map((status) => {
                 const dot = taskColumnDot(status)
                 return (
@@ -261,49 +348,96 @@ function FullBoard(): React.JSX.Element {
               })}
             </div>
 
-            {/* One swim-lane per repo, split by a dashed lane line. */}
-            {repos.map((p, i) => (
-              <div
-                key={p.id}
-                className={`flex gap-2 ${i > 0 ? 'border-t border-dashed border-line-strong' : ''}`}
-              >
-                <div className="flex w-[150px] flex-none items-center gap-2 py-3">
-                  <span className="size-[7px] flex-none rounded-full bg-dim" />
-                  <span className="truncate text-[12px] font-bold text-text-2" title={p.repoPath}>
-                    {p.name}
-                  </span>
-                </div>
-                {TASK_STATUSES.map((status) => {
-                  const cell = tasks.filter((t) => t.repoId === p.id && t.status === status)
-                  const cellKey = `${p.id}:${status}`
-                  const isHover = hoverCell === cellKey
-                  return (
-                    <div
-                      key={status}
-                      onDragOver={(e) => {
-                        e.preventDefault()
-                        e.dataTransfer.dropEffect = 'move'
-                        if (!isHover) setHoverCell(cellKey)
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault()
-                        const id = e.dataTransfer.getData('text/plain')
-                        if (id) dropTask(id, p.id, status)
-                        setHoverCell(null)
-                      }}
-                      className={`group/col flex min-h-[88px] flex-1 flex-col gap-2 border-x p-2 transition-colors ${
-                        isHover ? 'border-accent/40 bg-accent/[0.06]' : 'border-line bg-bg'
-                      }`}
-                    >
-                      {cell.map((task) => (
-                        <BoardTaskCard key={task.id} task={task} onDragEnd={() => setHoverCell(null)} />
-                      ))}
-                      <AddTaskCard repoId={p.id} status={status} />
+            {/* One swim-lane per repo (Project first), split by a dashed lane line. */}
+            {board.lanes.map((lane, i) => {
+              const Glyph = LANE_GLYPH[lane.kind]
+              const hoverLane = hoverCell?.slice(0, hoverCell.lastIndexOf(':'))
+              const target = !!drag && !drag.locked && hoverLane === lane.key && lane.key !== drag.fromKey
+              const hint = target
+                ? `Move to ${lane.kind === 'project' ? 'Project' : lane.name}`
+                : drag?.locked && lane.key === drag.fromKey
+                  ? 'Has a worktree here'
+                  : null
+              // A locked card may only move within its own lane.
+              const refused = !!drag && drag.locked && !board.single && lane.key !== drag.fromKey
+              const laneTitle =
+                lane.kind === 'project'
+                  ? `Tasks with no repo: work that spans ${project.name}`
+                  : (repos.find((r) => r.id === lane.repoId)?.repoPath ?? lane.name)
+              const ariaLane = lane.kind === 'project' ? 'Project, no repo' : lane.name
+              return (
+                <div
+                  key={lane.key}
+                  className={`flex gap-2 ${i > 0 ? 'border-t border-dashed border-line-strong' : ''}`}
+                >
+                  {!board.single && (
+                    <div className="flex w-[150px] flex-none items-center gap-2 py-3">
+                      <Glyph size={12} strokeWidth={1.5} className="flex-none text-faint" aria-hidden />
+                      <div className="min-w-0">
+                        <div
+                          className={`truncate text-[12px] font-bold ${target ? 'text-text' : 'text-text-2'}`}
+                          title={laneTitle}
+                        >
+                          {lane.name}
+                        </div>
+                        <div className={`truncate font-mono text-[10px] ${target ? 'text-accent' : 'text-faint'}`}>
+                          {hint ?? taskCount(lane.tasks.length)}
+                        </div>
+                      </div>
                     </div>
-                  )
-                })}
-              </div>
-            ))}
+                  )}
+                  {TASK_STATUSES.map((status) => {
+                    const cell = lane.tasks.filter((t) => t.status === status)
+                    const cellKey = `${lane.key}:${status}`
+                    const isHover = hoverCell === cellKey && !refused
+                    return (
+                      <div
+                        key={status}
+                        role="group"
+                        aria-label={`${board.single ? '' : `${ariaLane}, `}${taskStatusLabel(status)}, ${cell.length} tasks`}
+                        onDragOver={(e) => {
+                          if (refused) return
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                          if (hoverCell !== cellKey) setHoverCell(cellKey)
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          const id = e.dataTransfer.getData('text/plain') || drag?.taskId
+                          if (id && !refused) dropTask(id, lane, status)
+                          endDrag()
+                        }}
+                        className={`group/col flex min-h-[88px] flex-1 flex-col gap-2 border-x p-2 transition-[colors,opacity] ${
+                          isHover ? 'border-accent/40 bg-accent/[0.06]' : 'border-line bg-bg'
+                        } ${refused ? 'opacity-40' : ''}`}
+                      >
+                        {cell.map((task) => (
+                          <BoardTaskCard
+                            key={task.id}
+                            task={task}
+                            canStart={repoTotal > 0}
+                            onDragStart={(t) =>
+                              setDrag({
+                                taskId: t.id,
+                                fromKey: lane.key,
+                                locked: repoLock(t, worktrees) !== null
+                              })
+                            }
+                            onDragEnd={endDrag}
+                          />
+                        ))}
+                        <AddTaskCard
+                          projectId={project.id}
+                          repoId={board.single ? singleRepoId : lane.repoId}
+                          status={status}
+                          pinned={taskTotal === 0 && i === 0 && status === 'todo'}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

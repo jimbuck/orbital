@@ -150,3 +150,64 @@ describe('NewWorktree — branch source', () => {
     expect(screen.getByRole('button', { name: 'Create Worktree' })).toHaveProperty('disabled', false)
   })
 })
+
+describe('NewWorktree — a task with no repo', () => {
+  const api: Repo = { ...repo, id: 'api', name: 'api', repoPath: 'C:/acme/api', projectId: 'acme' }
+  const web: Repo = { ...repo, id: 'web', name: 'web', repoPath: 'C:/acme/web', projectId: 'acme' }
+  const untagged = {
+    id: 't1',
+    seq: 397,
+    projectId: 'acme',
+    repoId: null,
+    title: 'One lint config',
+    description: '',
+    tags: [],
+    status: 'todo',
+    worktreeId: null,
+    createdBy: 'user',
+    createdAt: 0,
+    updatedAt: 0,
+    archivedAt: null
+  }
+
+  function seedProject(): void {
+    useStore.setState({
+      repos: [api, web],
+      projects: [{ id: 'acme', name: 'Acme', rootPath: 'C:/acme', homeRepoId: null, repoIds: ['api', 'web'] }],
+      worktrees: [],
+      tasks: [untagged],
+      activeProjectId: 'acme',
+      activeRepoId: null,
+      activeWorktreeId: null,
+      modalData: { task: untagged }
+    } as unknown as Parameters<typeof useStore.setState>[0])
+  }
+
+  it('asks for a repo first, holding the rest of the form until one is picked', async () => {
+    seedProject()
+    render(<NewWorktree />)
+    const picker = screen.getByLabelText(/#397 has no repo, so pick where the work happens/)
+    expect(screen.getByText('Starting it files #397 under that repo.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create Worktree' })).toHaveProperty('disabled', true)
+    expect(screen.getByLabelText('Worktree name').matches(':disabled')).toBe(true)
+    expect(listBranches).not.toHaveBeenCalled()
+
+    fireEvent.change(picker, { target: { value: 'repo:web' } })
+    await waitFor(() => expect(listBranches).toHaveBeenCalledWith('web'))
+    expect(screen.getByText('Creates a git worktree · Acme · web')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Create Worktree' }))
+    await waitFor(() => expect(createWorktree).toHaveBeenCalledTimes(1))
+    expect(createWorktree.mock.calls[0][0]).toBe('web')
+    expect(createWorktree.mock.calls[0][1].taskId).toBe('t1')
+  })
+
+  it("goes straight to the task's repo when it has one", async () => {
+    seedProject()
+    useStore.setState({ modalData: { task: { ...untagged, repoId: 'api' } } } as unknown as Parameters<
+      typeof useStore.setState
+    >[0])
+    render(<NewWorktree />)
+    await waitFor(() => expect(listBranches).toHaveBeenCalledWith('api'))
+    expect(screen.queryByLabelText(/has no repo/)).toBeNull()
+  })
+})

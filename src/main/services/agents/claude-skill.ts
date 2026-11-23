@@ -108,12 +108,13 @@ lifecycle events and you do not need to call \`orbital status\` at all.
 
 ## Tasks
 
-A per-repo tracker the human watches. File follow-up work you notice instead
-of expanding the scope of what you were asked to do.
+A tracker per project that the human watches. File follow-up work you notice
+instead of expanding the scope of what you were asked to do.
 
 \`\`\`sh
 orbital task add "Write tests" --description "cover the parser" --tags test,parser
 orbital task list [--all] [--status <status>] [--tag <tag>]   # open tasks (see below)
+orbital task list --all-repos                                 # every repo's, and the project's own
 orbital task list --archived                                  # only archived tasks
 orbital task show 12                                          # full detail for one task
 orbital task update 12 --status in-progress                   # progress it as you work
@@ -129,6 +130,15 @@ yourself, so \`--status done\` works on its own.
 Tasks are never deleted: \`task archive\` (alias \`task delete\`) hides one from
 the board and the default list but keeps it, number and all. \`--all\` includes
 archived tasks, and \`task show\` / \`update\` / \`unarchive\` still reach them.
+
+A task belongs to the project and is filed under one of its repos, or under
+none when the work spans the project. \`task add\` files it where this terminal
+works: under this repo from a repo's worktree, under no repo from the project
+session. \`--repo <name>\` or \`--no-repo\` says otherwise. \`task list\` shows
+the same scope (this repo's tasks, or the whole project's) and adds a REPO
+column when the list mixes repos. \`task show\` / \`update\` / \`done\` reach any
+task in the project. \`task update 12 --repo web\` (or \`--no-repo\`) refiles one,
+except while it has a worktree: its repo follows the worktree.
 
 **Move the task as you work it.** The board is how the human sees what is
 underway, and a task sitting in \`todo\` while you work on it tells them nobody
@@ -152,6 +162,7 @@ orbital worktree new --worktree feat/login "Login flow"
 orbital worktree new --existing-branch origin/pr-42 # check an existing branch out into a worktree
 orbital worktree new --worktree feat/x --base main  # fork the new branch from a ref other than HEAD
 orbital task start 12                               # worktree from task #12, branch named after it, task linked
+orbital task start 14 --repo api                    # a task filed under no repo needs --repo
 orbital worktree sync                               # copy the root checkout's env files into this worktree again
 \`\`\`
 
@@ -159,8 +170,9 @@ A new worktree gets the repo's env files (\`.env\`, agent config dirs) copied in
 when it is created — once. They are not kept in sync afterwards, so if the root
 checkout's copies have changed, \`orbital worktree sync\` copies them again
 (overwriting this worktree's). \`task start\` is the scriptable form of the
-cockpit's play button: it creates the worktree, links the task to it, and moves
-the task to \`in-progress\`.
+cockpit's play button: it creates the worktree in the task's repo, links the
+task to it, and moves the task to \`in-progress\`. A task filed under no repo
+needs \`--repo\` to say where; starting it files it under that repo.
 
 ## Other repos
 
@@ -172,7 +184,8 @@ orbital task add "Bump the client" --repo api    # file work against it
 orbital worktree new --repo api --worktree feat/x
 \`\`\`
 
-Task and worktree commands are scoped to this terminal's repo. \`--repo <name|id>\`
+Worktree commands are scoped to this terminal's repo, and task commands to its
+project. \`--repo <name|id>\`
 (on \`task list/show/add/update/start/done/delete\`, \`worktrees\`, \`worktree new\`
 and \`tab new\`) points one at a sibling repo in the same workspace instead. Passing
 it is the opt-in, so writes go through. Reach across only when the work calls for it,
@@ -189,12 +202,14 @@ orbital project                                                    # pick the re
 orbital worktree new --repo api --task 12 --worktree feat/health   # api's part, on its own branch, linked to task #12
 orbital tab new agent --repo api --worktree feat/health --prompt "Do task #12, then run the tests"
 orbital task add "Use the new endpoint" --repo web                 # file what is not started yet
+orbital task add "Agree the API shape"                             # no --repo: work for the whole project
 \`\`\`
 
 Plan in the project session, then hand each repo its part: one worktree per
 change, one agent per worktree, a prompt that says what done looks like. The
-root folder session has no repo of its own, so task and worktree commands there
-need \`--repo\`. In a member repo, stay in that repo unless the task needs more.
+root folder session has no repo of its own, so worktree commands there need
+\`--repo\`; tasks filed there go under no repo unless you pass one. In a member
+repo, stay in that repo unless the task needs more.
 
 ## Tabs and dev servers
 

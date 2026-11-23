@@ -41,12 +41,15 @@ const { handleControl } = await import('./dispatch')
 
 let dir: string
 let repoId: string
+let projectId: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'orbital-dispatch-test-'))
   initDb(dir)
   tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
-  repoId = tables.repos.create({ name: 'p', repoPath: 'C:/p' }).id
+  const repo = tables.repos.create({ name: 'p', repoPath: 'C:/p' })
+  repoId = repo.id
+  projectId = repo.projectId
 })
 
 afterEach(() => {
@@ -65,8 +68,8 @@ const listed = async (args: Record<string, unknown> = {}): Promise<number[]> => 
 
 describe('task archive', () => {
   it('archives by number, hides the task from the default list, and unarchives it again', async () => {
-    tables.tasks.create({ repoId, title: 'keep', createdBy: 'agent' })
-    tables.tasks.create({ repoId, title: 'shelve', createdBy: 'agent' })
+    tables.tasks.create({ projectId, repoId, title: 'keep', createdBy: 'agent' })
+    tables.tasks.create({ projectId, repoId, title: 'shelve', createdBy: 'agent' })
 
     const res = await run('task-archive', { id: '#2' })
     expect(res).toMatchObject({ ok: true, data: { seq: 2, title: 'shelve' } })
@@ -79,16 +82,16 @@ describe('task archive', () => {
   })
 
   it('treats the legacy task-delete as archive: the row survives', async () => {
-    const t = tables.tasks.create({ repoId, title: 'old script', createdBy: 'agent' })
+    const t = tables.tasks.create({ projectId, repoId, title: 'old script', createdBy: 'agent' })
     expect((await run('task-delete', { id: String(t.seq) })).ok).toBe(true)
     expect(tables.tasks.get(t.id)?.archivedAt).toEqual(expect.any(Number))
   })
 
   it('--all includes done and archived tasks; --status still filters', async () => {
-    tables.tasks.create({ repoId, title: 'open', createdBy: 'agent' })
-    const done = tables.tasks.create({ repoId, title: 'done', createdBy: 'agent' })
+    tables.tasks.create({ projectId, repoId, title: 'open', createdBy: 'agent' })
+    const done = tables.tasks.create({ projectId, repoId, title: 'done', createdBy: 'agent' })
     tables.tasks.update(done.id, { status: 'done' })
-    const gone = tables.tasks.create({ repoId, title: 'gone', createdBy: 'agent' })
+    const gone = tables.tasks.create({ projectId, repoId, title: 'gone', createdBy: 'agent' })
     tables.tasks.archive(gone.id)
 
     expect(await listed()).toEqual([1])
@@ -98,7 +101,7 @@ describe('task archive', () => {
   })
 
   it('still resolves an archived task for show and update, and show carries archivedAt', async () => {
-    const t = tables.tasks.create({ repoId, title: 'a', createdBy: 'agent' })
+    const t = tables.tasks.create({ projectId, repoId, title: 'a', createdBy: 'agent' })
     tables.tasks.archive(t.id)
 
     const shown = await run('task-show', { id: '1' })
@@ -216,9 +219,94 @@ describe('projects', () => {
     expect(createTabInWorktree).not.toHaveBeenCalled()
   })
 
-  it('task commands from a folder session point at orbital project', async () => {
-    const { folder, project } = platform()
-    const res = await handleControl({ cmd: 'task-list', worktreeId: folder.id, projectId: project.id, args: {} })
-    expect(res.error).toMatch(/pass --repo <name\|id> \(`orbital project` lists its repos\)/)
+  describe('tasks at project scope', () => {
+    const add = async (worktreeId: string, args: Record<string, unknown>) => {
+      const res = await handleControl({ cmd: 'task-add', worktreeId, args: { title: 't', ...args } })
+      expect(res.ok).toBe(true)
+      return tables.tasks.get((res.data as { id: string }).id)!
+    }
+    const list = async (worktreeId: string, args: Record<string, unknown> = {}) => {
+      const res = await handleControl({ cmd: 'task-list', worktreeId, args })
+      expect(res.ok).toBe(true)
+      return (res.data as { title: string; repo: string | null }[]).map((t) => `${t.title}@${t.repo ?? '-'}`)
+    }
+
+    it('task add files where quick capture would: none from the project session, this repo from a repo session', async () => {
+      const { api, web, project, folder, apiLinked } = platform()
+      expect(await add(folder.id, {})).toMatchObject({ projectId: project.id, repoId: null })
+      expect(await add(apiLinked.id, {})).toMatchObject({ projectId: project.id, repoId: api.id })
+      expect(await add(apiLinked.id, { noRepo: true })).toMatchObject({ repoId: null })
+      expect(await add(folder.id, { repo: 'web' })).toMatchObject({ projectId: project.id, repoId: web.id })
+      const both = await handleControl({ cmd: 'task-add', worktreeId: folder.id, args: { title: 'x', repo: 'web', noRepo: true } })
+      expect(both).toEqual({ ok: false, error: 'pass --repo or --no-repo, not both' })
+    })
+
+    it("the home repo's root is the project session; its linked worktree is the home repo's", async () => {
+      const { api, project } = platform()
+      tables.projects.setHome(project.id, api.id)
+      const homeRoot = tables.worktrees.list().find((w) => w.repoId === api.id && w.kind === 'root')!
+      const homeLinked = tables.worktrees.list().find((w) => w.repoId === api.id && w.kind === 'linked')!
+      expect((await add(homeRoot.id, {})).repoId).toBeNull()
+      expect((await add(homeLinked.id, {})).repoId).toBe(api.id)
+    })
+
+    it('a one-repo project files under its repo from anywhere in it', async () => {
+      const solo = tables.repos.create({ name: 'solo', repoPath: join(dir, 'solo') })
+      const wt = tables.worktrees.create({ repoId: solo.id, kind: 'root', name: 'main', path: solo.repoPath, branch: 'main' })
+      expect((await add(wt.id, {})).repoId).toBe(solo.id)
+    })
+
+    it("task list defaults to the terminal's scope and widens with --all-repos", async () => {
+      const { folder, apiLinked } = platform()
+      await add(folder.id, { title: 'span' })
+      await add(apiLinked.id, { title: 'a1' })
+      await add(folder.id, { title: 'w1', repo: 'web' })
+      expect(await list(apiLinked.id)).toEqual(['a1@api'])
+      expect(await list(folder.id)).toEqual(['span@-', 'a1@api', 'w1@web'])
+      expect(await list(apiLinked.id, { allRepos: true })).toEqual(['span@-', 'a1@api', 'w1@web'])
+      expect(await list(apiLinked.id, { noRepo: true })).toEqual(['span@-'])
+      expect(await list(folder.id, { repo: 'web' })).toEqual(['w1@web'])
+    })
+
+    it('show, update and archive find any task of the project, from the folder session too', async () => {
+      const { folder, apiLinked, web } = platform()
+      const t = await add(apiLinked.id, { title: 'mine' })
+      const shown = await handleControl({ cmd: 'task-show', worktreeId: folder.id, args: { id: String(t.seq) } })
+      expect(shown).toMatchObject({ ok: true, data: { seq: t.seq, repo: 'api', project: 'Platform' } })
+
+      const moved = await handleControl({ cmd: 'task-update', worktreeId: folder.id, args: { id: String(t.seq), repo: 'web', retag: true } })
+      expect(moved).toMatchObject({ ok: true, data: { repo: 'web', retagged: true } })
+      expect(tables.tasks.get(t.id)!.repoId).toBe(web.id)
+      // `task done --repo web` finds the task through --repo but never moves it.
+      await handleControl({ cmd: 'task-update', worktreeId: folder.id, args: { id: String(t.seq), noRepo: true } })
+      expect(tables.tasks.get(t.id)!.repoId).toBeNull()
+      const done = await handleControl({ cmd: 'task-update', worktreeId: apiLinked.id, args: { id: String(t.seq), status: 'done', repo: 'web' } })
+      expect(done.ok).toBe(true)
+      expect(tables.tasks.get(t.id)).toMatchObject({ repoId: null, status: 'done' })
+
+      expect((await handleControl({ cmd: 'task-archive', worktreeId: folder.id, args: { id: String(t.seq) } })).ok).toBe(true)
+    })
+
+    it('a task with a live worktree keeps its repo', async () => {
+      const { folder, apiLinked } = platform()
+      const t = await add(apiLinked.id, { title: 'busy' })
+      tables.worktrees.linkTask(apiLinked.id, t.id)
+      const res = await handleControl({ cmd: 'task-update', worktreeId: folder.id, args: { id: String(t.seq), repo: 'web', retag: true } })
+      expect(res).toEqual({ ok: false, error: `task #${t.seq} has a worktree in api; its repo follows that worktree` })
+    })
+
+    it('starting an untagged task in a project of several repos asks for --repo', async () => {
+      const { folder } = platform()
+      const t = await add(folder.id, { title: 'span' })
+      const res = await handleControl({ cmd: 'worktree-new', worktreeId: folder.id, args: { task: String(t.seq) } })
+      expect(res.ok).toBe(false)
+      expect(res.error).toContain(`task #${t.seq} has no repo, so say where to start it: pass --repo <name|id>`)
+    })
+
+    it('worktree new without a task still needs a repo in the folder session', async () => {
+      const { folder, project } = platform()
+      const res = await handleControl({ cmd: 'worktree-new', worktreeId: folder.id, projectId: project.id, args: {} })
+      expect(res.error).toMatch(/pass --repo <name\|id> \(`orbital project` lists its repos\)/)
+    })
   })
 })

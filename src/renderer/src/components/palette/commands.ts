@@ -41,6 +41,7 @@ import type { AgentConfig, Pane, Tab, TabType, ThemeMode, Worktree } from '@shar
 import { OPEN_ACTIONS } from '@shared/types'
 import { useStore, activePaneId, type Store } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
+import { captureRepoId } from '@renderer/lib/taskScope'
 import { openTab } from '@renderer/lib/openTab'
 import { saveSetting, settingOf } from '@renderer/lib/settings'
 import { editCopy, editPaste, editSelectAll } from '@renderer/lib/editActions'
@@ -434,12 +435,13 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   add({
     id: 'task.board',
     group: 'Tasks',
-    label: 'All Tasks…',
-    keywords: 'board kanban',
+    label: 'Task Board…',
+    keywords: 'board kanban all tasks',
     icon: KanbanSquare,
     run: () => s.openModal('board')
   })
-  if (repo) {
+  const taskProjectId = s.activeProjectId
+  if (taskProjectId && s.projects.some((p) => p.id === taskProjectId)) {
     add({
       id: 'task.new',
       group: 'Tasks',
@@ -451,7 +453,10 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       // also what the board and the CLI can already see.
       run: () =>
         fireAndForget(
-          window.orbital.createTask(repo.id, 'New task').then((task) => s.openModal('editTask', { task }))
+          // Filed where quick capture would file it.
+          window.orbital
+            .createTask(taskProjectId, 'New task', captureRepoId(s))
+            .then((task) => s.openModal('editTask', { task }))
         )
     })
   }
