@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from 'react'
 import type { WorkspaceInfo } from '@shared/types'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
-import { useStore, activeRepo, activeWorktree } from '@renderer/store'
+import { useStore, activeProject, activeRepo, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { openTab } from '@renderer/lib/openTab'
 import { fireAndForget } from '@renderer/lib/bridge'
@@ -44,8 +44,18 @@ interface Menu {
  * is the drag region; interactive clusters opt out with `no-drag`.
  */
 export default function TitleBar(): JSX.Element {
-  const projName = useStore((s) => activeRepo(s)?.name ?? 'orbital')
-  const worktreeName = useStore((s) => activeWorktree(s)?.name)
+  // Project › Repo › Worktree. The project crumb shows only for a real group
+  // (a plain repo row's project is that repo); a folder session is the project
+  // itself and has neither of the other two.
+  const projectName = useStore((s) => {
+    const project = activeProject(s)
+    if (!project) return null
+    const flat = project.homeRepoId === null && project.repoIds.length === 1
+    return flat ? null : project.name
+  })
+  const isFolderSession = useStore((s) => activeWorktree(s)?.kind === 'folder')
+  const projName = useStore((s) => activeRepo(s)?.name ?? (activeProject(s) ? null : 'orbital'))
+  const worktreeName = useStore((s) => (activeWorktree(s)?.kind === 'folder' ? undefined : activeWorktree(s)?.name))
   // Prefix the breadcrumb with the workspace only when it's a named one — the
   // implicit default profile workspace would just be noise.
   const workspaceName = useStore((s) => (s.workspace && s.workspace.name !== 'Default' ? s.workspace.name : null))
@@ -327,7 +337,15 @@ export default function TitleBar(): JSX.Element {
               <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />
             </>
           )}
-          <span className="truncate">{projName}</span>
+          {projectName && (
+            <>
+              <span className="truncate text-faint">{projectName}</span>
+              {!isFolderSession && projName && (
+                <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />
+              )}
+            </>
+          )}
+          {!isFolderSession && projName && <span className="truncate">{projName}</span>}
           {worktreeName && (
             <>
               <ChevronRight size={12} strokeWidth={1.5} className="flex-none text-faint" />

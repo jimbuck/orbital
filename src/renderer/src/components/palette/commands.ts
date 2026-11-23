@@ -10,6 +10,8 @@ import {
   FolderOpen,
   FolderPlus,
   GitBranch,
+  House,
+  Layers,
   GitCommitHorizontal,
   Globe,
   Hash,
@@ -247,7 +249,8 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   }
 
   /* ---- Git ------------------------------------------------------------- */
-  if (wid) {
+  // A project's folder session is not a git checkout.
+  if (wid && worktree?.kind !== 'folder') {
     const git = (id: string, label: string, keywords: string, icon: IconType, call: () => Promise<void>): void =>
       add({ id, group: 'Git', label, keywords, icon, run: () => fireAndForget(call()) })
     git('git.stageAll', 'Stage All Changes', 'add index', Plus, () => window.orbital.gitStageAll(wid))
@@ -283,14 +286,16 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       icon: SquareTerminal,
       run: () => fireAndForget(window.orbital.openInTerminal(wid, ''))
     })
-    add({
-      id: 'worktree.syncEnv',
-      group: 'Worktree',
-      label: 'Sync Environment Files',
-      keywords: 'env copy dotenv',
-      icon: RotateCcw,
-      run: () => fireAndForget(window.orbital.syncWorktreeEnv(wid))
-    })
+    if (worktree?.kind !== 'folder') {
+      add({
+        id: 'worktree.syncEnv',
+        group: 'Worktree',
+        label: 'Sync Environment Files',
+        keywords: 'env copy dotenv',
+        icon: RotateCcw,
+        run: () => fireAndForget(window.orbital.syncWorktreeEnv(wid))
+      })
+    }
     add({
       id: 'worktree.clearStatus',
       group: 'Worktree',
@@ -300,14 +305,94 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       run: () => fireAndForget(window.orbital.clearWorktreeStatus(wid))
     })
   }
+  if (repo) {
+    add({
+      id: 'worktree.new',
+      group: 'Worktree',
+      label: 'New Worktree…',
+      keywords: 'branch create checkout',
+      icon: GitBranch,
+      run: () => s.openModal('newWorktree', { repo })
+    })
+  }
+
+  /* ---- Project ------------------------------------------------------- */
   add({
-    id: 'worktree.new',
-    group: 'Worktree',
-    label: 'New Worktree…',
-    keywords: 'branch create checkout',
-    icon: GitBranch,
-    run: () => s.openModal('newWorktree', { repo })
+    id: 'project.new',
+    group: 'Project',
+    label: 'New Project…',
+    keywords: 'create group repos root folder home',
+    icon: Layers,
+    run: () =>
+      fireAndForget(
+        window.orbital.createProject().then((created) => {
+          if (!created) return
+          useStore.getState().setActiveProject(created.id)
+          useStore.getState().setRenamingProject(created.id)
+        })
+      )
   })
+  // The active project, when it is a group rather than a plain repo row.
+  const project = s.projects.find((p) => p.id === s.activeProjectId)
+  const group = project && !(project.homeRepoId === null && project.repoIds.length === 1) ? project : undefined
+  if (group) {
+    if (worktree?.projectId !== group.id || (worktree.kind !== 'folder' && worktree.repoId !== group.homeRepoId)) {
+      add({
+        id: 'project.session',
+        group: 'Project',
+        label: `Open Project Session: ${group.name}`,
+        keywords: 'project home folder session',
+        icon: Layers,
+        run: () => s.setActiveProject(group.id)
+      })
+    }
+    add({
+      id: 'project.addRepo',
+      group: 'Project',
+      label: `Add Repo to ${group.name}…`,
+      keywords: 'add repo to project member clone',
+      icon: ListPlus,
+      run: () => s.openModal('addRepo', { projectId: group.id })
+    })
+    for (const rid of group.repoIds) {
+      if (rid === group.homeRepoId) continue
+      const member = s.repos.find((r) => r.id === rid)
+      if (!member) continue
+      add({
+        id: `project.home.${rid}`,
+        group: 'Project',
+        label: `Set Home Repo: ${member.name}`,
+        keywords: 'set home repo project steering agents',
+        icon: House,
+        run: () => fireAndForget(window.orbital.setProjectHome(group.id, rid))
+      })
+    }
+    if (group.homeRepoId) {
+      add({
+        id: 'project.home.clear',
+        group: 'Project',
+        label: 'Clear Home Repo',
+        keywords: 'set home repo project folder session',
+        icon: House,
+        run: () => fireAndForget(window.orbital.setProjectHome(group.id, null))
+      })
+    }
+  }
+  // Add the active repo to another project (the rail's "Move to Project").
+  if (repo) {
+    for (const other of s.projects) {
+      if (other.id === repo.projectId) continue
+      if (other.homeRepoId === null && other.repoIds.length === 1) continue
+      add({
+        id: `project.join.${other.id}`,
+        group: 'Project',
+        label: `Add ${repo.name} to Project ${other.name}`,
+        keywords: 'add repo to project move group',
+        icon: Layers,
+        run: () => fireAndForget(window.orbital.addRepoToProject(other.id, repo.id, null))
+      })
+    }
+  }
 
   /* ---- Repo & workspace --------------------------------------------- */
   add({

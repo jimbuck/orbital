@@ -21,10 +21,11 @@ export type TerminalStatus = 'idle' | 'working' | 'needs_attention' | 'error' | 
 export type TaskStatus = 'draft' | 'todo' | 'in_progress' | 'ready_for_review' | 'done'
 
 /**
- * A Worktree is bound to either a repo's main checkout (`root`) or an
- * additional git worktree (`linked`).
+ * A Worktree is bound to a repo's main checkout (`root`), an additional git
+ * worktree (`linked`), or, for a project with no home repo, the project's
+ * root folder (`folder`): a session with terminals and agents but no git.
  */
-export type WorktreeKind = 'root' | 'linked'
+export type WorktreeKind = 'root' | 'linked' | 'folder'
 
 /**
  * The persisted theme setting: a theme id from the registry, or `system` to
@@ -490,10 +491,16 @@ export interface Pane {
 
 export interface Worktree {
   id: string
-  repoId: string
+  /** The repo this checks out. Null for a `folder` session, which belongs to a project and no repo. */
+  repoId: string | null
+  /**
+   * The project it is in: a folder session's own project, else its repo's
+   * (so it follows the repo when the repo moves).
+   */
+  projectId: string
   kind: WorktreeKind
   name: string
-  /** Working directory: the repo root for `root`, the linked worktree path otherwise. */
+  /** Working directory: the repo root for `root`, the project root for `folder`, the linked worktree path otherwise. */
   path: string
   branch: string
   /** Cached aggregate of the Worktree's terminal statuses. */

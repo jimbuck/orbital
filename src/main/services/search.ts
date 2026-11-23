@@ -78,10 +78,16 @@ function checkoutsFor(
   worktreeId: string | undefined
 ): { id: string; path: string }[] {
   const all = tables.worktrees.listPaths()
-  if (scope === 'workspace' || !worktreeId) return all
+  // A folder session's root holds the repos' checkouts, so searching it as
+  // well as them would report every match twice.
+  const checkouts = all.filter((w) => w.kind !== 'folder')
+  if (scope === 'workspace' || !worktreeId) return checkouts
   if (scope === 'worktree') return all.filter((w) => w.id === worktreeId)
-  const repoId = all.find((w) => w.id === worktreeId)?.repoId
-  return repoId ? all.filter((w) => w.repoId === repoId) : []
+  const anchor = all.find((w) => w.id === worktreeId)
+  if (!anchor) return []
+  // From a folder session, the project's scope: every member repo's checkouts.
+  if (anchor.kind === 'folder') return checkouts.filter((w) => w.projectId === anchor.projectId)
+  return anchor.repoId ? checkouts.filter((w) => w.repoId === anchor.repoId) : []
 }
 
 /** Escape a literal so it can go into a JS RegExp. */

@@ -159,9 +159,13 @@ function migrate(d: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_rail_positions_folder ON rail_positions(folder_id);
 
+    -- A worktree is a repo's checkout (repo_id set) or, kind 'folder', a
+    -- project's root-folder session (project_id set, repo_id NULL). See
+    -- addProjectSessionsToWorktrees for databases from before the latter.
     CREATE TABLE IF NOT EXISTS worktrees (
       id              TEXT PRIMARY KEY,
-      repo_id         TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+      repo_id         TEXT REFERENCES repos(id) ON DELETE CASCADE,
+      project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
       kind            TEXT NOT NULL,
       name            TEXT NOT NULL,
       path            TEXT NOT NULL,
@@ -246,6 +250,10 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'repos', 'project_position', 'INTEGER')
   d.exec('CREATE INDEX IF NOT EXISTS idx_repos_project ON repos(project_id)')
   groupReposIntoProjects(d)
+  // After the rename chain (so `worktrees.repo_id` is today's name) and after
+  // projects exist (its new column references them).
+  addProjectSessionsToWorktrees(d)
+  d.exec('CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id)')
   migrateEnvPatternsToSettings(d)
   migrateEnvPatternsRecursive(d)
 }
@@ -488,6 +496,66 @@ function groupReposIntoProjects(d: Database.Database): void {
     )
   })
   tx.immediate()
+}
+
+/** Whether `worktrees` already has the project-session shape: a `project_id` and a nullable `repo_id`. */
+function worktreesHaveProjectSessions(d: Database.Database): boolean {
+  const cols = d.prepare('PRAGMA table_info(worktrees)').all() as Array<{ name: string; notnull: number }>
+  const repoId = cols.find((c) => c.name === 'repo_id')
+  return cols.some((c) => c.name === 'project_id') && !!repoId && repoId.notnull === 0
+}
+
+/**
+ * Let a worktree belong to a project instead of a repo. A project with no
+ * home repo runs its session in its root folder (kind 'folder'), which has no
+ * repo, so `repo_id` has to become nullable and `project_id` has to exist.
+ * SQLite cannot drop a NOT NULL in place, so this is the rebuild-and-rename
+ * scopeReposToWorkspaces does, with foreign keys off for the swap: panes,
+ * tabs and tasks name `worktrees` by table name, so they keep pointing at the
+ * same rows, and nothing cascades while the old table is dropped.
+ *
+ * Boot order: it runs after renameLegacySchema and renameProjectsToRepos, so
+ * the column it keeps is `repo_id` whatever the database's age (a pre-revamp
+ * `flights.workspace_id` has become `worktrees.repo_id` by then, so the
+ * `project_id` this adds can never be mistaken for the legacy one), and after
+ * groupReposIntoProjects, so `projects` exists for the new reference. The
+ * guard is checked again under the write lock, since another instance may be
+ * booting the same file. Existing rows are all repo checkouts, so their
+ * `project_id` stays NULL: a repo worktree's project is its repo's.
+ */
+function addProjectSessionsToWorktrees(d: Database.Database): void {
+  if (worktreesHaveProjectSessions(d)) return
+  d.pragma('foreign_keys = OFF')
+  try {
+    d.transaction(() => {
+      if (worktreesHaveProjectSessions(d)) return
+      d.exec(`
+        CREATE TABLE worktrees_new (
+          id              TEXT PRIMARY KEY,
+          repo_id         TEXT REFERENCES repos(id) ON DELETE CASCADE,
+          project_id      TEXT REFERENCES projects(id) ON DELETE CASCADE,
+          kind            TEXT NOT NULL,
+          name            TEXT NOT NULL,
+          path            TEXT NOT NULL,
+          branch          TEXT NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'idle',
+          task_id         TEXT,
+          split_direction TEXT NOT NULL DEFAULT 'row',
+          layout          TEXT NOT NULL DEFAULT '',
+          created_at      INTEGER NOT NULL
+        );
+        INSERT INTO worktrees_new
+          (id, repo_id, project_id, kind, name, path, branch, status, task_id, split_direction, layout, created_at)
+          SELECT id, repo_id, NULL, kind, name, path, branch, status, task_id, split_direction, layout, created_at
+          FROM worktrees;
+        DROP TABLE worktrees;
+        ALTER TABLE worktrees_new RENAME TO worktrees;
+        CREATE INDEX IF NOT EXISTS idx_worktrees_repo ON worktrees(repo_id);
+      `)
+    }).immediate()
+  } finally {
+    d.pragma('foreign_keys = ON')
+  }
 }
 
 /**

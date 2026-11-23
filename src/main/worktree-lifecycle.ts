@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { isPtyTabType, type Repo, type RemoveWorktreeOptions, type Worktree } from '@shared/types'
+import { isPtyTabType, type Project, type Repo, type RemoveWorktreeOptions, type Worktree } from '@shared/types'
 import { runtime, tables } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree as removeCheckout } from './services/worktree'
@@ -86,7 +86,10 @@ export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOpt
   const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) return
   if (worktree.kind === 'root') throw new Error('the root Worktree cannot be removed')
-  const repo = opts.removeWorktree ? tables.repos.get(worktree.repoId) : undefined
+  // A project's folder session comes and goes with the project's shape (see
+  // settleProjectSessions), never on its own.
+  if (worktree.kind === 'folder') throw new Error("a project's folder session cannot be removed")
+  const repo = opts.removeWorktree && worktree.repoId ? tables.repos.get(worktree.repoId) : undefined
   if (repo) {
     if (!opts.force && !(await git.status(worktree.path)).clean) {
       throw new Error('The worktree has uncommitted changes.')
@@ -119,9 +122,15 @@ export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOpt
  */
 export async function addRepo(repoPath: string, projectId?: string): Promise<Repo> {
   await registerRepo(repoPath, projectId)
-  const repo = tables.repos.getByPath(repoPath)
+  let repo = tables.repos.getByPath(repoPath)
   if (!repo) throw new Error(`repo at ${repoPath} was not registered`)
+  // Already added, but asked for in another project: move it there.
+  if (projectId && repo.projectId !== projectId) {
+    tables.projects.addRepo(projectId, repo.id, null)
+    repo = tables.repos.get(repo.id) ?? repo
+  }
   await reconcileRepoWorktrees(repo.id)
+  settleProjectSessions()
   announce()
   return repo
 }
@@ -132,6 +141,7 @@ export function removeRepo(repoId: string): void {
   if (!repo) return
   releaseRepoRuntime(repo)
   tables.repos.remove(repoId)
+  settleProjectSessions()
   announce()
 }
 
@@ -146,8 +156,65 @@ export function removeProject(projectId: string): void {
     const repo = tables.repos.get(repoId)
     if (repo) releaseRepoRuntime(repo)
   }
+  const folder = tables.worktrees.folderOf(projectId)
+  if (folder) releaseWorktreeRuntime(folder)
   tables.projects.remove(projectId)
   announce()
+}
+
+/* ---- project sessions ----------------------------------------------------- */
+
+/**
+ * Whether a project's session is a folder session: it has no home repo, and
+ * it is a group rather than a plain repo row (which is one repo and no home,
+ * and whose session is that repo's root). A project with no repos yet is a
+ * group too, so it still has somewhere to open a terminal.
+ */
+export function wantsFolderSession(project: Pick<Project, 'homeRepoId' | 'repoIds'>): boolean {
+  return project.homeRepoId === null && project.repoIds.length !== 1
+}
+
+/**
+ * Make every project's folder session match its shape. A project that has
+ * just become a no-home group (two repos joined, its home cleared, made
+ * empty) gets a `folder` worktree at its root, with one empty pane; one that
+ * stopped being one (a home was set, it went back to a plain repo row, it was
+ * ungrouped) loses it, with its terminals and agents torn down first, as
+ * {@link removeWorktree} does for a checkout. A root that moved moves the
+ * session's directory and name with it (open terminals keep the cwd they
+ * started in). Rows plus runtime, no push: callers announce.
+ *
+ * Every grouping change goes through here (the project IPC, adding and
+ * removing repos, boot), so the rule lives in one place and a crash between
+ * the grouping write and this one heals on the next boot.
+ */
+export function settleProjectSessions(): void {
+  const projects = tables.projects.list()
+  const wanted = new Map(projects.filter(wantsFolderSession).map((p) => [p.id, p]))
+  const have = new Map<string, Worktree>()
+  for (const w of tables.worktrees.list()) {
+    if (w.kind !== 'folder') continue
+    const project = wanted.get(w.projectId)
+    if (!project || have.has(project.id)) {
+      releaseWorktreeRuntime(w)
+      tables.worktrees.remove(w.id)
+      continue
+    }
+    have.set(project.id, w)
+    if (w.path !== project.rootPath) tables.worktrees.setPath(w.id, project.rootPath)
+    if (w.name !== project.name) tables.worktrees.rename(w.id, project.name)
+  }
+  for (const project of wanted.values()) {
+    if (have.has(project.id)) continue
+    tables.worktrees.create({
+      repoId: null,
+      projectId: project.id,
+      kind: 'folder',
+      name: project.name,
+      path: project.rootPath,
+      branch: ''
+    })
+  }
 }
 
 /** Stop everything a Repo holds open: its Worktrees' terminals and status, and its watchers. */
@@ -235,7 +302,9 @@ const COPY_STALL_SECONDS = 60
 export async function syncWorktreeEnv(worktreeId: string): Promise<{ copied: string[] }> {
   const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
-  if (worktree.kind !== 'linked') throw new Error('the root checkout is what env files are synced from')
+  if (worktree.kind !== 'linked' || !worktree.repoId) {
+    throw new Error('the root checkout is what env files are synced from')
+  }
   const repo = tables.repos.get(worktree.repoId)
   if (!repo) throw new Error(`repo ${worktree.repoId} not found`)
   const copied = await syncEnvFiles(repo.repoPath, worktree.path, getSettings().envSyncPatterns)
@@ -364,6 +433,9 @@ export async function reconcileRepoWorktrees(repoId: string): Promise<void> {
 
 /** On startup, resume watchers for already-registered repos and their worktrees. */
 export function resumeRepos(): void {
+  // Before anything reads the worktrees: a grouping written by an older build
+  // (or one interrupted between its two writes) gets its folder sessions now.
+  settleProjectSessions()
   const checkouts = new Set<string>()
   for (const repo of tables.repos.list()) {
     runtime.gitWatcher.watch(repo.repoPath)
@@ -377,7 +449,7 @@ export function resumeRepos(): void {
       // A node_modules copy that was still running when the app last quit (or
       // that never finished) left its marker behind. Pick it up where it
       // stopped: the copy skips files the worktree already has.
-      if (hasIncompleteCopy(w.path)) {
+      if (hasIncompleteCopy(w.path) && w.repoId) {
         const repo = tables.repos.get(w.repoId)
         if (repo) {
           logger.info('resuming interrupted node_modules copy', { worktree: w.name })

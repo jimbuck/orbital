@@ -30,7 +30,7 @@ let spawned: { command: string; cwd: string; args: string[] }[]
 let hold: boolean
 let pending: (() => void)[]
 /** Worktree rows the repository layer reports. */
-let worktreeRows: { id: string; path: string; repoId: string }[]
+let worktreeRows: { id: string; path: string; repoId: string | null; projectId?: string; kind?: string }[]
 
 /** One fake process, shared by both backends — they differ only in argv. */
 function fakeRun(command: string, cwd: string, args: string[]) {
@@ -221,6 +221,27 @@ describe('searchContent — scope', () => {
   it('searches the whole workspace for workspace scope', async () => {
     await searchContent({ query: 'xx', scope: 'workspace', worktreeId: 'w1' }, 's1')
     expect(spawned).toHaveLength(3)
+  })
+
+  it("searches a folder session's member repos for its project scope, and never the root twice", async () => {
+    worktreeRows = [
+      { id: 'folder', path: 'C:/acme', repoId: null, projectId: 'acme', kind: 'folder' },
+      { id: 'api', path: 'C:/acme/api', repoId: 'p-api', projectId: 'acme', kind: 'root' },
+      { id: 'api-feat', path: 'C:/acme/api-feat', repoId: 'p-api', projectId: 'acme', kind: 'linked' },
+      { id: 'web', path: 'C:/acme/web', repoId: 'p-web', projectId: 'acme', kind: 'root' },
+      { id: 'other', path: 'C:/other', repoId: 'p-other', projectId: 'other', kind: 'root' }
+    ]
+    await searchContent({ query: 'xx', scope: 'repo', worktreeId: 'folder' }, 's1')
+    expect(spawned.map((s) => s.cwd).sort()).toEqual(['C:/acme/api', 'C:/acme/api-feat', 'C:/acme/web'])
+
+    spawned = []
+    await searchContent({ query: 'xx', scope: 'workspace', worktreeId: 'folder' }, 's2')
+    expect(spawned.map((s) => s.cwd)).not.toContain('C:/acme')
+    expect(spawned).toHaveLength(4)
+
+    spawned = []
+    await searchContent({ query: 'xx', scope: 'worktree', worktreeId: 'folder' }, 's3')
+    expect(spawned.map((s) => s.cwd)).toEqual(['C:/acme'])
   })
 
   it('falls back to the whole workspace when no anchor is given', async () => {

@@ -127,9 +127,11 @@ export function joinPath(parent: string, name: string): string {
   return `${p}${sep}${name}`
 }
 
-function useDefaultParentDir(): string {
+function useDefaultParentDir(projectId?: string): string {
   const firstRepo = useStore((s) => s.repos[0]?.repoPath)
-  return rememberedParentDir || (firstRepo ? parentOf(firstRepo) : '')
+  // Cloning into a project lands in its root folder, beside its other repos.
+  const projectRoot = useStore((s) => (projectId ? s.projects.find((p) => p.id === projectId)?.rootPath : undefined))
+  return projectRoot || rememberedParentDir || (firstRepo ? parentOf(firstRepo) : '')
 }
 
 /** "3d ago"-style stamp for the repo picker. */
@@ -330,6 +332,8 @@ interface FormProps {
   github: GithubState
   modeSwitch: ReactNode
   onDone: () => void
+  /** Clone into this project: its root folder is the default destination, and the repo joins it. */
+  projectId?: string
 }
 
 /* ============================================================================
@@ -341,11 +345,11 @@ type RepoLoad =
   | { status: 'ready'; repos: GithubRepoSummary[] }
   | { status: 'error'; error: string }
 
-export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): React.JSX.Element {
+export function CloneFromGithub({ github, modeSwitch, onDone, projectId }: FormProps): React.JSX.Element {
   const ctx = github.load.status === 'ready' ? github.load.ctx : null
   const account = ctx?.account
   const acting = account ? accountKey(account) : ''
-  const defaultParent = useDefaultParentDir()
+  const defaultParent = useDefaultParentDir(projectId)
 
   const [owner, setOwner] = useState('')
   const [query, setQuery] = useState('')
@@ -403,7 +407,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
     setBusy(true)
     setError(null)
     try {
-      await window.orbital.githubCloneRepo(selected, parentDir.trim(), account ?? undefined)
+      await window.orbital.githubCloneRepo(selected, parentDir.trim(), account ?? undefined, projectId)
       rememberedParentDir = parentDir.trim()
       onDone()
     } catch (e) {
@@ -614,11 +618,11 @@ type NameCheck =
 
 const NAME_CHECK_DEBOUNCE_MS = 450
 
-export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React.JSX.Element {
+export function CreateOnGithub({ github, modeSwitch, onDone, projectId }: FormProps): React.JSX.Element {
   const ctx = github.load.status === 'ready' ? github.load.ctx : null
   const account = ctx?.account
   const acting = account ? accountKey(account) : ''
-  const defaultParent = useDefaultParentDir()
+  const defaultParent = useDefaultParentDir(projectId)
 
   const [owner, setOwner] = useState('')
   const [name, setName] = useState('')
@@ -719,7 +723,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
         setCreated(repo)
       }
       setPhase('cloning')
-      await window.orbital.githubCloneRepo(repo.nameWithOwner, parentDir.trim(), account ?? undefined)
+      await window.orbital.githubCloneRepo(repo.nameWithOwner, parentDir.trim(), account ?? undefined, projectId)
       rememberedParentDir = parentDir.trim()
       onDone()
     } catch (e) {

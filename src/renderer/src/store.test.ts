@@ -7,6 +7,7 @@ function worktree(id: string, paneIds: string[]): Worktree {
   return {
     id,
     repoId: 'p1',
+    projectId: 'pr1',
     kind: 'root',
     name: id,
     path: `/tmp/${id}`,
@@ -219,5 +220,69 @@ describe('openInEditor', () => {
     // No git state and no staged side: a line request is a plain file open, and
     // the editor reads exactly that to decide against diff mode.
     expect(useStore.getState().editorOpen?.gitState).toBeUndefined()
+  })
+})
+
+describe('project sessions', () => {
+  const settings = {} as Settings
+  const repoOf = (id: string, projectId: string): AppState['repos'][number] =>
+    ({ id, name: id, repoPath: `/${id}`, projectId }) as AppState['repos'][number]
+  const wt = (id: string, projectId: string, repoId: string | null, kind: Worktree['kind']): Worktree =>
+    ({ ...worktree(id, []), projectId, repoId, kind }) as Worktree
+  /** Project g (repos a, b) with `home`, its sessions given by `worktrees`. */
+  function state(home: string | null, worktrees: Worktree[]): AppState {
+    return {
+      repos: [repoOf('a', 'g'), repoOf('b', 'g')],
+      projects: [{ id: 'g', name: 'G', rootPath: '/g', homeRepoId: home, managedBlock: true, repoIds: ['a', 'b'], createdAt: 0 }],
+      railFolders: [],
+      railItems: [],
+      worktrees,
+      tasks: [],
+      settings,
+      workspace: { id: 'ws', name: 'Default' } as AppState['workspace'],
+      devServers: {},
+      settingUpWorktrees: []
+    }
+  }
+  const noHome = [wt('folder', 'g', null, 'folder'), wt('a-root', 'g', 'a', 'root'), wt('b-root', 'g', 'b', 'root')]
+
+  beforeEach(() => {
+    vi.stubGlobal('orbital', { setRailFolderCollapsed: vi.fn(async () => undefined) })
+    useStore.setState({ activeRepoId: null, activeProjectId: null, activeWorktreeId: null, expanded: {} })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("opens a folder session from the project, with no repo active", () => {
+    useStore.getState().applyState(state(null, noHome))
+    useStore.getState().setActiveProject('g')
+    const s = useStore.getState()
+    expect(s.activeWorktreeId).toBe('folder')
+    expect(s.activeProjectId).toBe('g')
+    expect(s.activeRepoId).toBeNull()
+    expect(s.expanded.g).toBe(true)
+  })
+
+  it('keeps a folder session open across pushes, and moves to the home once it is gone', () => {
+    useStore.getState().applyState(state(null, noHome))
+    useStore.getState().setActiveProject('g')
+    useStore.getState().applyState(state(null, noHome))
+    expect(useStore.getState().activeWorktreeId).toBe('folder')
+
+    // A home was set: main closed the folder session; the project's session is now the home's root.
+    useStore.getState().applyState(state('b', noHome.slice(1)))
+    const s = useStore.getState()
+    expect(s.activeWorktreeId).toBe('b-root')
+    expect(s.activeRepoId).toBe('b')
+    expect(s.activeProjectId).toBe('g')
+  })
+
+  it('opens the project and the repo when a linked worktree is picked from outside the rail', () => {
+    useStore.getState().applyState(state(null, [...noHome, wt('a-feat', 'g', 'a', 'linked')]))
+    useStore.setState({ expanded: { g: false } })
+    useStore.getState().setActiveWorktree('a-feat')
+    const s = useStore.getState()
+    expect(s.expanded).toMatchObject({ g: true, a: true })
+    expect(s.activeRepoId).toBe('a')
+    expect(s.activeProjectId).toBe('g')
   })
 })

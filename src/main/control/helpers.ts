@@ -61,10 +61,13 @@ export function resolveRepo(ref: string): { repo?: Repo; error?: string } {
  * the status/hook path.
  */
 function validateEnvIds(req: ControlRequest, repoIds: Set<string>): string | undefined {
+  // A folder session has no repo; it is this workspace's if its project is.
+  const inWorkspace = (wt: { repoId: string | null; projectId: string }): boolean =>
+    wt.repoId !== null ? repoIds.has(wt.repoId) : tables.projects.list().some((p) => p.id === wt.projectId)
   if (req.worktreeId) {
     const wt = tables.worktrees.get(req.worktreeId)
     if (wt) {
-      if (!repoIds.has(wt.repoId)) return `worktree '${req.worktreeId}' is not in this workspace`
+      if (!inWorkspace(wt)) return `worktree '${req.worktreeId}' is not in this workspace`
       if (req.repoId && wt.repoId !== req.repoId) {
         return `worktree '${req.worktreeId}' does not belong to repo '${req.repoId}'`
       }
@@ -74,7 +77,7 @@ function validateEnvIds(req: ControlRequest, repoIds: Set<string>): string | und
     const tab = tables.tabs.get(req.terminalId)
     if (tab) {
       const wt = tables.worktrees.get(tab.worktreeId)
-      if (!wt || !repoIds.has(wt.repoId)) return `terminal '${req.terminalId}' is not in this workspace`
+      if (!wt || !inWorkspace(wt)) return `terminal '${req.terminalId}' is not in this workspace`
       if (req.worktreeId && tab.worktreeId !== req.worktreeId) {
         return `terminal '${req.terminalId}' does not belong to worktree '${req.worktreeId}'`
       }
@@ -114,6 +117,20 @@ export function scopeRequest(req: ControlRequest): { req?: ControlRequest; error
     return { req: { ...req, repoId: repo.id } }
   }
   return { req }
+}
+
+/**
+ * The error for a repo-scoped command that has no repo to act on. From a
+ * project's folder session (which has no repo of its own) it says so and
+ * points at `--repo`, rather than blaming a missing environment variable.
+ */
+export function noRepoError(req: ControlRequest): string {
+  const wt = req.worktreeId ? tables.worktrees.get(req.worktreeId) : undefined
+  if (wt?.kind === 'folder') {
+    const project = tables.projects.get(wt.projectId)
+    return `this terminal is in the folder session of project '${project?.name ?? wt.name}', which has no repo of its own; pass --repo <name|id> (see \`orbital repos\`)`
+  }
+  return 'no ORBITAL_REPO_ID in environment'
 }
 
 /**

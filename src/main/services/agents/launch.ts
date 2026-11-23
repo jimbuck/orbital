@@ -1,5 +1,5 @@
 import { delimiter as PATH_DELIM } from 'node:path'
-import { ENV, SUPPORTED_AGENTS, resolveAgentRef, type Worktree, type Tab } from '@shared/types'
+import { ENV, SUPPORTED_AGENTS, resolveAgentRef, type Repo, type Worktree, type Tab } from '@shared/types'
 import { runtime, tables } from '../../runtime'
 import { launchFailed } from '../../status'
 import { cliDir } from './paths'
@@ -23,8 +23,11 @@ function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> 
   return {
     [ENV.terminalId]: tabId,
     [ENV.worktreeId]: worktree.id,
-    [ENV.repoId]: worktree.repoId,
-    [ENV.legacyRepoId]: worktree.repoId,
+    // A folder session has no repo. Set empty rather than left out, so a value
+    // inherited from Orbital's own environment cannot stand in for one; the
+    // CLI then answers repo-scoped commands with a clear "no repo" error.
+    [ENV.repoId]: worktree.repoId ?? '',
+    [ENV.legacyRepoId]: worktree.repoId ?? '',
     [ENV.socket]: activeControlPipePath(),
     PATH: path,
     Path: path
@@ -152,8 +155,30 @@ function discoverAgentSession(tab: Tab, provider: AgentProvider, lookup: Session
  * flips to `error` instead of sitting as a silent dead pane. A tab that has run
  * before resumes its conversation rather than starting over (see agentSession).
  */
+/**
+ * The repo an agent tab launches as. A folder session has none, so it stands
+ * in a repo-shaped view of its project: the project's name and root, and the
+ * agent defaults of its first member repo (the workspace's default agent when
+ * it has none yet).
+ */
+function sessionRepo(worktree: Worktree): Repo | undefined {
+  if (worktree.repoId) return tables.repos.get(worktree.repoId)
+  const project = tables.projects.get(worktree.projectId)
+  if (!project) return undefined
+  const first = project.repoIds.map((rid) => tables.repos.get(rid)).find((r): r is Repo => !!r)
+  return {
+    id: '',
+    name: project.name,
+    repoPath: project.rootPath,
+    defaultAgentId: first?.defaultAgentId ?? 'claude',
+    agentExecPath: first?.agentExecPath,
+    addedAt: project.createdAt,
+    projectId: project.id
+  }
+}
+
 async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
-  const repo = tables.repos.get(worktree.repoId)
+  const repo = sessionRepo(worktree)
   if (!repo) return
   // The configured profile this tab launches (profile dir, exec path, args, env).
   // Each reference is tried in turn, so a tab whose profile was deleted falls

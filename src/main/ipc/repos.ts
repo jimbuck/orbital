@@ -10,7 +10,7 @@ import { handle, broadcast } from './handle'
 export function register(): void {
   const h = handle
   // ---- repos ----
-  h(IPC.addRepo, async () => {
+  h(IPC.addRepo, async (_e, projectId) => {
     const win = runtime.window ?? undefined
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Open a git repository' })
@@ -25,7 +25,7 @@ export function register(): void {
       })
       return null
     }
-    return addRepo(dir)
+    return addRepo(dir, projectId || undefined)
   })
 
   h(IPC.pickDirectory, async (_e, title) => {
@@ -46,14 +46,14 @@ export function register(): void {
 
   // Clone into <parentDir>/<repo>, then register it exactly as addRepo does
   // for a folder picked by hand.
-  h(IPC.githubCloneRepo, async (_e, nameWithOwner, parentDir, account) => {
+  h(IPC.githubCloneRepo, async (_e, nameWithOwner, parentDir, account, projectId) => {
     const repoName = String(nameWithOwner).split('/').pop() ?? ''
     const dest = github.resolveCloneTarget(String(parentDir), repoName)
     await github.cloneRepo(String(nameWithOwner), dest, account)
     if (!(await git.isRepo(dest))) {
       throw new Error(`Cloned ${nameWithOwner}, but ${dest} is not a git repository.`)
     }
-    return addRepo(dest)
+    return addRepo(dest, projectId || undefined)
   })
 
   h(IPC.removeRepo, (_e, repoId) => removeRepo(repoId))
@@ -62,6 +62,13 @@ export function register(): void {
     const trimmed = name.trim()
     if (!trimmed) return
     tables.repos.rename(repoId, trimmed)
+    // A plain repo row's project carries its repo's name (the demote rule);
+    // keep the two in step, so a later grouping starts from the name shown.
+    const repo = tables.repos.get(repoId)
+    const project = repo ? tables.projects.get(repo.projectId) : undefined
+    if (project && project.homeRepoId === null && project.repoIds.length === 1) {
+      tables.projects.rename(project.id, trimmed)
+    }
     broadcast()
   })
 

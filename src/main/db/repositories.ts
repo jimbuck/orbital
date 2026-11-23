@@ -759,10 +759,22 @@ function buildPane(p: any, tabRows: any[]): Pane {
   }
 }
 
+/**
+ * The worktree columns plus `project_ref`: a folder session's own project, else
+ * its repo's. Reads that hydrate a Worktree select through this so `projectId`
+ * follows a repo that moves between projects without a write per worktree.
+ */
+const WORKTREE_SELECT = `SELECT w.*, COALESCE(w.project_id, r.project_id) AS project_ref
+  FROM worktrees w LEFT JOIN repos r ON r.id = w.repo_id`
+
+/** Scope a {@link WORKTREE_SELECT} to a workspace: through the repo, or a folder session's project. */
+const IN_WORKSPACE = `COALESCE(r.workspace_id, (SELECT j.workspace_id FROM projects j WHERE j.id = w.project_id)) = ?`
+
 function buildWorktree(r: any, panes: Pane[]): Worktree {
   return {
     id: r.id,
-    repoId: r.repo_id,
+    repoId: r.repo_id ?? null,
+    projectId: r.project_ref ?? r.project_id ?? '',
     kind: r.kind as WorktreeKind,
     name: r.name,
     path: r.path,
@@ -805,10 +817,7 @@ export const worktrees = {
   list(): Worktree[] {
     const db = getDb()
     const rows = db
-      .prepare(
-        `SELECT w.* FROM worktrees w JOIN repos p ON p.id = w.repo_id
-         WHERE p.workspace_id = ? ORDER BY w.created_at`
-      )
+      .prepare(`${WORKTREE_SELECT} WHERE ${IN_WORKSPACE} ORDER BY w.created_at`)
       .all(requireWorkspaceId()) as any[]
     if (rows.length === 0) return []
 
@@ -832,9 +841,7 @@ export const worktrees = {
   /** Lightweight id+status projection for alert badging — skips pane/tab hydration. */
   listStatuses(): Pick<Worktree, 'id' | 'status'>[] {
     return getDb()
-      .prepare(
-        `SELECT w.id, w.status FROM worktrees w JOIN repos p ON p.id = w.repo_id WHERE p.workspace_id = ?`
-      )
+      .prepare(`SELECT w.id, w.status FROM worktrees w LEFT JOIN repos r ON r.id = w.repo_id WHERE ${IN_WORKSPACE}`)
       .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'status'>[]
   },
   /**
@@ -842,20 +849,32 @@ export const worktrees = {
    * every keystroke and wants only somewhere to point `git ls-files`, not the
    * pane/tab hydration a full list() does.
    */
-  listPaths(): Pick<Worktree, 'id' | 'path' | 'repoId'>[] {
+  listPaths(): Pick<Worktree, 'id' | 'path' | 'repoId' | 'projectId' | 'kind'>[] {
     return getDb()
       .prepare(
-        `SELECT w.id, w.path, w.repo_id AS repoId FROM worktrees w
-         JOIN repos p ON p.id = w.repo_id WHERE p.workspace_id = ?`
+        `SELECT w.id, w.path, w.repo_id AS repoId, COALESCE(w.project_id, r.project_id) AS projectId, w.kind
+         FROM worktrees w LEFT JOIN repos r ON r.id = w.repo_id WHERE ${IN_WORKSPACE}`
       )
-      .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'path' | 'repoId'>[]
+      .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'path' | 'repoId' | 'projectId' | 'kind'>[]
   },
   get(wid: string): Worktree | undefined {
-    const r = getDb().prepare('SELECT * FROM worktrees WHERE id = ?').get(wid)
+    const r = getDb().prepare(`${WORKTREE_SELECT} WHERE w.id = ?`).get(wid)
     return r ? hydrateWorktree(r) : undefined
   },
+  /** A project's folder session, if it has one. */
+  folderOf(pid: string): Worktree | undefined {
+    const r = getDb()
+      .prepare(`${WORKTREE_SELECT} WHERE w.project_id = ? AND w.kind = 'folder' ORDER BY w.created_at LIMIT 1`)
+      .get(pid)
+    return r ? hydrateWorktree(r) : undefined
+  },
+  /**
+   * Add a worktree. A repo's checkout names its `repoId`; a `folder` session
+   * names its `projectId` instead (and no repo).
+   */
   create(input: {
-    repoId: string
+    repoId: string | null
+    projectId?: string | null
     kind: WorktreeKind
     name: string
     path: string
@@ -868,10 +887,20 @@ export const worktrees = {
     return writeTx(() => {
       getDb()
         .prepare(
-          `INSERT INTO worktrees (id, repo_id, kind, name, path, branch, status, task_id, split_direction, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
+          `INSERT INTO worktrees (id, repo_id, project_id, kind, name, path, branch, status, task_id, split_direction, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
         )
-        .run(wid, input.repoId, input.kind, input.name, input.path, input.branch, null, now())
+        .run(
+          wid,
+          input.repoId,
+          input.projectId ?? null,
+          input.kind,
+          input.name,
+          input.path,
+          input.branch,
+          null,
+          now()
+        )
       // Every Worktree starts with one empty pane (a single-leaf layout) for its first tab.
       const pane = panes.create(wid)
       worktrees.setLayout(wid, leaf(pane.id))
@@ -894,6 +923,10 @@ export const worktrees = {
   rename(wid: string, name: string): void {
     getDb().prepare('UPDATE worktrees SET name = ? WHERE id = ?').run(name, wid)
   },
+  /** Point a folder session at its project's (new) root. */
+  setPath(wid: string, path: string): void {
+    getDb().prepare('UPDATE worktrees SET path = ? WHERE id = ?').run(path, wid)
+  },
   /**
    * Link a Worktree and the task it was started from. The link is stored on
    * both rows (`worktrees.task_id`, `tasks.worktree_id`); they are written
@@ -913,8 +946,8 @@ export const worktrees = {
   idsByPath(path: string): string[] {
     const rows = getDb()
       .prepare(
-        `SELECT w.id FROM worktrees w JOIN repos p ON p.id = w.repo_id
-         WHERE p.workspace_id = ? AND w.path = ?`
+        `SELECT w.id FROM worktrees w LEFT JOIN repos r ON r.id = w.repo_id
+         WHERE ${IN_WORKSPACE} AND w.path = ?`
       )
       .all(requireWorkspaceId(), path) as { id: string }[]
     return rows.map((r) => r.id)
@@ -926,7 +959,8 @@ export const worktrees = {
   },
   updateBranchByPath(path: string, branch: string): boolean {
     const r = getDb()
-      .prepare('UPDATE worktrees SET branch = ? WHERE path = ? AND branch <> ?')
+      // A folder session has no branch, even when its root is also a checkout.
+      .prepare("UPDATE worktrees SET branch = ? WHERE path = ? AND branch <> ? AND kind <> 'folder'")
       .run(branch, path, branch)
     return r.changes > 0
   },

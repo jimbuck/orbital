@@ -18,7 +18,7 @@ import { recordAgentSession } from '../services/agents/launch'
 import { createTabInWorktree } from '../tabs'
 import { createWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
 import { hookFired, statusReported } from '../status'
-import { normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
+import { noRepoError, normalizeServerUrl, parseTagList, resolveTask, scopeRequest, taskDto } from './helpers'
 
 /**
  * The `orbital` CLI's commands, one handler per ControlCommand. The table is
@@ -29,7 +29,7 @@ type Handler = (req: ControlRequest) => Promise<ControlResponse>
 
 /** `task archive` / `task unarchive` (and the legacy `task delete`). */
 async function archiveTask(req: ControlRequest, archive: boolean): Promise<ControlResponse> {
-  if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
+  if (!req.repoId) return { ok: false, error: noRepoError(req) }
   const idArg = String(req.args.id ?? '').trim()
   if (!idArg) return { ok: false, error: 'task id required' }
   const { task, error } = resolveTask(req.repoId, idArg)
@@ -60,6 +60,7 @@ const handlers: Record<ControlCommand, Handler> = {
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     const worktree = tables.worktrees.get(req.worktreeId)
     if (!worktree) return { ok: false, error: 'worktree not found' }
+    if (!worktree.repoId) return { ok: false, error: noRepoError(req) }
     const repo = tables.repos.get(worktree.repoId)
     const tab = req.terminalId ? tables.tabs.get(req.terminalId) : undefined
     const task = worktree.taskId ? tables.tasks.get(worktree.taskId) : undefined
@@ -107,7 +108,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: list }
   },
   'worktree-new': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
+    if (!req.repoId) return { ok: false, error: noRepoError(req) }
     const repo = tables.repos.get(req.repoId)
     if (!repo) return { ok: false, error: 'repo not found' }
     // A task number/id may come along: the Worktree is then started from that
@@ -197,7 +198,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return status ? { ok: true, data: { status } } : { ok: true }
   },
   'task-add': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
+    if (!req.repoId) return { ok: false, error: noRepoError(req) }
     const title = String(req.args.title ?? '').trim()
     if (!title) return { ok: false, error: 'task title required' }
     const task = tables.tasks.create({
@@ -213,7 +214,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoName(req) } }
   },
   'task-list': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
+    if (!req.repoId) return { ok: false, error: noRepoError(req) }
     const all = req.args.all === true || req.args.all === 'true'
     const archived = req.args.archived === true || req.args.archived === 'true'
     // Explicit --status implies --all: asking for `done` and getting nothing
@@ -235,7 +236,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: list }
   },
   'task-show': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
+    if (!req.repoId) return { ok: false, error: noRepoError(req) }
     const idArg = String(req.args.id ?? '').trim()
     if (!idArg) return { ok: false, error: 'task id required' }
     const { task, error } = resolveTask(req.repoId, idArg)
@@ -243,7 +244,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: taskDto(task) }
   },
   'task-update': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
+    if (!req.repoId) return { ok: false, error: noRepoError(req) }
     const idArg = String(req.args.id ?? '').trim()
     if (!idArg) return { ok: false, error: 'task id required' }
     const { task, error } = resolveTask(req.repoId, idArg)

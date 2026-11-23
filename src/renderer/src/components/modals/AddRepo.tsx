@@ -37,6 +37,9 @@ const MODES: readonly SegmentedOption<AddRepoMode>[] = [
  */
 export default function AddRepo(): React.JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
+  // Opened from a project ("Add Repo…"): the repo joins that project.
+  const projectId = useStore((s) => (s.modalData as { projectId?: string } | null)?.projectId)
+  const projectName = useStore((s) => s.projects.find((p) => p.id === projectId)?.name)
   const [mode, setMode] = useState<AddRepoMode>('local')
   const github = useGithubContext(mode !== 'local')
 
@@ -44,12 +47,26 @@ export default function AddRepo(): React.JSX.Element {
     <SegmentedControl label="Repo source" options={MODES} value={mode} onChange={setMode} fill className="mb-4" />
   )
 
-  if (mode === 'clone') return <CloneFromGithub github={github} modeSwitch={modeSwitch} onDone={closeModal} />
-  if (mode === 'create') return <CreateOnGithub github={github} modeSwitch={modeSwitch} onDone={closeModal} />
-  return <LocalFolder modeSwitch={modeSwitch} onDone={closeModal} />
+  if (mode === 'clone') {
+    return <CloneFromGithub github={github} modeSwitch={modeSwitch} onDone={closeModal} projectId={projectId} />
+  }
+  if (mode === 'create') {
+    return <CreateOnGithub github={github} modeSwitch={modeSwitch} onDone={closeModal} projectId={projectId} />
+  }
+  return <LocalFolder modeSwitch={modeSwitch} onDone={closeModal} projectId={projectId} projectName={projectName} />
 }
 
-function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: () => void }): React.JSX.Element {
+function LocalFolder({
+  modeSwitch,
+  onDone,
+  projectId,
+  projectName
+}: {
+  modeSwitch: ReactNode
+  onDone: () => void
+  projectId?: string
+  projectName?: string
+}): React.JSX.Element {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -59,7 +76,7 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
     setBusy(true)
     setError(null)
     try {
-      const repo = await window.orbital.addRepo()
+      const repo = await window.orbital.addRepo(projectId)
       if (repo) onDone()
       else setBusy(false) // dialog cancelled — keep the modal open
     } catch (e) {
@@ -71,7 +88,7 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
   return (
     <ModalShell
       title="Add repo"
-      subtitle="Open a local git repo in Orbital"
+      subtitle={projectName ? `Open a local git repo in ${projectName}` : 'Open a local git repo in Orbital'}
       width={ADD_REPO_WIDTH}
       onClose={onDone}
       footer={

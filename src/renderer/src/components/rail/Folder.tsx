@@ -1,68 +1,19 @@
-import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
+import { useState, type JSX, type KeyboardEvent } from 'react'
 import { Folder as FolderClosed, FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type RailFolder } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { worktreeStatusLabel } from '@renderer/lib/status'
 import { fireAndForget } from '@renderer/lib/bridge'
-import Repo, { GroupChevron } from './Repo'
+import { GroupChevron, NeedsYouPill } from './Repo'
+import ProjectItem from './ProjectItem'
+import RenameField from './RenameField'
+import { SlotMarker } from './SlotMarker'
 import { ContextMenu, MenuConfirm, MenuItem, clampMenuPos, type MenuPos } from './menu'
-import { beginRailDrag, type ProjectRow } from './folders'
+import { beginRailDrag, type DropTarget, type ProjectRow } from './folders'
+import { repoCount } from './railActions'
 
-/** Where a dragged row would be inserted. Zero-height, so showing it never shifts the rows it sits between. */
-export function SlotMarker(): JSX.Element {
-  return (
-    <div className="pointer-events-none relative h-0">
-      <div className="absolute inset-x-[6px] -top-[3px] h-[2px] rounded-full bg-accent" />
-    </div>
-  )
-}
-
-/**
- * The folder's name as an editable field. Mounted only while renaming, so its
- * draft always starts from the current name and it takes focus as it appears.
- * Enter or leaving the field commits; Escape drops the edit.
- */
-function RenameField({
-  initial,
-  onCommit,
-  onCancel
-}: {
-  initial: string
-  onCommit: (name: string) => void
-  onCancel: () => void
-}): JSX.Element {
-  const [draft, setDraft] = useState(initial)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
-  }, [])
-
-  const onKey = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      onCommit(draft)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      onCancel()
-    }
-  }
-
-  return (
-    <input
-      ref={inputRef}
-      value={draft}
-      aria-label="Folder name"
-      onChange={(e) => setDraft(e.target.value)}
-      onKeyDown={onKey}
-      onBlur={() => onCommit(draft)}
-      onClick={(e) => e.stopPropagation()}
-      className="allow-select w-full rounded border border-accent/60 bg-bg px-1 py-0.5 text-[12px] font-semibold text-text outline-none"
-    />
-  )
-}
+export { SlotMarker }
 
 /**
  * A folder in the rail: a named, collapsible group of projects.
@@ -77,14 +28,16 @@ function RenameField({
  * vocabulary a repo's chevron uses for its hidden Worktrees. Right-click
  * renames or deletes it; deleting only ungroups. The header drags to move the
  * folder along the rail. The Rail owns every drop: it passes `dropInto` while
- * a dragged project would be filed here, and `dropSlot` while one would be
- * inserted at a place among the projects already inside.
+ * a dragged project would be filed here, `dropSlot` while one would be
+ * inserted at a place among the projects already inside, and `dropTarget` for
+ * the projects inside to find their own part of.
  */
 export default function Folder({
   folder,
   projects,
   dropInto,
   dropSlot,
+  dropTarget = null,
   renaming,
   onRenaming
 }: {
@@ -94,20 +47,20 @@ export default function Folder({
   dropInto: boolean
   /** The index among `projects` a dragged one would be inserted before (its length = last), or null. */
   dropSlot: number | null
+  /** The Rail's current drop target, for the projects inside. */
+  dropTarget?: DropTarget | null
   /** Controlled by the Rail, so a folder it has just created can open straight into its name. */
   renaming: boolean
   onRenaming: (renaming: boolean) => void
 }): JSX.Element {
-  // The repos of the projects filed here. Every Worktree under the folder,
-  // roots included: collapsed, none of its repos' own dots are on screen, so
-  // this is the only place they report.
-  const repoIds = useStore(
-    useShallow((s) => s.repos.filter((r) => folder.projectIds.includes(r.projectId)).map((r) => r.id))
-  )
+  // Every Worktree under the folder, project sessions and repo roots
+  // included: collapsed, none of their own dots are on screen, so this is the
+  // only place they report.
   const statuses = useStore(
-    useShallow((s) => s.worktrees.filter((w) => repoIds.includes(w.repoId)).map((w) => w.status))
+    useShallow((s) => s.worktrees.filter((w) => folder.projectIds.includes(w.projectId)).map((w) => w.status))
   )
-  const holdsActive = useStore((s) => !!s.activeRepoId && repoIds.includes(s.activeRepoId))
+  const repoTotal = useStore((s) => s.repos.filter((r) => folder.projectIds.includes(r.projectId)).length)
+  const holdsActive = useStore((s) => !!s.activeProjectId && folder.projectIds.includes(s.activeProjectId))
   const expanded = !folder.collapsed
   const status = aggregateStatus(statuses)
   const needsAttention = statuses.filter((s) => s === 'needs_attention').length
@@ -126,9 +79,10 @@ export default function Folder({
     setMenu(clampMenuPos(e, 210, 120))
   }
 
-  const toggle = (): void => {
-    fireAndForget(window.orbital.setRailFolderCollapsed(folder.id, expanded))
+  const setCollapsed = (collapsed: boolean): void => {
+    fireAndForget(window.orbital.setRailFolderCollapsed(folder.id, collapsed))
   }
+  const toggle = (): void => setCollapsed(expanded)
   const commitRename = (draft: string): void => {
     const name = draft.trim()
     onRenaming(false)
@@ -138,9 +92,21 @@ export default function Folder({
     fireAndForget(window.orbital.removeRailFolder(folder.id))
     closeMenu()
   }
+  const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (renaming || e.target !== e.currentTarget) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      toggle()
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault()
+      const open = e.key === 'ArrowRight'
+      if (open !== expanded) setCollapsed(!open)
+    }
+  }
 
   const Icon = expanded ? FolderOpen : FolderClosed
-  const count = `${repoIds.length} repo${repoIds.length === 1 ? '' : 's'}`
+  const count = repoCount(repoTotal)
+  const holds = projects.length > 0 || repoTotal > 0
 
   return (
     // The data attribute is how the Rail tells which folder a drag is over. The
@@ -155,13 +121,7 @@ export default function Folder({
           tabIndex={0}
           aria-expanded={expanded}
           onClick={() => !renaming && toggle()}
-          onKeyDown={(e) => {
-            if (renaming) return
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              toggle()
-            }
-          }}
+          onKeyDown={onKey}
           onContextMenu={openMenu}
           draggable={!renaming}
           onDragStart={(e) => beginRailDrag(e, { kind: 'folder', id: folder.id })}
@@ -179,7 +139,13 @@ export default function Folder({
 
           <div className="min-w-0 flex-1">
             {renaming ? (
-              <RenameField initial={folder.name} onCommit={commitRename} onCancel={() => onRenaming(false)} />
+              <RenameField
+                initial={folder.name}
+                label="Folder name"
+                className="text-[12px] font-semibold"
+                onCommit={commitRename}
+                onCancel={() => onRenaming(false)}
+              />
             ) : (
               <div
                 className={`truncate text-[12px] font-semibold ${
@@ -193,14 +159,10 @@ export default function Folder({
             )}
           </div>
 
-          {!renaming && !expanded && needsAttention > 0 && (
-            <span className="inline-flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-amber/15 px-[5px] font-mono text-[10px] font-bold text-amber-2">
-              {needsAttention}
-            </span>
-          )}
+          {!renaming && !expanded && needsAttention > 0 && <NeedsYouPill count={needsAttention} />}
           {!renaming && (
             <span title={count} className="flex-none font-mono text-[10px] text-faint">
-              {repoIds.length}
+              {repoTotal}
             </span>
           )}
         </div>
@@ -212,13 +174,15 @@ export default function Folder({
                 {projects.map((row, i) => (
                   <div key={row.id}>
                     {dropSlot === i && <SlotMarker />}
-                    <Repo repo={row.repo} />
+                    <ProjectItem row={row} dropTarget={dropTarget} />
                   </div>
                 ))}
                 {dropSlot === projects.length && <SlotMarker />}
               </>
             ) : (
-              <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">Empty. Drag a repo here.</div>
+              <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">
+                Empty. Drag a repo or project here.
+              </div>
             )}
           </div>
         )}
@@ -242,13 +206,13 @@ export default function Folder({
                 label="Delete Folder"
                 danger
                 // An empty folder holds nothing to lose track of, so it just goes.
-                onClick={() => (repoIds.length > 0 ? setConfirming(true) : remove())}
+                onClick={() => (holds ? setConfirming(true) : remove())}
               />
             </>
           ) : (
             <MenuConfirm
               message={`Delete the folder "${folder.name}"?`}
-              hint={`Its ${count} stay${repoIds.length === 1 ? 's' : ''} in Orbital, ungrouped. Nothing on disk changes.`}
+              hint="Everything in it stays in Orbital, at the top level. Nothing on disk changes."
               confirmLabel="Delete Folder"
               danger={false}
               onConfirm={remove}

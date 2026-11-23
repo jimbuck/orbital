@@ -88,7 +88,8 @@ export async function searchFiles(query: string, limit = DEFAULT_LIMIT): Promise
   const trimmed = query.trim()
   if (!trimmed) return []
 
-  const worktrees = tables.worktrees.listPaths()
+  // A folder session is no checkout to list; the repos under it are listed as themselves.
+  const worktrees = tables.worktrees.listPaths().filter((w) => w.kind !== 'folder')
   const listings = await Promise.all(
     worktrees.map(async (w) => ({ worktreeId: w.id, paths: await pathsFor(w.id, w.path) }))
   )

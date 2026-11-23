@@ -13,7 +13,18 @@ export type MenuPos = { x: number; y: number }
 
 /** Clamp a context-menu origin so the surface stays inside the window. */
 export function clampMenuPos(e: React.MouseEvent, width: number, height: number): MenuPos {
-  return { x: Math.min(e.clientX, window.innerWidth - width - 12), y: Math.min(e.clientY, window.innerHeight - height) }
+  let x = e.clientX
+  let y = e.clientY
+  // Opened from the keyboard (the ContextMenu key, Shift+F10) the event has no
+  // pointer position, so the menu opens under the row it belongs to.
+  if (x === 0 && y === 0 && e.currentTarget instanceof Element) {
+    const box = e.currentTarget.getBoundingClientRect()
+    if (box.width > 0) {
+      x = box.left + 12
+      y = box.bottom
+    }
+  }
+  return { x: Math.min(x, window.innerWidth - width - 12), y: Math.max(0, Math.min(y, window.innerHeight - height)) }
 }
 
 /** Full-screen dismiss overlay + fixed, elevated menu surface. */

@@ -261,7 +261,7 @@ describe('AddRepo — new GitHub repo', () => {
       template: undefined,
       team: undefined
     })
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/demo', 'D:\\Code', personal))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/demo', 'D:\\Code', personal, undefined))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -345,7 +345,7 @@ describe('AddRepo — clone from GitHub', () => {
     expect(screen.getByText(`${parent}\\orbital`)).toBeTruthy()
     fireEvent.click(clone)
 
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', parent, personal))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', parent, personal, undefined))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -356,7 +356,7 @@ describe('AddRepo — clone from GitHub', () => {
     fireEvent.click(within(list).getByRole('option', { name: /cli\/cli/ }))
     const parent = (screen.getByLabelText(/Local folder/) as HTMLInputElement).value
     fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('cli/cli', parent, personal))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('cli/cli', parent, personal, undefined))
   })
 
   it('surfaces a clone failure and stays open', async () => {
@@ -407,7 +407,7 @@ describe('AddRepo — GitHub account picker', () => {
 
     await waitFor(() => expect(githubCreateRepo).toHaveBeenCalledTimes(1))
     expect(githubCreateRepo.mock.calls[0][0]).toMatchObject({ account: work, owner: 'jimbuckrda', name: 'demo' })
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuckrda/demo', expect.any(String), work))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuckrda/demo', expect.any(String), work, undefined))
   })
 
   it('keeps the account across the two GitHub modes and re-lists repositories as it', async () => {

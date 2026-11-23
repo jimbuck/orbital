@@ -368,7 +368,9 @@ export default function GitPanel(): JSX.Element {
   /** The open right-click menu on a changed file or folder, if any. */
   const [rowMenu, setRowMenu] = useState<{ target: GitMenuTarget; pos: MenuPos } | null>(null)
 
-  const worktreeId = worktree?.id ?? null
+  // A project's folder session has no git: nothing here may ask main about it.
+  const isFolder = worktree?.kind === 'folder'
+  const worktreeId = worktree && !isFolder ? worktree.id : null
 
   // Monotonic request id. Every action below pairs `worktree.id` with paths
   // taken from `status`, so a slow status for the PREVIOUS Worktree landing
@@ -445,11 +447,16 @@ export default function GitPanel(): JSX.Element {
   const stagedTree = useMemo(() => buildFileTree(staged), [staged])
   const unstagedTree = useMemo(() => buildFileTree(unstaged), [unstaged])
 
-  if (!worktree) {
+  if (!worktree || isFolder) {
     return (
       <div className="border-b border-soft px-[15px] py-4">
         <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Git</span>
-        <div className="mt-2 text-[12px] text-faint">No Worktree</div>
+        <div className="mt-2 text-[12px] text-faint">{worktree ? 'Not a git checkout' : 'No Worktree'}</div>
+        {worktree && (
+          <div className="mt-1 text-[11px] leading-snug text-dim">
+            This project session runs in its root folder. Open a repo below it to use git.
+          </div>
+        )}
       </div>
     )
   }

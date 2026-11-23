@@ -7,17 +7,23 @@ import type { ControlRequest, Repo } from '@shared/types'
 const workspaceRepos: Repo[] = []
 // Worktrees/tabs are NOT workspace-scoped in the real repository: lookups by id
 // find rows of any workspace, so these stubs hold foreign ones too.
-const worktrees = new Map<string, { id: string; repoId: string }>()
+const worktrees = new Map<string, { id: string; repoId: string | null; projectId?: string; kind?: string; name?: string }>()
 const tabs = new Map<string, { id: string; worktreeId: string }>()
+// This workspace's projects (list is workspace-scoped, get is not).
+const workspaceProjects = [{ id: 'proj-platform', name: 'Platform' }]
 vi.mock('../runtime', () => ({
   tables: {
     repos: { list: () => workspaceRepos },
+    projects: {
+      list: () => workspaceProjects,
+      get: (id: string) => workspaceProjects.find((p) => p.id === id)
+    },
     worktrees: { get: (id: string) => worktrees.get(id) },
     tabs: { get: (id: string) => tabs.get(id) }
   }
 }))
 
-const { resolveRepo, scopeRequest } = await import('./helpers')
+const { noRepoError, resolveRepo, scopeRequest } = await import('./helpers')
 
 const repo = (id: string, name: string): Repo => ({
   id,
@@ -145,5 +151,30 @@ describe('scopeRequest env worktree / terminal ids', () => {
 
   it('passes stale ids (closed tab / removed worktree) through for the handlers to no-op', () => {
     expect(scopeRequest(req({ cmd: 'hook', worktreeId: 'gone-wt', terminalId: 'gone-tab' })).req).toBeDefined()
+  })
+})
+
+describe("a project's folder session (no repo)", () => {
+  beforeEach(() => {
+    worktrees.set('wt-folder', { id: 'wt-folder', repoId: null, projectId: 'proj-platform', kind: 'folder', name: 'Platform' })
+    worktrees.set('wt-folder-foreign', { id: 'wt-folder-foreign', repoId: null, projectId: 'proj-elsewhere', kind: 'folder' })
+    tabs.set('tab-folder', { id: 'tab-folder', worktreeId: 'wt-folder' })
+  })
+
+  it('is in the workspace when its project is, so its status hooks go through', () => {
+    expect(scopeRequest(req({ worktreeId: 'wt-folder', terminalId: 'tab-folder' })).req).toBeDefined()
+    expect(scopeRequest(req({ worktreeId: 'wt-folder-foreign' })).error).toMatch(/not in this workspace/)
+  })
+
+  it('answers a repo-scoped command with what to do instead of blaming the environment', () => {
+    expect(noRepoError(req({ worktreeId: 'wt-folder' }))).toMatch(
+      /folder session of project 'Platform', which has no repo of its own; pass --repo/
+    )
+    expect(noRepoError(req({ worktreeId: 'wt-web' }))).toBe('no ORBITAL_REPO_ID in environment')
+    expect(noRepoError(req())).toBe('no ORBITAL_REPO_ID in environment')
+  })
+
+  it('still reaches a sibling repo with --repo', () => {
+    expect(scopeRequest(req({ worktreeId: 'wt-folder', args: { repo: 'web' } })).req?.repoId).toBe('aaaa1111-0000')
   })
 })

@@ -3,32 +3,58 @@ import {
   ChevronDown,
   ChevronRight,
   CircleOff,
-  Folder,
   FolderInput,
-  FolderMinus,
   FolderOpen,
-  FolderPlus,
+  House,
+  Layers,
+  ListMinus,
   Pencil,
   Plus,
   Terminal,
   Trash2
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { aggregateStatus, type Repo as RepoModel, type TerminalStatus } from '@shared/types'
+import { aggregateStatus, type Project, type Repo as RepoModel, type TerminalStatus } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import WorktreeRow from './WorktreeRow'
-import { ContextMenu, MenuItem, MenuConfirm, MenuPrompt, clampMenuPos, type MenuPos } from './menu'
-import { beginRailDrag } from './folders'
+import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
+import {
+  beginRailDrag,
+  dissolvesOnLeave,
+  folderOf,
+  projectRowById,
+  railRows,
+  repoPathLabel,
+  type RailAction
+} from './folders'
+import { FolderStep, NewFolderStep, ProjectStep } from './menuSteps'
+import {
+  dissolveConfirm,
+  folderSessionOf,
+  makeHome,
+  needsYouLabel,
+  ptyCount,
+  runRailAction,
+  type DissolveConfirm
+} from './railActions'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { fileManagerName } from '@renderer/lib/platform'
 
 /**
  * What the context menu is showing: its items, or one of the steps that swap in
  * place of them (see ./menu). `move` is the folder picker and `newFolder` the
- * name prompt it leads to.
+ * name prompt it leads to; `project` is the Move to Project picker; `confirm`
+ * holds a move that would close a folder session with terminals open.
  */
-type MenuStep = 'items' | 'confirmRemove' | 'move' | 'newFolder'
+type MenuStep =
+  | { kind: 'items' }
+  | { kind: 'confirmRemove' }
+  | { kind: 'move' }
+  | { kind: 'newFolder' }
+  | { kind: 'project' }
+  | { kind: 'confirm'; action: RailAction; confirm: DissolveConfirm }
+  | { kind: 'confirmHome'; terminals: number }
 
 /**
  * The expand/collapse chevron, carrying what the hidden Worktrees add up to.
@@ -51,30 +77,64 @@ export function GroupChevron({ expanded, status }: { expanded: boolean; status: 
   return <Chevron size={14} strokeWidth={1.5} className={`${tint} ${pulse}`} />
 }
 
+/** The amber needs-you pill a collapsed row carries for what it hides. */
+export function NeedsYouPill({ count }: { count: number }): JSX.Element {
+  const label = needsYouLabel(count)
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className="inline-flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-amber/15 px-[5px] font-mono text-[10px] font-bold text-amber-2"
+    >
+      {count}
+    </span>
+  )
+}
+
 /**
  * A repo header in the rail. The header row IS the root Worktree:
  * clicking it selects the repo's root Worktree directly. Linked Worktrees
  * live in the collapsible list below — the chevron only renders when there
- * are any. Right-click opens a context menu to rename the repo inline, file
- * it in a rail folder, start a new Worktree, clear a stuck root status, open the
- * repo in Explorer or an external terminal, or remove the repo. The header
- * can also be dragged: up and down its list to reorder it, onto a folder, or out
- * of one. The Rail owns the drop.
+ * are any.
+ *
+ * Two variants, which differ in the subline, the menu and what the drag means
+ * and nothing else:
+ *
+ * - `flat`: a one-repo project with no home, drawn as the repo. It files and
+ *   reorders as its project, and joins another project as a repo; dropping a
+ *   repo on its middle starts a project with it.
+ * - `member`: one of a group's repos. Its path reads relative to the
+ *   project's root, it reorders among the members, and dragged out it
+ *   detaches into a project of its own.
+ *
+ * The Rail owns every drop; `joinTarget` says a dragged repo would start a
+ * project with this flat row.
  */
-export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
+export default function Repo({
+  repo,
+  project: projectProp,
+  variant = 'flat',
+  joinTarget = false
+}: {
+  repo: RepoModel
+  /** Its project. Looked up from the store when not given. */
+  project?: Project
+  variant?: 'flat' | 'member'
+  joinTarget?: boolean
+}): JSX.Element {
+  const storedProject = useStore((s) => s.projects.find((p) => p.id === repo.projectId))
+  const project = projectProp ?? storedProject
   const worktrees = useStore(useShallow((s) => s.worktrees.filter((w) => w.repoId === repo.id)))
   const expanded = useStore((s) => !!s.expanded[repo.id])
   const isActive = useStore((s) => s.activeRepoId === repo.id)
   const activeWorktreeId = useStore((s) => s.activeWorktreeId)
   const setActiveRepo = useStore((s) => s.setActiveRepo)
   const toggleExpanded = useStore((s) => s.toggleExpanded)
+  const setExpanded = useStore((s) => s.setExpanded)
   const openModal = useStore((s) => s.openModal)
-  const folders = useStore((s) => s.railFolders)
-  // The rail arranges the repo's PROJECT (one repo each, for now), so that is
-  // what is filed, dragged and placed.
-  const folderId = folders.find((f) => f.projectIds.includes(repo.projectId))?.id ?? null
+  const member = variant === 'member'
   const root = worktrees.find((w) => w.kind === 'root')
-  const linked = worktrees.filter((w) => w.kind !== 'root')
+  const linked = worktrees.filter((w) => w.kind === 'linked')
   const rootActive = !!root && activeWorktreeId === root.id
   // The header row IS the root Worktree, so its dot is the ROOT's status and
   // nothing else. Rolling every Worktree in the repo into it meant a single
@@ -93,7 +153,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
   const needsAttention = linked.filter((w) => w.status === 'needs_attention').length
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
-  const [step, setStep] = useState<MenuStep>('items')
+  const [step, setStep] = useState<MenuStep>({ kind: 'items' })
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState(repo.name)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -104,29 +164,56 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
 
   const closeMenu = (): void => {
     setMenu(null)
-    setStep('items')
+    setStep({ kind: 'items' })
   }
 
   const openMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    setStep('items')
-    setMenu(clampMenuPos(e, 210, 240))
+    setStep({ kind: 'items' })
+    setMenu(clampMenuPos(e, 210, 300))
   }
 
-  // Filing a project is a rail arrangement only: main records where the row
-  // sits and leaves the project and its repo untouched. It goes last in the
-  // folder it is moved to.
-  const moveTo = (target: string): void => {
-    fireAndForget(window.orbital.placeProject(repo.projectId, target, null))
+  /** Run a move, confirming first when it would close a folder session that has terminals open. */
+  const pick = (action: RailAction): void => {
+    const confirm = dissolveConfirm(action)
+    if (confirm) {
+      setStep({ kind: 'confirm', action, confirm })
+      return
+    }
+    runRailAction(action)
     closeMenu()
   }
-  // Out of its folder, it lands at the top level just below that folder, which
-  // is the nearest place to where it was.
-  const removeFromFolder = (): void => {
-    const rail = useStore.getState().railItems
-    const at = rail.findIndex((item) => item.kind === 'folder' && item.id === folderId)
-    fireAndForget(window.orbital.placeProject(repo.projectId, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
+
+  // Out of its project, it lands as its own row just below the project.
+  const removeFromProject = (): void => {
+    if (!project) return
+    const s = useStore.getState()
+    const rows = railRows(s.projects, s.repos, s.railFolders, s.railItems, {})
+    const folderId = folderOf(rows, project.id)
+    const list = folderId
+      ? (rows.find((r) => r.kind === 'folder' && r.id === folderId) as { projects: { id: string }[] }).projects
+      : rows
+    const after = list[list.findIndex((r) => r.id === project.id) + 1]?.id ?? null
+    pick({
+      op: 'detachRepo',
+      repoId: repo.id,
+      folderId,
+      beforeId: after,
+      dissolves: dissolvesOnLeave(projectRowById(rows, project.id))
+    })
+  }
+
+  // Making a member the home closes the folder session; say so when that
+  // takes terminals with it. A flat row has no folder session to close.
+  const makeHomeRepo = (): void => {
+    if (!project) return
+    const terminals = ptyCount(folderSessionOf(useStore.getState().worktrees, project.id))
+    if (terminals > 0) {
+      setStep({ kind: 'confirmHome', terminals })
+      return
+    }
+    makeHome(project.id, repo.id)
     closeMenu()
   }
 
@@ -141,6 +228,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
     if (name && name !== repo.name) void window.orbital.renameRepo(repo.id, name)
   }
   const onRenameKey = (e: KeyboardEvent<HTMLInputElement>): void => {
+    e.stopPropagation()
     if (e.key === 'Enter') {
       e.preventDefault()
       commitRename()
@@ -152,26 +240,41 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
 
   const activate = (): void => setActiveRepo(repo.id)
   const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (renaming) return
+    if (renaming || e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       activate()
+    } else if (linked.length > 0 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault()
+      setExpanded(repo.id, e.key === 'ArrowRight')
     }
   }
 
+  const pathLabel = member && project ? repoPathLabel(repo.repoPath, project.rootPath) : repo.repoPath
+  const projectName = project?.name ?? ''
+
   return (
-    // The data attribute is how the Rail tells which project a drag is over.
-    <div data-project-id={repo.projectId} className="mb-1">
+    // The data attribute is how the Rail tells what a drag is over: a flat
+    // row is its project, a member row is a repo inside one.
+    <div {...(member ? { 'data-repo-id': repo.id } : { 'data-project-id': repo.projectId })} className="mb-1">
       <div
         role="button"
         tabIndex={0}
+        title={member ? repo.repoPath : undefined}
+        aria-current={rootActive ? 'true' : undefined}
         onClick={() => !renaming && activate()}
         onKeyDown={onHeaderKey}
         onContextMenu={openMenu}
         draggable={!renaming}
-        onDragStart={(e) => beginRailDrag(e, { kind: 'project', id: repo.projectId })}
+        onDragStart={(e) => beginRailDrag(e, { kind: 'repo', id: repo.id })}
         className={`group flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
-          rootActive ? 'bg-panel-2' : isActive ? 'bg-hover' : 'hover:bg-hover'
+          joinTarget
+            ? 'bg-accent/10 ring-1 ring-inset ring-accent/50'
+            : rootActive
+              ? 'bg-panel-2'
+              : isActive
+                ? 'bg-hover'
+                : 'hover:bg-hover'
         }`}
       >
         {linked.length > 0 ? (
@@ -182,6 +285,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
             aria-label={`${expanded ? 'Collapse' : 'Expand'} repo${
               linkedStatus === 'idle' ? '' : ` — worktrees ${worktreeStatusLabel(linkedStatus)}`
             }`}
+            aria-expanded={expanded}
             title={linkedStatus === 'idle' ? undefined : `Worktrees ${worktreeStatusLabel(linkedStatus)}`}
             onClick={(e) => {
               e.stopPropagation()
@@ -195,10 +299,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
           <span className="w-[14px] flex-none" />
         )}
 
-        <span
-          title={worktreeStatusLabel(rootStatus)}
-          className="flex w-[11px] flex-none items-center justify-center"
-        >
+        <span title={worktreeStatusLabel(rootStatus)} className="flex w-[11px] flex-none items-center justify-center">
           <StatusDot status={rootStatus} />
         </span>
 
@@ -207,6 +308,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
             <input
               ref={inputRef}
               value={draft}
+              aria-label="Repo name"
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onRenameKey}
               onBlur={commitRename}
@@ -214,14 +316,19 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
               className="allow-select w-full rounded border border-accent/60 bg-bg px-1 py-0.5 text-[13.5px] font-bold text-text outline-none"
             />
           ) : (
-            <div className={`text-[13.5px] font-bold ${isActive ? 'text-text' : 'text-text-2'}`}>
+            <div className={`truncate text-[13.5px] font-bold ${isActive ? 'text-text' : 'text-text-2'}`}>
               {repo.name}
             </div>
           )}
-          <div className="mt-px truncate font-mono text-[10.5px] text-faint">
-            {root ? `${root.branch} · ` : ''}
-            {repo.repoPath}
-          </div>
+          {joinTarget ? (
+            // The one drop that makes something new says so.
+            <div className="mt-px truncate font-mono text-[10.5px] text-accent">Drop to start a project</div>
+          ) : (
+            <div className="mt-px truncate font-mono text-[10.5px] text-faint">
+              {root ? `${root.branch} · ` : ''}
+              {pathLabel}
+            </div>
+          )}
         </div>
 
         {!renaming && (
@@ -239,11 +346,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
           </button>
         )}
 
-        {!renaming && needsAttention > 0 && (
-          <span className="inline-flex h-[17px] min-w-[17px] flex-none items-center justify-center rounded-full bg-amber/15 px-[5px] font-mono text-[10px] font-bold text-amber-2">
-            {needsAttention}
-          </span>
-        )}
+        {!renaming && needsAttention > 0 && <NeedsYouPill count={needsAttention} />}
       </div>
 
       {expanded && linked.length > 0 && (
@@ -264,14 +367,31 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
 
       {menu && (
         <ContextMenu pos={menu} width={210} onClose={closeMenu}>
-          {step === 'items' && (
+          {step.kind === 'items' && (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
-              <MenuItem
-                icon={<FolderInput size={13} strokeWidth={1.5} />}
-                label="Move to Folder"
-                onClick={() => setStep('move')}
-              />
+              {/* Folders hold projects: a member is filed with its project, from the header. */}
+              {!member && (
+                <MenuItem
+                  icon={<FolderInput size={13} strokeWidth={1.5} />}
+                  label="Move to Folder"
+                  onClick={() => setStep({ kind: 'move' })}
+                />
+              )}
+              {!member && project && (
+                <>
+                  <MenuItem
+                    icon={<Layers size={13} strokeWidth={1.5} />}
+                    label="Move to Project"
+                    onClick={() => setStep({ kind: 'project' })}
+                  />
+                  <MenuItem
+                    icon={<House size={13} strokeWidth={1.5} />}
+                    label="Make Home Repo"
+                    onClick={makeHomeRepo}
+                  />
+                </>
+              )}
               <MenuItem
                 icon={<Plus size={13} strokeWidth={1.5} />}
                 label="New Worktree"
@@ -280,6 +400,27 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
                   closeMenu()
                 }}
               />
+              {member && project && (
+                <>
+                  <div className="my-1 h-px bg-soft" />
+                  <MenuItem
+                    icon={<House size={13} strokeWidth={1.5} />}
+                    label="Make Home Repo"
+                    onClick={makeHomeRepo}
+                  />
+                  <MenuItem
+                    icon={<Layers size={13} strokeWidth={1.5} />}
+                    label="Move to Project"
+                    onClick={() => setStep({ kind: 'project' })}
+                  />
+                  <MenuItem
+                    icon={<ListMinus size={13} strokeWidth={1.5} />}
+                    label="Remove from Project"
+                    onClick={removeFromProject}
+                  />
+                  <div className="my-1 h-px bg-soft" />
+                </>
+              )}
               {/* Clear Status acts on a Worktree row, so it can only appear when
                   there is one. */}
               {root && (
@@ -327,56 +468,59 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
                 icon={<Trash2 size={13} strokeWidth={1.5} />}
                 label="Remove repo"
                 danger
-                onClick={() => setStep('confirmRemove')}
+                onClick={() => setStep({ kind: 'confirmRemove' })}
               />
             </>
           )}
 
-          {step === 'move' && (
-            <>
-              <div className="truncate px-2 py-1.5 text-[11.5px] font-semibold text-text-2">
-                Move {repo.name} to
-              </div>
-              {folders.map((folder) => (
-                <MenuItem
-                  key={folder.id}
-                  icon={<Folder size={13} strokeWidth={1.5} />}
-                  label={folder.name}
-                  hint={folder.id === folderId ? 'current' : undefined}
-                  disabled={folder.id === folderId}
-                  onClick={() => moveTo(folder.id)}
-                />
-              ))}
-              {folders.length > 0 && <div className="my-1 h-px bg-soft" />}
-              <MenuItem
-                icon={<FolderPlus size={13} strokeWidth={1.5} />}
-                label="New Folder…"
-                onClick={() => setStep('newFolder')}
-              />
-              {folderId !== null && (
-                <MenuItem
-                  icon={<FolderMinus size={13} strokeWidth={1.5} />}
-                  label="Remove from Folder"
-                  onClick={removeFromFolder}
-                />
-              )}
-            </>
+          {step.kind === 'move' && (
+            <FolderStep
+              name={repo.name}
+              projectId={repo.projectId}
+              onNewFolder={() => setStep({ kind: 'newFolder' })}
+              onDone={closeMenu}
+            />
           )}
 
-          {step === 'newFolder' && (
-            <MenuPrompt
-              label={`New folder for ${repo.name}`}
-              placeholder="Folder name"
-              confirmLabel="Create"
-              onSubmit={(name) => {
-                fireAndForget(window.orbital.createRailFolder(name, repo.projectId))
+          {step.kind === 'newFolder' && (
+            <NewFolderStep name={repo.name} projectId={repo.projectId} onDone={closeMenu} />
+          )}
+
+          {step.kind === 'project' && project && <ProjectStep repo={repo} project={project} onPick={pick} />}
+
+          {step.kind === 'confirm' && (
+            <MenuConfirm
+              message={step.confirm.message}
+              hint={step.confirm.hint}
+              confirmLabel={step.confirm.confirmLabel}
+              danger={false}
+              onConfirm={() => {
+                runRailAction(step.action)
                 closeMenu()
               }}
               onCancel={closeMenu}
             />
           )}
 
-          {step === 'confirmRemove' && (
+          {step.kind === 'confirmHome' && project && (
+            <MenuConfirm
+              message={`Make ${repo.name} the home repo of "${projectName}"?`}
+              hint={`The project session moves into ${repo.name}. ${
+                step.terminals === 1
+                  ? 'The 1 terminal open in the folder session closes.'
+                  : `The ${step.terminals} terminals open in the folder session close.`
+              }`}
+              confirmLabel="Make Home"
+              danger={false}
+              onConfirm={() => {
+                makeHome(project.id, repo.id)
+                closeMenu()
+              }}
+              onCancel={closeMenu}
+            />
+          )}
+
+          {step.kind === 'confirmRemove' && (
             <MenuConfirm
               message={`Remove "${repo.name}" from Orbital?`}
               hint="The repo and its worktrees stay on disk; open terminals close."

@@ -188,14 +188,21 @@ export default function CommandPalette(): JSX.Element | null {
   /* ---- Row assembly ------------------------------------------------------ */
 
   const repoName = useCallback(
-    (id: string): string => repos.find((p) => p.id === id)?.name ?? 'unknown repo',
+    (id: string | null): string => repos.find((p) => p.id === id)?.name ?? 'unknown repo',
     [repos]
   )
 
-  /** `repo › worktree` — the one line that says which checkout a hit is in. */
+  /**
+   * `repo › worktree` — the one line that says which checkout a hit is in. A
+   * project's folder session has no repo; it is named after its project.
+   */
   const originOf = useCallback(
     (worktree: Worktree | undefined): string =>
-      worktree ? `${repoName(worktree.repoId)} › ${worktree.name}` : 'unknown Worktree',
+      !worktree
+        ? 'unknown Worktree'
+        : worktree.kind === 'folder'
+          ? `${worktree.name} › project session`
+          : `${repoName(worktree.repoId)} › ${worktree.name}`,
     [repoName]
   )
 
@@ -254,7 +261,7 @@ export default function CommandPalette(): JSX.Element | null {
         label: w.name,
         detail: w.branch,
         mono: true,
-        meta: repoName(w.repoId),
+        meta: w.kind === 'folder' ? 'project session' : repoName(w.repoId),
         run: () => setActiveWorktree(w.id),
         score: m.score
       })

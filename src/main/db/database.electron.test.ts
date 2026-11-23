@@ -128,13 +128,14 @@ describe('migrating a pre-revamp database', () => {
     expect(repo.default_agent_id).toBe('codex')
     expect(repo.agent_exec_path).toBe('C:/tools/codex.exe')
 
-    const wts = d.prepare('SELECT id, repo_id, kind, path FROM worktrees ORDER BY created_at').all() as Record<
-      string,
-      unknown
-    >[]
+    const wts = d
+      .prepare('SELECT id, repo_id, project_id, kind, path FROM worktrees ORDER BY created_at')
+      .all() as Record<string, unknown>[]
+    // The legacy `flights.workspace_id` became `repo_id`; the project-session
+    // `project_id` added after it is a new, empty column, never the old one.
     expect(wts).toEqual([
-      { id: 'f1', repo_id: 'ws1', kind: 'root', path: 'C:/repo' },
-      { id: 'f2', repo_id: 'ws1', kind: 'linked', path: 'C:/repo/.orbital-worktrees/repo/feat' }
+      { id: 'f1', repo_id: 'ws1', project_id: null, kind: 'root', path: 'C:/repo' },
+      { id: 'f2', repo_id: 'ws1', project_id: null, kind: 'linked', path: 'C:/repo/.orbital-worktrees/repo/feat' }
     ])
     expect(d.prepare('SELECT worktree_id FROM panes').get()).toEqual({ worktree_id: 'f1' })
     expect(d.prepare('SELECT worktree_id, pane_id FROM tabs').get()).toEqual({ worktree_id: 'f1', pane_id: 'p1' })
@@ -331,6 +332,117 @@ describe.each([
     // and `workspaces` without the old `projects` must not read as pre-revamp.
     initDb(dir)
     expect(snapshot()).toEqual(first)
+  })
+})
+
+describe('giving worktrees project sessions', () => {
+  /** `worktrees` as PRAGMA reports it: column name → NOT NULL. */
+  const worktreeShape = (): Record<string, number> =>
+    Object.fromEntries(
+      (getDb().prepare('PRAGMA table_info(worktrees)').all() as Array<{ name: string; notnull: number }>).map((c) => [
+        c.name,
+        c.notnull
+      ])
+    )
+  const indexes = (): string[] =>
+    (
+      getDb().prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'worktrees'").all() as Array<{
+        name: string
+      }>
+    )
+      .map((r) => r.name)
+      .filter((n) => !n.startsWith('sqlite_'))
+      .sort()
+
+  it('makes a fresh database with the shape already', () => {
+    expect(worktreeShape()).toMatchObject({ repo_id: 0, project_id: 0, kind: 1 })
+    expect(indexes()).toEqual(['idx_worktrees_project', 'idx_worktrees_repo'])
+  })
+
+  it.each([
+    ['from before projects', false],
+    ['from v1.45', true]
+  ])(
+    'rebuilds an older worktrees table %s, keeping every row and every link to it',
+    (_label, v145) => {
+      closeDb()
+      writePreProjectsDb(v145)
+      // A pane and a tab hang off the worktree by table name; the rebuild must not strand them.
+      const raw = new Database(join(dir, 'orbital.db'))
+      raw.exec(`
+        INSERT INTO panes (id, worktree_id, position) VALUES ('p1', 'w1', 0);
+        INSERT INTO tabs (id, worktree_id, pane_id, type, position) VALUES ('tab1', 'w1', 'p1', 'terminal', 0);
+        UPDATE tasks SET worktree_id = 'w1';
+      `)
+      raw.close()
+      initDb(dir)
+      tables.setActiveWorkspaceId('ws')
+
+      expect(worktreeShape()).toMatchObject({ repo_id: 0, project_id: 0 })
+      expect(indexes()).toEqual(['idx_worktrees_project', 'idx_worktrees_repo'])
+      const row = getDb().prepare('SELECT * FROM worktrees').get() as Record<string, unknown>
+      expect(row).toMatchObject({ id: 'w1', repo_id: 'r-api', project_id: null, kind: 'root', path: 'C:/src/acme/api' })
+      expect(getDb().pragma('foreign_key_check')).toEqual([])
+      expect(getDb().pragma('foreign_keys', { simple: true })).toBe(1)
+
+      // Hydrated, the repo worktree reports its repo's project.
+      const api = tables.repos.get('r-api')!
+      expect(tables.worktrees.get('w1')).toMatchObject({ repoId: 'r-api', projectId: api.projectId })
+      expect(tables.worktrees.get('w1')!.panes[0].tabs.map((t) => t.id)).toEqual(['tab1'])
+      expect(tables.tasks.get('t1')?.worktreeId).toBe('w1')
+
+      // The cascades still run through the rebuilt table, both ways down.
+      tables.worktrees.remove('w1')
+      expect(getDb().prepare('SELECT COUNT(*) AS n FROM panes').get()).toEqual({ n: 0 })
+      expect(getDb().prepare('SELECT COUNT(*) AS n FROM tabs').get()).toEqual({ n: 0 })
+    }
+  )
+
+  it('is idempotent: a second boot leaves the rebuilt table alone', () => {
+    closeDb()
+    writePreProjectsDb(false)
+    initDb(dir)
+    const snapshot = (): unknown => ({
+      sql: getDb().prepare("SELECT sql FROM sqlite_master WHERE name = 'worktrees'").get(),
+      rows: getDb().prepare('SELECT * FROM worktrees ORDER BY id').all()
+    })
+    const first = snapshot()
+    closeDb()
+    initDb(dir)
+    expect(snapshot()).toEqual(first)
+  })
+
+  it('stores a folder session with no repo, in its project\'s workspace, cascading with the project', () => {
+    tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
+    const project = tables.projects.create({ name: 'Platform', rootPath: 'C:/platform' })
+    const folder = tables.worktrees.create({
+      repoId: null,
+      projectId: project.id,
+      kind: 'folder',
+      name: 'Platform',
+      path: 'C:/platform',
+      branch: ''
+    })
+    expect(folder).toMatchObject({ repoId: null, projectId: project.id, kind: 'folder' })
+    expect(tables.worktrees.list().map((w) => w.id)).toEqual([folder.id])
+    expect(tables.worktrees.listStatuses().map((w) => w.id)).toEqual([folder.id])
+    expect(tables.worktrees.listPaths()).toEqual([
+      { id: folder.id, path: 'C:/platform', repoId: null, projectId: project.id, kind: 'folder' }
+    ])
+    expect(tables.worktrees.idsByPath('C:/platform')).toEqual([folder.id])
+    expect(tables.worktrees.folderOf(project.id)?.id).toBe(folder.id)
+    // A branch sync at its path (a repo checked out at the root too) leaves it branchless.
+    tables.worktrees.updateBranchByPath('C:/platform', 'main')
+    expect(tables.worktrees.get(folder.id)?.branch).toBe('')
+
+    // Another workspace does not see it.
+    const other = tables.workspaces.create('Other')
+    tables.setActiveWorkspaceId(other.id)
+    expect(tables.worktrees.list()).toEqual([])
+    tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
+
+    tables.projects.remove(project.id)
+    expect(tables.worktrees.get(folder.id)).toBeUndefined()
   })
 })
 

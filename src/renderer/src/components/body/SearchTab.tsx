@@ -163,6 +163,7 @@ export default function SearchTab({ tab, active }: { tab: Tab; active: boolean }
   const originOf = (id: string): string => {
     const w = worktrees.find((x) => x.id === id)
     if (!w) return 'unknown Worktree'
+    if (w.kind === 'folder') return `${w.name} › project session`
     return `${repos.find((p) => p.id === w.repoId)?.name ?? '?'} › ${w.name}`
   }
 

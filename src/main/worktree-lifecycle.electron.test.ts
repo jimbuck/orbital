@@ -64,9 +64,15 @@ vi.mock('./services/worktree', async (importOriginal) => {
   return { ...actual, removeWorktree: vi.fn(actual.removeWorktree) }
 })
 
-const { createWorktree, removeWorktree, addRepo, removeRepo, removeProject, stopWorktreesWatchers } = await import(
-  './worktree-lifecycle'
-)
+const {
+  createWorktree,
+  removeWorktree,
+  addRepo,
+  removeRepo,
+  removeProject,
+  settleProjectSessions,
+  stopWorktreesWatchers
+} = await import('./worktree-lifecycle')
 const checkout = await import('./services/worktree')
 
 let dir: string
@@ -317,5 +323,114 @@ describe('adding and removing a Repo', () => {
     expect(rt.unwatch).toHaveBeenCalledWith(sibling.repoPath)
     expect(existsSync(repoPath)).toBe(true)
     expect(rt.state).toHaveBeenCalled()
+  })
+})
+
+describe("a project's folder session", () => {
+  const folderOf = (pid: string): Worktree | undefined =>
+    tables.worktrees.list().find((w) => w.kind === 'folder' && w.projectId === pid)
+
+  /** A second repo row (no git needed for the grouping rules), joined to `repo`'s project. */
+  function group(): Repo {
+    const sib = tables.repos.create({ name: 'sib', repoPath: join(dir, 'sib') })
+    tables.projects.addRepo(repo.projectId, sib.id, null)
+    settleProjectSessions()
+    return sib
+  }
+
+  it('opens one at the root when a project becomes a group with no home, with no repo and one pane', () => {
+    expect(folderOf(repo.projectId)).toBeUndefined()
+    group()
+    const project = tables.projects.get(repo.projectId)!
+    const folder = folderOf(project.id)!
+    expect(folder).toMatchObject({ kind: 'folder', repoId: null, projectId: project.id, path: project.rootPath, name: project.name, branch: '' })
+    expect(folder.panes).toHaveLength(1)
+    // The repos' own worktrees report the project too, and the session is in the workspace's state.
+    expect(tables.worktrees.get(root.id)?.projectId).toBe(project.id)
+    expect(tables.getAppState().worktrees.some((w) => w.id === folder.id)).toBe(true)
+    // Settling again changes nothing.
+    settleProjectSessions()
+    expect(tables.worktrees.list().filter((w) => w.kind === 'folder')).toHaveLength(1)
+  })
+
+  it('closes it, terminals first, when a home is set, and reopens one when the home is cleared', () => {
+    group()
+    const folder = folderOf(repo.projectId)!
+    const terminal = tables.tabs.create({ worktreeId: folder.id, paneId: folder.panes[0].id, type: 'terminal' })
+    rt.kill.mockClear()
+
+    tables.projects.setHome(repo.projectId, repo.id)
+    settleProjectSessions()
+    expect(folderOf(repo.projectId)).toBeUndefined()
+    expect(tables.tabs.get(terminal.id)).toBeUndefined()
+    expect(rt.kill).toHaveBeenCalledWith(terminal.id)
+
+    tables.projects.setHome(repo.projectId, null)
+    settleProjectSessions()
+    expect(folderOf(repo.projectId)).toBeDefined()
+  })
+
+  it('closes it when the group goes back to a plain repo row: detached, or ungrouped', () => {
+    const sib = group()
+    tables.projects.detachRepo(sib.id, null, null)
+    settleProjectSessions()
+    expect(tables.worktrees.list().some((w) => w.kind === 'folder')).toBe(false)
+
+    tables.projects.addRepo(repo.projectId, sib.id, null)
+    settleProjectSessions()
+    expect(folderOf(repo.projectId)).toBeDefined()
+    tables.projects.ungroup(repo.projectId)
+    settleProjectSessions()
+    expect(tables.worktrees.list().some((w) => w.kind === 'folder')).toBe(false)
+  })
+
+  it('follows the root and the name', () => {
+    group()
+    tables.projects.setRoot(repo.projectId, join(dir, 'elsewhere'))
+    tables.projects.rename(repo.projectId, 'Platform')
+    settleProjectSessions()
+    expect(folderOf(repo.projectId)).toMatchObject({ path: join(dir, 'elsewhere'), name: 'Platform' })
+  })
+
+  it('closes it when a repo removal leaves one repo, and goes with a removed project', () => {
+    const sib = group()
+    removeRepo(sib.id)
+    expect(tables.worktrees.list().some((w) => w.kind === 'folder')).toBe(false)
+
+    group()
+    const folder = folderOf(repo.projectId)!
+    const terminal = tables.tabs.create({ worktreeId: folder.id, paneId: folder.panes[0].id, type: 'terminal' })
+    rt.kill.mockClear()
+    removeProject(repo.projectId)
+    expect(rt.kill).toHaveBeenCalledWith(terminal.id)
+    expect(tables.worktrees.list()).toEqual([])
+  })
+
+  it('gives an empty project (made before it has any repo) a session too', () => {
+    const empty = tables.projects.create({ name: 'Fresh', rootPath: join(dir, 'fresh') })
+    settleProjectSessions()
+    expect(folderOf(empty.id)).toMatchObject({ path: join(dir, 'fresh'), repoId: null })
+  })
+
+  it('is never removed like a checkout', async () => {
+    group()
+    const folder = folderOf(repo.projectId)!
+    await expect(removeWorktree(folder.id, { removeWorktree: true })).rejects.toThrow(/folder session/)
+    expect(folderOf(repo.projectId)).toBeDefined()
+  })
+
+  it('adds a picked repo into the project it was asked for, moving one that is already in Orbital', async () => {
+    const other = join(dir, 'other')
+    mkdirSync(other)
+    gitIn(other, 'init', '-q', '-b', 'main')
+    const project = tables.projects.create({ name: 'Fresh', rootPath: dir })
+    settleProjectSessions()
+    const added = await addRepo(other, project.id)
+    expect(added.projectId).toBe(project.id)
+    const moved = await addRepo(repoPath, project.id)
+    expect(moved.projectId).toBe(project.id)
+    expect(tables.projects.get(project.id)?.repoIds).toEqual([added.id, repo.id])
+    // Still a no-home group of two: it keeps its session.
+    expect(folderOf(project.id)).toBeDefined()
   })
 })

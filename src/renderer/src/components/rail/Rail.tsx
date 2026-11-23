@@ -5,28 +5,35 @@ import { usePanelWidth } from '@renderer/lib/usePanelWidth'
 import { fireAndForget } from '@renderer/lib/bridge'
 import PanelResizeHandle from '../PanelResizeHandle'
 import { CollapsedPane, PaneCollapseTab } from '../PaneCollapse'
-import Folder, { SlotMarker } from './Folder'
-import Repo from './Repo'
+import Folder from './Folder'
+import ProjectItem from './ProjectItem'
+import { SlotMarker } from './SlotMarker'
 import RailFooter from './RailFooter'
+import { ContextMenu, MenuConfirm, type MenuPos } from './menu'
 import {
-  beforeIdAt,
   currentRailDrag,
+  dropAction,
   dropTargetFor,
   endRailDrag,
   railRows,
   sameDropTarget,
   type DropTarget,
+  type RailAction,
   type RailOver
 } from './folders'
+import { dissolveConfirm, runRailAction, type DissolveConfirm } from './railActions'
 
 const HEADER_BUTTON =
   'flex size-6 flex-none items-center justify-center rounded-[7px] border border-line-2 text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /**
- * What the pointer of a drag is over: the project and the folder it is inside
- * of, each with where on its header row the pointer sits. The header (the first
- * row of the block) is what is measured, not the whole block, so an open
- * project's Worktrees and an open folder's projects all count as "below".
+ * What the pointer of a drag is over: the member repo, the project and the
+ * folder it is inside of, each with where on its header row the pointer sits.
+ * The header (the first row of the block) is what is measured, not the whole
+ * block, so an open project's rows and an open folder's projects all count as
+ * "below". A project's header is split in three (top quarter, middle half,
+ * bottom quarter), since its middle is where a dragged repo joins it; below
+ * the header is its body.
  */
 function railOverAt(e: DragEvent): RailOver {
   const target = e.target as HTMLElement
@@ -36,7 +43,16 @@ function railOverAt(e: DragEvent): RailOver {
     return !!box && y > box.top + box.height / 2
   }
 
+  const repoEl = target.closest<HTMLElement>('[data-repo-id]')
   const projectEl = target.closest<HTMLElement>('[data-project-id]')
+  const projectHeader = projectEl?.firstElementChild
+  let zone: 'top' | 'middle' | 'bottom' | 'body' = 'body'
+  if (projectHeader?.contains(target)) {
+    const box = projectHeader.getBoundingClientRect()
+    const band = box.height / 4
+    zone = y < box.top + band ? 'top' : y > box.bottom - band ? 'bottom' : 'middle'
+  }
+
   const folderEl = target.closest<HTMLElement>('[data-folder-id]')
   const folderHeader = folderEl?.querySelector('[data-folder-header]')
   const box = folderHeader?.getBoundingClientRect()
@@ -48,32 +64,39 @@ function railOverAt(e: DragEvent): RailOver {
   }
 
   return {
+    repo: repoEl ? { id: repoEl.dataset.repoId ?? '', lowerHalf: below(repoEl.firstElementChild) } : null,
     project: projectEl
-      ? { id: projectEl.dataset.projectId ?? '', lowerHalf: below(projectEl.firstElementChild) }
+      ? {
+          id: projectEl.dataset.projectId ?? '',
+          lowerHalf: zone === 'body' || below(projectHeader),
+          zone
+        }
       : null,
     folder: folderEl ? { id: folderEl.dataset.folderId ?? '', lowerHalf: below(folderHeader), edge } : null
   }
 }
 
 /**
- * The left rail: the repo switcher. Lists every repo as a collapsible
- * group of Worktrees, with add-repo and new-folder affordances up top and a
- * terminal tally in the footer.
+ * The left rail: the repo switcher, with add-repo and new-folder affordances
+ * up top and a terminal tally in the footer.
  *
- * What the rail arranges is projects: each one is drawn through its repo (one
- * per project, for now). Projects can be filed in folders, and the rail's
- * order is the user's: a folder sits anywhere among the loose projects, and
- * projects are ordered by hand both at the top level and inside a folder.
- * All of that only arranges
- * this panel. The rail is also the one drop zone for its own drags. What a
- * drop would do is decided by `dropTargetFor`; this component turns the
- * pointer into its inputs and paints the answer.
+ * What the rail arranges is projects: a one-repo project with no home is drawn
+ * as its repo's row, anything else as a group (see ProjectGroup). Dragging a
+ * repo onto another project's row adds it there, and dragging it out of a
+ * group gives it a project of its own. Projects can be filed in folders, and
+ * the rail's order is the user's: a folder sits anywhere among the loose
+ * projects, and projects are ordered by hand both at the top level and inside
+ * a folder. The rail is also the one drop zone for its own drags. What a drop
+ * would do is decided by `dropTargetFor` and `dropAction`; this component turns
+ * the pointer into their inputs and paints the answer.
  */
 export default function Rail(): JSX.Element {
   const repos = useStore((s) => s.repos)
   const projects = useStore((s) => s.projects)
   const folders = useStore((s) => s.railFolders)
   const rail = useStore((s) => s.railItems)
+  const expanded = useStore((s) => s.expanded)
+  const railMessage = useStore((s) => s.railMessage)
   const openModal = useStore((s) => s.openModal)
   const { width, collapsed, dragging, startResize, resetWidth, toggleCollapsed } = usePanelWidth({
     storageKey: 'orbital.railWidth',
@@ -82,11 +105,21 @@ export default function Rail(): JSX.Element {
     max: 440,
     handleEdge: 'right'
   })
-  const rows = useMemo(() => railRows(projects, repos, folders, rail), [projects, repos, folders, rail])
+  const rows = useMemo(
+    () => railRows(projects, repos, folders, rail, expanded),
+    [projects, repos, folders, rail, expanded]
+  )
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   // The folder whose name is being edited. Held here, not in the folder, so
   // that one created from the header button opens straight into its name.
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
+  // A drop waiting on its confirm: it would close a folder session that has
+  // terminals open. Asked at the drop point, like a menu.
+  const [pendingDrop, setPendingDrop] = useState<{
+    action: RailAction
+    pos: MenuPos
+    confirm: DissolveConfirm
+  } | null>(null)
 
   if (collapsed) return <CollapsedPane edge="right" label="repos panel" onExpand={toggleCollapsed} />
 
@@ -120,12 +153,21 @@ export default function Rail(): JSX.Element {
     onDragEnd()
     if (!drag || !target) return
     e.preventDefault()
-    const beforeId = beforeIdAt(rows, target)
-    if (drag.kind === 'folder') {
-      fireAndForget(window.orbital.placeRailFolder(drag.id, beforeId))
-    } else {
-      fireAndForget(window.orbital.placeProject(drag.id, target.folderId, beforeId))
+    const action = dropAction(drag, rows, target)
+    if (!action) return
+    const confirm = dissolveConfirm(action)
+    if (confirm) {
+      setPendingDrop({
+        action,
+        confirm,
+        pos: {
+          x: Math.max(0, Math.min(e.clientX, window.innerWidth - 262)),
+          y: Math.max(0, Math.min(e.clientY, window.innerHeight - 160))
+        }
+      })
+      return
     }
+    runRailAction(action)
   }
 
   // The top-level slot a drop would open, and the slot inside one folder.
@@ -143,7 +185,13 @@ export default function Rail(): JSX.Element {
           </div>
         </div>
         <div className="flex flex-none items-center gap-[6px]">
-          <button type="button" aria-label="New folder" title="New folder" onClick={newFolder} className={HEADER_BUTTON}>
+          <button
+            type="button"
+            aria-label="New folder"
+            title="New folder"
+            onClick={newFolder}
+            className={HEADER_BUTTON}
+          >
             <FolderPlus size={14} strokeWidth={1.5} />
           </button>
           <button
@@ -176,16 +224,38 @@ export default function Rail(): JSX.Element {
                 projects={row.projects}
                 dropInto={dropTarget?.kind === 'into' && dropTarget.folderId === row.id}
                 dropSlot={slotIn(row.id)}
+                dropTarget={dropTarget}
                 renaming={renamingFolderId === row.id}
                 onRenaming={(renaming) => setRenamingFolderId(renaming ? row.id : null)}
               />
             ) : (
-              <Repo repo={row.repo} />
+              <ProjectItem row={row} dropTarget={dropTarget} />
             )}
           </div>
         ))}
         {topSlot === rows.length && <SlotMarker />}
       </div>
+
+      {/* What a drop or a rail menu just did, for a screen reader. */}
+      <div aria-live="polite" className="sr-only">
+        {railMessage}
+      </div>
+
+      {pendingDrop && (
+        <ContextMenu pos={pendingDrop.pos} width={250} onClose={() => setPendingDrop(null)}>
+          <MenuConfirm
+            message={pendingDrop.confirm.message}
+            hint={pendingDrop.confirm.hint}
+            confirmLabel={pendingDrop.confirm.confirmLabel}
+            danger={false}
+            onConfirm={() => {
+              runRailAction(pendingDrop.action)
+              setPendingDrop(null)
+            }}
+            onCancel={() => setPendingDrop(null)}
+          />
+        </ContextMenu>
+      )}
 
       <RailFooter />
       <PanelResizeHandle edge="right" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />

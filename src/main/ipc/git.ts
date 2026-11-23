@@ -4,52 +4,53 @@ import { git } from '../services/git'
 import { searchFiles } from '../services/file-index'
 import { searchContent, cancelSearch } from '../services/search'
 import { handle, broadcast, gitChanged } from './handle'
-import { worktreeRepoPath } from './resolve'
+import { worktreeGitPath, worktreeRepoPath } from './resolve'
+import { folderFileTree } from '../services/folder-tree'
 
 /** Git and file operations on a Worktree's checkout; every path is resolved through the git service's containment gate. */
 export function register(): void {
   const h = handle
   // ---- git ----
-  h(IPC.gitStatus, (_e, worktreeId) => git.status(worktreeRepoPath(worktreeId)))
+  h(IPC.gitStatus, (_e, worktreeId) => git.status(worktreeGitPath(worktreeId)))
   h(IPC.gitStage, async (_e, worktreeId, path) => {
-    await git.stage(worktreeRepoPath(worktreeId), path)
+    await git.stage(worktreeGitPath(worktreeId), path)
     gitChanged(worktreeId)
   })
   h(IPC.gitUnstage, async (_e, worktreeId, path) => {
-    await git.unstage(worktreeRepoPath(worktreeId), path)
+    await git.unstage(worktreeGitPath(worktreeId), path)
     gitChanged(worktreeId)
   })
   h(IPC.gitStageAll, async (_e, worktreeId) => {
-    await git.stageAll(worktreeRepoPath(worktreeId))
+    await git.stageAll(worktreeGitPath(worktreeId))
     gitChanged(worktreeId)
   })
   h(IPC.gitUnstageAll, async (_e, worktreeId) => {
-    await git.unstageAll(worktreeRepoPath(worktreeId))
+    await git.unstageAll(worktreeGitPath(worktreeId))
     gitChanged(worktreeId)
   })
   h(IPC.gitDiscard, async (_e, worktreeId, path) => {
-    await git.discard(worktreeRepoPath(worktreeId), path)
+    await git.discard(worktreeGitPath(worktreeId), path)
     gitChanged(worktreeId)
   })
   h(IPC.gitDiscardAll, async (_e, worktreeId) => {
-    await git.discardAll(worktreeRepoPath(worktreeId))
+    await git.discardAll(worktreeGitPath(worktreeId))
     gitChanged(worktreeId)
   })
   h(IPC.gitCommit, async (_e, worktreeId, message, amend) => {
-    await git.commit(worktreeRepoPath(worktreeId), message, amend)
+    await git.commit(worktreeGitPath(worktreeId), message, amend)
     gitChanged(worktreeId)
   })
-  h(IPC.gitLastCommitMessage, (_e, worktreeId) => git.lastCommitMessage(worktreeRepoPath(worktreeId)))
+  h(IPC.gitLastCommitMessage, (_e, worktreeId) => git.lastCommitMessage(worktreeGitPath(worktreeId)))
   h(IPC.gitPush, async (_e, worktreeId) => {
-    await git.push(worktreeRepoPath(worktreeId))
+    await git.push(worktreeGitPath(worktreeId))
     gitChanged(worktreeId)
   })
   h(IPC.gitPull, async (_e, worktreeId) => {
-    await git.pull(worktreeRepoPath(worktreeId))
+    await git.pull(worktreeGitPath(worktreeId))
     gitChanged(worktreeId)
   })
   h(IPC.gitFetch, async (_e, worktreeId) => {
-    await git.fetch(worktreeRepoPath(worktreeId))
+    await git.fetch(worktreeGitPath(worktreeId))
     gitChanged(worktreeId)
   })
   h(IPC.gitCheckout, async (_e, worktreeId, branch, create) => {
@@ -64,21 +65,27 @@ export function register(): void {
     gitChanged(worktreeId)
   })
   h(IPC.gitDiff, (_e, worktreeId, path, staged) =>
-    git.diff(worktreeRepoPath(worktreeId), path, staged)
+    git.diff(worktreeGitPath(worktreeId), path, staged)
   )
   // History: `hash` is renderer-supplied and reaches git as a positional
   // argument, so the git service hex-checks it (see checkHash) the way paths go
   // through the containment gate.
   h(IPC.gitLog, (_e, worktreeId, skip, limit) =>
-    git.log(worktreeRepoPath(worktreeId), skip, limit)
+    git.log(worktreeGitPath(worktreeId), skip, limit)
   )
   h(IPC.gitCommitDetail, (_e, worktreeId, hash) =>
-    git.commitDetail(worktreeRepoPath(worktreeId), hash)
+    git.commitDetail(worktreeGitPath(worktreeId), hash)
   )
   h(IPC.gitCommitDiff, (_e, worktreeId, hash, path, oldPath) =>
-    git.commitDiff(worktreeRepoPath(worktreeId), hash, path, oldPath)
+    git.commitDiff(worktreeGitPath(worktreeId), hash, path, oldPath)
   )
-  h(IPC.fileTree, (_e, worktreeId) => git.fileTree(worktreeRepoPath(worktreeId)))
+  // A folder session has no git of its own: its tree is the root folder's,
+  // with each repo under it listed the way git lists it.
+  h(IPC.fileTree, (_e, worktreeId) => {
+    const w = tables.worktrees.get(worktreeId)
+    if (w?.kind === 'folder') return folderFileTree(w.path)
+    return git.fileTree(worktreeRepoPath(worktreeId))
+  })
   // Every handler from here down is given a checkout-relative path chosen by
   // the renderer, and every one of them resolves it through the git service's
   // containment gate rather than joining it onto the checkout root and hoping.

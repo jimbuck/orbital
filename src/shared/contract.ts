@@ -122,7 +122,12 @@ export const contract = {
   importWorkspace: invoke<() => Promise<WorkspaceInfo | null>>(),
 
   // repos
-  addRepo: invoke<() => Promise<Repo | null>>(),
+  /**
+   * Pick a folder and add it as a repo. With `projectId` the repo joins that
+   * project (moving there if it was already added elsewhere); otherwise it
+   * gets a project of its own.
+   */
+  addRepo: invoke<(projectId?: string) => Promise<Repo | null>>(),
   removeRepo: invoke<(repoId: string) => Promise<void>>(),
   renameRepo: invoke<(repoId: string, name: string) => Promise<void>>(),
   /** Native folder picker; `null` when cancelled. */
@@ -154,6 +159,11 @@ export const contract = {
   ungroupProject: invoke<(projectId: string) => Promise<void>>(),
   /** Remove a project and all its repos from Orbital. Nothing on disk changes. */
   removeProject: invoke<(projectId: string) => Promise<void>>(),
+  /**
+   * Pick a root folder with the native picker and make an empty project
+   * there, named after the folder and listed last. Null when cancelled.
+   */
+  createProject: invoke<() => Promise<Project | null>>(),
 
   // rail folders: how the rail groups projects. None of these touch a
   // project's or repo's own row, paths, worktrees or any setting.
@@ -193,7 +203,9 @@ export const contract = {
    * Clone `owner/repo` into `<parentDir>/<repo>` as `account` and register it
    * as a repo, like `addRepo` does for a folder picked by hand.
    */
-  githubCloneRepo: invoke<(nameWithOwner: string, parentDir: string, account?: GithubAccountRef) => Promise<Repo>>(),
+  githubCloneRepo: invoke<
+    (nameWithOwner: string, parentDir: string, account?: GithubAccountRef, projectId?: string) => Promise<Repo>
+  >(),
 
   // worktrees / panes / tabs
   createWorktree: invoke<(repoId: string, opts: CreateWorktreeOptions) => Promise<Worktree>>(),
@@ -445,6 +457,13 @@ export const contract = {
    * `openRepoPath`.
    */
   openRepoInTerminal: invoke<(repoId: string) => Promise<void>>(),
+  /**
+   * Open a PROJECT's session directory (its home repo's path, else its root
+   * folder) in the OS file manager. Project id only, like `openRepoPath`.
+   */
+  openProjectPath: invoke<(projectId: string) => Promise<void>>(),
+  /** Open an external terminal at a project's session directory. */
+  openProjectInTerminal: invoke<(projectId: string) => Promise<void>>(),
   /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */
   openLogFolder: invoke<() => Promise<void>>(),
   windowMinimize: send<() => void>(),

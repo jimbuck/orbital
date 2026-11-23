@@ -28,9 +28,28 @@ export type ModalType =
 
 interface UIState {
   ready: boolean
+  /** The repo of the open session; null while a project's folder session is open. */
   activeRepoId: string | null
+  /** The project of the open session (the active repo's, or the folder session's own). */
+  activeProjectId: string | null
   activeWorktreeId: string | null
+  /**
+   * Open/closed rows of the rail, keyed by id (project ids and repo ids never
+   * collide). A repo's linked worktrees default closed; a project group's
+   * children default OPEN (see {@link projectOpen}).
+   */
   expanded: Record<string, boolean>
+  /**
+   * The project whose name the rail is editing. In the store rather than the
+   * rail so a project made from the palette, or by dropping one repo on
+   * another, opens straight into its name.
+   */
+  renamingProjectId: string | null
+  /**
+   * The rail's latest announcement for screen readers (its polite live
+   * region): what a drop or a menu action just did to the grouping.
+   */
+  railMessage: string
   modal: ModalType
   /** Free-form payload for the open modal (e.g. the repo a New Worktree targets). */
   modalData: unknown
@@ -120,8 +139,15 @@ interface Actions {
   init: () => Promise<void>
   applyState: (s: AppState) => void
   setActiveRepo: (id: string) => void
+  /** Open a project's own session: its home repo's root, else its folder session. */
+  setActiveProject: (id: string) => void
   setActiveWorktree: (id: string) => void
-  toggleExpanded: (id: string) => void
+  /** Flip a rail row open or closed. `defaultOpen` is what an unset entry means (project groups: true). */
+  toggleExpanded: (id: string, defaultOpen?: boolean) => void
+  /** Set a rail row open or closed. */
+  setExpanded: (id: string, open: boolean) => void
+  setRenamingProject: (id: string | null) => void
+  announceRail: (message: string) => void
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
   setActivePane: (worktreeId: string, paneId: string) => void
@@ -192,18 +218,43 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
 }
 
 /**
- * Open the rail folder hiding `repoId` (that is, its project), if one is.
+ * Open the rail folder hiding `projectId`, if one is.
  *
- * A repo can be selected from places that are not its rail row (the command
- * palette, the needs-attention banner), and a selection the rail cannot show
- * reads as nothing having happened. Called only from the two explicit select
- * actions, never from applyState: a folder the user collapsed stays collapsed
- * through every state push, including the one at boot.
+ * A session can be selected from places that are not its rail row (the
+ * command palette, the needs-attention banner), and a selection the rail
+ * cannot show reads as nothing having happened. Called only from the explicit
+ * select actions, never from applyState: a folder the user collapsed stays
+ * collapsed through every state push, including the one at boot. (The project
+ * and repo rows are opened by the select actions themselves, in `expanded`.)
  */
-function revealRepo(folders: RailFolder[], repos: Repo[], repoId: string): void {
-  const projectId = repos.find((r) => r.id === repoId)?.projectId
+function revealProject(folders: RailFolder[], projectId: string | null | undefined): void {
   const hiding = folders.find((f) => f.collapsed && !!projectId && f.projectIds.includes(projectId))
   if (hiding) fireAndForget(window.orbital.setRailFolderCollapsed(hiding.id, false))
+}
+
+/** Whether a project group's children are showing: open unless closed by hand. */
+export function projectOpen(expanded: Record<string, boolean>, projectId: string): boolean {
+  return expanded[projectId] ?? true
+}
+
+/** A repo's own session: its root worktree, else (while it has none) its first. */
+function repoSession(worktrees: Worktree[], repoId: string): Worktree | undefined {
+  const mine = worktrees.filter((w) => w.repoId === repoId)
+  return mine.find((w) => w.kind === 'root') ?? mine[0]
+}
+
+/**
+ * A project's own session: its home repo's root worktree, else its folder
+ * session. A plain one-repo project has neither, and its session is its repo's.
+ */
+export function projectSession(projects: Project[], worktrees: Worktree[], projectId: string): Worktree | undefined {
+  const project = projects.find((p) => p.id === projectId)
+  if (!project) return undefined
+  if (project.homeRepoId) return repoSession(worktrees, project.homeRepoId)
+  return (
+    worktrees.find((w) => w.kind === 'folder' && w.projectId === projectId) ??
+    (project.repoIds.length === 1 ? repoSession(worktrees, project.repoIds[0]) : undefined)
+  )
 }
 
 export const useStore = create<Store>((set, get) => ({
@@ -222,8 +273,11 @@ export const useStore = create<Store>((set, get) => ({
   // ui
   ready: false,
   activeRepoId: null,
+  activeProjectId: null,
   activeWorktreeId: null,
   expanded: {},
+  renamingProjectId: null,
+  railMessage: '',
   modal: null,
   modalData: null,
   modalStack: [],
@@ -254,17 +308,25 @@ export const useStore = create<Store>((set, get) => ({
 
   applyState(s) {
     const prev = get()
-    let activeRepoId = prev.activeRepoId
-    if (!activeRepoId || !s.repos.some((p) => p.id === activeRepoId)) {
-      activeRepoId = s.repos[0]?.id ?? null
+    // The open session, if it survived the push. A folder session can go (its
+    // project got a home, or went back to a plain repo row) while its project
+    // stays, so the project is the next thing to fall back on; then the active
+    // repo, then the first repo.
+    let active = s.worktrees.find((w) => w.id === prev.activeWorktreeId)
+    const repoKnown = !!prev.activeRepoId && s.repos.some((p) => p.id === prev.activeRepoId)
+    if (!active && repoKnown && prev.activeRepoId) active = repoSession(s.worktrees, prev.activeRepoId)
+    if (!active && !repoKnown && prev.activeProjectId) {
+      active = projectSession(s.projects, s.worktrees, prev.activeProjectId)
     }
-
-    const repoWorktrees = s.worktrees.filter((w) => w.repoId === activeRepoId)
-    let activeWorktreeId = prev.activeWorktreeId
-    if (!activeWorktreeId || !repoWorktrees.some((w) => w.id === activeWorktreeId)) {
-      // Prefer the root Worktree, else the first Worktree of the active repo.
-      activeWorktreeId = (repoWorktrees.find((w) => w.kind === 'root') ?? repoWorktrees[0])?.id ?? null
+    let activeRepoId: string | null
+    if (active) {
+      activeRepoId = active.repoId
+    } else {
+      activeRepoId = repoKnown ? prev.activeRepoId : (s.repos[0]?.id ?? null)
+      if (activeRepoId) active = repoSession(s.worktrees, activeRepoId)
     }
+    const activeWorktreeId = active?.id ?? null
+    const activeProjectId = active?.projectId ?? s.repos.find((r) => r.id === activeRepoId)?.projectId ?? null
 
     let expanded = prev.expanded
     if (activeRepoId && expanded[activeRepoId] === undefined) {
@@ -284,6 +346,7 @@ export const useStore = create<Store>((set, get) => ({
       devServers: share(prev.devServers, s.devServers),
       settingUpWorktrees: share(prev.settingUpWorktrees, s.settingUpWorktrees),
       activeRepoId,
+      activeProjectId,
       activeWorktreeId,
       expanded,
       alertCount: s.worktrees.filter((w) => w.status === 'needs_attention').length
@@ -291,24 +354,67 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setActiveRepo(id) {
-    revealRepo(get().railFolders, get().repos, id)
-    const repoWorktrees = get().worktrees.filter((w) => w.repoId === id)
-    const activeWorktreeId = (repoWorktrees.find((w) => w.kind === 'root') ?? repoWorktrees[0])?.id ?? null
+    const projectId = get().repos.find((r) => r.id === id)?.projectId ?? null
+    revealProject(get().railFolders, projectId)
+    const activeWorktreeId = repoSession(get().worktrees, id)?.id ?? null
     set((s) => ({
       activeRepoId: id,
+      activeProjectId: projectId,
       activeWorktreeId,
-      expanded: { ...s.expanded, [id]: true }
+      // Folder, then project, then repo: everything between the rail's top and the row.
+      expanded: { ...s.expanded, ...(projectId ? { [projectId]: true } : {}), [id]: true }
+    }))
+  },
+
+  setActiveProject(id) {
+    const s = get()
+    const project = s.projects.find((p) => p.id === id)
+    if (!project) return
+    revealProject(s.railFolders, id)
+    const session = projectSession(s.projects, s.worktrees, id)
+    set((st) => ({
+      activeProjectId: id,
+      activeRepoId: session ? session.repoId : project.homeRepoId,
+      activeWorktreeId: session?.id ?? null,
+      expanded: { ...st.expanded, [id]: true }
     }))
   },
 
   setActiveWorktree(id) {
     const worktree = get().worktrees.find((w) => w.id === id)
-    if (worktree) revealRepo(get().railFolders, get().repos, worktree.repoId)
-    set({ activeWorktreeId: id, activeRepoId: worktree ? worktree.repoId : get().activeRepoId })
+    if (!worktree) {
+      set({ activeWorktreeId: id })
+      return
+    }
+    revealProject(get().railFolders, worktree.projectId)
+    const { projectId, repoId } = worktree
+    set((s) => ({
+      activeWorktreeId: id,
+      activeRepoId: repoId,
+      activeProjectId: projectId,
+      // A linked worktree shows only inside its open repo, and that inside its open project.
+      expanded:
+        worktree.kind === 'linked' && repoId
+          ? { ...s.expanded, [projectId]: true, [repoId]: true }
+          : { ...s.expanded, [projectId]: true }
+    }))
   },
 
-  toggleExpanded(id) {
-    set((s) => ({ expanded: { ...s.expanded, [id]: !s.expanded[id] } }))
+  toggleExpanded(id, defaultOpen = false) {
+    set((s) => ({ expanded: { ...s.expanded, [id]: !(s.expanded[id] ?? defaultOpen) } }))
+  },
+
+  setExpanded(id, open) {
+    if (get().expanded[id] === open) return
+    set((s) => ({ expanded: { ...s.expanded, [id]: open } }))
+  },
+
+  setRenamingProject(id) {
+    set({ renamingProjectId: id })
+  },
+
+  announceRail(message) {
+    set({ railMessage: message })
   },
 
   openModal(type, data) {
@@ -363,6 +469,10 @@ export const useStore = create<Store>((set, get) => ({
 
 export function activeRepo(s: Store): Repo | undefined {
   return s.repos.find((p) => p.id === s.activeRepoId)
+}
+
+export function activeProject(s: Store): Project | undefined {
+  return s.projects.find((p) => p.id === s.activeProjectId)
 }
 
 export function activeWorktree(s: Store): Worktree | undefined {

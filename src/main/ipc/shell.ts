@@ -9,7 +9,7 @@ import { spawnExternalEditor } from '../services/external-editor'
 import { getSettings } from '../services/settings'
 import { createTabInWorktree } from '../tabs'
 import { handle } from './handle'
-import { repoPathOf, worktreeRepoPath } from './resolve'
+import { projectSessionPath, repoPathOf, worktreeRepoPath } from './resolve'
 
 /** Hand-offs to the OS and the embedded browser: external links, webview popups, Explorer, external terminals. */
 export function register(): void {
@@ -152,5 +152,14 @@ export function register(): void {
   })
   h(IPC.openRepoInTerminal, (_e, repoId) => {
     spawnExternalTerminal(repoPathOf(repoId))
+  })
+  // The project twins: an id only, and main picks the directory it stored
+  // (the home repo's path, else the root folder).
+  h(IPC.openProjectPath, async (_e, projectId) => {
+    const err = await shell.openPath(projectSessionPath(projectId))
+    if (err) throw new Error(err)
+  })
+  h(IPC.openProjectInTerminal, (_e, projectId) => {
+    spawnExternalTerminal(projectSessionPath(projectId))
   })
 }
