@@ -13,12 +13,15 @@ vi.mock('../runtime', () => ({
   }
 }))
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
+vi.mock('./code-workspace', () => ({ syncCodeWorkspaces: async () => undefined }))
 
 const {
   BLOCK_END,
   BLOCK_START,
   erasePointers,
   importsOnlyAgents,
+  LEGACY_BLOCK_END,
+  LEGACY_BLOCK_START,
   removeBlock,
   renderBlock,
   resetPointerMemory,
@@ -40,12 +43,46 @@ describe('renderBlock', () => {
       BLOCK_START,
       '## Repos in this project',
       '',
-      '<!-- Managed by Orbital: edits inside this block are overwritten. Turn it off per project in Orbital. -->',
+      '<!-- Generated list: edits between these markers are overwritten. -->',
       '',
       '- api: ../api. Clone from git@github.com:acme/api.git if missing. Read its AGENTS.md before changing it.',
       '- web: ../web.',
       BLOCK_END
     ])
+  })
+
+  it('names no tool anywhere in the block', () => {
+    expect(renderBlock(entries).join('\n')).not.toMatch(/orbital/i)
+    expect(BLOCK_START).toBe('<!-- repos:start -->')
+    expect(BLOCK_END).toBe('<!-- repos:end -->')
+  })
+})
+
+describe('blocks written with the old orbital:repos markers', () => {
+  const legacy = (eol = '\n'): string =>
+    [LEGACY_BLOCK_START, '## Repos in this project', '', '<!-- Managed by Orbital -->', '', '- api: ../api.', LEGACY_BLOCK_END].join(
+      eol
+    )
+
+  it('are rewritten in place with the neutral block', () => {
+    const before = `intro\n\n${legacy()}\n\n## After\n`
+    expect(upsertBlock(before, renderBlock(entries))).toBe(`intro\n\n${block()}\n\n## After\n`)
+  })
+
+  it('keep CRLF through the rewrite', () => {
+    const before = `intro\r\n\r\n${legacy('\r\n')}\r\n`
+    const after = upsertBlock(before, renderBlock(entries))!
+    expect(after).toBe(`intro\r\n\r\n${block('\r\n')}\r\n`)
+    expect(after.replace(/\r\n/g, '')).not.toContain('\n')
+  })
+
+  it('are removed like a current one', () => {
+    expect(removeBlock(`# Home\n\n${legacy()}\n`)).toBe('# Home\n')
+  })
+
+  it('are left alone when half there', () => {
+    const broken = `# Home\n\n${LEGACY_BLOCK_START}\n- api: ../api.\n`
+    expect(upsertBlock(broken, renderBlock(entries))).toBeNull()
   })
 })
 
@@ -141,6 +178,23 @@ describe('files in the home repo', () => {
     expect(targetFile(home)).toBe(at('CLAUDE.md'))
   })
 
+  it('finds an old-style block and replaces it in that file', () => {
+    writeFileSync(at('CLAUDE.md'), `# Rules\r\n\r\n${LEGACY_BLOCK_START}\r\n- api: ../api.\r\n${LEGACY_BLOCK_END}\r\n`)
+    writeFileSync(at('AGENTS.md'), '# Agents\n')
+    expect(targetFile(home)).toBe(at('CLAUDE.md'))
+    expect(writePointers(home, entries)).toBe(at('CLAUDE.md'))
+    expect(readFileSync(at('CLAUDE.md'), 'utf8')).toBe(`# Rules\r\n\r\n${block('\r\n')}\r\n`)
+    expect(readFileSync(at('AGENTS.md'), 'utf8')).toBe('# Agents\n')
+    // A second pass has nothing to do.
+    expect(writePointers(home, entries)).toBeNull()
+  })
+
+  it('erases an old-style block', () => {
+    writeFileSync(at('AGENTS.md'), `# Agents\n\n${LEGACY_BLOCK_START}\n- api: ../api.\n${LEGACY_BLOCK_END}\n`)
+    expect(erasePointers(home)).toEqual([at('AGENTS.md')])
+    expect(readFileSync(at('AGENTS.md'), 'utf8')).toBe('# Agents\n')
+  })
+
   it('does not rewrite (or touch the mtime of) an unchanged file', () => {
     writeFileSync(at('AGENTS.md'), `# Agents\n\n${block()}\n`)
     const past = new Date('2020-01-01T00:00:00Z')
@@ -176,6 +230,7 @@ describe('syncProjectPointers', () => {
     rootPath: root,
     homeRepoId: 'r-home',
     managedBlock: true,
+    codeWorkspace: false,
     repoIds: ['r-home', 'r-api'],
     createdAt: 0,
     ...over

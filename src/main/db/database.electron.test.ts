@@ -291,11 +291,13 @@ describe.each([
     ])
     // One project per repo, named after it and rooted at it, in repo order.
     const projects = tables.projects.list()
-    expect(projects.map((p) => [p.name, p.rootPath, p.repoIds, p.homeRepoId, p.managedBlock])).toEqual([
-      ['api', 'C:/src/acme/api', ['r-api'], null, true],
-      ['web', 'C:/src/acme/web', ['r-web'], null, true],
-      ['docs', 'C:/docs', ['r-docs'], null, true],
-      ['loose', 'C:/loose', ['r-loose'], null, true]
+    expect(
+      projects.map((p) => [p.name, p.rootPath, p.repoIds, p.homeRepoId, p.managedBlock, p.codeWorkspace])
+    ).toEqual([
+      ['api', 'C:/src/acme/api', ['r-api'], null, true, false],
+      ['web', 'C:/src/acme/web', ['r-web'], null, true, false],
+      ['docs', 'C:/docs', ['r-docs'], null, true, false],
+      ['loose', 'C:/loose', ['r-loose'], null, true, false]
     ])
     for (const r of repos) expect(projects.find((p) => p.id === r.projectId)!.repoIds).toEqual([r.id])
 
@@ -443,6 +445,16 @@ describe('giving worktrees project sessions', () => {
 
     tables.projects.remove(project.id)
     expect(tables.worktrees.get(folder.id)).toBeUndefined()
+  })
+
+  it('keeps a project workspace-file flag, off by default', () => {
+    tables.setActiveWorkspaceId(tables.workspaces.list()[0].id)
+    const project = tables.projects.create({ name: 'Platform', rootPath: 'C:/platform' })
+    expect(project.codeWorkspace).toBe(false)
+    tables.projects.setCodeWorkspace(project.id, true)
+    expect(tables.projects.get(project.id)?.codeWorkspace).toBe(true)
+    tables.projects.setCodeWorkspace(project.id, false)
+    expect(tables.projects.get(project.id)?.codeWorkspace).toBe(false)
   })
 })
 

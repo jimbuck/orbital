@@ -29,6 +29,7 @@ const project = (id: string, name: string, repoIds: string[], homeRepoId: string
   rootPath: `C:/Projects/${id}`,
   homeRepoId,
   managedBlock: true,
+  codeWorkspace: false,
   repoIds,
   createdAt: 0
 })
@@ -165,6 +166,7 @@ beforeEach(() => {
     setProjectHome: vi.fn(async () => undefined),
     setProjectRoot: vi.fn(async () => null),
     setProjectManagedBlock: vi.fn(async () => undefined),
+    setProjectCodeWorkspace: vi.fn(async () => undefined),
     renameProject: vi.fn(async () => undefined),
     ungroupProject: vi.fn(async () => undefined),
     removeProject: vi.fn(async () => undefined),
@@ -304,7 +306,8 @@ describe('project header menu', () => {
       'New Worktree',
       'Home Repohome',
       'Change Root Folder…',
-      'Managed AGENTS.md Blockon',
+      'Repo List in AGENTS.mdon',
+      'VS Code Workspace Fileoff · in home',
       'Move to Folder',
       'Clear Status',
       'Open in File Explorer',
@@ -316,9 +319,29 @@ describe('project header menu', () => {
 
     fireEvent.contextMenu(groupHeader('platform'))
     expect(items()).not.toContain('New Worktree')
-    const block = screen.getByText('Managed AGENTS.md Block').closest('button')!
+    const block = screen.getByText('Repo List in AGENTS.md').closest('button')!
     expect(block.disabled).toBe(true)
     expect(within(block).getByText('needs home repo')).toBeTruthy()
+  })
+
+  it('toggles the VS Code workspace file, naming where it goes', () => {
+    renderRail()
+    fireEvent.contextMenu(groupHeader('platform'))
+    const item = screen.getByText('VS Code Workspace File').closest('button')!
+    expect(item.disabled).toBe(false)
+    expect(within(item).getByText('off · in root folder')).toBeTruthy()
+    fireEvent.click(item)
+    expect(bridge.setProjectCodeWorkspace).toHaveBeenCalledWith('platform', true)
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('turns an on workspace file off', () => {
+    renderRail({ projects: projects.map((p) => (p.id === 'acme' ? { ...p, codeWorkspace: true } : p)) })
+    fireEvent.contextMenu(groupHeader('acme'))
+    const item = screen.getByText('VS Code Workspace File').closest('button')!
+    expect(within(item).getByText('on · in home')).toBeTruthy()
+    fireEvent.click(item)
+    expect(bridge.setProjectCodeWorkspace).toHaveBeenCalledWith('acme', false)
   })
 
   it('renames inline, by project id', () => {

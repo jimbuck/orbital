@@ -30,6 +30,7 @@ const project = (id: string): Project => ({
   rootPath: `C:/${id}`,
   homeRepoId: null,
   managedBlock: true,
+  codeWorkspace: false,
   repoIds: [id],
   createdAt: 0
 })

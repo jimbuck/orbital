@@ -383,6 +383,11 @@ export interface Project {
   homeRepoId: string | null
   /** Whether Orbital may write its managed block into the home repo's agent files. */
   managedBlock: boolean
+  /**
+   * Whether Orbital keeps a VS Code / Cursor multi-root `<name>.code-workspace`
+   * listing the project's repos (in the home repo, else the root folder). Off by default.
+   */
+  codeWorkspace: boolean
   /** The member repos in hand order, the home included. */
   repoIds: string[]
   createdAt: number

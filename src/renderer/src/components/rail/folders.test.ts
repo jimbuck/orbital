@@ -31,6 +31,7 @@ const project = (id: string, repoIds: string[], homeRepoId: string | null = null
   rootPath: `C:/${id}`,
   homeRepoId,
   managedBlock: true,
+  codeWorkspace: false,
   repoIds,
   createdAt: 0
 })

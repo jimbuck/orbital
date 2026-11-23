@@ -154,6 +154,8 @@ export const contract = {
   /** Pick the project's root folder with the native picker. Resolves to the new root, or null when cancelled. */
   setProjectRoot: invoke<(projectId: string) => Promise<string | null>>(),
   setProjectManagedBlock: invoke<(projectId: string, on: boolean) => Promise<void>>(),
+  /** Turn the project's `.code-workspace` file on or off (off removes the one Orbital wrote). */
+  setProjectCodeWorkspace: invoke<(projectId: string, on: boolean) => Promise<void>>(),
   renameProject: invoke<(projectId: string, name: string) => Promise<void>>(),
   /** Clear the home and give every repo a project of its own, where the project was in the rail. */
   ungroupProject: invoke<(projectId: string) => Promise<void>>(),

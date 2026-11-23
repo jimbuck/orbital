@@ -93,7 +93,16 @@ describe('applyState structural sharing', () => {
     return {
       repos: [{ id: 'p1', name: 'P', repoPath: '/p', projectId: 'pr1' } as AppState['repos'][number]],
       projects: [
-        { id: 'pr1', name: 'P', rootPath: '/p', homeRepoId: null, managedBlock: true, repoIds: ['p1'], createdAt: 0 }
+        {
+          id: 'pr1',
+          name: 'P',
+          rootPath: '/p',
+          homeRepoId: null,
+          managedBlock: true,
+          codeWorkspace: false,
+          repoIds: ['p1'],
+          createdAt: 0
+        }
       ],
       railFolders: [{ id: 'f1', name: 'Work', collapsed: false, projectIds: ['pr1'] }],
       railItems: [{ kind: 'folder', id: 'f1' }],
@@ -233,7 +242,18 @@ describe('project sessions', () => {
   function state(home: string | null, worktrees: Worktree[]): AppState {
     return {
       repos: [repoOf('a', 'g'), repoOf('b', 'g')],
-      projects: [{ id: 'g', name: 'G', rootPath: '/g', homeRepoId: home, managedBlock: true, repoIds: ['a', 'b'], createdAt: 0 }],
+      projects: [
+        {
+          id: 'g',
+          name: 'G',
+          rootPath: '/g',
+          homeRepoId: home,
+          managedBlock: true,
+          codeWorkspace: false,
+          repoIds: ['a', 'b'],
+          createdAt: 0
+        }
+      ],
       railFolders: [],
       railItems: [],
       worktrees,

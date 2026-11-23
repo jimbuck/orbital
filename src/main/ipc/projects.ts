@@ -65,6 +65,12 @@ export function register(): void {
     scheduleProjectPointers()
   })
 
+  h(IPC.setProjectCodeWorkspace, (_e, projectId, on) => {
+    tables.projects.setCodeWorkspace(projectId, !!on)
+    broadcast()
+    scheduleProjectPointers()
+  })
+
   h(IPC.renameProject, (_e, projectId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return

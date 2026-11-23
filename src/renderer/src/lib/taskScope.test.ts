@@ -28,6 +28,7 @@ const acme: Project = {
   rootPath: 'C:/acme',
   homeRepoId: 'home',
   managedBlock: true,
+  codeWorkspace: false,
   // Hand order puts the home in the middle; listings lead with it anyway.
   repoIds: ['api', 'home', 'web'],
   createdAt: 0

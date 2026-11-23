@@ -113,6 +113,7 @@ function migrate(d: Database.Database): void {
       root_path     TEXT NOT NULL,
       home_repo_id  TEXT REFERENCES repos(id) ON DELETE SET NULL,
       managed_block INTEGER NOT NULL DEFAULT 1,
+      code_workspace INTEGER NOT NULL DEFAULT 0,
       created_at    INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
@@ -236,6 +237,8 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'tasks', 'created_by', "TEXT NOT NULL DEFAULT ''")
   // NULL = active; a timestamp = archived (hidden from the default views).
   addColumnIfMissing(d, 'tasks', 'archived_at', 'INTEGER')
+  // Off by default: a project's `.code-workspace` file is opt-in.
+  addColumnIfMissing(d, 'projects', 'code_workspace', 'INTEGER NOT NULL DEFAULT 0')
   backfillTaskSeqs(d)
   unlinkTasksFromMissingWorktrees(d)
   d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')

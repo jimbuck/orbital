@@ -27,6 +27,7 @@ const project = (over: Partial<Project> = {}): Project => ({
   rootPath: 'C:\\work',
   homeRepoId: 'home',
   managedBlock: true,
+  codeWorkspace: false,
   repoIds: ['home', 'api', 'web'],
   createdAt: 0,
   ...over

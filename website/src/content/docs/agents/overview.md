@@ -143,13 +143,14 @@ repository.
 
 A project with a home repo also gets a short repo list in the home repo's
 `AGENTS.md` (or its `CLAUDE.md` if that's the only one), between
-`<!-- orbital:repos:start -->` and `<!-- orbital:repos:end -->`, so agents
-started outside Orbital, and your teammates, find the other repos too:
+`<!-- repos:start -->` and `<!-- repos:end -->`, so agents started outside
+Orbital, and your teammates, find the other repos too. Nothing in it names
+Orbital, so it reads the same to any tool:
 
 ```md
 ## Repos in this project
 
-<!-- Managed by Orbital: edits inside this block are overwritten. Turn it off per project in Orbital. -->
+<!-- Generated list: edits between these markers are overwritten. -->
 
 - api: ../api. Clone from git@github.com:acme/api.git if missing. Read its AGENTS.md before changing it.
 - web: ../web. Clone from git@github.com:acme/web.git if missing.
@@ -157,8 +158,33 @@ started outside Orbital, and your teammates, find the other repos too:
 
 It holds only names, paths relative to the home repo, remotes and the file to
 read, so it changes only when the project does. Orbital leaves it as an
-uncommitted change for you to commit. Turn it off per project with **Managed
-AGENTS.md Block** in the project's menu, which takes it out again.
+uncommitted change for you to commit. Turn it off per project with **Repo List
+in AGENTS.md** in the project's menu, which takes it out again. A list written
+by an older Orbital, between `<!-- orbital:repos:start -->` and
+`<!-- orbital:repos:end -->`, is switched to the new markers in place.
+
+### VS Code workspace file
+
+**VS Code Workspace File** in the project's menu (off by default) has Orbital
+write `<project-name>.code-workspace`, a multi-root workspace for VS Code or
+Cursor that opens every repo in the project at once. It goes in the home repo,
+where you can commit it alongside the repo list, or in the project's root
+folder when there's no home. The home repo comes first as `.`, then the other
+repos in the project's order:
+
+```json
+{
+  "folders": [
+    { "path": ".", "name": "home" },
+    { "path": "../api", "name": "api" }
+  ]
+}
+```
+
+If the file already exists, Orbital replaces only `folders`. Your settings,
+extensions, launch configs and comments stay as they are, and a file it can't
+parse is left untouched. Turning the option off, renaming the project or
+moving its home removes the file Orbital wrote, unless you've added to it since.
 
 For a repository whose agents run both inside and outside Orbital, this line in
 your `CLAUDE.md` or `AGENTS.md` covers the gap:

@@ -1,5 +1,5 @@
 /**
- * The Orbital-managed repo list in a project's home repo.
+ * The generated repo list in a project's home repo.
  *
  * The home repo pattern keeps one-line pointers to sibling repos in the home
  * repo's AGENTS.md, so any agent started there (in Orbital or not, by you or a
@@ -13,6 +13,11 @@
  * appended after one blank line when it is new, and cut out (with that blank
  * line) when it is turned off. An unchanged block is not rewritten at all.
  *
+ * The block carries nothing tool-specific (neutral markers, no "Orbital"), so
+ * the home repo reads the same to any tool. A block written before that, with
+ * `orbital:repos` markers, is still recognized: the next sync replaces it in
+ * place and removal takes it out.
+ *
  * Off switch: `Project.managedBlock`. Clearing the home or turning it off
  * removes the block from the home it was written to.
  */
@@ -21,10 +26,18 @@ import { join } from 'node:path'
 import type { Project, Repo } from '@shared/types'
 import { tables } from '../runtime'
 import { logger } from './logger'
+import { syncCodeWorkspaces } from './code-workspace'
 import { originUrl, relativePath, samePath, steeringFiles } from './project-map'
 
-export const BLOCK_START = '<!-- orbital:repos:start -->'
-export const BLOCK_END = '<!-- orbital:repos:end -->'
+export const BLOCK_START = '<!-- repos:start -->'
+export const BLOCK_END = '<!-- repos:end -->'
+/** The markers blocks were written with before they went tool-neutral. Read, never written. */
+export const LEGACY_BLOCK_START = '<!-- orbital:repos:start -->'
+export const LEGACY_BLOCK_END = '<!-- orbital:repos:end -->'
+const MARKERS: Array<[start: string, end: string]> = [
+  [BLOCK_START, BLOCK_END],
+  [LEGACY_BLOCK_START, LEGACY_BLOCK_END]
+]
 
 /** One sibling repo as the block lists it. */
 export interface PointerEntry {
@@ -42,7 +55,7 @@ export function renderBlock(entries: PointerEntry[]): string[] {
     BLOCK_START,
     '## Repos in this project',
     '',
-    '<!-- Managed by Orbital: edits inside this block are overwritten. Turn it off per project in Orbital. -->',
+    '<!-- Generated list: edits between these markers are overwritten. -->',
     ''
   ]
   for (const e of entries) {
@@ -60,13 +73,24 @@ export function eolOf(content: string): string {
   return content.includes('\r\n') ? '\r\n' : '\n'
 }
 
-/** Where the block sits in `content`, or null; `broken` when the end marker is missing. */
+/**
+ * Where the block sits in `content` (either marker style, the current one
+ * first), or null; `broken` when a start marker has no end marker after it.
+ */
 function findBlock(content: string): { start: number; end: number } | 'broken' | null {
-  const start = content.indexOf(BLOCK_START)
-  if (start === -1) return null
-  const end = content.indexOf(BLOCK_END, start)
-  if (end === -1) return 'broken'
-  return { start, end: end + BLOCK_END.length }
+  for (const [startMarker, endMarker] of MARKERS) {
+    const start = content.indexOf(startMarker)
+    if (start === -1) continue
+    const end = content.indexOf(endMarker, start)
+    if (end === -1) return 'broken'
+    return { start, end: end + endMarker.length }
+  }
+  return null
+}
+
+/** Whether `content` holds a block start marker, in either style. */
+export function hasBlock(content: string): boolean {
+  return MARKERS.some(([start]) => content.includes(start))
 }
 
 /**
@@ -140,8 +164,8 @@ export function targetFile(homePath: string): string {
   const claude = join(homePath, 'CLAUDE.md')
   const agentsText = existsSync(agents) ? readOrEmpty(agents) : null
   const claudeText = existsSync(claude) ? readOrEmpty(claude) : null
-  if (agentsText?.includes(BLOCK_START)) return agents
-  if (claudeText?.includes(BLOCK_START)) return claude
+  if (agentsText !== null && hasBlock(agentsText)) return agents
+  if (claudeText !== null && hasBlock(claudeText)) return claude
   if (agentsText !== null) return agents
   if (claudeText !== null && !importsOnlyAgents(claudeText)) return claude
   return agents
@@ -209,8 +233,9 @@ const DEBOUNCE_MS = 250
  * Bring every project's block in line with its state: written for a project
  * with a home and the flag on (and another repo to list), removed everywhere
  * else it was written. Called after any change to a project's membership,
- * home, root, names or flag, and once at boot. Never throws: a failure is
- * logged and the UI carries on.
+ * home, root, names or flag, and once at boot. The same pass then brings the
+ * projects' `.code-workspace` files in line (see code-workspace.ts). Never
+ * throws: a failure is logged and the UI carries on.
  */
 export function scheduleProjectPointers(): void {
   if (timer) clearTimeout(timer)
@@ -222,6 +247,8 @@ export function scheduleProjectPointers(): void {
     }
     running = syncProjectPointers()
       .catch((err: unknown) => logger.warn('managed block sync failed', { error: String(err) }))
+      .then(() => syncCodeWorkspaces())
+      .catch((err: unknown) => logger.warn('workspace file sync failed', { error: String(err) }))
       .finally(() => {
         running = null
         if (again) {

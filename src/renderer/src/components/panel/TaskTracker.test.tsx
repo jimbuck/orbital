@@ -25,6 +25,7 @@ const acme: Project = {
   rootPath: 'C:/acme',
   homeRepoId: 'home',
   managedBlock: true,
+  codeWorkspace: false,
   repoIds: ['home', 'api'],
   createdAt: 0
 }

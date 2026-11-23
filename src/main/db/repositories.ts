@@ -303,6 +303,7 @@ interface ProjectRow {
   root_path: string
   home_repo_id: string | null
   managed_block: number
+  code_workspace: number
   created_at: number
 }
 
@@ -365,6 +366,7 @@ function mapProject(r: ProjectRow, repoIds: string[]): Project {
     rootPath: r.root_path,
     homeRepoId: r.home_repo_id ?? null,
     managedBlock: r.managed_block === 1,
+    codeWorkspace: r.code_workspace === 1,
     repoIds,
     createdAt: r.created_at
   }
@@ -489,6 +491,9 @@ export const projects = {
   },
   setManagedBlock(pid: string, on: boolean): void {
     getDb().prepare('UPDATE projects SET managed_block = ? WHERE id = ?').run(on ? 1 : 0, pid)
+  },
+  setCodeWorkspace(pid: string, on: boolean): void {
+    getDb().prepare('UPDATE projects SET code_workspace = ? WHERE id = ?').run(on ? 1 : 0, pid)
   },
   /**
    * Delete a project's rows and, through the cascade, its tasks, its repos'

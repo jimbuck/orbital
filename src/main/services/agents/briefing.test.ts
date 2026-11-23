@@ -25,6 +25,7 @@ const project: Project = {
   rootPath: 'C:\\work',
   homeRepoId: null,
   managedBlock: true,
+  codeWorkspace: false,
   repoIds: ['home', 'api'],
   createdAt: 0
 }

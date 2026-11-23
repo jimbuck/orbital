@@ -1,6 +1,7 @@
 import { useMemo, useState, type JSX, type KeyboardEvent } from 'react'
 import {
   CircleOff,
+  FileJson,
   FileText,
   FolderInput,
   FolderOpen,
@@ -92,7 +93,7 @@ export default function ProjectGroup({
     e.preventDefault()
     e.stopPropagation()
     setStep('items')
-    // 280, not the spec's 230: "Managed AGENTS.md Block" and its "needs home repo" hint wrap below that.
+    // 280, not the spec's 230: "Repo List in AGENTS.md" and its "needs home repo" hint wrap below that.
     setMenu(clampMenuPos(e, 280, 400))
   }
 
@@ -342,11 +343,20 @@ export default function ProjectGroup({
               />
               <MenuItem
                 icon={<FileText size={13} strokeWidth={1.5} />}
-                label="Managed AGENTS.md Block"
+                label="Repo List in AGENTS.md"
                 hint={home ? (project.managedBlock ? 'on' : 'off') : 'needs home repo'}
                 disabled={!home}
                 onClick={() => {
                   fireAndForget(window.orbital.setProjectManagedBlock(project.id, !project.managedBlock))
+                  closeMenu()
+                }}
+              />
+              <MenuItem
+                icon={<FileJson size={13} strokeWidth={1.5} />}
+                label="VS Code Workspace File"
+                hint={`${project.codeWorkspace ? 'on' : 'off'} · in ${home ? home.name : 'root folder'}`}
+                onClick={() => {
+                  fireAndForget(window.orbital.setProjectCodeWorkspace(project.id, !project.codeWorkspace))
                   closeMenu()
                 }}
               />
@@ -436,8 +446,9 @@ export default function ProjectGroup({
                 <>
                   <div className="my-1 h-px bg-soft" />
                   <div className="px-2 pb-1 pt-1 text-[11px] leading-snug text-dim">
-                    Orbital keeps a repo list in the home repo&rsquo;s AGENTS.md (or its CLAUDE.md), left uncommitted
-                    for you. Turn it off with Managed AGENTS.md Block.
+                    Orbital keeps a repo list in the home repo&rsquo;s AGENTS.md (or its CLAUDE.md), between plain
+                    repos:start / repos:end markers, left uncommitted for you. Turn it off with Repo List in
+                    AGENTS.md.
                   </div>
                 </>
               )}
