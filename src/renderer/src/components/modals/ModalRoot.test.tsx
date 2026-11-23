@@ -23,7 +23,7 @@ afterEach(() => {
 describe('ModalRoot Escape', () => {
   it('closes the top modal on a plain Escape', () => {
     render(<ModalRoot />)
-    act(() => useStore.getState().openModal('addProject'))
+    act(() => useStore.getState().openModal('addRepo'))
     expect(useStore.getState().modalStack.length).toBe(1)
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(useStore.getState().modalStack.length).toBe(0)
@@ -31,7 +31,7 @@ describe('ModalRoot Escape', () => {
 
   it('leaves the modal open when something inside already consumed the Escape', () => {
     render(<ModalRoot />)
-    act(() => useStore.getState().openModal('addProject'))
+    act(() => useStore.getState().openModal('addRepo'))
     const evt = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
     evt.preventDefault()
     window.dispatchEvent(evt)

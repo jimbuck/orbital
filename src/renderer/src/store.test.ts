@@ -6,7 +6,7 @@ import { activePaneId, deepEqual, shareById, useStore } from './store'
 function worktree(id: string, paneIds: string[]): Worktree {
   return {
     id,
-    projectId: 'p1',
+    repoId: 'p1',
     kind: 'root',
     name: id,
     path: `/tmp/${id}`,
@@ -90,9 +90,9 @@ describe('applyState structural sharing', () => {
   const settings = { theme: 'dark', alerts: { sound: true } } as unknown as Settings
   function appState(): AppState {
     return {
-      projects: [{ id: 'p1', name: 'P', repoPath: '/p' } as AppState['projects'][number]],
-      projectFolders: [{ id: 'f1', name: 'Work', collapsed: false, projectIds: ['p1'] }],
-      projectRail: [{ kind: 'folder', id: 'f1' }],
+      repos: [{ id: 'p1', name: 'P', repoPath: '/p' } as AppState['repos'][number]],
+      railFolders: [{ id: 'f1', name: 'Work', collapsed: false, repoIds: ['p1'] }],
+      railItems: [{ kind: 'folder', id: 'f1' }],
       worktrees: [worktree('w1', ['a']), worktree('w2', ['c'])],
       tasks: [],
       settings: structuredClone(settings),
@@ -107,9 +107,9 @@ describe('applyState structural sharing', () => {
     const before = useStore.getState()
     useStore.getState().applyState(appState())
     const after = useStore.getState()
-    expect(after.projects).toBe(before.projects)
-    expect(after.projectFolders).toBe(before.projectFolders)
-    expect(after.projectRail).toBe(before.projectRail)
+    expect(after.repos).toBe(before.repos)
+    expect(after.railFolders).toBe(before.railFolders)
+    expect(after.railItems).toBe(before.railItems)
     expect(after.worktrees).toBe(before.worktrees)
     expect(after.tasks).toBe(before.tasks)
     expect(after.settings).toBe(before.settings)
@@ -130,22 +130,22 @@ describe('applyState structural sharing', () => {
     expect(after.worktrees[0]).toBe(before.worktrees[0])
     expect(after.worktrees[1].status).toBe('needs_attention')
     expect(after.alertCount).toBe(1)
-    expect(after.projects).toBe(before.projects)
+    expect(after.repos).toBe(before.repos)
     expect(after.settings).toBe(before.settings)
   })
 })
 
-describe('selecting a project hidden in a collapsed rail folder', () => {
-  const setProjectFolderCollapsed = vi.fn(async () => undefined)
+describe('selecting a repo hidden in a collapsed rail folder', () => {
+  const setRailFolderCollapsed = vi.fn(async () => undefined)
 
   beforeEach(() => {
-    setProjectFolderCollapsed.mockClear()
-    vi.stubGlobal('orbital', { setProjectFolderCollapsed })
+    setRailFolderCollapsed.mockClear()
+    vi.stubGlobal('orbital', { setRailFolderCollapsed })
     useStore.setState({
       worktrees: [worktree('w1', ['a'])],
-      projectFolders: [
-        { id: 'f-shut', name: 'Shut', collapsed: true, projectIds: ['p1'] },
-        { id: 'f-open', name: 'Open', collapsed: false, projectIds: ['p2'] }
+      railFolders: [
+        { id: 'f-shut', name: 'Shut', collapsed: true, repoIds: ['p1'] },
+        { id: 'f-open', name: 'Open', collapsed: false, repoIds: ['p2'] }
       ]
     })
   })
@@ -154,27 +154,27 @@ describe('selecting a project hidden in a collapsed rail folder', () => {
     vi.unstubAllGlobals()
   })
 
-  it('opens the folder, whether the project or one of its Worktrees was picked', () => {
-    useStore.getState().setActiveProject('p1')
-    expect(setProjectFolderCollapsed.mock.calls).toEqual([['f-shut', false]])
+  it('opens the folder, whether the repo or one of its Worktrees was picked', () => {
+    useStore.getState().setActiveRepo('p1')
+    expect(setRailFolderCollapsed.mock.calls).toEqual([['f-shut', false]])
 
     // w1 belongs to p1: this is the palette / needs-attention banner path.
     useStore.getState().setActiveWorktree('w1')
-    expect(setProjectFolderCollapsed).toHaveBeenCalledTimes(2)
+    expect(setRailFolderCollapsed).toHaveBeenCalledTimes(2)
   })
 
-  it('leaves folders alone when the project is already on show', () => {
-    useStore.getState().setActiveProject('p2')
-    useStore.getState().setActiveProject('loose')
-    expect(setProjectFolderCollapsed).not.toHaveBeenCalled()
+  it('leaves folders alone when the repo is already on show', () => {
+    useStore.getState().setActiveRepo('p2')
+    useStore.getState().setActiveRepo('loose')
+    expect(setRailFolderCollapsed).not.toHaveBeenCalled()
   })
 
   it('never reopens a folder on a state push: one the user collapsed stays collapsed', () => {
     const state = useStore.getState()
     state.applyState({
-      projects: [{ id: 'p1', name: 'P', repoPath: '/p' } as AppState['projects'][number]],
-      projectFolders: state.projectFolders,
-      projectRail: state.projectRail,
+      repos: [{ id: 'p1', name: 'P', repoPath: '/p' } as AppState['repos'][number]],
+      railFolders: state.railFolders,
+      railItems: state.railItems,
       worktrees: [worktree('w1', ['a'])],
       tasks: [],
       settings: {} as Settings,
@@ -182,8 +182,8 @@ describe('selecting a project hidden in a collapsed rail folder', () => {
       devServers: {},
       settingUpWorktrees: []
     })
-    expect(useStore.getState().activeProjectId).toBe('p1')
-    expect(setProjectFolderCollapsed).not.toHaveBeenCalled()
+    expect(useStore.getState().activeRepoId).toBe('p1')
+    expect(setRailFolderCollapsed).not.toHaveBeenCalled()
   })
 })
 

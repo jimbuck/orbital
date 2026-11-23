@@ -33,7 +33,7 @@ import { shortcutLabel } from '@renderer/lib/platform'
  * File search spans EVERY Worktree in the workspace, not just the active one —
  * running several checkouts side by side is the whole point of the cockpit, and
  * "which copy of config.ts" is the question a result row has to answer. So each
- * file row carries the project and Worktree it came from, in one small chip
+ * file row carries the repo and Worktree it came from, in one small chip
  * rather than a second line per result.
  */
 
@@ -69,7 +69,7 @@ interface Row {
    * other rows do the opposite, because there the name is what you are reading.
    */
   code?: boolean
-  /** Right-aligned chip: which project and Worktree a hit belongs to. */
+  /** Right-aligned chip: which repo and Worktree a hit belongs to. */
   meta?: string
   /** Renders a selected-state check gutter (theme, default open action). */
   checked?: boolean
@@ -101,13 +101,13 @@ export default function CommandPalette(): JSX.Element | null {
   const palette = useStore((s) => s.palette)
   const closePalette = useStore((s) => s.closePalette)
   const worktrees = useStore((s) => s.worktrees)
-  const projects = useStore((s) => s.projects)
+  const repos = useStore((s) => s.repos)
   const tasks = useStore((s) => s.tasks)
   const settings = useStore((s) => s.settings)
   const devServers = useStore((s) => s.devServers)
   const zoomFactor = useStore((s) => s.zoomFactor)
   const activeWorktreeId = useStore((s) => s.activeWorktreeId)
-  const activeProjectId = useStore((s) => s.activeProjectId)
+  const activeRepoId = useStore((s) => s.activeRepoId)
   const setActiveWorktree = useStore((s) => s.setActiveWorktree)
   const openModal = useStore((s) => s.openModal)
 
@@ -187,16 +187,16 @@ export default function CommandPalette(): JSX.Element | null {
 
   /* ---- Row assembly ------------------------------------------------------ */
 
-  const projectName = useCallback(
-    (id: string): string => projects.find((p) => p.id === id)?.name ?? 'unknown repo',
-    [projects]
+  const repoName = useCallback(
+    (id: string): string => repos.find((p) => p.id === id)?.name ?? 'unknown repo',
+    [repos]
   )
 
-  /** `project › worktree` — the one line that says which checkout a hit is in. */
+  /** `repo › worktree` — the one line that says which checkout a hit is in. */
   const originOf = useCallback(
     (worktree: Worktree | undefined): string =>
-      worktree ? `${projectName(worktree.projectId)} › ${worktree.name}` : 'unknown Worktree',
-    [projectName]
+      worktree ? `${repoName(worktree.repoId)} › ${worktree.name}` : 'unknown Worktree',
+    [repoName]
   )
 
   const commandRows = useMemo((): Row[] => {
@@ -240,7 +240,7 @@ export default function CommandPalette(): JSX.Element | null {
     // Subscribing to each slice, rather than to the whole store, is what keeps
     // this component from re-rendering on every terminal status flip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, seq, term, worktrees, projects, tasks, settings, devServers, zoomFactor, activeWorktreeId, activeProjectId])
+  }, [open, seq, term, worktrees, repos, tasks, settings, devServers, zoomFactor, activeWorktreeId, activeRepoId])
 
   const worktreeRows = useMemo((): Row[] => {
     const rows: Row[] = []
@@ -254,13 +254,13 @@ export default function CommandPalette(): JSX.Element | null {
         label: w.name,
         detail: w.branch,
         mono: true,
-        meta: projectName(w.projectId),
+        meta: repoName(w.repoId),
         run: () => setActiveWorktree(w.id),
         score: m.score
       })
     }
     return rows.sort((a, b) => b.score - a.score)
-  }, [worktrees, term, originOf, projectName, setActiveWorktree])
+  }, [worktrees, term, originOf, repoName, setActiveWorktree])
 
   const taskRows = useMemo((): Row[] => {
     const rows: Row[] = []
@@ -275,7 +275,7 @@ export default function CommandPalette(): JSX.Element | null {
         label,
         ranges: term ? positionsToRanges(m.positions.filter((p) => p < label.length)) : undefined,
         detail: taskStatusLabel(t.status),
-        meta: projectName(t.projectId),
+        meta: repoName(t.repoId),
         run: () => openModal('editTask', { task: t }),
         score: m.score
       })
@@ -283,7 +283,7 @@ export default function CommandPalette(): JSX.Element | null {
     // Tie-break on recency: a task filed a minute ago is likelier to be the one
     // being looked for than one from last month.
     return rows.sort((a, b) => b.score - a.score)
-  }, [tasks, term, projectName, openModal])
+  }, [tasks, term, repoName, openModal])
 
   const fileRows = useMemo((): Row[] => {
     const byId = new Map(worktrees.map((w) => [w.id, w]))

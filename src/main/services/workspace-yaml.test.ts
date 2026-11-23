@@ -12,7 +12,7 @@ describe('workspace-yaml normalize — agent settings', () => {
           { provider: 'codex' }
         ]
       },
-      projects: []
+      repos: []
     })
     expect(cfg.settings?.agents).toEqual([
       {
@@ -32,7 +32,7 @@ describe('workspace-yaml normalize — agent settings', () => {
       id: 'ws',
       name: 'Old',
       settings: { enabledAgents: ['claude', 'cursor'] },
-      projects: []
+      repos: []
     })
     expect(cfg.settings?.agents).toEqual([
       { id: 'claude', name: 'Claude', provider: 'claude' },
@@ -41,20 +41,20 @@ describe('workspace-yaml normalize — agent settings', () => {
   })
 
   it('drops an unusable agents value entirely', () => {
-    const cfg = normalize({ id: 'ws', name: 'X', settings: { agents: 'bogus' }, projects: [] })
+    const cfg = normalize({ id: 'ws', name: 'X', settings: { agents: 'bogus' }, repos: [] })
     expect(cfg.settings).toBeUndefined()
   })
 })
 
 describe('workspace-yaml normalize — accent colour', () => {
   it('keeps a valid accent, normalised to lowercase #rrggbb', () => {
-    const cfg = normalize({ id: 'ws', name: 'Work', settings: { accentColor: 'F06A8A' }, projects: [] })
+    const cfg = normalize({ id: 'ws', name: 'Work', settings: { accentColor: 'F06A8A' }, repos: [] })
     expect(cfg.settings?.accentColor).toBe('#f06a8a')
   })
 
   it('drops an accent that is not a colour', () => {
     for (const bad of ['red', '#fff', '#12345g', 42, null]) {
-      const cfg = normalize({ id: 'ws', name: 'Work', settings: { accentColor: bad, periodicFetch: true }, projects: [] })
+      const cfg = normalize({ id: 'ws', name: 'Work', settings: { accentColor: bad, periodicFetch: true }, repos: [] })
       expect(cfg.settings?.accentColor).toBeUndefined()
       expect(cfg.settings?.periodicFetch).toBe(true)
     }
@@ -64,7 +64,7 @@ describe('workspace-yaml normalize — accent colour', () => {
 describe('workspace-yaml normalize — theme', () => {
   it('keeps a known theme, System, and a pair of the right appearances', () => {
     const settings = { theme: 'system', systemDarkTheme: 'dracula', systemLightTheme: 'github-light' }
-    const cfg = normalize({ id: 'ws', name: 'Work', settings, projects: [] })
+    const cfg = normalize({ id: 'ws', name: 'Work', settings, repos: [] })
     expect(cfg.settings).toEqual(settings)
   })
 
@@ -73,7 +73,7 @@ describe('workspace-yaml normalize — theme', () => {
       id: 'ws',
       name: 'Work',
       settings: { theme: 'not-a-theme', systemDarkTheme: 'github-light', systemLightTheme: 'nord', periodicFetch: true },
-      projects: []
+      repos: []
     })
     expect(cfg.settings).toEqual({ periodicFetch: true })
   })
@@ -81,10 +81,10 @@ describe('workspace-yaml normalize — theme', () => {
 
 describe('workspace-yaml normalize — ligatures', () => {
   it('keeps a boolean and drops anything else', () => {
-    expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: false }, projects: [] }).settings).toEqual({
+    expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: false }, repos: [] }).settings).toEqual({
       fontLigatures: false
     })
-    expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: 'no' }, projects: [] }).settings).toBeUndefined()
+    expect(normalize({ id: 'ws', name: 'W', settings: { fontLigatures: 'no' }, repos: [] }).settings).toBeUndefined()
   })
 })
 
@@ -96,7 +96,7 @@ describe('workspace-yaml normalize — shell, logging, open action, alerts', () 
       defaultOpenAction: 'left',
       alerts: { sound: false, taskbarFlash: true }
     }
-    expect(normalize({ id: 'ws', name: 'W', settings, projects: [] }).settings).toEqual(settings)
+    expect(normalize({ id: 'ws', name: 'W', settings, repos: [] }).settings).toEqual(settings)
   })
 
   it('drops badly-typed values and unknown alert toggles', () => {
@@ -104,7 +104,7 @@ describe('workspace-yaml normalize — shell, logging, open action, alerts', () 
       id: 'ws',
       name: 'W',
       settings: { defaultShell: 3, debugLogging: 'yes', defaultOpenAction: 'sideways', alerts: { sound: 'no', bogus: true } },
-      projects: []
+      repos: []
     })
     expect(cfg.settings).toBeUndefined()
   })

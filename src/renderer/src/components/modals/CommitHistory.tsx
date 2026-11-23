@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { Check, Copy, GitBranch, RefreshCw, Tag, X } from 'lucide-react'
 import { Spinner } from '@renderer/lib/status'
-import { useStore, activeProject, activeWorktree } from '@renderer/store'
+import { useStore, activeRepo, activeWorktree } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import type { FileDiff, GitCommit, GitCommitDetail, GitCommitFile, GitFileState } from '@shared/types'
 import { GRAPH_COLOR_COUNT, layoutGraph, type GraphRow } from '@renderer/lib/commitGraph'
@@ -237,7 +237,7 @@ function FileRow({
  */
 export default function CommitHistory(): JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
-  const project = useStore(activeProject)
+  const repo = useStore(activeRepo)
   const worktree = useStore(activeWorktree)
   const worktreeId = worktree?.id ?? null
 
@@ -404,7 +404,7 @@ export default function CommitHistory(): JSX.Element {
           <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-dim">
             {worktree ? (
               <>
-                <span className="truncate">{project?.name}</span>
+                <span className="truncate">{repo?.name}</span>
                 <span className="text-faint">▸</span>
                 <span className="truncate">{worktree.name}</span>
                 <span className="text-faint">·</span>

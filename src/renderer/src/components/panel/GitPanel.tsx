@@ -12,7 +12,7 @@ import {
   X
 } from 'lucide-react'
 import { Spinner } from '@renderer/lib/status'
-import { useStore, activeWorktree, activeProject } from '@renderer/store'
+import { useStore, activeWorktree, activeRepo } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import { openFileInEditor } from '@renderer/lib/openTab'
 import { ContextMenu, clampMenuPos, type MenuPos } from '../rail/menu'
@@ -348,7 +348,7 @@ function TreeRow({
  */
 export default function GitPanel(): JSX.Element {
   const worktree = useStore(activeWorktree)
-  const project = useStore(activeProject)
+  const repo = useStore(activeRepo)
   const openModal = useStore((s) => s.openModal)
 
   const [status, setStatus] = useState<GitStatus | null>(null)
@@ -510,8 +510,8 @@ export default function GitPanel(): JSX.Element {
     const r = e.currentTarget.getBoundingClientRect()
     setPickerPos({ x: Math.min(r.left, window.innerWidth - PICKER_WIDTH - 12), y: r.bottom + 4 })
     setNewBranch('')
-    if (project) {
-      void window.orbital.listBranches(project.id).then((info) => {
+    if (repo) {
+      void window.orbital.listBranches(repo.id).then((info) => {
         setBranches(info.branches)
         setRemoteBranches(info.remotes)
       })
@@ -785,7 +785,7 @@ export default function GitPanel(): JSX.Element {
         </button>
         <button
           type="button"
-          onClick={() => openModal('newWorktree', { project })}
+          onClick={() => openModal('newWorktree', { repo })}
           className={`flex-1 py-[7px] inline-flex items-center justify-center gap-1 ${SECONDARY}`}
         >
           <Plus size={13} strokeWidth={1.5} />

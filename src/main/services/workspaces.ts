@@ -3,13 +3,13 @@ import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { controlPipePath, type WorkspaceConfig, type WorkspaceInfo } from '@shared/types'
 import { getDb, initDb } from '../db/database'
-import { projects, requireWorkspaceId, setActiveWorkspaceId, workspaces } from '../db/repositories'
+import { repos, requireWorkspaceId, setActiveWorkspaceId, workspaces } from '../db/repositories'
 import { readWorkspaceYaml, writeWorkspaceYaml } from './workspace-yaml'
 
 /**
  * Workspace management. Workspaces are rows in the GLOBAL DB (nice and simple):
  * one `orbital.db` under the app-storage root holds every workspace, its
- * projects, and all state; each running instance scopes itself to one workspace
+ * repos, and all state; each running instance scopes itself to one workspace
  * and gets its own Chromium profile dir (browsers can't share one), while the
  * data layer is shared through WAL. Sharing a workspace happens through
  * Export/Import (see workspace-yaml.ts), not through live files.
@@ -76,7 +76,7 @@ export function activeControlPipePath(): string {
 /**
  * One-time cleanup of the short-lived files-as-source-of-truth design: a
  * `workspace.yaml` next to the DB is folded into the oldest workspace's
- * settings (its projects already live in the DB), a `global-config.json`'s
+ * settings (its repos already live in the DB), a `global-config.json`'s
  * settings into the global settings blob; both files are then set aside as
  * `.imported.bak` so this never runs twice.
  */
@@ -136,7 +136,7 @@ export function migrateLegacyWorkspaceFiles(globalRoot: string): void {
   }
 }
 
-/** Serialize a workspace (projects + settings) to a shareable export file. */
+/** Serialize a workspace (repos + settings) to a shareable export file. */
 export function exportWorkspaceToFile(workspaceId: string, file: string): void {
   const ws = workspaces.get(workspaceId)
   if (!ws) throw new Error(`workspace ${workspaceId} not found`)
@@ -146,8 +146,8 @@ export function exportWorkspaceToFile(workspaceId: string, file: string): void {
     id: ws.id,
     name: ws.name,
     settings: Object.keys(settings).length > 0 ? settings : undefined,
-    projects: projects.list(workspaceId).map((p) => {
-      const entry: WorkspaceConfig['projects'][number] = { id: p.id, name: p.name, path: p.repoPath }
+    repos: repos.list(workspaceId).map((p) => {
+      const entry: WorkspaceConfig['repos'][number] = { id: p.id, name: p.name, path: p.repoPath }
       if (p.defaultAgentId && p.defaultAgentId !== 'claude') entry.agentId = p.defaultAgentId
       if (p.agentExecPath) entry.agentExecPath = p.agentExecPath
       return entry
@@ -168,7 +168,7 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
   const wsIdTaken = !!db.prepare('SELECT 1 FROM workspaces WHERE id = ?').get(config.id)
   const workspaceId = wsIdTaken ? randomUUID() : config.id
   const now = Date.now()
-  const projectIdTaken = db.prepare('SELECT 1 FROM projects WHERE id = ?')
+  const repoIdTaken = db.prepare('SELECT 1 FROM repos WHERE id = ?')
 
   const tx = db.transaction(() => {
     db.prepare('INSERT INTO workspaces (id, name, settings, created_at, last_opened_at) VALUES (?, ?, ?, ?, 0)').run(
@@ -178,13 +178,13 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
       now
     )
     const insert = db.prepare(
-      `INSERT INTO projects (id, workspace_id, name, repo_path, default_agent_id, agent_exec_path, added_at)
+      `INSERT INTO repos (id, workspace_id, name, repo_path, default_agent_id, agent_exec_path, added_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     let seq = now
-    for (const p of config.projects) {
+    for (const p of config.repos) {
       insert.run(
-        projectIdTaken.get(p.id) ? randomUUID() : p.id,
+        repoIdTaken.get(p.id) ? randomUUID() : p.id,
         workspaceId,
         p.name,
         p.path,

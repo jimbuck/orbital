@@ -10,7 +10,7 @@ import {
   type ControlRequest,
   type ControlResponse
 } from '@shared/types'
-import { runtime, repo } from '../runtime'
+import { runtime, tables } from '../runtime'
 import { getSettings } from '../services/settings'
 import { logger } from '../services/logger'
 import { updater } from '../services/updater'
@@ -29,27 +29,27 @@ type Handler = (req: ControlRequest) => Promise<ControlResponse>
 
 /** `task archive` / `task unarchive` (and the legacy `task delete`). */
 async function archiveTask(req: ControlRequest, archive: boolean): Promise<ControlResponse> {
-  if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+  if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
   const idArg = String(req.args.id ?? '').trim()
   if (!idArg) return { ok: false, error: 'task id required' }
-  const { task, error } = resolveTask(req.projectId, idArg)
+  const { task, error } = resolveTask(req.repoId, idArg)
   if (!task) return { ok: false, error }
-  if (archive) repo.tasks.archive(task.id)
-  else repo.tasks.unarchive(task.id)
+  if (archive) tables.tasks.archive(task.id)
+  else tables.tasks.unarchive(task.id)
   runtime.broadcastState()
-  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, project: projectName(req) } }
+  return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoName(req) } }
 }
 
-/** The target project's name, so the CLI can name it in a cross-project confirmation. */
-const projectName = (req: ControlRequest): string | undefined =>
-  req.projectId ? repo.projects.get(req.projectId)?.name : undefined
+/** The target repo's name, so the CLI can name it in a cross-repo confirmation. */
+const repoName = (req: ControlRequest): string | undefined =>
+  req.repoId ? tables.repos.get(req.repoId)?.name : undefined
 
 const handlers: Record<ControlCommand, Handler> = {
   status: async (req) => {
     const status = normalizeStatus(String(req.args.status ?? ''))
     if (!status) return { ok: false, error: `unknown status '${req.args.status}'` }
     if (!req.terminalId) return { ok: false, error: 'no ORBITAL_TERMINAL_ID in environment' }
-    const tab = repo.tabs.get(req.terminalId)
+    const tab = tables.tabs.get(req.terminalId)
     if (!tab) return { ok: false, error: 'terminal not found' }
     statusReported(req.terminalId, status, req.args.firedAt)
     return { ok: true, data: { status } }
@@ -58,17 +58,17 @@ const handlers: Record<ControlCommand, Handler> = {
     // Self-inspection: an agent knows its ids from the env, but not what they
     // mean. One call answers "where am I, and what does the cockpit think I'm doing".
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
-    const worktree = repo.worktrees.get(req.worktreeId)
+    const worktree = tables.worktrees.get(req.worktreeId)
     if (!worktree) return { ok: false, error: 'worktree not found' }
-    const project = repo.projects.get(worktree.projectId)
-    const tab = req.terminalId ? repo.tabs.get(req.terminalId) : undefined
-    const task = worktree.taskId ? repo.tasks.get(worktree.taskId) : undefined
+    const repo = tables.repos.get(worktree.repoId)
+    const tab = req.terminalId ? tables.tabs.get(req.terminalId) : undefined
+    const task = worktree.taskId ? tables.tasks.get(worktree.taskId) : undefined
     return {
       ok: true,
       data: {
-        project: project?.name ?? '',
-        projectId: worktree.projectId,
-        repoPath: project?.repoPath ?? '',
+        repo: repo?.name ?? '',
+        repoId: worktree.repoId,
+        repoPath: repo?.repoPath ?? '',
         worktree: worktree.name,
         worktreeId: worktree.id,
         kind: worktree.kind,
@@ -81,21 +81,21 @@ const handlers: Record<ControlCommand, Handler> = {
       }
     }
   },
-  projects: async (req) => {
-    // The workspace's projects, so an agent can find a sibling to pass as `--project`.
-    const list = repo.projects.list().map((p) => ({
+  repos: async (req) => {
+    // The workspace's repos, so an agent can find a sibling to pass as `--repo`.
+    const list = tables.repos.list().map((p) => ({
       id: p.id,
       name: p.name,
       repoPath: p.repoPath,
-      current: p.id === req.projectId
+      current: p.id === req.repoId
     }))
     return { ok: true, data: list }
   },
   worktrees: async (req) => {
-    const pid = req.projectId
-    const list = repo.worktrees
+    const pid = req.repoId
+    const list = tables.worktrees
       .list()
-      .filter((w) => !pid || w.projectId === pid)
+      .filter((w) => !pid || w.repoId === pid)
       .map((w) => ({
         id: w.id,
         name: w.name,
@@ -107,19 +107,19 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: list }
   },
   'worktree-new': async (req) => {
-    if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
-    const project = repo.projects.get(req.projectId)
-    if (!project) return { ok: false, error: 'project not found' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    const repo = tables.repos.get(req.repoId)
+    if (!repo) return { ok: false, error: 'repo not found' }
     // A task number/id may come along: the Worktree is then started from that
     // task, same as the cockpit's "start a worktree from a task".
-    let task: ReturnType<typeof repo.tasks.get> | undefined
+    let task: ReturnType<typeof tables.tasks.get> | undefined
     if (req.args.task !== undefined) {
-      const resolved = resolveTask(req.projectId, String(req.args.task).trim())
+      const resolved = resolveTask(req.repoId, String(req.args.task).trim())
       if (!resolved.task) return { ok: false, error: resolved.error }
       task = resolved.task
     }
     const worktree = await createWorktree({
-      projectId: project.id,
+      repoId: repo.id,
       branch: req.args.worktree !== undefined ? String(req.args.worktree) : undefined,
       existingBranch: req.args.existingBranch ? String(req.args.existingBranch) : undefined,
       name: req.args.name ? String(req.args.name) : undefined,
@@ -134,7 +134,7 @@ const handlers: Record<ControlCommand, Handler> = {
         branch: worktree.branch,
         path: worktree.path,
         task: task ? { seq: task.seq, title: task.title } : null,
-        project: project.name
+        repo: repo.name
       }
     }
   },
@@ -184,7 +184,7 @@ const handlers: Record<ControlCommand, Handler> = {
     // Invoked by Claude Code hooks via `orbital hook <event>`. The CLI only
     // reaches here for Orbital-spawned sessions (it guards on ORBITAL_WORKTREE_ID).
     if (!req.terminalId) return { ok: true }
-    const tab = repo.tabs.get(req.terminalId)
+    const tab = tables.tabs.get(req.terminalId)
     if (!tab) return { ok: true }
     const event = String(req.args.event ?? '')
     const payload = (req.args.payload ?? {}) as Record<string, unknown>
@@ -197,11 +197,11 @@ const handlers: Record<ControlCommand, Handler> = {
     return status ? { ok: true, data: { status } } : { ok: true }
   },
   'task-add': async (req) => {
-    if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
     const title = String(req.args.title ?? '').trim()
     if (!title) return { ok: false, error: 'task title required' }
-    const task = repo.tasks.create({
-      projectId: req.projectId,
+    const task = tables.tasks.create({
+      repoId: req.repoId,
       title,
       description: req.args.description ? String(req.args.description) : undefined,
       tags: req.args.tags ? parseTagList(String(req.args.tags)) : undefined,
@@ -210,10 +210,10 @@ const handlers: Record<ControlCommand, Handler> = {
       createdBy: 'agent'
     })
     runtime.broadcastState()
-    return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, project: projectName(req) } }
+    return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoName(req) } }
   },
   'task-list': async (req) => {
-    if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
     const all = req.args.all === true || req.args.all === 'true'
     const archived = req.args.archived === true || req.args.archived === 'true'
     // Explicit --status implies --all: asking for `done` and getting nothing
@@ -226,27 +226,27 @@ const handlers: Record<ControlCommand, Handler> = {
     const tag = req.args.tag !== undefined ? String(req.args.tag).trim().toLowerCase() : null
     // --archived shows only archived tasks (any status); --all adds them to
     // everything else; the default is active, not-done tasks.
-    const list = repo.tasks
+    const list = tables.tasks
       .list(archived ? 'archived' : all ? 'all' : 'active')
-      .filter((t) => t.projectId === req.projectId && (all || archived || wanted !== null || t.status !== 'done'))
+      .filter((t) => t.repoId === req.repoId && (all || archived || wanted !== null || t.status !== 'done'))
       .filter((t) => wanted === null || t.status === wanted)
       .filter((t) => !tag || t.tags.some((x) => x.toLowerCase() === tag))
       .map(taskDto)
     return { ok: true, data: list }
   },
   'task-show': async (req) => {
-    if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
     const idArg = String(req.args.id ?? '').trim()
     if (!idArg) return { ok: false, error: 'task id required' }
-    const { task, error } = resolveTask(req.projectId, idArg)
+    const { task, error } = resolveTask(req.repoId, idArg)
     if (!task) return { ok: false, error }
     return { ok: true, data: taskDto(task) }
   },
   'task-update': async (req) => {
-    if (!req.projectId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
     const idArg = String(req.args.id ?? '').trim()
     if (!idArg) return { ok: false, error: 'task id required' }
-    const { task, error } = resolveTask(req.projectId, idArg)
+    const { task, error } = resolveTask(req.repoId, idArg)
     if (!task) return { ok: false, error }
     const patch: TaskPatch = {}
     if (req.args.status !== undefined) {
@@ -258,9 +258,9 @@ const handlers: Record<ControlCommand, Handler> = {
     if (req.args.description !== undefined) patch.description = String(req.args.description)
     if (req.args.tags !== undefined) patch.tags = parseTagList(String(req.args.tags))
     if (Object.keys(patch).length === 0) return { ok: false, error: 'nothing to update' }
-    const updated = repo.tasks.update(task.id, patch)
+    const updated = tables.tasks.update(task.id, patch)
     runtime.broadcastState()
-    return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title, project: projectName(req) } }
+    return { ok: true, data: { id: updated.id, seq: updated.seq, status: updated.status, title: updated.title, repo: repoName(req) } }
   },
   'task-archive': async (req) => archiveTask(req, true),
   'task-unarchive': async (req) => archiveTask(req, false),
@@ -295,12 +295,12 @@ const handlers: Record<ControlCommand, Handler> = {
 export async function handleControl(req: ControlRequest): Promise<ControlResponse> {
   // Record every incoming CLI command up front so a crash mid-dispatch still
   // leaves a trail of what the CLI was asking the app to do.
-  logger.cli(req.cmd, { args: req.args, worktreeId: req.worktreeId, projectId: req.projectId })
+  logger.cli(req.cmd, { args: req.args, worktreeId: req.worktreeId, repoId: req.repoId })
   const handler = Object.prototype.hasOwnProperty.call(handlers, req.cmd) ? handlers[req.cmd] : undefined
   if (!handler) return { ok: false, error: `unknown command '${String(req.cmd)}'` }
   try {
-    // Resolve `--project` / validate ORBITAL_PROJECT_ID against this workspace
-    // up front, so every handler's `req.projectId` is one it may act on.
+    // Resolve `--repo` / validate ORBITAL_PROJECT_ID against this workspace
+    // up front, so every handler's `req.repoId` is one it may act on.
     const scoped = scopeRequest(req)
     if (!scoped.req) return { ok: false, error: scoped.error }
     return await handler(scoped.req)

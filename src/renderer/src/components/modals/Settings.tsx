@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { X, Plus, ChevronDown, AlertTriangle } from 'lucide-react'
-import { useStore, activeProject } from '@renderer/store'
+import { useStore, activeRepo } from '@renderer/store'
 import type {
   Settings as SettingsModel,
   SettingsPatch,
@@ -431,7 +431,7 @@ function InstallPanel({ agentId, kind }: { agentId: string; kind: InstallKind })
 }
 
 export default function Settings(): React.JSX.Element {
-  const project = useStore(activeProject)
+  const repo = useStore(activeRepo)
   const settings = useStore((s) => s.settings)
   const workspace = useStore((s) => s.workspace)
   const closeModal = useStore((s) => s.closeModal)
@@ -487,15 +487,15 @@ export default function Settings(): React.JSX.Element {
   // install and is rendered inside that card.
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  // Per-project agent config. A default stored before profiles had ids names a
+  // Per-repo agent config. A default stored before profiles had ids names a
   // provider — resolve it to the profile it refers to. The fallback is the first
   // CONFIGURED profile, never a hard-coded id: a workspace that dropped Claude
   // would otherwise show (and save) a default pointing at nothing.
   const [agentId, setAgentId] = useState(() => {
     const configured = settings?.agents ?? defaultAgentConfigs()
-    return findAgentConfig(configured, project?.defaultAgentId)?.id ?? configured[0]?.id ?? 'claude'
+    return findAgentConfig(configured, repo?.defaultAgentId)?.id ?? configured[0]?.id ?? 'claude'
   })
-  const [agentExecPath, setAgentExecPath] = useState(() => project?.agentExecPath ?? '')
+  const [agentExecPath, setAgentExecPath] = useState(() => repo?.agentExecPath ?? '')
 
   const shellOptions = SHELL_OPTIONS.includes(defaultShell) ? SHELL_OPTIONS : [defaultShell, ...SHELL_OPTIONS]
 
@@ -526,7 +526,7 @@ export default function Settings(): React.JSX.Element {
     if (agents.length <= 1) return
     const next = agents.filter((a) => a.id !== id)
     setAgents(next)
-    // The project's default cannot point at a profile that no longer exists.
+    // The repo's default cannot point at a profile that no longer exists.
     if (id === agentId) setAgentId(next[0].id)
   }
 
@@ -568,8 +568,8 @@ export default function Settings(): React.JSX.Element {
       if (workspace && wsName && wsName !== workspace.name) {
         await window.orbital.renameWorkspace(workspace.id, wsName)
       }
-      if (project) {
-        await window.orbital.setProjectAgent(project.id, {
+      if (repo) {
+        await window.orbital.setRepoAgent(repo.id, {
           defaultAgentId: agentId,
           agentExecPath: agentExecPath.trim()
         })
@@ -616,7 +616,7 @@ export default function Settings(): React.JSX.Element {
   return (
     <ModalShell
       title="Settings"
-      subtitle={`Repo · ${project?.name ?? '—'}`}
+      subtitle={`Repo · ${repo?.name ?? '—'}`}
       width={540}
       onClose={closeModal}
       footer={
@@ -676,7 +676,7 @@ export default function Settings(): React.JSX.Element {
       <p className="mt-1.5 text-[12px] leading-relaxed text-text-3 text-pretty">
         Files matching these patterns are copied from the root checkout into a Worktree when it is created.
         Copy them again any time from the Worktree&apos;s menu or with <code>orbital worktree sync</code>. Applies
-        to all projects.
+        to all repos.
       </p>
       <div className="mt-3 flex flex-wrap gap-[7px]">
         {patterns.map((p) => (

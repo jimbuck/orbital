@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { Project, SearchQuery, SearchResults, Settings, Tab, Worktree } from '@shared/types'
+import type { Repo, SearchQuery, SearchResults, Settings, Tab, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 import SearchTab from './SearchTab'
 
@@ -25,10 +25,10 @@ const splitPane = vi.fn(async () => ({ id: 'p-new' }) as never)
 
 const EMPTY: SearchResults = { files: [], totalMatches: 0, truncated: false, errors: [], cancelled: false }
 
-function worktree(id: string, projectId: string, name: string): Worktree {
+function worktree(id: string, repoId: string, name: string): Worktree {
   return {
     id,
-    projectId,
+    repoId,
     kind: 'root',
     name,
     path: `C:/repo/${name}`,
@@ -41,7 +41,7 @@ function worktree(id: string, projectId: string, name: string): Worktree {
   }
 }
 
-const project = (id: string, name: string): Project => ({
+const repo = (id: string, name: string): Repo => ({
   id,
   name,
   repoPath: `C:/repo/${name}`,
@@ -98,9 +98,9 @@ beforeEach(() => {
     splitPane
   })
   useStore.setState({
-    projects: [project('p1', 'orbital'), project('p2', 'website')],
+    repos: [repo('p1', 'orbital'), repo('p2', 'website')],
     worktrees: [worktree('w1', 'p1', 'main'), worktree('w2', 'p2', 'docs')],
-    activeProjectId: 'p1',
+    activeRepoId: 'p1',
     activeWorktreeId: 'w1',
     activePaneIds: {},
     settings: { defaultOpenAction: 'right' } as unknown as Settings,

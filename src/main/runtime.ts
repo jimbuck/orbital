@@ -3,7 +3,7 @@ import { TerminalManager } from './services/terminals'
 import { GitWatcher, git, type GitChangeKind } from './services/git'
 import { ControlChannel } from './services/control-channel'
 import { AlertManager } from './services/alerts'
-import * as repo from './db/repositories'
+import * as tables from './db/repositories'
 import { safeWrite } from './db/database'
 import { getSettings } from './services/settings'
 import { invalidate as invalidateFileIndex } from './services/file-index'
@@ -17,7 +17,7 @@ import { type AppState, type GitChangedEvent } from '@shared/types'
  */
 class Runtime {
   private static readonly COALESCE_MS = 50
-  /** How often the background fetcher runs `git fetch` per project. */
+  /** How often the background fetcher runs `git fetch` per repo. */
   private static readonly FETCH_INTERVAL_MS = 3 * 60_000
 
   window: BrowserWindow | null = null
@@ -57,15 +57,15 @@ class Runtime {
       if (kind === 'head') {
         void this.refreshBranch(repoPath).finally(() => {
           this.broadcastState()
-          this.broadcastGitChanged(repo.worktrees.idsByPath(repoPath))
+          this.broadcastGitChanged(tables.worktrees.idsByPath(repoPath))
         })
       } else {
-        this.broadcastGitChanged(repo.worktrees.idsByPath(repoPath))
+        this.broadcastGitChanged(tables.worktrees.idsByPath(repoPath))
       }
     })
 
     // Background `git fetch` so ahead/behind stays current without a manual Fetch.
-    // Reads projects live each tick, so this is safe before projects are resumed.
+    // Reads repos live each tick, so this is safe before repos are resumed.
     this.configureFetch()
   }
 
@@ -81,7 +81,7 @@ class Runtime {
    */
   refreshWindowTitle(): void {
     if (!this.window || this.window.isDestroyed()) return
-    const name = repo.workspaces.active().name
+    const name = tables.workspaces.active().name
     this.window.setTitle(name !== 'Default' ? `${name} - Orbital` : 'Orbital')
   }
 
@@ -102,9 +102,9 @@ class Runtime {
       if (urls.size > 0) devServers[worktreeId] = [...urls]
     }
     return {
-      ...repo.getAppState(),
+      ...tables.getAppState(),
       settings: getSettings(),
-      workspace: repo.workspaces.active(),
+      workspace: tables.workspaces.active(),
       devServers,
       settingUpWorktrees: [...this.settingUp]
     }
@@ -175,7 +175,7 @@ class Runtime {
    */
   async refreshBranch(path: string): Promise<void> {
     const branch = await git.currentBranch(path).catch(() => null)
-    if (branch) safeWrite('refresh branch', () => repo.worktrees.updateBranchByPath(path, branch))
+    if (branch) safeWrite('refresh branch', () => tables.worktrees.updateBranchByPath(path, branch))
   }
 
   /** Push the full hydrated app state to the renderer (coalesced). */
@@ -205,7 +205,7 @@ class Runtime {
   /** Recompute needs-attention, update the taskbar badge, notify the renderer (coalesced). */
   broadcastAlert(): void {
     if (!this.alerts) return
-    this.coalesce('alert', () => this.send(IPC.evtAlert, this.alerts.update(repo.worktrees.listStatuses())))
+    this.coalesce('alert', () => this.send(IPC.evtAlert, this.alerts.update(tables.worktrees.listStatuses())))
   }
 
   /**
@@ -234,7 +234,7 @@ class Runtime {
   /**
    * Start/stop the background `git fetch` scheduler to match the `periodicFetch`
    * setting. Idempotent — safe to call at startup and again on every settings save.
-   * The tick reads the project list live, so this works even before resume.
+   * The tick reads the repo list live, so this works even before resume.
    */
   configureFetch(): void {
     const enabled = getSettings().periodicFetch
@@ -247,7 +247,7 @@ class Runtime {
   }
 
   /**
-   * One tick: `git fetch` each project's shared repo. Worktrees share the repo's
+   * One tick: `git fetch` each repo's shared repo. Worktrees share the repo's
    * refs, so one fetch per repoPath updates ahead/behind for all its worktrees. Each
    * fetch is best-effort (an offline remote must not abort the rest), and the whole
    * run is guarded so a slow tick never overlaps the next.
@@ -256,12 +256,12 @@ class Runtime {
     if (this.fetching) return
     this.fetching = true
     try {
-      for (const project of repo.projects.list()) {
+      for (const repo of tables.repos.list()) {
         try {
-          await git.fetch(project.repoPath, { background: true })
-          // Remote-tracking refs may have moved — every worktree of the project
+          await git.fetch(repo.repoPath, { background: true })
+          // Remote-tracking refs may have moved — every worktree of the repo
           // shares them, so nudge them all to re-read ahead/behind.
-          this.broadcastGitChanged(repo.worktrees.idsByProject(project.id))
+          this.broadcastGitChanged(tables.worktrees.idsByRepo(repo.id))
         } catch {
           /* offline / no remote — skip this repo, keep fetching the others */
         }
@@ -285,4 +285,4 @@ class Runtime {
 }
 
 export const runtime = new Runtime()
-export { repo }
+export { tables }

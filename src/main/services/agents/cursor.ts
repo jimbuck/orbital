@@ -92,7 +92,7 @@ function killTree(pid: number | undefined): void {
 export const cursorProvider: AgentProvider = {
   id: 'cursor',
   displayName: 'Cursor',
-  // Used later to auto-suggest a provider per project; defined now, unused for now.
+  // Used later to auto-suggest a provider per repo; defined now, unused for now.
   detectFiles: ['.cursor', '.cursorrules', 'AGENTS.md'],
   // cursor-agent has no launch-time instructions flag and no profile-level rules
   // file; the only channel is `.cursor/rules` INSIDE the repo, which Orbital will

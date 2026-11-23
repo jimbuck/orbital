@@ -29,7 +29,7 @@ export function claudeTranscriptPath(profileDir: string, cwd: string, sessionId:
 export const claudeProvider: AgentProvider = {
   id: 'claude',
   displayName: 'Claude',
-  // Used later to auto-suggest a provider per project; defined now, unused for now.
+  // Used later to auto-suggest a provider per repo; defined now, unused for now.
   detectFiles: ['CLAUDE.md', 'AGENTS.md'],
   acceptsBriefingFile: true,
 

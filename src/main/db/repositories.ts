@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { getDb, writeTx } from './database'
 import {
-  type Project,
-  type ProjectFolder,
+  type Repo,
+  type RailFolder,
   type RailItem,
   type Worktree,
   type Pane,
@@ -30,7 +30,7 @@ const now = (): number => Date.now()
 
 /* ---- row -> entity mappers --------------------------------------------- */
 
-function mapProject(r: any): Project {
+function mapRepo(r: any): Repo {
   return {
     id: r.id,
     name: r.name,
@@ -49,15 +49,27 @@ function mapTab(r: any): Tab {
     type: r.type as TabType,
     status: (r.status as TerminalStatus | null) ?? null,
     position: r.position,
-    config: JSON.parse(r.config || '{}') as TabConfig
+    config: readTabConfig(r.config)
   }
+}
+
+/**
+ * Parse a stored tab config. Search tabs saved before the Project→Repo rename
+ * hold the scope `'project'`, which meant what `'repo'` means now.
+ */
+function readTabConfig(raw: string | null): TabConfig {
+  const config = JSON.parse(raw || '{}') as TabConfig
+  if (config.search && (config.search.scope as string | undefined) === 'project') {
+    config.search = { ...config.search, scope: 'repo' }
+  }
+  return config
 }
 
 function mapTask(r: any): Task {
   return {
     id: r.id,
     seq: r.seq,
-    projectId: r.project_id,
+    repoId: r.repo_id,
     title: r.title,
     description: r.description ?? '',
     tags: JSON.parse(r.tags || '[]') as string[],
@@ -76,7 +88,7 @@ function mapTask(r: any): Task {
 
 /**
  * The workspace this INSTANCE is scoped to — set once at boot, before anything
- * reads state. Every project (and, through projects, every worktree and task)
+ * reads state. Every repo (and, through repos, every worktree and task)
  * the instance sees belongs to this workspace; the underlying DB is shared by
  * all workspaces and instances.
  */
@@ -97,7 +109,7 @@ export function hasActiveWorkspace(): boolean {
 }
 
 function mapWorkspace(r: any): WorkspaceInfo {
-  return { id: r.id, name: r.name, lastOpenedAt: r.last_opened_at, projectCount: r.project_count ?? 0 }
+  return { id: r.id, name: r.name, lastOpenedAt: r.last_opened_at, repoCount: r.repo_count ?? 0 }
 }
 
 export const workspaces = {
@@ -105,7 +117,7 @@ export const workspaces = {
   list(): WorkspaceInfo[] {
     return getDb()
       .prepare(
-        `SELECT w.*, (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS project_count
+        `SELECT w.*, (SELECT COUNT(*) FROM repos p WHERE p.workspace_id = w.id) AS repo_count
          FROM workspaces w ORDER BY w.last_opened_at DESC, w.created_at`
       )
       .all()
@@ -114,7 +126,7 @@ export const workspaces = {
   get(workspaceId: string): WorkspaceInfo | undefined {
     const r = getDb()
       .prepare(
-        `SELECT w.*, (SELECT COUNT(*) FROM projects p WHERE p.workspace_id = w.id) AS project_count
+        `SELECT w.*, (SELECT COUNT(*) FROM repos p WHERE p.workspace_id = w.id) AS repo_count
          FROM workspaces w WHERE w.id = ?`
       )
       .get(workspaceId)
@@ -143,7 +155,7 @@ export const workspaces = {
   rename(workspaceId: string, name: string): void {
     getDb().prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, workspaceId)
   },
-  /** Delete a workspace; its projects (and their worktrees/tasks) cascade away. */
+  /** Delete a workspace; its repos (and their worktrees/tasks) cascade away. */
   remove(workspaceId: string): void {
     getDb().prepare('DELETE FROM workspaces WHERE id = ?').run(workspaceId)
   },
@@ -174,69 +186,69 @@ export const workspaces = {
 }
 
 /* ============================================================================
- * Projects (always scoped to the instance's active workspace)
+ * Repos (always scoped to the instance's active workspace)
  * ========================================================================== */
 
-export const projects = {
-  /** The active workspace's projects; pass `workspaceId` to read another's (export). */
-  list(workspaceId?: string): Project[] {
+export const repos = {
+  /** The active workspace's repos; pass `workspaceId` to read another's (export). */
+  list(workspaceId?: string): Repo[] {
     return getDb()
-      .prepare('SELECT * FROM projects WHERE workspace_id = ? ORDER BY added_at')
+      .prepare('SELECT * FROM repos WHERE workspace_id = ? ORDER BY added_at')
       .all(workspaceId ?? requireWorkspaceId())
-      .map(mapProject)
+      .map(mapRepo)
   },
-  get(pid: string): Project | undefined {
-    const r = getDb().prepare('SELECT * FROM projects WHERE id = ?').get(pid)
-    return r ? mapProject(r) : undefined
+  get(pid: string): Repo | undefined {
+    const r = getDb().prepare('SELECT * FROM repos WHERE id = ?').get(pid)
+    return r ? mapRepo(r) : undefined
   },
-  getByPath(repoPath: string): Project | undefined {
+  getByPath(repoPath: string): Repo | undefined {
     const r = getDb()
-      .prepare('SELECT * FROM projects WHERE workspace_id = ? AND repo_path = ?')
+      .prepare('SELECT * FROM repos WHERE workspace_id = ? AND repo_path = ?')
       .get(requireWorkspaceId(), repoPath)
-    return r ? mapProject(r) : undefined
+    return r ? mapRepo(r) : undefined
   },
-  create(input: { name: string; repoPath: string; workspaceId?: string }): Project {
+  create(input: { name: string; repoPath: string; workspaceId?: string }): Repo {
     const pid = id()
     getDb()
-      .prepare('INSERT INTO projects (id, workspace_id, name, repo_path, added_at) VALUES (?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO repos (id, workspace_id, name, repo_path, added_at) VALUES (?, ?, ?, ?, ?)')
       .run(pid, input.workspaceId ?? requireWorkspaceId(), input.name, input.repoPath, now())
-    return projects.get(pid)!
+    return repos.get(pid)!
   },
   remove(pid: string): void {
-    getDb().prepare('DELETE FROM projects WHERE id = ?').run(pid)
+    getDb().prepare('DELETE FROM repos WHERE id = ?').run(pid)
   },
   rename(pid: string, name: string): void {
-    getDb().prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, pid)
+    getDb().prepare('UPDATE repos SET name = ? WHERE id = ?').run(name, pid)
   },
   updateAgent(pid: string, patch: { defaultAgentId?: string; agentExecPath?: string }): void {
     writeTx(() => {
-      const cur = projects.get(pid)
+      const cur = repos.get(pid)
       if (!cur) return
       getDb()
-        .prepare('UPDATE projects SET default_agent_id = ?, agent_exec_path = ? WHERE id = ?')
+        .prepare('UPDATE repos SET default_agent_id = ?, agent_exec_path = ? WHERE id = ?')
         .run(patch.defaultAgentId ?? cur.defaultAgentId, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
     })
   }
 }
 
 /* ============================================================================
- * Project folders and the rail's order (scoped to the active workspace)
+ * Repo folders and the rail's order (scoped to the active workspace)
  *
- * Nothing here writes to `projects`. A folder is a row of its own, and where a
- * project sits (which folder, how far down) is a row in
- * `project_rail_positions`, so filing, reordering and unfiling a project leave
- * the project exactly as it was.
+ * Nothing here writes to `repos`. A folder is a row of its own, and where a
+ * repo sits (which folder, how far down) is a row in
+ * `rail_positions`, so filing, reordering and unfiling a repo leave
+ * the repo exactly as it was.
  *
- * The top level is one order shared by folders (`project_folders.position`)
- * and loose projects (their `project_rail_positions.position`). Every write
- * renumbers the whole list it touched, so the two never collide. A project
+ * The top level is one order shared by folders (`rail_folders.position`)
+ * and loose repos (their `rail_positions.position`). Every write
+ * renumbers the whole list it touched, so the two never collide. A repo
  * that has never been arranged has no row and is listed last, oldest first.
  * ========================================================================== */
 
 interface RailLayout {
-  /** Folders in top-level order, each with its projects in order. */
-  folders: ProjectFolder[]
-  /** The top level: folders and loose projects, interleaved. */
+  /** Folders in top-level order, each with its repos in order. */
+  folders: RailFolder[]
+  /** The top level: folders and loose repos, interleaved. */
   rail: RailItem[]
 }
 
@@ -244,14 +256,14 @@ function readRailLayout(): RailLayout {
   const db = getDb()
   const workspaceId = requireWorkspaceId()
   const folderRows = db
-    .prepare('SELECT * FROM project_folders WHERE workspace_id = ? ORDER BY position, created_at, id')
+    .prepare('SELECT * FROM rail_folders WHERE workspace_id = ? ORDER BY position, created_at, id')
     .all(workspaceId) as Array<{ id: string; name: string; collapsed: number; position: number }>
-  // Arranged projects first, by position; the rest (no row) after, oldest
+  // Arranged repos first, by position; the rest (no row) after, oldest
   // first, with rowid settling a tie the way insertion order would.
-  const projectRows = db
+  const repoRows = db
     .prepare(
-      `SELECT p.id, s.folder_id, s.position FROM projects p
-       LEFT JOIN project_rail_positions s ON s.project_id = p.id
+      `SELECT p.id, s.folder_id, s.position FROM repos p
+       LEFT JOIN rail_positions s ON s.repo_id = p.id
        WHERE p.workspace_id = ? ORDER BY s.position IS NULL, s.position, p.added_at, p.rowid`
     )
     .all(workspaceId) as Array<{ id: string; folder_id: string | null; position: number | null }>
@@ -261,13 +273,13 @@ function readRailLayout(): RailLayout {
     item: { kind: 'folder', id: f.id },
     position: f.position
   }))
-  for (const p of projectRows) {
+  for (const p of repoRows) {
     const filed = p.folder_id === null ? undefined : members.get(p.folder_id)
     if (filed) filed.push(p.id)
-    else top.push({ item: { kind: 'project', id: p.id }, position: p.position ?? Number.POSITIVE_INFINITY })
+    else top.push({ item: { kind: 'repo', id: p.id }, position: p.position ?? Number.POSITIVE_INFINITY })
   }
   // A stable sort: where positions tie, folders (pushed first) stay ahead of
-  // projects and each kind keeps the order it was read in.
+  // repos and each kind keeps the order it was read in.
   top.sort((a, b) => (a.position === b.position ? 0 : a.position < b.position ? -1 : 1))
 
   return {
@@ -275,7 +287,7 @@ function readRailLayout(): RailLayout {
       id: f.id,
       name: f.name,
       collapsed: f.collapsed === 1,
-      projectIds: members.get(f.id) ?? []
+      repoIds: members.get(f.id) ?? []
     })),
     rail: top.map((t) => t.item)
   }
@@ -284,24 +296,24 @@ function readRailLayout(): RailLayout {
 function setRailPosition(pid: string, folderId: string | null, position: number): void {
   getDb()
     .prepare(
-      `INSERT INTO project_rail_positions (project_id, folder_id, position) VALUES (?, ?, ?)
-       ON CONFLICT(project_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
+      `INSERT INTO rail_positions (repo_id, folder_id, position) VALUES (?, ?, ?)
+       ON CONFLICT(repo_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
     )
     .run(pid, folderId, position)
 }
 
-/** Record `rail` as the top-level order. A project in it is, by that, in no folder. */
+/** Record `rail` as the top-level order. A repo in it is, by that, in no folder. */
 function writeRail(rail: RailItem[]): void {
-  const setFolder = getDb().prepare('UPDATE project_folders SET position = ? WHERE id = ?')
+  const setFolder = getDb().prepare('UPDATE rail_folders SET position = ? WHERE id = ?')
   rail.forEach((item, i) => {
     if (item.kind === 'folder') setFolder.run(i, item.id)
     else setRailPosition(item.id, null, i)
   })
 }
 
-/** Record `projectIds` as the folder's projects, in that order. */
-function writeFolderProjects(fid: string, projectIds: string[]): void {
-  projectIds.forEach((pid, i) => setRailPosition(pid, fid, i))
+/** Record `repoIds` as the folder's repos, in that order. */
+function writeFolderRepos(fid: string, repoIds: string[]): void {
+  repoIds.forEach((pid, i) => setRailPosition(pid, fid, i))
 }
 
 /** Insert `item` just before the entry `isBefore` matches, or last when none does. */
@@ -310,34 +322,34 @@ function insertBefore<T>(list: T[], item: T, isBefore: (entry: T) => boolean): v
   list.splice(at === -1 ? list.length : at, 0, item)
 }
 
-export const projectFolders = {
-  /** The active workspace's folders, each with its projects in rail order. */
-  list(): ProjectFolder[] {
+export const railFolders = {
+  /** The active workspace's folders, each with its repos in rail order. */
+  list(): RailFolder[] {
     return readRailLayout().folders
   },
-  /** The rail's top level in order: folders and the projects in none of them. */
+  /** The rail's top level in order: folders and the repos in none of them. */
   rail(): RailItem[] {
     return readRailLayout().rail
   },
-  get(fid: string): ProjectFolder | undefined {
-    return projectFolders.list().find((f) => f.id === fid)
+  get(fid: string): RailFolder | undefined {
+    return railFolders.list().find((f) => f.id === fid)
   },
   /**
-   * A new, expanded folder. Given a project it is made to hold, it takes that
-   * project's place in the rail (or sits just below the folder the project was
+   * A new, expanded folder. Given a repo it is made to hold, it takes that
+   * repo's place in the rail (or sits just below the folder the repo was
    * in); otherwise it goes at the top, where a folder nobody has placed yet is
    * sure to be seen.
    */
-  create(name: string, forProjectId?: string): ProjectFolder {
+  create(name: string, forRepoId?: string): RailFolder {
     const fid = id()
     writeTx(() => {
       const { folders, rail } = readRailLayout()
       getDb()
-        .prepare('INSERT INTO project_folders (id, workspace_id, name, position, created_at) VALUES (?, ?, ?, 0, ?)')
+        .prepare('INSERT INTO rail_folders (id, workspace_id, name, position, created_at) VALUES (?, ?, ?, 0, ?)')
         .run(fid, requireWorkspaceId(), name, now())
       const entry: RailItem = { kind: 'folder', id: fid }
-      const loose = rail.findIndex((item) => item.kind === 'project' && item.id === forProjectId)
-      const holder = folders.find((f) => forProjectId !== undefined && f.projectIds.includes(forProjectId))
+      const loose = rail.findIndex((item) => item.kind === 'repo' && item.id === forRepoId)
+      const holder = folders.find((f) => forRepoId !== undefined && f.repoIds.includes(forRepoId))
       if (loose !== -1) {
         rail.splice(loose, 1, entry)
       } else if (holder) {
@@ -345,18 +357,18 @@ export const projectFolders = {
       } else {
         rail.unshift(entry)
       }
-      // Members before the top level, so the project is filed by the time
+      // Members before the top level, so the repo is filed by the time
       // writeRail (which no longer lists it) runs.
-      if (forProjectId !== undefined && (loose !== -1 || holder)) writeFolderProjects(fid, [forProjectId])
+      if (forRepoId !== undefined && (loose !== -1 || holder)) writeFolderRepos(fid, [forRepoId])
       writeRail(rail)
     })
-    return projectFolders.get(fid)!
+    return railFolders.get(fid)!
   },
   rename(fid: string, name: string): void {
-    getDb().prepare('UPDATE project_folders SET name = ? WHERE id = ?').run(name, fid)
+    getDb().prepare('UPDATE rail_folders SET name = ? WHERE id = ?').run(name, fid)
   },
   /**
-   * Delete a folder. Its projects are not deleted: they take the folder's
+   * Delete a folder. Its repos are not deleted: they take the folder's
    * place at the top level, in the order they had inside it.
    */
   remove(fid: string): void {
@@ -365,46 +377,46 @@ export const projectFolders = {
       const folder = folders.find((f) => f.id === fid)
       if (!folder) return
       const at = rail.findIndex((item) => item.kind === 'folder' && item.id === fid)
-      rail.splice(at, 1, ...folder.projectIds.map((pid): RailItem => ({ kind: 'project', id: pid })))
+      rail.splice(at, 1, ...folder.repoIds.map((pid): RailItem => ({ kind: 'repo', id: pid })))
       // Before the delete: the rows now say "top level", so the cascade from
       // the folder finds none of them.
       writeRail(rail)
-      getDb().prepare('DELETE FROM project_folders WHERE id = ?').run(fid)
+      getDb().prepare('DELETE FROM rail_folders WHERE id = ?').run(fid)
     })
   },
   setCollapsed(fid: string, collapsed: boolean): void {
-    getDb().prepare('UPDATE project_folders SET collapsed = ? WHERE id = ?').run(collapsed ? 1 : 0, fid)
+    getDb().prepare('UPDATE rail_folders SET collapsed = ? WHERE id = ?').run(collapsed ? 1 : 0, fid)
   },
   /**
-   * Put a project in `folderId` (null = the top level), just before `beforeId`
-   * or last when that is null or names nothing there. `beforeId` is a project
-   * in that folder or, at the top level, a folder or a loose project.
+   * Put a repo in `folderId` (null = the top level), just before `beforeId`
+   * or last when that is null or names nothing there. `beforeId` is a repo
+   * in that folder or, at the top level, a folder or a loose repo.
    *
-   * A project or folder that is gone, or belongs to another workspace, is not
+   * A repo or folder that is gone, or belongs to another workspace, is not
    * in this workspace's layout, so the call does nothing.
    */
-  placeProject(pid: string, folderId: string | null, beforeId: string | null): void {
+  placeRepo(pid: string, folderId: string | null, beforeId: string | null): void {
     if (beforeId === pid) return
     writeTx(() => {
       const { folders, rail } = readRailLayout()
       const known =
-        rail.some((item) => item.kind === 'project' && item.id === pid) ||
-        folders.some((f) => f.projectIds.includes(pid))
+        rail.some((item) => item.kind === 'repo' && item.id === pid) ||
+        folders.some((f) => f.repoIds.includes(pid))
       if (!known) return
-      const top = rail.filter((item) => !(item.kind === 'project' && item.id === pid))
+      const top = rail.filter((item) => !(item.kind === 'repo' && item.id === pid))
       if (folderId === null) {
-        insertBefore(top, { kind: 'project', id: pid }, (item) => item.id === beforeId)
+        insertBefore(top, { kind: 'repo', id: pid }, (item) => item.id === beforeId)
       } else {
         const folder = folders.find((f) => f.id === folderId)
         if (!folder) return
-        const filed = folder.projectIds.filter((x) => x !== pid)
+        const filed = folder.repoIds.filter((x) => x !== pid)
         insertBefore(filed, pid, (x) => x === beforeId)
-        writeFolderProjects(folderId, filed)
+        writeFolderRepos(folderId, filed)
       }
       writeRail(top)
     })
   },
-  /** Put a folder just before the top-level row `beforeId` (a folder or a loose project), or last when null or unknown. */
+  /** Put a folder just before the top-level row `beforeId` (a folder or a loose repo), or last when null or unknown. */
   placeFolder(fid: string, beforeId: string | null): void {
     if (beforeId === fid) return
     writeTx(() => {
@@ -436,7 +448,7 @@ function buildPane(p: any, tabRows: any[]): Pane {
 function buildWorktree(r: any, panes: Pane[]): Worktree {
   return {
     id: r.id,
-    projectId: r.project_id,
+    repoId: r.repo_id,
     kind: r.kind as WorktreeKind,
     name: r.name,
     path: r.path,
@@ -480,7 +492,7 @@ export const worktrees = {
     const db = getDb()
     const rows = db
       .prepare(
-        `SELECT w.* FROM worktrees w JOIN projects p ON p.id = w.project_id
+        `SELECT w.* FROM worktrees w JOIN repos p ON p.id = w.repo_id
          WHERE p.workspace_id = ? ORDER BY w.created_at`
       )
       .all(requireWorkspaceId()) as any[]
@@ -507,7 +519,7 @@ export const worktrees = {
   listStatuses(): Pick<Worktree, 'id' | 'status'>[] {
     return getDb()
       .prepare(
-        `SELECT w.id, w.status FROM worktrees w JOIN projects p ON p.id = w.project_id WHERE p.workspace_id = ?`
+        `SELECT w.id, w.status FROM worktrees w JOIN repos p ON p.id = w.repo_id WHERE p.workspace_id = ?`
       )
       .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'status'>[]
   },
@@ -516,20 +528,20 @@ export const worktrees = {
    * every keystroke and wants only somewhere to point `git ls-files`, not the
    * pane/tab hydration a full list() does.
    */
-  listPaths(): Pick<Worktree, 'id' | 'path' | 'projectId'>[] {
+  listPaths(): Pick<Worktree, 'id' | 'path' | 'repoId'>[] {
     return getDb()
       .prepare(
-        `SELECT w.id, w.path, w.project_id AS projectId FROM worktrees w
-         JOIN projects p ON p.id = w.project_id WHERE p.workspace_id = ?`
+        `SELECT w.id, w.path, w.repo_id AS repoId FROM worktrees w
+         JOIN repos p ON p.id = w.repo_id WHERE p.workspace_id = ?`
       )
-      .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'path' | 'projectId'>[]
+      .all(requireWorkspaceId()) as Pick<Worktree, 'id' | 'path' | 'repoId'>[]
   },
   get(wid: string): Worktree | undefined {
     const r = getDb().prepare('SELECT * FROM worktrees WHERE id = ?').get(wid)
     return r ? hydrateWorktree(r) : undefined
   },
   create(input: {
-    projectId: string
+    repoId: string
     kind: WorktreeKind
     name: string
     path: string
@@ -542,10 +554,10 @@ export const worktrees = {
     return writeTx(() => {
       getDb()
         .prepare(
-          `INSERT INTO worktrees (id, project_id, kind, name, path, branch, status, task_id, split_direction, created_at)
+          `INSERT INTO worktrees (id, repo_id, kind, name, path, branch, status, task_id, split_direction, created_at)
            VALUES (?, ?, ?, ?, ?, ?, 'idle', ?, 'row', ?)`
         )
-        .run(wid, input.projectId, input.kind, input.name, input.path, input.branch, null, now())
+        .run(wid, input.repoId, input.kind, input.name, input.path, input.branch, null, now())
       // Every Worktree starts with one empty pane (a single-leaf layout) for its first tab.
       const pane = panes.create(wid)
       worktrees.setLayout(wid, leaf(pane.id))
@@ -587,15 +599,15 @@ export const worktrees = {
   idsByPath(path: string): string[] {
     const rows = getDb()
       .prepare(
-        `SELECT w.id FROM worktrees w JOIN projects p ON p.id = w.project_id
+        `SELECT w.id FROM worktrees w JOIN repos p ON p.id = w.repo_id
          WHERE p.workspace_id = ? AND w.path = ?`
       )
       .all(requireWorkspaceId(), path) as { id: string }[]
     return rows.map((r) => r.id)
   },
-  /** Ids of every worktree of a project (they share the repo's refs, so a fetch touches all). */
-  idsByProject(projectId: string): string[] {
-    const rows = getDb().prepare('SELECT id FROM worktrees WHERE project_id = ?').all(projectId) as { id: string }[]
+  /** Ids of every worktree of a repo (they share the repo's refs, so a fetch touches all). */
+  idsByRepo(repoId: string): string[] {
+    const rows = getDb().prepare('SELECT id FROM worktrees WHERE repo_id = ?').all(repoId) as { id: string }[]
     return rows.map((r) => r.id)
   },
   updateBranchByPath(path: string, branch: string): boolean {
@@ -754,7 +766,7 @@ export const tasks = {
       filter === 'active' ? ' AND t.archived_at IS NULL' : filter === 'archived' ? ' AND t.archived_at IS NOT NULL' : ''
     return getDb()
       .prepare(
-        `SELECT t.* FROM tasks t JOIN projects p ON p.id = t.project_id
+        `SELECT t.* FROM tasks t JOIN repos p ON p.id = t.repo_id
          WHERE p.workspace_id = ?${archived} ORDER BY t.created_at, t.id`
       )
       .all(requireWorkspaceId())
@@ -765,7 +777,7 @@ export const tasks = {
     return r ? mapTask(r) : undefined
   },
   create(input: {
-    projectId: string
+    repoId: string
     title: string
     description?: string
     tags?: string[]
@@ -780,11 +792,11 @@ export const tasks = {
     // processes the same number.
     db.transaction(() => {
       db.prepare(
-        'INSERT INTO tasks (id, seq, project_id, title, description, tags, status, worktree_id, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
+        'INSERT INTO tasks (id, seq, repo_id, title, description, tags, status, worktree_id, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
       ).run(
         tid,
         nextTaskSeq(db),
-        input.projectId,
+        input.repoId,
         input.title,
         input.description ?? '',
         JSON.stringify(input.tags ?? []),
@@ -804,14 +816,14 @@ export const tasks = {
       if (!cur) throw new Error(`task ${tid} not found`)
       getDb()
         .prepare(
-          'UPDATE tasks SET title = ?, description = ?, tags = ?, status = ?, project_id = ?, updated_at = ? WHERE id = ?'
+          'UPDATE tasks SET title = ?, description = ?, tags = ?, status = ?, repo_id = ?, updated_at = ? WHERE id = ?'
         )
         .run(
           patch.title ?? cur.title,
           patch.description ?? cur.description,
           JSON.stringify(patch.tags ?? cur.tags),
           patch.status ?? cur.status,
-          patch.projectId ?? cur.projectId,
+          patch.repoId ?? cur.repoId,
           now(),
           tid
         )
@@ -820,7 +832,7 @@ export const tasks = {
   },
   /**
    * Tasks are archived, never deleted: the row (and its number) stays, it just
-   * drops out of the default views. Only removing its project deletes it.
+   * drops out of the default views. Only removing its repo deletes it.
    */
   archive(tid: string): void {
     const t = now()
@@ -843,9 +855,9 @@ export const tasks = {
 export function getAppState(): Omit<AppState, 'devServers' | 'settings' | 'workspace' | 'settingUpWorktrees'> {
   const rail = readRailLayout()
   return {
-    projects: projects.list(),
-    projectFolders: rail.folders,
-    projectRail: rail.rail,
+    repos: repos.list(),
+    railFolders: rail.folders,
+    railItems: rail.rail,
     worktrees: worktrees.list(),
     tasks: tasks.list()
   }

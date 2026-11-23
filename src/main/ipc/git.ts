@@ -1,5 +1,5 @@
 import { IPC } from '@shared/contract'
-import { runtime, repo } from '../runtime'
+import { runtime, tables } from '../runtime'
 import { git } from '../services/git'
 import { searchFiles } from '../services/file-index'
 import { searchContent, cancelSearch } from '../services/search'
@@ -53,7 +53,7 @@ export function register(): void {
     gitChanged(worktreeId)
   })
   h(IPC.gitCheckout, async (_e, worktreeId, branch, create) => {
-    const w = repo.worktrees.get(worktreeId)
+    const w = tables.worktrees.get(worktreeId)
     if (!w) throw new Error(`worktree ${worktreeId} not found`)
     // Linked Worktrees are pinned to their branch; only the root checkout may move HEAD.
     if (w.kind !== 'root') throw new Error('branches can only be switched on the root Worktree')

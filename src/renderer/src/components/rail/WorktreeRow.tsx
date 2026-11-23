@@ -18,8 +18,8 @@ type DeleteMode = 'none' | 'confirm' | 'force'
 type SyncStep = { kind: 'none' } | { kind: 'confirm' } | { kind: 'busy' } | { kind: 'done'; copied: number }
 
 /**
- * A single linked Worktree entry inside an expanded project (the root Worktree
- * is the project header itself). Click selects it; the leading dot + optional
+ * A single linked Worktree entry inside an expanded repo (the root Worktree
+ * is the repo header itself). Click selects it; the leading dot + optional
  * "needs you" label carry its status. Right-click opens a context menu (rename
  * inline, force-clear a stuck status, close keeping the worktree, or delete the
  * worktree).

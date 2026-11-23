@@ -136,7 +136,7 @@ export default function Workspaces(): React.JSX.Element {
                     )}
                   </span>
                   <span className="mt-0.5 block truncate text-[10.5px] text-dim">
-                    {ws.projectCount} project{ws.projectCount === 1 ? '' : 's'}
+                    {ws.repoCount} repo{ws.repoCount === 1 ? '' : 's'}
                   </span>
                 </button>
 

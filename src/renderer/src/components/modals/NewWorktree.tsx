@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Check, FolderGit2 } from 'lucide-react'
-import { useStore, activeProject, tasksForProject } from '@renderer/store'
-import type { Project, Task, BranchInfo } from '@shared/types'
+import { useStore, activeRepo, tasksForRepo } from '@renderer/store'
+import type { Repo, Task, BranchInfo } from '@shared/types'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
 import { Select } from './Select'
@@ -16,7 +16,7 @@ const BRANCH_SOURCES: readonly SegmentedOption<'new' | 'existing'>[] = [
 
 /** modalData payload for the New Worktree modal. */
 interface NewWorktreeData {
-  project?: Project
+  repo?: Repo
   /** Pre-link this task and seed the branch/name from it (play-button flow). */
   task?: Task
 }
@@ -35,13 +35,13 @@ export default function NewWorktree(): React.JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
   const setActiveWorktree = useStore((s) => s.setActiveWorktree)
   const data = useStore((s) => s.modalData) as NewWorktreeData | null
-  const fallback = useStore(activeProject)
-  const project = data?.project ?? fallback
+  const fallback = useStore(activeRepo)
+  const repo = data?.repo ?? fallback
 
-  // Subscribe via useShallow: tasksForProject() builds a fresh array each call,
+  // Subscribe via useShallow: tasksForRepo() builds a fresh array each call,
   // and a selector that returns a new reference every render makes zustand v5's
   // useSyncExternalStore loop forever ("Maximum update depth exceeded").
-  const allTasks = useStore(useShallow((s) => (project ? tasksForProject(s, project.id) : [])))
+  const allTasks = useStore(useShallow((s) => (repo ? tasksForRepo(s, repo.id) : [])))
   const prefill = data?.task
   // Only tasks without a Worktree can be linked — plus the prefill task itself.
   const linkable = useMemo(
@@ -64,20 +64,20 @@ export default function NewWorktree(): React.JSX.Element {
   const [busy, setBusy] = useState(false)
 
   // Load the repo's branches + what HEAD points at for the base-ref picker.
-  const projectId = project?.id
+  const repoId = repo?.id
   useEffect(() => {
-    if (!projectId) return
+    if (!repoId) return
     let alive = true
-    void window.orbital.listBranches(projectId).then((r) => {
+    void window.orbital.listBranches(repoId).then((r) => {
       if (alive) setInfo(r)
     })
     return () => {
       alive = false
     }
-  }, [projectId])
+  }, [repoId])
 
-  // No project to target — surface a clear message instead of a broken form.
-  if (!project) {
+  // No repo to target — surface a clear message instead of a broken form.
+  if (!repo) {
     return (
       <ModalShell
         title="New Worktree"
@@ -122,7 +122,7 @@ export default function NewWorktree(): React.JSX.Element {
     setBusy(true)
     setError(null)
     try {
-      const worktree = await window.orbital.createWorktree(project.id, {
+      const worktree = await window.orbital.createWorktree(repo.id, {
         branch: mode === 'new' ? trimmedBranch : undefined,
         existingBranch: mode === 'existing' ? trimmedBranch : undefined,
         name: name.trim() || (mode === 'new' ? trimmedBranch : trimmedBranch.replace(/^[^/]+\//, '')),
@@ -148,7 +148,7 @@ export default function NewWorktree(): React.JSX.Element {
   return (
     <ModalShell
       title="New Worktree"
-      subtitle={`Creates a git worktree · ${project.name}`}
+      subtitle={`Creates a git worktree · ${repo.name}`}
       width={520}
       onClose={closeModal}
       footer={
@@ -274,7 +274,7 @@ export default function NewWorktree(): React.JSX.Element {
 
       <div className="mt-2.5 flex items-center gap-2 text-[11px] text-dim">
         <FolderGit2 size={13} strokeWidth={1.5} className="flex-none text-faint" />
-        <span className="truncate font-mono">{project.repoPath}</span>
+        <span className="truncate font-mono">{repo.repoPath}</span>
       </div>
 
       {error && <div className="mt-3 text-[11.5px] text-red-2">{error}</div>}

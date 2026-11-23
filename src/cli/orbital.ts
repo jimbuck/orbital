@@ -27,19 +27,19 @@ const USAGE = `orbital — control the running Orbital cockpit from inside a wor
 Usage:
   orbital status <idle|working|needs-attention|error|done>
   orbital whoami
-  orbital projects
-  orbital worktrees [--project <name|id>]
-  orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--project <name|id>] [name]
+  orbital repos
+  orbital worktrees [--repo <name|id>]
+  orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--repo <name|id>] [name]
   orbital worktree sync
   orbital tab new <terminal|browser|editor|agent|search> [arg]
-  orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--project <name|id>]
-  orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--project <name|id>]
-  orbital task show <number|id> [--project <name|id>]
-  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--project <name|id>]
-  orbital task start <number|id> [--worktree <branch>] [--base <ref>] [--project <name|id>] [name]
-  orbital task done <number|id> [--project <name|id>]
-  orbital task archive <number|id> [--project <name|id>]      (alias: task delete)
-  orbital task unarchive <number|id> [--project <name|id>]
+  orbital task add "<title>" [--description <text>] [--tags <a,b,c>] [--repo <name|id>]
+  orbital task list [--all | --archived] [--status <status>] [--tag <tag>] [--repo <name|id>]
+  orbital task show <number|id> [--repo <name|id>]
+  orbital task update <number|id> [--status <draft|todo|in-progress|ready-for-review|done>] [--title <text>] [--description <text>] [--tags <a,b,c>] [--repo <name|id>]
+  orbital task start <number|id> [--worktree <branch>] [--base <ref>] [--repo <name|id>] [name]
+  orbital task done <number|id> [--repo <name|id>]
+  orbital task archive <number|id> [--repo <name|id>]      (alias: task delete)
+  orbital task unarchive <number|id> [--repo <name|id>]
   orbital server add <url|port>
   orbital server remove <url|port>
   orbital server list
@@ -47,9 +47,9 @@ Usage:
 
 Options:
   --json       print the raw JSON response instead of a table — use this when parsing
-  --project    act on another project in this workspace (name or id, see \`orbital projects\`).
+  --repo       act on another repo in this workspace (name or id, see \`orbital repos\`).
                Without it, task and worktree commands stay scoped to this terminal's
-               project; passing it is the explicit opt-in, and writes are allowed.
+               repo; passing it is the explicit opt-in, and writes are allowed.
 
 Examples:
   orbital status needs-attention
@@ -62,7 +62,7 @@ Examples:
   orbital tab new search "TODO("
   orbital task add "Write tests" --description "cover the parser" --tags test
   orbital task list --status todo
-  orbital task add "Bump the API client" --project api
+  orbital task add "Bump the API client" --repo api
   orbital task start 12
   orbital task done 12
   orbital task archive 12
@@ -131,7 +131,7 @@ function request(cmd: ControlCommand, args: Record<string, unknown>): ControlReq
     cmd,
     terminalId: process.env[ENV.terminalId],
     worktreeId: process.env[ENV.worktreeId],
-    projectId: process.env[ENV.projectId],
+    repoId: process.env[ENV.repoId] || process.env[ENV.legacyRepoId],
     args
   }
 }
@@ -146,14 +146,16 @@ const TAB_TYPES = ['terminal', 'browser', 'editor', 'agent', 'search'] as const
 let jsonMode = false
 
 /**
- * Copy `--project <name|id>` into the request args; main resolves it within
- * the workspace. A bare `--project` is a usage error rather than a silent
- * fall-back to the caller's own project.
+ * Copy `--repo <name|id>` into the request args; main resolves it within
+ * the workspace. A bare `--repo` is a usage error rather than a silent
+ * fall-back to the caller's own repo. `--project` is the hidden pre-rename
+ * spelling of the same flag.
  */
-function withProject(args: Record<string, unknown>, flags: Record<string, string>): Record<string, unknown> {
-  if ('project' in flags) {
-    if (!flags.project) usageError()
-    args.project = flags.project
+function withRepo(args: Record<string, unknown>, flags: Record<string, string>): Record<string, unknown> {
+  const key = 'repo' in flags ? 'repo' : 'project' in flags ? 'project' : null
+  if (key) {
+    if (!flags[key]) usageError()
+    args.repo = flags[key]
   }
   return args
 }
@@ -173,7 +175,7 @@ function worktreeNewRequest(tokens: string[], taskId?: string): ControlRequest {
   const task = taskId ?? flags.task
   if (task) args.task = task
   if (positionals[0]) args.name = positionals[0]
-  withProject(args, flags)
+  withRepo(args, flags)
   return request('worktree-new', args)
 }
 
@@ -196,10 +198,12 @@ function buildRequest(argv: string[]): ControlRequest {
     // `flights` is a hidden backward-compat alias for `worktrees`.
     case 'worktrees':
     case 'flights':
-      return request('worktrees', withProject({}, parseArgs(rest).flags))
+      return request('worktrees', withRepo({}, parseArgs(rest).flags))
 
+    // `projects` is a hidden backward-compat alias for `repos`.
+    case 'repos':
     case 'projects':
-      return request('projects', {})
+      return request('repos', {})
 
     // `flight` is a hidden backward-compat alias for `worktree`.
     case 'worktree':
@@ -230,13 +234,13 @@ function buildRequest(argv: string[]): ControlRequest {
         const args: Record<string, unknown> = { title }
         if (flags.description) args.description = flags.description
         if (flags.tags) args.tags = flags.tags
-        return request('task-add', withProject(args, flags))
+        return request('task-add', withRepo(args, flags))
       }
       if (sub === 'list') {
         const args: Record<string, unknown> = { all: 'all' in flags, archived: 'archived' in flags }
         if (flags.status) args.status = flags.status
         if (flags.tag) args.tag = flags.tag
-        return request('task-list', withProject(args, flags))
+        return request('task-list', withRepo(args, flags))
       }
       if (sub === 'start') {
         const id = positionals[0]
@@ -253,24 +257,24 @@ function buildRequest(argv: string[]): ControlRequest {
         if (flags.title !== undefined) args.title = flags.title
         if (flags.description !== undefined) args.description = flags.description
         if (flags.tags !== undefined) args.tags = flags.tags
-        return request('task-update', withProject(args, flags))
+        return request('task-update', withRepo(args, flags))
       }
       if (sub === 'show') {
         const id = positionals[0]
         if (!id) usageError()
-        return request('task-show', withProject({ id }, flags))
+        return request('task-show', withRepo({ id }, flags))
       }
       if (sub === 'done') {
         const id = positionals[0]
         if (!id) usageError()
-        return request('task-update', withProject({ id, status: 'done' }, flags))
+        return request('task-update', withRepo({ id, status: 'done' }, flags))
       }
       // Tasks are archived, never deleted; `delete` stays as an alias so
       // existing agent scripts keep working.
       if (sub === 'archive' || sub === 'delete' || sub === 'unarchive') {
         const id = positionals[0]
         if (!id) usageError()
-        return request(sub === 'unarchive' ? 'task-unarchive' : 'task-archive', withProject({ id }, flags))
+        return request(sub === 'unarchive' ? 'task-unarchive' : 'task-archive', withRepo({ id }, flags))
       }
       return usageError()
     }
@@ -339,10 +343,10 @@ function printWorktrees(data: unknown): void {
   )
 }
 
-function printProjects(data: unknown): void {
+function printRepos(data: unknown): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
-    process.stdout.write('No projects.\n')
+    process.stdout.write('No repos.\n')
     return
   }
   printTable(
@@ -352,10 +356,10 @@ function printProjects(data: unknown): void {
       { key: 'id', head: 'ID' },
       { key: 'repoPath', head: 'REPO PATH' }
     ],
-    list.map((project) => {
-      const o = (project ?? {}) as Record<string, unknown>
+    list.map((repo) => {
+      const o = (repo ?? {}) as Record<string, unknown>
       return {
-        // Marks the calling terminal's own project — the default scope.
+        // Marks the calling terminal's own repo — the default scope.
         current: o.current ? '*' : '',
         name: String(o.name ?? ''),
         id: String(o.id ?? ''),
@@ -407,7 +411,7 @@ function printWhoami(data: unknown): void {
   const task = (o.task ?? null) as { seq?: number; title?: string; status?: string } | null
   const servers = Array.isArray(o.servers) ? o.servers : []
   printFields([
-    ['project', String(o.project ?? '')],
+    ['repo', String(o.repo ?? '')],
     ['worktree', `${String(o.worktree ?? '')}${o.kind ? ` (${String(o.kind)})` : ''}`],
     ['branch', String(o.branch ?? '')],
     ['path', String(o.path ?? '')],
@@ -451,8 +455,8 @@ function printServers(data: unknown): void {
 /** A one-line confirmation for the non-`worktrees` commands. */
 function confirmation(req: ControlRequest, data: unknown): string {
   const d = (data ?? {}) as Record<string, unknown>
-  // With `--project` the write may land in another project: name it.
-  const into = req.args.project && d.project ? ` ${String(d.project)}` : ''
+  // With `--repo` the write may land in another repo: name it.
+  const into = req.args.repo && d.repo ? ` ${String(d.repo)}` : ''
   const to = into && ` to${into}`
   const inn = into && ` in${into}`
   switch (req.cmd) {
@@ -603,8 +607,8 @@ function handleResponse(req: ControlRequest, lineText: string): void {
     process.stdout.write(JSON.stringify(res.data ?? null, null, 2) + '\n')
   } else if (req.cmd === 'whoami') {
     printWhoami(res.data)
-  } else if (req.cmd === 'projects') {
-    printProjects(res.data)
+  } else if (req.cmd === 'repos') {
+    printRepos(res.data)
   } else if (req.cmd === 'worktrees') {
     printWorktrees(res.data)
   } else if (req.cmd === 'task-list') {

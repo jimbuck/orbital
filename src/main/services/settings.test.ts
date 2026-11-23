@@ -282,7 +282,7 @@ describe('the legacy global row', () => {
 describe('patchTouches', () => {
   // What ipc.ts gates its side effects on, so a patch that cannot affect a
   // subsystem does not restart it — { theme } used to stop and restart the
-  // env-sync FS watcher of every project. The handler itself needs an Electron
+  // env-sync FS watcher of every repo. The handler itself needs an Electron
   // main process to import, so the predicate it turns on is what is asserted here.
 
   it('is true only for the keys the patch actually names', () => {

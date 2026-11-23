@@ -281,7 +281,7 @@ async function flush(): Promise<void> {
 function worktree(id: string): Worktree {
   return {
     id,
-    projectId: 'p1',
+    repoId: 'p1',
     kind: 'root',
     name: id,
     path: `/tmp/${id}`,
@@ -357,9 +357,9 @@ describe('EditorTab worktree binding', () => {
 
     // Two worktrees exist and w1 is the active one — the cockpit's starting state.
     useStore.setState({
-      projects: [{ id: 'p1' }],
+      repos: [{ id: 'p1' }],
       worktrees: [worktree('w1'), worktree('w2')],
-      activeProjectId: 'p1',
+      activeRepoId: 'p1',
       activeWorktreeId: 'w1'
     } as unknown as Parameters<typeof useStore.setState>[0])
   })
@@ -1130,9 +1130,9 @@ describe('EditorTab file mutations', () => {
     }
     vi.stubGlobal('orbital', bridge)
     useStore.setState({
-      projects: [{ id: 'p1' }],
+      repos: [{ id: 'p1' }],
       worktrees: [worktree('w1')],
-      activeProjectId: 'p1',
+      activeRepoId: 'p1',
       activeWorktreeId: 'w1'
     } as unknown as Parameters<typeof useStore.setState>[0])
   })
@@ -1370,9 +1370,9 @@ describe('EditorTab open-file pills', () => {
     }
     vi.stubGlobal('orbital', bridge)
     useStore.setState({
-      projects: [{ id: 'p1' }],
+      repos: [{ id: 'p1' }],
       worktrees: [worktree('w1')],
-      activeProjectId: 'p1',
+      activeRepoId: 'p1',
       activeWorktreeId: 'w1'
     } as unknown as Parameters<typeof useStore.setState>[0])
   })
@@ -1813,9 +1813,9 @@ describe('EditorTab folder view', () => {
     }
     vi.stubGlobal('orbital', bridge)
     useStore.setState({
-      projects: [{ id: 'p1' }],
+      repos: [{ id: 'p1' }],
       worktrees: [worktree('w1')],
-      activeProjectId: 'p1',
+      activeRepoId: 'p1',
       activeWorktreeId: 'w1'
     } as unknown as Parameters<typeof useStore.setState>[0])
   })

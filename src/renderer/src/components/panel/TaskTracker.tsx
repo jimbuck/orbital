@@ -1,7 +1,7 @@
 import { useState, type JSX, type KeyboardEvent } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ChevronRight, Maximize2, Play, Plus } from 'lucide-react'
-import { useStore, activeProject, tasksForProject } from '@renderer/store'
+import { useStore, activeRepo, tasksForRepo } from '@renderer/store'
 import { taskChipClass, taskStatusLabel } from '@renderer/lib/status'
 import type { Task } from '@shared/types'
 import TaskTitleButton from './TaskTitleButton'
@@ -11,21 +11,21 @@ import ArchiveTaskButton from './ArchiveTaskButton'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 
 /**
- * Task tracker for the active project. Captures new tasks as a list, opens a
+ * Task tracker for the active repo. Captures new tasks as a list, opens a
  * task in the edit modal (via its title), and bridges a task to a Worktree; the
- * expand button opens the full kanban board across all projects. Task data is
+ * expand button opens the full kanban board across all repos. Task data is
  * sourced from the store, which is kept live by the `onStateChanged`
  * subscription, so mutations need no manual reload.
  */
 export default function TaskTracker(): JSX.Element {
-  const project = useStore(activeProject)
+  const repo = useStore(activeRepo)
   const worktrees = useStore((s) => s.worktrees)
   const openModal = useStore((s) => s.openModal)
   const setActiveWorktree = useStore((s) => s.setActiveWorktree)
   const tasks = useStore(
     useShallow((s) => {
-      const p = activeProject(s)
-      return p ? tasksForProject(s, p.id) : []
+      const p = activeRepo(s)
+      return p ? tasksForRepo(s, p.id) : []
     })
   )
 
@@ -38,16 +38,16 @@ export default function TaskTracker(): JSX.Element {
   const onCaptureKey = async (e: KeyboardEvent<HTMLInputElement>): Promise<void> => {
     if (e.key !== 'Enter') return
     const title = draft.trim()
-    if (!title || !project) return
+    if (!title || !repo) return
     e.preventDefault()
     setDraft('')
-    await window.orbital.createTask(project.id, title)
+    await window.orbital.createTask(repo.id, title)
   }
 
   // Open the New Worktree modal prefilled with (and pre-linked to) this task,
   // letting the user pick a base ref before the worktree is created.
   const startWorktree = (task: Task): void => {
-    openModal('newWorktree', { project, task })
+    openModal('newWorktree', { repo, task })
   }
 
   /** Inline mono link to a task's bound Worktree. */
@@ -76,9 +76,9 @@ export default function TaskTracker(): JSX.Element {
       <div className="flex flex-none items-center justify-between px-[15px] pt-[13px] mb-[10px]">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[11px] tracking-[0.9px] uppercase text-muted font-bold">Tasks</span>
-          {project && (
-            <span className="font-mono text-[11px] text-faint truncate" title={project.name}>
-              {project.name}
+          {repo && (
+            <span className="font-mono text-[11px] text-faint truncate" title={repo.name}>
+              {repo.name}
             </span>
           )}
         </div>
@@ -100,7 +100,7 @@ export default function TaskTracker(): JSX.Element {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => void onCaptureKey(e)}
-          disabled={!project}
+          disabled={!repo}
           placeholder="Capture a task…"
           className="allow-select flex-1 min-w-0 bg-transparent text-[12px] text-text placeholder:text-faint outline-none disabled:opacity-50"
         />

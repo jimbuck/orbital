@@ -24,7 +24,7 @@ import PaneGroup from './PaneGroup'
 function makeWorktree(activeTabId: string): Worktree {
   return {
     id: 'w1',
-    projectId: 'p1',
+    repoId: 'p1',
     kind: 'root',
     name: 'main',
     path: '/tmp/w1',
@@ -46,9 +46,9 @@ function makeWorktree(activeTabId: string): Worktree {
 
 function seed(activeTabId: string): void {
   useStore.setState({
-    projects: [{ id: 'p1' }],
+    repos: [{ id: 'p1' }],
     worktrees: [makeWorktree(activeTabId)],
-    activeProjectId: 'p1',
+    activeRepoId: 'p1',
     activeWorktreeId: 'w1',
     settings: null
   } as unknown as Parameters<typeof useStore.setState>[0])

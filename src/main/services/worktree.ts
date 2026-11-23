@@ -6,7 +6,7 @@ import { syncEnvFiles } from './env-sync'
 import { beginWorktreeCreate, endWorktreeCreate, normPath } from './worktree-scan'
 import { worktrees as worktreeRepo } from '../db/repositories'
 import { getSettings } from './settings'
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 
 /** Turn a branch/title into a filesystem- and git-safe slug. */
 export function slugify(input: string): string {
@@ -24,12 +24,12 @@ export function slugify(input: string): string {
  * Worktrees live in a sibling directory so they never pollute the repo's own
  * working tree: <repoParent>/.orbital-worktrees/<repoName>/<slug>.
  */
-export function worktreeBaseDir(project: Project): string {
-  return join(dirname(project.repoPath), '.orbital-worktrees', basename(project.repoPath))
+export function worktreeBaseDir(repo: Repo): string {
+  return join(dirname(repo.repoPath), '.orbital-worktrees', basename(repo.repoPath))
 }
 
-function uniqueWorktreePath(project: Project, slug: string): string {
-  const base = worktreeBaseDir(project)
+function uniqueWorktreePath(repo: Repo, slug: string): string {
+  const base = worktreeBaseDir(repo)
   let candidate = join(base, slug.replace(/\//g, '-'))
   let n = 2
   while (existsSync(candidate)) {
@@ -40,7 +40,7 @@ function uniqueWorktreePath(project: Project, slug: string): string {
 }
 
 export interface CreateLinkedWorktreeInput {
-  project: Project
+  repo: Repo
   /** Branch to check out or create. */
   branch: string
   /** Check out this existing branch (local, or `origin/x` remote) instead of creating one. */
@@ -52,11 +52,11 @@ export interface CreateLinkedWorktreeInput {
 
 /**
  * Create a git worktree on `branch`, register a linked Worktree for it, and
- * sync the project's env files into the new checkout (PRD §5, §8).
+ * sync the repo's env files into the new checkout (PRD §5, §8).
  */
 export async function createLinkedWorktree(input: CreateLinkedWorktreeInput): Promise<Worktree> {
-  const { project } = input
-  const repoPath = project.repoPath
+  const { repo } = input
+  const repoPath = repo.repoPath
 
   // Every path this call claims against worktree auto-discovery, released once
   // the row exists (or the attempt fails). `git worktree add` announces itself in
@@ -81,8 +81,8 @@ async function buildWorktree(
   input: CreateLinkedWorktreeInput,
   addWorktree: (opts: Parameters<typeof git.worktreeAdd>[1]) => Promise<void>
 ): Promise<Worktree> {
-  const { project } = input
-  const repoPath = project.repoPath
+  const { repo } = input
+  const repoPath = repo.repoPath
 
   let branch: string
   let worktreePath: string
@@ -94,7 +94,7 @@ async function buildWorktree(
     const picked = input.existingBranch.trim()
     const isLocal = await git.branchExists(repoPath, picked)
     branch = isLocal ? picked : picked.replace(/^[^/]+\//, '')
-    worktreePath = uniqueWorktreePath(project, slugify(branch))
+    worktreePath = uniqueWorktreePath(repo, slugify(branch))
     if (isLocal || (await git.branchExists(repoPath, branch))) {
       try {
         await addWorktree({ branch, worktreePath, newBranch: false })
@@ -116,7 +116,7 @@ async function buildWorktree(
     const baseSlug = slugify(input.branch.trim())
 
     branch = baseSlug
-    worktreePath = uniqueWorktreePath(project, baseSlug)
+    worktreePath = uniqueWorktreePath(repo, baseSlug)
     let attached = false
 
     if (await git.branchExists(repoPath, baseSlug)) {
@@ -139,7 +139,7 @@ async function buildWorktree(
         branch = `${baseSlug}-${n}`
         n++
       }
-      worktreePath = uniqueWorktreePath(project, branch)
+      worktreePath = uniqueWorktreePath(repo, branch)
       await addWorktree({ branch, worktreePath, baseRef: input.baseRef, newBranch: true })
     }
   }
@@ -150,7 +150,7 @@ async function buildWorktree(
   // the directory was reused — take that row over instead of adding a second one
   // for the same path (the duplicate the rail used to show).
   const key = normPath(worktreePath)
-  const existing = worktreeRepo.list().find((w) => w.projectId === project.id && normPath(w.path) === key)
+  const existing = worktreeRepo.list().find((w) => w.repoId === repo.id && normPath(w.path) === key)
   let worktree: Worktree
   if (existing) {
     // The adopted row is named after the directory; the caller's name wins.
@@ -159,7 +159,7 @@ async function buildWorktree(
     worktree = worktreeRepo.get(existing.id) ?? existing
   } else {
     worktree = worktreeRepo.create({
-      projectId: project.id,
+      repoId: repo.id,
       kind: 'linked',
       name,
       path: worktreePath,
@@ -174,7 +174,7 @@ async function buildWorktree(
   // separately by the caller (in the background), so it never blocks flight
   // creation — see ipc.ts / runtime.markSettingUp.
   try {
-    await syncEnvFiles(project.repoPath, worktreePath, getSettings().envSyncPatterns)
+    await syncEnvFiles(repo.repoPath, worktreePath, getSettings().envSyncPatterns)
   } catch {
     /* env sync is non-fatal */
   }

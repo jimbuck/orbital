@@ -6,21 +6,21 @@ import { formatTaskTime } from '@renderer/components/panel/TaskMeta'
 import { ModalShell, ghostBtn } from './ModalRoot'
 
 /**
- * The archived tasks across the workspace's projects, newest archive first,
+ * The archived tasks across the workspace's repos, newest archive first,
  * each with an Unarchive action. Opened from the full board's header; stacks
  * over it, so closing returns to the board. There is no purge: archived rows
  * stay in the database for good.
  */
 export default function ArchivedTasks(): JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
-  const projects = useStore((s) => s.projects)
+  const repos = useStore((s) => s.repos)
   const archived = useArchivedTasks()
   // Rows being unarchived, so a double click doesn't fire twice while the
   // refreshed list is on its way.
   const [pending, setPending] = useState<Set<string>>(new Set())
 
   const rows = [...archived].sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0))
-  const projectName = (id: string): string => projects.find((p) => p.id === id)?.name ?? ''
+  const repoName = (id: string): string => repos.find((p) => p.id === id)?.name ?? ''
 
   const unarchive = (taskId: string): void => {
     setPending((s) => new Set(s).add(taskId))
@@ -59,7 +59,7 @@ export default function ArchivedTasks(): JSX.Element {
               <tr key={t.id} className="border-t border-soft">
                 <td className="px-2 py-2 text-faint">#{t.seq}</td>
                 <td className="px-2 py-2 font-semibold text-text-2">{t.title}</td>
-                <td className="px-2 py-2 text-text-3">{projectName(t.projectId)}</td>
+                <td className="px-2 py-2 text-text-3">{repoName(t.repoId)}</td>
                 <td className="px-2 py-2">
                   <span className={`rounded-chip px-2 py-0.5 text-[10px] font-bold ${taskChipClass(t.status)}`}>
                     {taskStatusLabel(t.status)}

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 
 vi.mock('./executable', () => ({
   resolveExecutable: async () => ({ file: 'cmd.exe', prefixArgs: ['/c', 'cursor-agent.cmd'] })
@@ -10,8 +10,8 @@ vi.mock('./executable', () => ({
 
 import { cursorChatDir, cursorChatIdFromOutput, cursorProvider } from './cursor'
 
-const project = { id: 'p1', name: 'orbital', repoPath: 'C:\\Projects\\orbital' } as Project
-const worktree = { id: 'w1', projectId: 'p1', path: 'C:\\Projects\\orbital', branch: 'main' } as Worktree
+const repo = { id: 'p1', name: 'orbital', repoPath: 'C:\\Projects\\orbital' } as Repo
+const worktree = { id: 'w1', repoId: 'p1', path: 'C:\\Projects\\orbital', branch: 'main' } as Worktree
 const ID = 'a486e926-54e5-4adb-b6da-e50f636aac7d'
 
 let home = ''
@@ -25,13 +25,13 @@ afterEach(() => {
 describe('cursorProvider.resolveCommand', () => {
   it('opens a minted or stored chat with --resume=<id>', async () => {
     for (const resume of [false, true]) {
-      const cmd = await cursorProvider.resolveCommand({ project, worktree, briefingPath: null, session: { id: ID, resume } })
+      const cmd = await cursorProvider.resolveCommand({ repo, worktree, briefingPath: null, session: { id: ID, resume } })
       expect(cmd.args).toEqual(['/c', 'cursor-agent.cmd', `--resume=${ID}`])
     }
   })
 
   it('launches plain cursor-agent without a session', async () => {
-    const cmd = await cursorProvider.resolveCommand({ project, worktree, briefingPath: null })
+    const cmd = await cursorProvider.resolveCommand({ repo, worktree, briefingPath: null })
     expect(cmd.args).toEqual(['/c', 'cursor-agent.cmd'])
   })
 })

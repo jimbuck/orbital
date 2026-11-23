@@ -1,6 +1,6 @@
 /**
  * GitHub-side shapes and pure helpers shared by main (which drives the `gh`
- * CLI) and the renderer (which renders the Add Project forms). Nothing here
+ * CLI) and the renderer (which renders the Add Repo forms). Nothing here
  * touches a process or the network — that is `main/services/github.ts`.
  */
 

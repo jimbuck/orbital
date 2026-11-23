@@ -6,7 +6,7 @@
  * Worktree. Claude and Codex are implemented; the registry is the extension point
  * for Gemini / etc. (add a provider + register it here — no other plumbing).
  */
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 
 /**
  * The conversation an agent launch is pinned to: either one the tab already ran
@@ -21,11 +21,11 @@ export interface AgentSession {
 }
 
 export interface AgentContext {
-  project: Project
+  repo: Repo
   worktree: Worktree
   /** Absolute path to the briefing file Orbital generated for this launch, or null. */
   briefingPath: string | null
-  /** Explicit executable path configured on the project, if any. */
+  /** Explicit executable path configured on the repo, if any. */
   execPath?: string
   /** Session to run under; only given to providers with {@link SessionSupport}. */
   session?: AgentSession
@@ -74,10 +74,10 @@ export interface SessionSupport {
 }
 
 export interface AgentProvider {
-  /** Stable id stored on the tab + project (e.g. 'claude'). */
+  /** Stable id stored on the tab + repo (e.g. 'claude'). */
   id: string
   displayName: string
-  /** Files that hint a project uses this provider (future auto-detection; unused for now). */
+  /** Files that hint a repo uses this provider (future auto-detection; unused for now). */
   detectFiles: string[]
   /**
    * Whether this CLI can be handed a per-launch briefing file. Only Claude takes

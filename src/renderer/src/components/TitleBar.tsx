@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from 'react'
 import type { WorkspaceInfo } from '@shared/types'
 import { Minus, Square, X, ChevronRight, RefreshCw, Globe, Check } from 'lucide-react'
-import { useStore, activeProject, activeWorktree } from '@renderer/store'
+import { useStore, activeRepo, activeWorktree } from '@renderer/store'
 import { serverLabel } from './body/TabStrip'
 import { openTab } from '@renderer/lib/openTab'
 import { fireAndForget } from '@renderer/lib/bridge'
@@ -39,12 +39,12 @@ interface Menu {
 
 /**
  * Native (frameless) window titlebar: the Orbital brand + an app menu bar
- * (File / View / Help) on the left, the project ▸ worktree breadcrumb centered,
+ * (File / View / Help) on the left, the repo ▸ worktree breadcrumb centered,
  * and the needs-attention banner + window controls on the right. The bar itself
  * is the drag region; interactive clusters opt out with `no-drag`.
  */
 export default function TitleBar(): JSX.Element {
-  const projName = useStore((s) => activeProject(s)?.name ?? 'orbital')
+  const projName = useStore((s) => activeRepo(s)?.name ?? 'orbital')
   const worktreeName = useStore((s) => activeWorktree(s)?.name)
   // Prefix the breadcrumb with the workspace only when it's a named one — the
   // implicit default profile workspace would just be noise.
@@ -54,7 +54,7 @@ export default function TitleBar(): JSX.Element {
   const zoomFactor = useStore((s) => s.zoomFactor)
   const openModal = useStore((s) => s.openModal)
   const openPalette = useStore((s) => s.openPalette)
-  const project = useStore(activeProject)
+  const repo = useStore(activeRepo)
 
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   // Index of the row whose flyout is showing, within the open menu.
@@ -121,8 +121,8 @@ export default function TitleBar(): JSX.Element {
       id: 'file',
       label: 'File',
       items: [
-        { label: 'Add Repo…', onClick: () => openModal('addProject') },
-        { label: 'New Worktree…', onClick: () => openModal('newWorktree', { project }), disabled: !project },
+        { label: 'Add Repo…', onClick: () => openModal('addRepo') },
+        { label: 'New Worktree…', onClick: () => openModal('newWorktree', { repo }), disabled: !repo },
         { sep: true, label: '' },
         { label: 'Open Recent Workspace', submenu: recentItems },
         { label: 'Workspaces…', onClick: () => openModal('workspaces') },
@@ -318,7 +318,7 @@ export default function TitleBar(): JSX.Element {
         </nav>
       </div>
 
-      {/* Center: workspace ▸ project ▸ worktree breadcrumb (non-interactive, so dragging still works) */}
+      {/* Center: workspace ▸ repo ▸ worktree breadcrumb (non-interactive, so dragging still works) */}
       <div className="pointer-events-none absolute left-1/2 top-0 flex h-full max-w-[40%] -translate-x-1/2 items-center">
         <span className="flex min-w-0 items-center gap-1 font-mono text-[11px] text-dim">
           {workspaceName && (

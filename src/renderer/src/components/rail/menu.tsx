@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react'
 import { Spinner } from '@renderer/lib/status'
 
 /**
- * Shared right-click context-menu primitives (rail WorktreeRow/Project rows,
+ * Shared right-click context-menu primitives (rail WorktreeRow/Repo rows,
  * task cards and the editor file tree): a dismiss overlay + positioned surface,
  * a menu row, a destructive-action confirm block, and a single-line text prompt
  * — the latter two swap in place of the menu items rather than opening a

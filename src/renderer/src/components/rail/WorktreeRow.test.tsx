@@ -16,7 +16,7 @@ let bridge: Record<string, ReturnType<typeof vi.fn>>
 
 const worktree: Worktree = {
   id: 'w-1',
-  projectId: 'p1',
+  repoId: 'p1',
   kind: 'linked',
   name: 'feature',
   path: 'C:/repo/.orbital-worktrees/repo/feature',
@@ -37,10 +37,10 @@ beforeEach(() => {
   }
   vi.stubGlobal('orbital', bridge)
   useStore.setState({
-    projects: [],
+    repos: [],
     worktrees: [worktree],
     tasks: [],
-    activeProjectId: 'p1',
+    activeRepoId: 'p1',
     activeWorktreeId: null,
     settingUpWorktrees: []
   } as unknown as Parameters<typeof useStore.setState>[0])

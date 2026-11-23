@@ -1,5 +1,5 @@
 import * as workspace from './workspace'
-import * as projects from './projects'
+import * as repos from './repos'
 import * as agentConfig from './agent-config'
 import * as worktrees from './worktrees'
 import * as layout from './layout'
@@ -10,7 +10,7 @@ import * as shell from './shell'
 import * as window from './window'
 
 export { handleControl } from '../control/dispatch'
-export { resumeProjects, stopWorktreesWatchers, reconcileProjectWorktrees } from '../worktree-lifecycle'
+export { resumeRepos, stopWorktreesWatchers, reconcileRepoWorktrees } from '../worktree-lifecycle'
 export { resumeTerminals, watchPtyExits } from '../tabs'
 
 /**
@@ -20,7 +20,7 @@ export { resumeTerminals, watchPtyExits } from '../tabs'
  */
 export function registerIpc(): void {
   workspace.register()
-  projects.register()
+  repos.register()
   agentConfig.register()
   worktrees.register()
   layout.register()

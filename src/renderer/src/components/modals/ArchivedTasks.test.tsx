@@ -13,7 +13,7 @@ import ModalRoot from './ModalRoot'
 const archived: Task = {
   id: 't-archived',
   seq: 12,
-  projectId: 'p1',
+  repoId: 'p1',
   title: 'Shelved idea',
   description: '',
   tags: ['ui'],
@@ -37,7 +37,7 @@ beforeEach(() => {
     modalStack: [],
     modal: null,
     modalData: null,
-    projects: [{ id: 'p1', name: 'orbital' }],
+    repos: [{ id: 'p1', name: 'orbital' }],
     tasks: []
   } as unknown as Parameters<typeof useStore.setState>[0])
 })

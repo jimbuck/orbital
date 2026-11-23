@@ -16,7 +16,7 @@ import GitPanel from './GitPanel'
 function worktree(id: string): Worktree {
   return {
     id,
-    projectId: 'p1',
+    repoId: 'p1',
     kind: 'root',
     name: id,
     path: `C:/repo/${id}`,
@@ -61,10 +61,10 @@ beforeEach(() => {
     }
   })
   useStore.setState({
-    projects: [{ id: 'p1', name: 'repo', repoPath: 'C:/repo' }],
+    repos: [{ id: 'p1', name: 'repo', repoPath: 'C:/repo' }],
     worktrees: [worktree('A'), worktree('B')],
     tasks: [],
-    activeProjectId: 'p1',
+    activeRepoId: 'p1',
     activeWorktreeId: 'A',
     settings: null
   } as unknown as Parameters<typeof useStore.setState>[0])

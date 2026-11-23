@@ -65,7 +65,7 @@ const ADD_OPTIONS: { type: TabType; label: string; config?: TabConfig; provider?
 ]
 
 /**
- * The agent profile a tab launches: the one it names, else the project's
+ * The agent profile a tab launches: the one it names, else the repo's
  * default. Undefined when that profile is no longer configured.
  */
 function tabAgent(tab: Tab, agents: AgentConfig[], defaultAgentId?: string): AgentConfig | undefined {
@@ -125,7 +125,7 @@ export default function TabStrip({ pane, worktree }: { pane: Pane; worktree: Wor
   const [dropAt, setDropAt] = useState<{ slot: number; left: number } | null>(null)
   const onlyPane = worktree.panes.length <= 1
   const servers = useStore((s) => s.devServers[worktree.id]) ?? []
-  const defaultAgentId = useStore((s) => s.projects.find((p) => p.id === worktree.projectId)?.defaultAgentId)
+  const defaultAgentId = useStore((s) => s.repos.find((p) => p.id === worktree.repoId)?.defaultAgentId)
   // The workspace's agent profiles (Settings → Agents) fill the popover's agent
   // entries, in list order. Undefined (state not loaded yet) means the default
   // lineup.

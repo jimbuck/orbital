@@ -4,12 +4,12 @@ import { spawn } from 'node:child_process'
  * Open the platform's external terminal application with `dir` as its working
  * directory, detached so it outlives Orbital.
  *
- * Shared by the Worktree-scoped and project-scoped hand-offs so the Windows
+ * Shared by the Worktree-scoped and repo-scoped hand-offs so the Windows
  * "Windows Terminal, else a PowerShell window" fallback is written once —
  * `wt` is absent on stock Windows Server and on machines where the user
  * removed it, and the two entry points must degrade identically.
  *
- * `dir` is always a path MAIN derived (from a stored Worktree or project), so
+ * `dir` is always a path MAIN derived (from a stored Worktree or repo), so
  * whatever containment applies has already been applied by the caller.
  */
 export function spawnExternalTerminal(dir: string): void {

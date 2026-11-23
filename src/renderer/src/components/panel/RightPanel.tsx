@@ -7,7 +7,7 @@ import TaskTracker from './TaskTracker'
 
 /**
  * The cockpit's right rail: the Git surface for the active Worktree (bordered off
- * below) followed by the project Task tracker. Inside each, only the list
+ * below) followed by the repo Task tracker. Inside each, only the list
  * scrolls — the changed files, the task cards — while the buttons and inputs
  * around it stay put. The Git section caps at ~half the panel so the task list
  * stays reachable. Each wrapper still scrolls as a last resort, for a window

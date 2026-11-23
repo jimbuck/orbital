@@ -21,7 +21,7 @@ import { appImageShimPath } from './services/agents/paths'
 import {
   registerIpc,
   handleControl,
-  resumeProjects,
+  resumeRepos,
   resumeTerminals,
   stopWorktreesWatchers,
   watchPtyExits
@@ -192,7 +192,7 @@ if (!gotLock) {
     runtime.setWindow(win)
     win.on('closed', () => runtime.setWindow(null))
 
-    resumeProjects()
+    resumeRepos()
     // Start the CLI control channel BEFORE respawning terminals so a single bad
     // worktree can never prevent the orbital-CLI pipe from coming up. The pipe is
     // scoped to this workspace so multiple instances never collide on one name.

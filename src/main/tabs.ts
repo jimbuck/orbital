@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { isPtyTabType, type TabType, type TabConfig, type Tab } from '@shared/types'
-import { runtime, repo } from './runtime'
+import { runtime, tables } from './runtime'
 import { safeWrite } from './db/database'
 import { removePane } from './services/layout'
 import { startPtyTab } from './services/agents/launch'
@@ -12,11 +12,11 @@ import { ptyExited, resetWorktree, tabsClosed } from './status'
 
 /** Create a tab in a Worktree (resolving the target pane) and start its PTY if PTY-backed. */
 export function createTabInWorktree(worktreeId: string, paneId: string | null, type: TabType, config?: TabConfig): Tab {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
-  const targetPane = paneId ?? repo.panes.firstPaneId(worktreeId)
+  const targetPane = paneId ?? tables.panes.firstPaneId(worktreeId)
   if (!targetPane) throw new Error(`worktree ${worktreeId} has no pane`)
-  const tab = repo.tabs.create({ worktreeId, paneId: targetPane, type, config })
+  const tab = tables.tabs.create({ worktreeId, paneId: targetPane, type, config })
   startPtyTab(worktree, tab)
   return tab
 }
@@ -37,10 +37,10 @@ export function releaseTabRuntime(tab: Pick<Tab, 'id' | 'worktreeId' | 'type'>):
  * "Open a terminal" prompt. Panes only collapse when a tab is dragged out.
  */
 export function closeTab(tabId: string): void {
-  const tab = repo.tabs.get(tabId)
+  const tab = tables.tabs.get(tabId)
   if (!tab) return
   releaseTabRuntime(tab)
-  repo.tabs.remove(tabId)
+  tables.tabs.remove(tabId)
   tabsClosed(tab.worktreeId, [tabId])
 }
 
@@ -49,14 +49,14 @@ export function closeTab(tabId: string): void {
  * Refuses the Worktree's last pane.
  */
 export function closePane(worktreeId: string, paneId: string): void {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) return
   if (worktree.panes.length <= 1) throw new Error('cannot close the last pane')
-  const tabs = repo.tabs.inPane(paneId)
+  const tabs = tables.tabs.inPane(paneId)
   for (const tab of tabs) releaseTabRuntime(tab)
   const next = removePane(worktree.layout, paneId)
-  if (next) repo.worktrees.setLayout(worktreeId, next)
-  repo.panes.remove(paneId) // cascades the pane's tabs
+  if (next) tables.worktrees.setLayout(worktreeId, next)
+  tables.panes.remove(paneId) // cascades the pane's tabs
   tabsClosed(
     worktreeId,
     tabs.map((t) => t.id)
@@ -75,7 +75,7 @@ export function watchPtyExits(): void {
     // uncaughtException — log it instead (safeWrite) and let the next event
     // re-derive the worktree's status.
     safeWrite('terminal exit', () => {
-      const tab = repo.tabs.get(e.tabId)
+      const tab = tables.tabs.get(e.tabId)
       if (!tab) return
       if (tab.type === 'agent') closeTab(tab.id)
       else ptyExited(tab.id)
@@ -84,7 +84,7 @@ export function watchPtyExits(): void {
 }
 
 export function killWorktreeTerminals(worktreeId: string): void {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) return
   for (const pane of worktree.panes) {
     for (const tab of pane.tabs) {
@@ -95,13 +95,13 @@ export function killWorktreeTerminals(worktreeId: string): void {
 
 /** Drop an empty pane, collapsing the layout to its sibling — never the Worktree's last pane. */
 export function collapseIfEmpty(worktreeId: string, paneId: string): void {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree || worktree.panes.length <= 1) return
   const pane = worktree.panes.find((p) => p.id === paneId)
   if (!pane || pane.tabs.length > 0) return
   const next = removePane(worktree.layout, paneId)
-  if (next) repo.worktrees.setLayout(worktreeId, next)
-  repo.panes.remove(paneId)
+  if (next) tables.worktrees.setLayout(worktreeId, next)
+  tables.panes.remove(paneId)
 }
 
 /**
@@ -113,7 +113,7 @@ export function collapseIfEmpty(worktreeId: string, paneId: string): void {
  */
 export function resumeTerminals(): void {
   const keepBriefings = new Set<string>()
-  for (const worktree of repo.worktrees.list()) {
+  for (const worktree of tables.worktrees.list()) {
     // Track every current agent tab so the prune below only drops orphans.
     for (const pane of worktree.panes) {
       for (const tab of pane.tabs) {

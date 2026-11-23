@@ -30,7 +30,7 @@ let spawned: { command: string; cwd: string; args: string[] }[]
 let hold: boolean
 let pending: (() => void)[]
 /** Worktree rows the repository layer reports. */
-let worktreeRows: { id: string; path: string; projectId: string }[]
+let worktreeRows: { id: string; path: string; repoId: string }[]
 
 /** One fake process, shared by both backends — they differ only in argv. */
 function fakeRun(command: string, cwd: string, args: string[]) {
@@ -94,9 +94,9 @@ beforeEach(() => {
   // and pin the fallback, which still has to work.
   __setRgPath(null)
   worktreeRows = [
-    { id: 'w1', path: 'C:/repo/one', projectId: 'p1' },
-    { id: 'w2', path: 'C:/repo/two', projectId: 'p1' },
-    { id: 'w3', path: 'C:/repo/other', projectId: 'p2' }
+    { id: 'w1', path: 'C:/repo/one', repoId: 'p1' },
+    { id: 'w2', path: 'C:/repo/two', repoId: 'p1' },
+    { id: 'w3', path: 'C:/repo/other', repoId: 'p2' }
   ]
 })
 
@@ -213,8 +213,8 @@ describe('searchContent — scope', () => {
     expect(spawned.map((s) => s.cwd)).toEqual(['C:/repo/two'])
   })
 
-  it('searches every checkout of the same project for project scope', async () => {
-    await searchContent({ query: 'xx', scope: 'project', worktreeId: 'w1' }, 's1')
+  it('searches every checkout of the same repo for repo scope', async () => {
+    await searchContent({ query: 'xx', scope: 'repo', worktreeId: 'w1' }, 's1')
     expect(spawned.map((s) => s.cwd).sort()).toEqual(['C:/repo/one', 'C:/repo/two'])
   })
 
@@ -252,7 +252,7 @@ describe('searchContent — failure and limits', () => {
   it('surfaces a checkout that failed without losing the ones that worked', async () => {
     responses.set('C:/repo/one', { stderr: "fatal: -e option, 'foo(': missing closing parenthesis", code: 128 })
     responses.set('C:/repo/two', { stdout: `${rec('a.ts', 1, 'foo')}\n`, code: 0 })
-    const res = await searchContent({ query: 'foo(', regex: true, scope: 'project', worktreeId: 'w1' }, 's1')
+    const res = await searchContent({ query: 'foo(', regex: true, scope: 'repo', worktreeId: 'w1' }, 's1')
     expect(res.errors).toEqual([
       { worktreeId: 'w1', message: "-e option, 'foo(': missing closing parenthesis" }
     ])

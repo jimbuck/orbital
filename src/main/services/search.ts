@@ -8,7 +8,7 @@ import type {
 import { git } from './git'
 import { parseRg, rgArgs, rgPath } from './ripgrep'
 import { captureCancellable, type CancellableRun } from './spawn'
-import * as repo from '../db/repositories'
+import * as tables from '../db/repositories'
 
 /**
  * Content search across the workspace's checkouts, served by ripgrep where it
@@ -77,11 +77,11 @@ function checkoutsFor(
   scope: SearchScope,
   worktreeId: string | undefined
 ): { id: string; path: string }[] {
-  const all = repo.worktrees.listPaths()
+  const all = tables.worktrees.listPaths()
   if (scope === 'workspace' || !worktreeId) return all
   if (scope === 'worktree') return all.filter((w) => w.id === worktreeId)
-  const projectId = all.find((w) => w.id === worktreeId)?.projectId
-  return projectId ? all.filter((w) => w.projectId === projectId) : []
+  const repoId = all.find((w) => w.id === worktreeId)?.repoId
+  return repoId ? all.filter((w) => w.repoId === repoId) : []
 }
 
 /** Escape a literal so it can go into a JS RegExp. */

@@ -6,7 +6,7 @@ import { fireAndForget } from '@renderer/lib/bridge'
 import PanelResizeHandle from '../PanelResizeHandle'
 import { CollapsedPane, PaneCollapseTab } from '../PaneCollapse'
 import Folder, { SlotMarker } from './Folder'
-import Project from './Project'
+import Repo from './Repo'
 import RailFooter from './RailFooter'
 import {
   beforeIdAt,
@@ -23,10 +23,10 @@ const HEADER_BUTTON =
   'flex size-6 flex-none items-center justify-center rounded-[7px] border border-line-2 text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /**
- * What the pointer of a drag is over: the project and the folder it is inside
+ * What the pointer of a drag is over: the repo and the folder it is inside
  * of, each with where on its header row the pointer sits. The header (the first
  * row of the block) is what is measured, not the whole block, so an open
- * project's Worktrees and an open folder's projects all count as "below".
+ * repo's Worktrees and an open folder's repos all count as "below".
  */
 function railOverAt(e: DragEvent): RailOver {
   const target = e.target as HTMLElement
@@ -36,7 +36,7 @@ function railOverAt(e: DragEvent): RailOver {
     return !!box && y > box.top + box.height / 2
   }
 
-  const projectEl = target.closest<HTMLElement>('[data-project-id]')
+  const repoEl = target.closest<HTMLElement>('[data-repo-id]')
   const folderEl = target.closest<HTMLElement>('[data-folder-id]')
   const folderHeader = folderEl?.querySelector('[data-folder-header]')
   const box = folderHeader?.getBoundingClientRect()
@@ -48,27 +48,27 @@ function railOverAt(e: DragEvent): RailOver {
   }
 
   return {
-    project: projectEl ? { id: projectEl.dataset.projectId ?? '', lowerHalf: below(projectEl.firstElementChild) } : null,
+    repo: repoEl ? { id: repoEl.dataset.repoId ?? '', lowerHalf: below(repoEl.firstElementChild) } : null,
     folder: folderEl ? { id: folderEl.dataset.folderId ?? '', lowerHalf: below(folderHeader), edge } : null
   }
 }
 
 /**
- * The left rail: the project switcher. Lists every repo as a collapsible
- * group of Worktrees, with add-project and new-folder affordances up top and a
+ * The left rail: the repo switcher. Lists every repo as a collapsible
+ * group of Worktrees, with add-repo and new-folder affordances up top and a
  * terminal tally in the footer.
  *
- * Projects can be filed in folders, and the rail's order is the user's: a
- * folder sits anywhere among the loose projects, and projects are ordered by
+ * Repos can be filed in folders, and the rail's order is the user's: a
+ * folder sits anywhere among the loose repos, and repos are ordered by
  * hand both at the top level and inside a folder. All of that only arranges
  * this panel. The rail is also the one drop zone for its own drags. What a
  * drop would do is decided by `dropTargetFor`; this component turns the
  * pointer into its inputs and paints the answer.
  */
 export default function Rail(): JSX.Element {
-  const projects = useStore((s) => s.projects)
-  const folders = useStore((s) => s.projectFolders)
-  const rail = useStore((s) => s.projectRail)
+  const repos = useStore((s) => s.repos)
+  const folders = useStore((s) => s.railFolders)
+  const rail = useStore((s) => s.railItems)
   const openModal = useStore((s) => s.openModal)
   const { width, collapsed, dragging, startResize, resetWidth, toggleCollapsed } = usePanelWidth({
     storageKey: 'orbital.railWidth',
@@ -77,7 +77,7 @@ export default function Rail(): JSX.Element {
     max: 440,
     handleEdge: 'right'
   })
-  const rows = useMemo(() => railRows(projects, folders, rail), [projects, folders, rail])
+  const rows = useMemo(() => railRows(repos, folders, rail), [repos, folders, rail])
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   // The folder whose name is being edited. Held here, not in the folder, so
   // that one created from the header button opens straight into its name.
@@ -86,7 +86,7 @@ export default function Rail(): JSX.Element {
   if (collapsed) return <CollapsedPane edge="right" label="repos panel" onExpand={toggleCollapsed} />
 
   const newFolder = (): void => {
-    fireAndForget(window.orbital.createProjectFolder('New Folder').then((folder) => setRenamingFolderId(folder.id)))
+    fireAndForget(window.orbital.createRailFolder('New Folder').then((folder) => setRenamingFolderId(folder.id)))
   }
 
   const targetAt = (e: DragEvent): DropTarget | null => {
@@ -117,9 +117,9 @@ export default function Rail(): JSX.Element {
     e.preventDefault()
     const beforeId = beforeIdAt(rows, target)
     if (drag.kind === 'folder') {
-      fireAndForget(window.orbital.placeProjectFolder(drag.id, beforeId))
+      fireAndForget(window.orbital.placeRailFolder(drag.id, beforeId))
     } else {
-      fireAndForget(window.orbital.placeProject(drag.id, target.folderId, beforeId))
+      fireAndForget(window.orbital.placeRepo(drag.id, target.folderId, beforeId))
     }
   }
 
@@ -134,7 +134,7 @@ export default function Rail(): JSX.Element {
         <div>
           <div className="text-[11px] font-bold uppercase tracking-[0.9px] text-faint">Repos</div>
           <div className="mt-[3px] text-[11px] text-dim">
-            {projects.length} repo{projects.length === 1 ? '' : 's'} · get work done from orbit
+            {repos.length} repo{repos.length === 1 ? '' : 's'} · get work done from orbit
           </div>
         </div>
         <div className="flex flex-none items-center gap-[6px]">
@@ -145,7 +145,7 @@ export default function Rail(): JSX.Element {
             type="button"
             aria-label="Add repo"
             title="Add repo"
-            onClick={() => openModal('addProject')}
+            onClick={() => openModal('addRepo')}
             className={HEADER_BUTTON}
           >
             <Plus size={15} strokeWidth={1.5} />
@@ -168,14 +168,14 @@ export default function Rail(): JSX.Element {
             {row.kind === 'folder' ? (
               <Folder
                 folder={row.folder}
-                projects={row.projects}
+                repos={row.repos}
                 dropInto={dropTarget?.kind === 'into' && dropTarget.folderId === row.id}
                 dropSlot={slotIn(row.id)}
                 renaming={renamingFolderId === row.id}
                 onRenaming={(renaming) => setRenamingFolderId(renaming ? row.id : null)}
               />
             ) : (
-              <Project project={row.project} />
+              <Repo repo={row.repo} />
             )}
           </div>
         ))}

@@ -7,7 +7,7 @@ import picomatch from 'picomatch'
 
 /**
  * Env-file sync: copying gitignored local config (`.env` and friends, agent
- * config dirs) from a project's ROOT checkout into a linked worktree so the
+ * config dirs) from a repo's ROOT checkout into a linked worktree so the
  * worktree is runnable the moment it opens.
  *
  * The copy happens exactly twice: once when the worktree is created, and again
@@ -23,7 +23,7 @@ import picomatch from 'picomatch'
  * `.git` is never walked. `node_modules` is only walked when a pattern
  * explicitly targets it (the bulk copy at worktree creation).
  * `.orbital-worktrees` is excluded defensively: worktrees normally live beside
- * the repo (see worktree.ts), but if a project root happens to enclose one,
+ * the repo (see worktree.ts), but if a repo root happens to enclose one,
  * a recursive `.env` glob must never sync files out of sibling worktrees.
  */
 

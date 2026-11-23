@@ -5,7 +5,7 @@
  * the per-launch briefing Claude gets (see briefing.ts) — a Codex agent tab
  * would have no idea the cockpit or the `orbital` CLI exist. What Codex DOES
  * read, at the start of every session, is the AGENTS.md in its home directory
- * (`CODEX_HOME`, else ~/.codex), ahead of any project-level ones.
+ * (`CODEX_HOME`, else ~/.codex), ahead of any repo-level ones.
  *
  * That file belongs to the user, so Orbital manages a delimited BLOCK inside it
  * rather than the file: install rewrites just that block (idempotent), uninstall
@@ -41,17 +41,17 @@ When \`ORBITAL_WORKTREE_ID\` is set, this session is running inside a worktree o
 the Orbital cockpit, and the \`orbital\` CLI on your PATH talks to it. If that
 variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 
-- \`orbital whoami\` — project, worktree, branch, path, status, linked task, dev servers.
+- \`orbital whoami\` — repo, worktree, branch, path, status, linked task, dev servers.
 - \`orbital status <working|needs-attention|idle|error|done>\` — keep the cockpit honest
   about what you are doing. \`needs-attention\` is what makes the human look at this
   worktree, so set it when you are genuinely blocked on them.
 - \`orbital task add "<title>"\` — file follow-up work you notice instead of expanding
-  the current change; \`orbital task list\` to see the project's open tasks.
+  the current change; \`orbital task list\` to see the repo's open tasks.
 - \`orbital task update <n> --status in-progress\` the moment you start work on a task,
   and \`orbital task done <n>\` when it is finished. The board is how the human sees
   what is underway; a task left in \`todo\` while you work on it reads as unclaimed.
-- \`orbital projects\` lists the other projects in this workspace. Task and worktree
-  commands stay scoped to this project unless you pass \`--project <name|id>\`, which
+- \`orbital repos\` lists the other repos in this workspace. Task and worktree
+  commands stay scoped to this repo unless you pass \`--repo <name|id>\`, which
   is the explicit opt-in to read or write a sibling's tasks and worktrees.
 - \`orbital server add <port>\` when you start a dev server, \`orbital server remove <port>\`
   when you stop it, so the human can open it in one click.

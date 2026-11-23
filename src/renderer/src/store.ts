@@ -3,8 +3,8 @@ import { fireAndForget } from './lib/bridge'
 import type {
   AppState,
   GitFileState,
-  Project,
-  ProjectFolder,
+  Repo,
+  RailFolder,
   RailItem,
   Worktree,
   Task,
@@ -15,7 +15,7 @@ import type {
 
 export type ModalType =
   | 'settings'
-  | 'addProject'
+  | 'addRepo'
   | 'newWorktree'
   | 'board'
   | 'archivedTasks'
@@ -27,11 +27,11 @@ export type ModalType =
 
 interface UIState {
   ready: boolean
-  activeProjectId: string | null
+  activeRepoId: string | null
   activeWorktreeId: string | null
   expanded: Record<string, boolean>
   modal: ModalType
-  /** Free-form payload for the open modal (e.g. the project a New Worktree targets). */
+  /** Free-form payload for the open modal (e.g. the repo a New Worktree targets). */
   modalData: unknown
   /**
    * Ordered stack of open modals — enables stacking (e.g. a task modal on top of
@@ -97,11 +97,11 @@ export interface EditorOpenRequest extends EditorOpenTarget {
 }
 
 interface Data {
-  projects: Project[]
-  /** The rail's folders, in rail order (see ProjectFolder). */
-  projectFolders: ProjectFolder[]
-  /** The rail's top level in order: folders and the projects in none of them. */
-  projectRail: RailItem[]
+  repos: Repo[]
+  /** The rail's folders, in rail order (see RailFolder). */
+  railFolders: RailFolder[]
+  /** The rail's top level in order: folders and the repos in none of them. */
+  railItems: RailItem[]
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings | null
@@ -116,7 +116,7 @@ interface Data {
 interface Actions {
   init: () => Promise<void>
   applyState: (s: AppState) => void
-  setActiveProject: (id: string) => void
+  setActiveRepo: (id: string) => void
   setActiveWorktree: (id: string) => void
   toggleExpanded: (id: string) => void
   openModal: (type: ModalType, data?: unknown) => void
@@ -189,24 +189,24 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
 }
 
 /**
- * Open the rail folder hiding `projectId`, if one is.
+ * Open the rail folder hiding `repoId`, if one is.
  *
- * A project can be selected from places that are not its rail row (the command
+ * A repo can be selected from places that are not its rail row (the command
  * palette, the needs-attention banner), and a selection the rail cannot show
  * reads as nothing having happened. Called only from the two explicit select
  * actions, never from applyState: a folder the user collapsed stays collapsed
  * through every state push, including the one at boot.
  */
-function revealProject(folders: ProjectFolder[], projectId: string): void {
-  const hiding = folders.find((f) => f.collapsed && f.projectIds.includes(projectId))
-  if (hiding) fireAndForget(window.orbital.setProjectFolderCollapsed(hiding.id, false))
+function revealRepo(folders: RailFolder[], repoId: string): void {
+  const hiding = folders.find((f) => f.collapsed && f.repoIds.includes(repoId))
+  if (hiding) fireAndForget(window.orbital.setRailFolderCollapsed(hiding.id, false))
 }
 
 export const useStore = create<Store>((set, get) => ({
   // data
-  projects: [],
-  projectFolders: [],
-  projectRail: [],
+  repos: [],
+  railFolders: [],
+  railItems: [],
   worktrees: [],
   tasks: [],
   settings: null,
@@ -216,7 +216,7 @@ export const useStore = create<Store>((set, get) => ({
 
   // ui
   ready: false,
-  activeProjectId: null,
+  activeRepoId: null,
   activeWorktreeId: null,
   expanded: {},
   modal: null,
@@ -249,47 +249,47 @@ export const useStore = create<Store>((set, get) => ({
 
   applyState(s) {
     const prev = get()
-    let activeProjectId = prev.activeProjectId
-    if (!activeProjectId || !s.projects.some((p) => p.id === activeProjectId)) {
-      activeProjectId = s.projects[0]?.id ?? null
+    let activeRepoId = prev.activeRepoId
+    if (!activeRepoId || !s.repos.some((p) => p.id === activeRepoId)) {
+      activeRepoId = s.repos[0]?.id ?? null
     }
 
-    const projectWorktrees = s.worktrees.filter((w) => w.projectId === activeProjectId)
+    const repoWorktrees = s.worktrees.filter((w) => w.repoId === activeRepoId)
     let activeWorktreeId = prev.activeWorktreeId
-    if (!activeWorktreeId || !projectWorktrees.some((w) => w.id === activeWorktreeId)) {
-      // Prefer the root Worktree, else the first Worktree of the active project.
-      activeWorktreeId = (projectWorktrees.find((w) => w.kind === 'root') ?? projectWorktrees[0])?.id ?? null
+    if (!activeWorktreeId || !repoWorktrees.some((w) => w.id === activeWorktreeId)) {
+      // Prefer the root Worktree, else the first Worktree of the active repo.
+      activeWorktreeId = (repoWorktrees.find((w) => w.kind === 'root') ?? repoWorktrees[0])?.id ?? null
     }
 
     let expanded = prev.expanded
-    if (activeProjectId && expanded[activeProjectId] === undefined) {
-      expanded = { ...expanded, [activeProjectId]: true }
+    if (activeRepoId && expanded[activeRepoId] === undefined) {
+      expanded = { ...expanded, [activeRepoId]: true }
     }
 
     // Keep previous references wherever the content did not change (see shareById).
     set({
-      projects: shareById(prev.projects, s.projects),
-      projectFolders: shareById(prev.projectFolders, s.projectFolders),
-      projectRail: share(prev.projectRail, s.projectRail),
+      repos: shareById(prev.repos, s.repos),
+      railFolders: shareById(prev.railFolders, s.railFolders),
+      railItems: share(prev.railItems, s.railItems),
       worktrees: shareById(prev.worktrees, s.worktrees),
       tasks: shareById(prev.tasks, s.tasks),
       settings: share(prev.settings, s.settings),
       workspace: share(prev.workspace, s.workspace),
       devServers: share(prev.devServers, s.devServers),
       settingUpWorktrees: share(prev.settingUpWorktrees, s.settingUpWorktrees),
-      activeProjectId,
+      activeRepoId,
       activeWorktreeId,
       expanded,
       alertCount: s.worktrees.filter((w) => w.status === 'needs_attention').length
     })
   },
 
-  setActiveProject(id) {
-    revealProject(get().projectFolders, id)
-    const projectWorktrees = get().worktrees.filter((w) => w.projectId === id)
-    const activeWorktreeId = (projectWorktrees.find((w) => w.kind === 'root') ?? projectWorktrees[0])?.id ?? null
+  setActiveRepo(id) {
+    revealRepo(get().railFolders, id)
+    const repoWorktrees = get().worktrees.filter((w) => w.repoId === id)
+    const activeWorktreeId = (repoWorktrees.find((w) => w.kind === 'root') ?? repoWorktrees[0])?.id ?? null
     set((s) => ({
-      activeProjectId: id,
+      activeRepoId: id,
       activeWorktreeId,
       expanded: { ...s.expanded, [id]: true }
     }))
@@ -297,8 +297,8 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveWorktree(id) {
     const worktree = get().worktrees.find((w) => w.id === id)
-    if (worktree) revealProject(get().projectFolders, worktree.projectId)
-    set({ activeWorktreeId: id, activeProjectId: worktree ? worktree.projectId : get().activeProjectId })
+    if (worktree) revealRepo(get().railFolders, worktree.repoId)
+    set({ activeWorktreeId: id, activeRepoId: worktree ? worktree.repoId : get().activeRepoId })
   },
 
   toggleExpanded(id) {
@@ -355,16 +355,16 @@ export const useStore = create<Store>((set, get) => ({
 
 /* ---- Selectors --------------------------------------------------------- */
 
-export function activeProject(s: Store): Project | undefined {
-  return s.projects.find((p) => p.id === s.activeProjectId)
+export function activeRepo(s: Store): Repo | undefined {
+  return s.repos.find((p) => p.id === s.activeRepoId)
 }
 
 export function activeWorktree(s: Store): Worktree | undefined {
   return s.worktrees.find((w) => w.id === s.activeWorktreeId)
 }
 
-export function tasksForProject(s: Store, projectId: string): Task[] {
-  return s.tasks.filter((t) => t.projectId === projectId)
+export function tasksForRepo(s: Store, repoId: string): Task[] {
+  return s.tasks.filter((t) => t.repoId === repoId)
 }
 
 /**

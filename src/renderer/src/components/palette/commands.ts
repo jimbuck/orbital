@@ -121,7 +121,7 @@ export interface BuildContext {
 export function buildCommands(ctx: BuildContext): PaletteCommand[] {
   const s = useStore.getState()
   const worktree = s.worktrees.find((w) => w.id === s.activeWorktreeId)
-  const project = s.projects.find((p) => p.id === s.activeProjectId)
+  const repo = s.repos.find((p) => p.id === s.activeRepoId)
   const pane = currentPane(s, worktree)
   const tab = currentTab(pane)
   const agents: AgentConfig[] = settingOf(s.settings, 'agents')
@@ -160,7 +160,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     group: 'Search',
     label: 'Go to Worktree…',
     hint: '@',
-    keywords: 'switch project jump',
+    keywords: 'switch repo jump',
     icon: GitBranch,
     keepOpen: true,
     run: () => ctx.setQuery('@')
@@ -306,34 +306,34 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     label: 'New Worktree…',
     keywords: 'branch create checkout',
     icon: GitBranch,
-    run: () => s.openModal('newWorktree', { project })
+    run: () => s.openModal('newWorktree', { repo })
   })
 
-  /* ---- Project & workspace --------------------------------------------- */
+  /* ---- Repo & workspace --------------------------------------------- */
   add({
-    id: 'project.add',
+    id: 'repo.add',
     group: 'Repo',
     label: 'Add Repo…',
     keywords: 'repo clone folder open',
     icon: FolderPlus,
-    run: () => s.openModal('addProject')
+    run: () => s.openModal('addRepo')
   })
-  if (project) {
+  if (repo) {
     add({
-      id: 'project.explorer',
+      id: 'repo.explorer',
       group: 'Repo',
       label: `Open Repo in ${fileManagerName}`,
       keywords: 'reveal folder repo',
       icon: FolderOpen,
-      run: () => fireAndForget(window.orbital.openProjectPath(project.id))
+      run: () => fireAndForget(window.orbital.openRepoPath(repo.id))
     })
     add({
-      id: 'project.terminal',
+      id: 'repo.terminal',
       group: 'Repo',
       label: 'Open Repo in External Terminal',
       keywords: 'shell repo',
       icon: SquareTerminal,
-      run: () => fireAndForget(window.orbital.openProjectInTerminal(project.id))
+      run: () => fireAndForget(window.orbital.openRepoInTerminal(repo.id))
     })
   }
   add({
@@ -354,7 +354,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
     icon: KanbanSquare,
     run: () => s.openModal('board')
   })
-  if (project) {
+  if (repo) {
     add({
       id: 'task.new',
       group: 'Tasks',
@@ -366,7 +366,7 @@ export function buildCommands(ctx: BuildContext): PaletteCommand[] {
       // also what the board and the CLI can already see.
       run: () =>
         fireAndForget(
-          window.orbital.createTask(project.id, 'New task').then((task) => s.openModal('editTask', { task }))
+          window.orbital.createTask(repo.id, 'New task').then((task) => s.openModal('editTask', { task }))
         )
     })
   }

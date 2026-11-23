@@ -21,7 +21,7 @@ export type TerminalStatus = 'idle' | 'working' | 'needs_attention' | 'error' | 
 export type TaskStatus = 'draft' | 'todo' | 'in_progress' | 'ready_for_review' | 'done'
 
 /**
- * A Worktree is bound to either a project's main checkout (`root`) or an
+ * A Worktree is bound to either a repo's main checkout (`root`) or an
  * additional git worktree (`linked`).
  */
 export type WorktreeKind = 'root' | 'linked'
@@ -93,12 +93,12 @@ export const SUPPORTED_AGENTS: ReadonlyArray<{
  *
  * A workspace may hold SEVERAL profiles of the same provider ("Claude
  * (personal)" and "Claude (work)"), which is why entries are keyed by their own
- * `id` rather than by provider. That id is what tabs and project defaults
+ * `id` rather than by provider. That id is what tabs and repo defaults
  * reference, and what the hook/skill/instruction installers act on — those
  * write into THIS profile's directory, so two profiles need two installs.
  */
 export interface AgentConfig {
-  /** Stable key for this profile (e.g. 'claude', 'claude-2'); referenced by tabs and projects. */
+  /** Stable key for this profile (e.g. 'claude', 'claude-2'); referenced by tabs and repos. */
   id: string
   /** User-facing label shown in the menus, tab titles, and Settings. */
   name: string
@@ -106,7 +106,7 @@ export interface AgentConfig {
   provider: string
   /** Profile/config directory, exported via the provider's configDirEnvVar at launch. */
   configDir?: string
-  /** Explicit executable path, overriding PATH lookup (a project-level path still wins). */
+  /** Explicit executable path, overriding PATH lookup (a repo-level path still wins). */
   execPath?: string
   /** Extra CLI arguments appended to the launch command. */
   args?: string[]
@@ -117,7 +117,7 @@ export interface AgentConfig {
 /**
  * One untweaked profile per supported provider — the default agent lineup.
  * Their ids deliberately EQUAL the provider ids, so references stored before
- * profiles were named (a tab's `agentProvider`, a project's default) keep
+ * profiles were named (a tab's `agentProvider`, a repo's default) keep
  * resolving to the same agent.
  */
 export function defaultAgentConfigs(): AgentConfig[] {
@@ -138,7 +138,7 @@ export function providerLabel(providerId: string): string {
  * The profile a stored reference points at: its `id` first, else the first
  * profile of a provider by that name. The second pass is what keeps references
  * written before profiles had ids (tabs carrying `agentProvider: 'claude'`, a
- * project defaulting to `'codex'`) pointing at the right agent.
+ * repo defaulting to `'codex'`) pointing at the right agent.
  */
 export function findAgentConfig(agents: AgentConfig[], ref: string | undefined): AgentConfig | undefined {
   if (!ref) return undefined
@@ -147,7 +147,7 @@ export function findAgentConfig(agents: AgentConfig[], ref: string | undefined):
 
 /**
  * The first of several references that still resolves — a tab's own profile,
- * then its legacy provider id, then the project's default. A reference to a
+ * then its legacy provider id, then the repo's default. A reference to a
  * profile that has since been deleted must not stop the fallback: without this
  * the tab would launch the hard-coded default provider with none of the
  * workspace's configuration behind it.
@@ -349,15 +349,15 @@ export function normalizeStatus(token: string): TerminalStatus | null {
  * ========================================================================== */
 
 /**
- * A Project is a local git repo Orbital tracks (previously called a
- * "workspace"). It surfaces one `root` Worktree on the repo's main checkout plus
+ * A Repo is a local git repo Orbital tracks (first called a "workspace", then a
+ * "project"). It surfaces one `root` Worktree on the repo's main checkout plus
  * any additional `linked` Worktrees.
  */
-export interface Project {
+export interface Repo {
   id: string
   name: string
   repoPath: string
-  /** Agent profile an `agent` tab launches by default in this project (default 'claude'). */
+  /** Agent profile an `agent` tab launches by default in this repo (default 'claude'). */
   defaultAgentId: string
   /** Optional explicit path to the agent executable, overriding PATH lookup. */
   agentExecPath?: string
@@ -365,33 +365,33 @@ export interface Project {
 }
 
 /**
- * A folder in the rail: a named, collapsible group of projects.
+ * A folder in the rail: a named, collapsible group of repos.
  *
- * It arranges the Projects panel and does nothing else. A project's row, repo
+ * It arranges the Repos panel and does nothing else. A repo's row, repo
  * path, worktree locations, agent defaults and settings are the same in a
  * folder as out of one, which is why membership lives here and not as a field
- * on {@link Project}; folders are also left out of the workspace export.
+ * on {@link Repo}; folders are also left out of the workspace export.
  */
-export interface ProjectFolder {
+export interface RailFolder {
   id: string
   name: string
-  /** Whether its projects are hidden. Persisted, so the rail comes back as it was left. */
+  /** Whether its repos are hidden. Persisted, so the rail comes back as it was left. */
   collapsed: boolean
-  /** The projects filed here, in the order the rail lists them. A project is in at most one folder. */
-  projectIds: string[]
+  /** The repos filed here, in the order the rail lists them. A repo is in at most one folder. */
+  repoIds: string[]
 }
 
 /**
- * One row at the rail's top level: a folder, or a project that is in no folder.
- * The two share one order, so a folder can sit anywhere among the loose projects.
+ * One row at the rail's top level: a folder, or a repo that is in no folder.
+ * The two share one order, so a folder can sit anywhere among the loose repos.
  */
 export interface RailItem {
-  kind: 'folder' | 'project'
+  kind: 'folder' | 'repo'
   id: string
 }
 
 /**
- * Default env-sync globs (a global setting shared by every project): env
+ * Default env-sync globs (a global setting shared by every repo): env
  * files, agent config directories, and installed dependencies. Directory
  * patterns use `/**` since sync matching runs against relative file paths.
  * Env-file patterns are prefixed with `**` so nested files (e.g.
@@ -422,7 +422,7 @@ export interface TabConfig {
   filePath?: string
   /** editor: open `filePath` as a diff of its staged (index) version, not the worktree. */
   diffStaged?: boolean
-  /** agent: which configured profile this tab launches; defaults to the project's. */
+  /** agent: which configured profile this tab launches; defaults to the repo's. */
   agentId?: string
   /**
    * agent, LEGACY: the provider id tabs stored before profiles were named.
@@ -467,7 +467,7 @@ export interface Pane {
 
 export interface Worktree {
   id: string
-  projectId: string
+  repoId: string
   kind: WorktreeKind
   name: string
   /** Working directory: the repo root for `root`, the linked worktree path otherwise. */
@@ -493,7 +493,7 @@ export interface Task {
   id: string
   /** Human-facing task number: globally unique, assigned in creation order, never reused. */
   seq: number
-  projectId: string
+  repoId: string
   title: string
   description: string
   tags: string[]
@@ -523,9 +523,9 @@ export interface Settings {
     /** Flash the taskbar button (FlashWindow) when a Worktree flips to needs-attention. */
     taskbarFlash: boolean
   }
-  /** Wildcard list for env-file sync, applied to every project in the workspace (PRD §5). */
+  /** Wildcard list for env-file sync, applied to every repo in the workspace (PRD §5). */
   envSyncPatterns: string[]
-  /** Auto-run `git fetch` per project on an interval so ahead/behind stays current. */
+  /** Auto-run `git fetch` per repo on an interval so ahead/behind stays current. */
   periodicFetch: boolean
   /** Opt-in verbose file logging of CLI calls, UI actions, and errors, with rotation. Off by default. */
   debugLogging: boolean
@@ -612,11 +612,11 @@ export type SettingsPatch = Partial<Settings>
 
 /** Full application state pushed to / pulled by the renderer. */
 export interface AppState {
-  projects: Project[]
-  /** The rail's folders, each with the projects filed in it. */
-  projectFolders: ProjectFolder[]
-  /** The rail's top level, in order: every folder and every project that is in none. */
-  projectRail: RailItem[]
+  repos: Repo[]
+  /** The rail's folders, each with the repos filed in it. */
+  railFolders: RailFolder[]
+  /** The rail's top level, in order: every folder and every repo that is in none. */
+  railItems: RailItem[]
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings
@@ -664,7 +664,7 @@ export interface GitStatus {
   unstaged: GitFileStatus[]
 }
 
-/** Branch list for a project plus the branch HEAD currently points at. */
+/** Branch list for a repo plus the branch HEAD currently points at. */
 export interface BranchInfo {
   branches: string[]
   /** Remote-tracking branches (e.g. `origin/pr-42`) with no matching local branch. */
@@ -739,7 +739,7 @@ export interface GitCommitDetail {
 /**
  * One file matched by the command palette's search, across every Worktree in
  * the workspace. `worktreeId` is what makes the hit openable (and what the
- * palette labels with the owning project ▸ Worktree); `path` is
+ * palette labels with the owning repo ▸ Worktree); `path` is
  * checkout-relative, like every other path crossing this bridge.
  */
 export interface FileSearchHit {
@@ -757,14 +757,14 @@ export interface FileSearchHit {
  * main/services/search.ts for why that rather than an index.
  * -------------------------------------------------------------------------- */
 
-/** How wide a content search casts: one checkout, one project's checkouts, or all of them. */
-export type SearchScope = 'worktree' | 'project' | 'workspace'
+/** How wide a content search casts: one checkout, one repo's checkouts, or all of them. */
+export type SearchScope = 'worktree' | 'repo' | 'workspace'
 
 /** The scopes in the order the Search tab offers them, with their labels. */
 export const SEARCH_SCOPES: ReadonlyArray<{ value: SearchScope; label: string }> = [
   { value: 'worktree', label: 'This Worktree' },
-  { value: 'project', label: 'This project' },
-  { value: 'workspace', label: 'All projects' }
+  { value: 'repo', label: 'This repo' },
+  { value: 'workspace', label: 'All repos' }
 ]
 
 export interface SearchQuery {
@@ -776,7 +776,7 @@ export interface SearchQuery {
   regex?: boolean
   /** Default: `worktree` when `worktreeId` is given, else `workspace`. */
   scope?: SearchScope
-  /** The checkout the `worktree` and `project` scopes are anchored on. */
+  /** The checkout the `worktree` and `repo` scopes are anchored on. */
   worktreeId?: string
   /**
    * Comma-separated globs limiting which files are searched, e.g.
@@ -865,12 +865,12 @@ export interface TaskPatch {
   description?: string
   tags?: string[]
   status?: TaskStatus
-  /** Reassign the task to another project (e.g. dragged across board swim-lanes). */
-  projectId?: string
+  /** Reassign the task to another repo (e.g. dragged across board swim-lanes). */
+  repoId?: string
 }
 
-/** Per-project agent settings update. */
-export interface ProjectAgentPatch {
+/** Per-repo agent settings update. */
+export interface RepoAgentPatch {
   defaultAgentId?: string
   agentExecPath?: string
 }
@@ -1023,7 +1023,12 @@ export interface UpdateStatus {
 export const ENV = {
   terminalId: 'ORBITAL_TERMINAL_ID',
   worktreeId: 'ORBITAL_WORKTREE_ID',
-  projectId: 'ORBITAL_PROJECT_ID',
+  repoId: 'ORBITAL_REPO_ID',
+  /**
+   * The repo id under its pre-rename name. Still set, so a CLI or hook run from
+   * a terminal opened before the rename (or a script that reads it) keeps working.
+   */
+  legacyRepoId: 'ORBITAL_PROJECT_ID',
   /** Named-pipe path the CLI connects to. */
   socket: 'ORBITAL_SOCKET'
 } as const
@@ -1031,7 +1036,7 @@ export const ENV = {
 export type ControlCommand =
   | 'status'
   | 'whoami'
-  | 'projects'
+  | 'repos'
   | 'worktrees'
   | 'worktree-new'
   | 'worktree-sync'
@@ -1056,11 +1061,11 @@ export interface ControlRequest {
   /** Identity injected into the terminal env, echoed back by the CLI. */
   terminalId?: string
   worktreeId?: string
-  projectId?: string
+  repoId?: string
   /**
-   * Command arguments. `project` (a project name or id, from `--project`)
-   * retargets a project-scoped command at a sibling project in the same
-   * workspace; main resolves it into `projectId` before dispatch.
+   * Command arguments. `repo` (a repo name or id, from `--repo`)
+   * retargets a repo-scoped command at a sibling repo in the same
+   * workspace; main resolves it into `repoId` before dispatch.
    */
   args: Record<string, unknown>
 }
@@ -1090,9 +1095,9 @@ export function controlPipePath(key?: string): string {
 /* ============================================================================
  * Workspace configuration
  *
- * A "workspace" is a collection of projects defined by a YAML config file. The
- * file is the source of truth for which projects the workspace contains (and,
- * in a later phase, for workspace-scoped settings); the SQLite `projects` table
+ * A "workspace" is a collection of repos defined by a YAML config file. The
+ * file is the source of truth for which repos the workspace contains (and,
+ * in a later phase, for workspace-scoped settings); the SQLite `repos` table
  * is a reconciled projection of it. Each workspace maps to its own profile
  * directory (its own DB + control pipe), so instances run side by side.
  * ========================================================================== */
@@ -1100,8 +1105,8 @@ export function controlPipePath(key?: string): string {
 /** Bump when the on-disk config shape changes in a non-additive way. */
 export const WORKSPACE_CONFIG_VERSION = 1
 
-/** One project entry in a workspace config file. */
-export interface WorkspaceProjectConfig {
+/** One repo entry in a workspace config file. */
+export interface WorkspaceRepoConfig {
   /** Stable id — worktree and task rows in the DB reference it. */
   id: string
   name: string
@@ -1126,7 +1131,7 @@ export interface WorkspaceConfig {
   name: string
   /** Workspace-scoped settings. Every field optional — defaults fill gaps. */
   settings?: Partial<WorkspaceSettings>
-  projects: WorkspaceProjectConfig[]
+  repos: WorkspaceRepoConfig[]
 }
 
 /** A workspace as listed in the picker (a row of the global `workspaces` table). */
@@ -1134,6 +1139,6 @@ export interface WorkspaceInfo {
   id: string
   name: string
   lastOpenedAt: number
-  /** How many projects the workspace holds (picker display). */
-  projectCount: number
+  /** How many repos the workspace holds (picker display). */
+  repoCount: number
 }

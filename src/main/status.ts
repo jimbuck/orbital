@@ -1,5 +1,5 @@
 import { isPtyTabType, type TerminalStatus } from '@shared/types'
-import { runtime, repo } from './runtime'
+import { runtime, tables } from './runtime'
 
 /**
  * Terminal status: the one module that decides what a PTY tab's status is.
@@ -11,7 +11,7 @@ import { runtime, repo } from './runtime'
  * Worktree roll-up, and the state and alert pushes that follow a change.
  *
  * Every write to a tab's status goes through `apply` below. Nothing outside
- * this file calls `repo.tabs.updateStatus` or `repo.worktrees.recomputeStatus`.
+ * this file calls `tables.tabs.updateStatus` or `tables.worktrees.recomputeStatus`.
  */
 
 /**
@@ -84,7 +84,7 @@ export function hookFired(
   payload: Record<string, unknown>,
   firedAt: unknown
 ): TerminalStatus | null {
-  const tab = repo.tabs.get(tabId)
+  const tab = tables.tabs.get(tabId)
   if (!tab) return null
   const ts = fireTime(firedAt)
   // Session and prompt starts are tracked whether or not the event goes on to
@@ -111,7 +111,7 @@ export function hookFired(
  * so typing into the tab afterwards resets it to idle.
  */
 export function statusReported(tabId: string, status: TerminalStatus, firedAt: unknown): void {
-  const tab = repo.tabs.get(tabId)
+  const tab = tables.tabs.get(tabId)
   if (!tab) return
   if (!accept(tabId, fireTime(firedAt))) return
   attentionKind.delete(tabId)
@@ -126,7 +126,7 @@ export function statusReported(tabId: string, status: TerminalStatus, firedAt: u
  * those just the same). Uses INPUT only — never scrapes terminal output.
  */
 export function humanTyped(tabId: string, data: string): void {
-  const tab = repo.tabs.get(tabId)
+  const tab = tables.tabs.get(tabId)
   if (!tab || !isPtyTabType(tab.type) || tab.status !== 'needs_attention') return
   if (data.replace(TERMINAL_REPORTS, '').length === 0) return
   // The human's response supersedes anything already in flight: hook events
@@ -144,7 +144,7 @@ export function humanTyped(tabId: string, data: string): void {
  * re-set a status afterwards.
  */
 export function resetWorktree(worktreeId: string): void {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) return
   const now = Date.now()
   for (const pane of worktree.panes) {
@@ -152,7 +152,7 @@ export function resetWorktree(worktreeId: string): void {
       if (!isPtyTabType(tab.type)) continue
       statusAppliedAt.set(tab.id, now)
       attentionKind.delete(tab.id)
-      repo.tabs.updateStatus(tab.id, 'idle')
+      tables.tabs.updateStatus(tab.id, 'idle')
     }
   }
   rollUp(worktreeId)
@@ -164,7 +164,7 @@ export function resetWorktree(worktreeId: string): void {
  * rail and taskbar stay stuck on working / needs-you.
  */
 export function ptyExited(tabId: string): void {
-  const tab = repo.tabs.get(tabId)
+  const tab = tables.tabs.get(tabId)
   if (!tab || !isPtyTabType(tab.type)) return
   attentionKind.delete(tabId)
   apply(tabId, tab.worktreeId, 'idle')
@@ -172,7 +172,7 @@ export function ptyExited(tabId: string): void {
 
 /** The tab's agent could not be launched. */
 export function launchFailed(tabId: string): void {
-  const tab = repo.tabs.get(tabId)
+  const tab = tables.tabs.get(tabId)
   if (!tab) return
   attentionKind.delete(tabId)
   apply(tabId, tab.worktreeId, 'error')
@@ -277,13 +277,13 @@ function hookEventToStatus(event: string, payload: Record<string, unknown>): Ter
 
 /** Persist one tab's status, then re-aggregate its Worktree and push. */
 function apply(tabId: string, worktreeId: string, status: TerminalStatus): void {
-  repo.tabs.updateStatus(tabId, status)
+  tables.tabs.updateStatus(tabId, status)
   rollUp(worktreeId)
 }
 
 /** Refresh a Worktree's aggregate from its tabs and push the state and the alert. */
 function rollUp(worktreeId: string): void {
-  repo.worktrees.recomputeStatus(worktreeId)
+  tables.worktrees.recomputeStatus(worktreeId)
   runtime.broadcastState()
   runtime.broadcastAlert()
 }

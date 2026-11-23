@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { app, dialog } from 'electron'
 import { IPC } from '@shared/contract'
-import { runtime, repo } from '../runtime'
+import { runtime, tables } from '../runtime'
 import { logger } from '../services/logger'
 import { patchTouches, setSettings } from '../services/settings'
 import { exportWorkspaceToFile, importWorkspaceFromFile } from '../services/workspaces'
@@ -52,13 +52,13 @@ export function register(): void {
   })
 
   // ---- workspaces ----
-  h(IPC.listWorkspaces, () => repo.workspaces.list())
+  h(IPC.listWorkspaces, () => tables.workspaces.list())
 
   h(IPC.openWorkspace, (_e, workspaceId) => {
-    const info = repo.workspaces.get(workspaceId)
+    const info = tables.workspaces.get(workspaceId)
     if (!info) throw new Error('workspace not found')
     // Opening the workspace this instance already runs just means "focus me".
-    if (workspaceId === repo.requireWorkspaceId()) {
+    if (workspaceId === tables.requireWorkspaceId()) {
       const win = runtime.window
       if (win) {
         if (win.isMinimized()) win.restore()
@@ -73,7 +73,7 @@ export function register(): void {
   h(IPC.createWorkspace, (_e, name) => {
     const trimmed = name.trim()
     if (!trimmed) return null
-    const info = repo.workspaces.create(trimmed)
+    const info = tables.workspaces.create(trimmed)
     launchWorkspace(info.id)
     return info
   })
@@ -81,10 +81,10 @@ export function register(): void {
   h(IPC.renameWorkspace, (_e, workspaceId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    repo.workspaces.rename(workspaceId, trimmed)
+    tables.workspaces.rename(workspaceId, trimmed)
     // The title-bar breadcrumb and the OS window title show the current
     // workspace's name.
-    if (workspaceId === repo.requireWorkspaceId()) {
+    if (workspaceId === tables.requireWorkspaceId()) {
       broadcast()
       runtime.refreshWindowTitle()
     }
@@ -96,16 +96,16 @@ export function register(): void {
     // picker greys out the current workspace instead. (An instance of ANOTHER
     // workspace being open while it's deleted is the user's call — its window
     // keeps running on in-memory state until closed.)
-    if (workspaceId === repo.requireWorkspaceId()) {
+    if (workspaceId === tables.requireWorkspaceId()) {
       throw new Error('switch to another workspace before deleting this one')
     }
-    repo.workspaces.remove(workspaceId)
+    tables.workspaces.remove(workspaceId)
     refreshJumpList()
-    return repo.workspaces.list()
+    return tables.workspaces.list()
   })
 
   h(IPC.exportWorkspace, async (_e, workspaceId) => {
-    const ws = repo.workspaces.get(workspaceId)
+    const ws = tables.workspaces.get(workspaceId)
     if (!ws) throw new Error('workspace not found')
     const win = runtime.window ?? undefined
     const opts = {

@@ -16,7 +16,7 @@ import ArchiveTaskButton from '../panel/ArchiveTaskButton'
 import { clampMenuPos, type MenuPos } from '../rail/menu'
 import AddTaskCard from '../panel/AddTaskCard'
 import Settings from './Settings'
-import AddProject from './AddProject'
+import AddRepo from './AddRepo'
 import NewWorktree from './NewWorktree'
 import EditTask from './EditTask'
 import ArchivedTasks from './ArchivedTasks'
@@ -118,15 +118,15 @@ export function ModalShell({
 }
 
 /* ============================================================================
- * Full-board modal ("All tasks") — tasks across all projects, by status.
+ * Full-board modal ("All tasks") — tasks across all repos, by status.
  * ========================================================================== */
 
 function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void }): React.JSX.Element {
   const [menuPos, setMenuPos] = useState<MenuPos | null>(null)
   const openModal = useStore((s) => s.openModal)
-  // Look up the card's project the same way TaskCardContextMenu does, so the
-  // Create Worktree flow can seed the New Worktree modal with the right project.
-  const project = useStore((s) => s.projects.find((p) => p.id === task.projectId))
+  // Look up the card's repo the same way TaskCardContextMenu does, so the
+  // Create Worktree flow can seed the New Worktree modal with the right repo.
+  const repo = useStore((s) => s.repos.find((p) => p.id === task.repoId))
   // "No linked worktree" mirrors TaskCardContextMenu: a fresh todo with no Worktree
   // yet. If the task already has a matching Worktree, don't offer Create Worktree.
   const hasWorktree = useStore((s) => !!task.worktreeId && s.worktrees.some((w) => w.id === task.worktreeId))
@@ -169,7 +169,7 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
-            openModal('newWorktree', { project, task })
+            openModal('newWorktree', { repo, task })
           }}
           className="mt-2 inline-flex items-center gap-1 rounded-btn border border-line-2 px-2 py-1 text-[10.5px] font-semibold text-accent hover:bg-hover transition-colors no-drag"
         >
@@ -183,19 +183,19 @@ function BoardTaskCard({ task, onDragEnd }: { task: Task; onDragEnd?: () => void
 }
 
 function FullBoard(): React.JSX.Element {
-  const projects = useStore((s) => s.projects)
+  const repos = useStore((s) => s.repos)
   const tasks = useStore((s) => s.tasks)
   const closeModal = useStore((s) => s.closeModal)
   const openModal = useStore((s) => s.openModal)
   const [hoverCell, setHoverCell] = useState<string | null>(null)
 
-  // Dropping a card on a cell sets its status (column) and project (lane).
-  const dropTask = (taskId: string, projectId: string, status: TaskStatus): void => {
+  // Dropping a card on a cell sets its status (column) and repo (lane).
+  const dropTask = (taskId: string, repoId: string, status: TaskStatus): void => {
     const task = tasks.find((t) => t.id === taskId)
     if (!task) return
     const patch: TaskPatch = {}
     if (task.status !== status) patch.status = status
-    if (task.projectId !== projectId) patch.projectId = projectId
+    if (task.repoId !== repoId) patch.repoId = repoId
     if (Object.keys(patch).length) void window.orbital.updateTask(taskId, patch)
   }
 
@@ -208,7 +208,7 @@ function FullBoard(): React.JSX.Element {
         <div className="min-w-0">
           <div className="text-[15px] font-bold text-text">All tasks across your repos</div>
           <div className="mt-0.5 text-[11.5px] text-dim">
-            {projects.length} project{projects.length === 1 ? '' : 's'} · {tasks.length} task
+            {repos.length} repo{repos.length === 1 ? '' : 's'} · {tasks.length} task
             {tasks.length === 1 ? '' : 's'}
           </div>
         </div>
@@ -235,11 +235,11 @@ function FullBoard(): React.JSX.Element {
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto p-[18px]">
-        {projects.length === 0 ? (
+        {repos.length === 0 ? (
           <div className="text-[12px] text-faint">No repos yet.</div>
         ) : (
           <div className="min-w-[820px]">
-            {/* Status column headers, offset by the project-label gutter.
+            {/* Status column headers, offset by the repo-label gutter.
                 No bottom padding so the header sits flush on the first lane. */}
             <div className="sticky top-0 z-10 flex gap-2 bg-panel">
               <div className="w-[150px] flex-none" />
@@ -261,8 +261,8 @@ function FullBoard(): React.JSX.Element {
               })}
             </div>
 
-            {/* One swim-lane per project, split by a dashed lane line. */}
-            {projects.map((p, i) => (
+            {/* One swim-lane per repo, split by a dashed lane line. */}
+            {repos.map((p, i) => (
               <div
                 key={p.id}
                 className={`flex gap-2 ${i > 0 ? 'border-t border-dashed border-line-strong' : ''}`}
@@ -274,7 +274,7 @@ function FullBoard(): React.JSX.Element {
                   </span>
                 </div>
                 {TASK_STATUSES.map((status) => {
-                  const cell = tasks.filter((t) => t.projectId === p.id && t.status === status)
+                  const cell = tasks.filter((t) => t.repoId === p.id && t.status === status)
                   const cellKey = `${p.id}:${status}`
                   const isHover = hoverCell === cellKey
                   return (
@@ -298,7 +298,7 @@ function FullBoard(): React.JSX.Element {
                       {cell.map((task) => (
                         <BoardTaskCard key={task.id} task={task} onDragEnd={() => setHoverCell(null)} />
                       ))}
-                      <AddTaskCard projectId={p.id} status={status} />
+                      <AddTaskCard repoId={p.id} status={status} />
                     </div>
                   )
                 })}
@@ -349,7 +349,7 @@ export default function ModalRoot(): React.JSX.Element | null {
           className="fixed inset-0 grid place-items-center bg-scrim p-8 no-drag"
         >
           {entry.type === 'settings' && <Settings />}
-          {entry.type === 'addProject' && <AddProject />}
+          {entry.type === 'addRepo' && <AddRepo />}
           {entry.type === 'newWorktree' && <NewWorktree />}
           {entry.type === 'editTask' && <EditTask />}
           {entry.type === 'board' && <FullBoard />}

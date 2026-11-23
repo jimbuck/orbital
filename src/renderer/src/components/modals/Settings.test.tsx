@@ -41,9 +41,9 @@ function makeSettings(theme: ThemeMode, pair?: SystemPair): SettingsModel {
 
 function seed(theme: ThemeMode, pair?: SystemPair): void {
   useStore.setState({
-    projects: [],
+    repos: [],
     worktrees: [],
-    activeProjectId: null,
+    activeRepoId: null,
     activeWorktreeId: null,
     workspace: null,
     settings: makeSettings(theme, pair)

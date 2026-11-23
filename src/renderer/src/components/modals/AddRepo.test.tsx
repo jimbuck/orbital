@@ -1,20 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { Project } from '@shared/types'
+import type { Repo } from '@shared/types'
 import type { GithubAccountRef, GithubContext, GithubCreateRepoOptions, GithubRepoSummary } from '@shared/github'
 import { useStore } from '@renderer/store'
 
-import AddProject from './AddProject'
-import { joinPath, timeAgo } from './AddProjectGithub'
+import AddRepo from './AddRepo'
+import { joinPath, timeAgo } from './AddRepoGithub'
 
 /**
- * The Add Project dialog has three sources behind one radio group. These tests
+ * The Add Repo dialog has three sources behind one radio group. These tests
  * pin the wiring for each: the local picker still does what it did, and the
  * two GitHub forms load the gh context once, gate their primary action on the
  * right things, and hand the bridge exactly the request the form describes.
  */
 
-const project: Project = {
+const repo: Repo = {
   id: 'p1',
   name: 'orbital',
   repoPath: 'C:\\Projects\\orbital',
@@ -69,7 +69,7 @@ const repos: GithubRepoSummary[] = [
   }
 ]
 
-const addProject = vi.fn(async (): Promise<Project | null> => project)
+const addRepo = vi.fn(async (): Promise<Repo | null> => repo)
 const pickDirectory = vi.fn(async (): Promise<string | null> => 'D:\\Code')
 const githubContext = vi.fn(contextFor)
 const githubListRepos = vi.fn(async (_owner: string) => repos)
@@ -78,17 +78,17 @@ const githubCreateRepo = vi.fn(async (opts: GithubCreateRepoOptions) => ({
   nameWithOwner: `${opts.owner}/${opts.name}`,
   url: `https://github.com/${opts.owner}/${opts.name}`
 }))
-const githubCloneRepo = vi.fn(async (_nameWithOwner: string, _parentDir: string): Promise<Project> => project)
+const githubCloneRepo = vi.fn(async (_nameWithOwner: string, _parentDir: string): Promise<Repo> => repo)
 
-function seed(projects: Project[] = [project]): void {
+function seed(repos: Repo[] = [repo]): void {
   useStore.setState({
-    projects,
+    repos,
     worktrees: [],
     tasks: [],
-    activeProjectId: projects[0]?.id ?? null,
+    activeRepoId: repos[0]?.id ?? null,
     activeWorktreeId: null,
-    modal: 'addProject',
-    modalStack: [{ type: 'addProject', data: null }],
+    modal: 'addRepo',
+    modalStack: [{ type: 'addRepo', data: null }],
     modalData: null
   } as unknown as Parameters<typeof useStore.setState>[0])
 }
@@ -100,7 +100,7 @@ function sourceRadio(name: string): HTMLElement {
 /** Render and, for a GitHub mode, wait for the context to land so the form is live. */
 async function open(mode: 'local' | 'clone' | 'create' = 'local'): Promise<void> {
   seed()
-  render(<AddProject />)
+  render(<AddRepo />)
   if (mode === 'local') return
   fireEvent.click(sourceRadio(mode === 'clone' ? 'Clone from GitHub' : 'New GitHub repo'))
   await waitFor(() => expect(githubContext).toHaveBeenCalled())
@@ -111,7 +111,7 @@ async function open(mode: 'local' | 'clone' | 'create' = 'local'): Promise<void>
 beforeEach(() => {
   // Reset implementations too: a `mockImplementationOnce` a failing test never
   // consumed would otherwise fire in the next one.
-  addProject.mockReset().mockImplementation(async () => project)
+  addRepo.mockReset().mockImplementation(async () => repo)
   pickDirectory.mockReset().mockImplementation(async () => 'D:\\Code')
   githubContext.mockReset().mockImplementation(contextFor)
   githubListRepos.mockReset().mockImplementation(async () => repos)
@@ -120,9 +120,9 @@ beforeEach(() => {
     nameWithOwner: `${opts.owner}/${opts.name}`,
     url: `https://github.com/${opts.owner}/${opts.name}`
   }))
-  githubCloneRepo.mockReset().mockImplementation(async () => project)
+  githubCloneRepo.mockReset().mockImplementation(async () => repo)
   vi.stubGlobal('orbital', {
-    addProject,
+    addRepo,
     pickDirectory,
     githubContext,
     githubListRepos,
@@ -137,17 +137,17 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('AddProject — source switch', () => {
+describe('AddRepo — source switch', () => {
   it('starts on the local folder picker and does not touch gh until asked', async () => {
     await open()
     expect(screen.getByRole('button', { name: /Choose folder/ })).toBeTruthy()
     expect(githubContext).not.toHaveBeenCalled()
   })
 
-  it('opens the native picker and closes once a project comes back', async () => {
+  it('opens the native picker and closes once a repo comes back', async () => {
     await open()
     fireEvent.click(screen.getByRole('button', { name: /Choose folder/ }))
-    await waitFor(() => expect(addProject).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(addRepo).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -165,7 +165,7 @@ describe('AddProject — source switch', () => {
       throw new Error("Error invoking remote method 'orbital:githubContext': Error: You are not logged into any GitHub hosts. Run gh auth login")
     })
     seed()
-    render(<AddProject />)
+    render(<AddRepo />)
     fireEvent.click(sourceRadio('New GitHub repo'))
     const alert = await screen.findByRole('alert')
     // Electron's IPC wrapper is stripped so the user sees gh's own sentence.
@@ -179,8 +179,8 @@ describe('AddProject — source switch', () => {
   })
 })
 
-describe('AddProject — new GitHub repo', () => {
-  it('defaults the owner to the signed-in user and the folder to beside an existing project', async () => {
+describe('AddRepo — new GitHub repo', () => {
+  it('defaults the owner to the signed-in user and the folder to beside an existing repo', async () => {
     await open('create')
     expect((screen.getByLabelText('Owner') as HTMLSelectElement).value).toBe('jimbuck')
     expect((screen.getByLabelText(/Local folder/) as HTMLInputElement).value).toBe('C:\\Projects')
@@ -299,7 +299,7 @@ describe('AddProject — new GitHub repo', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('was created at https://github.com/jimbuck/demo')
     expect(alert.textContent).toContain('could not write')
-    expect(useStore.getState().modal).toBe('addProject')
+    expect(useStore.getState().modal).toBe('addRepo')
     // The form is frozen on the repo that now exists; only the clone reruns.
     expect(screen.getByLabelText('Repository name').hasAttribute('disabled')).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'Retry clone' }))
@@ -309,7 +309,7 @@ describe('AddProject — new GitHub repo', () => {
   })
 })
 
-describe('AddProject — clone from GitHub', () => {
+describe('AddRepo — clone from GitHub', () => {
   it('lists the owner\u2019s repositories with their visibility and filters as you type', async () => {
     await open('clone')
     await waitFor(() => expect(githubListRepos).toHaveBeenCalledWith('jimbuck', personal))
@@ -339,7 +339,7 @@ describe('AddProject — clone from GitHub', () => {
     fireEvent.click(row)
     expect(row.getAttribute('aria-selected')).toBe('true')
     // The folder defaults to the last one cloned into this session (or beside
-    // an existing project), so read it rather than assume which.
+    // an existing repo), so read it rather than assume which.
     const parent = (screen.getByLabelText(/Local folder/) as HTMLInputElement).value
     expect(parent).toBeTruthy()
     expect(screen.getByText(`${parent}\\orbital`)).toBeTruthy()
@@ -369,11 +369,11 @@ describe('AddProject — clone from GitHub', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe('D:\\x\\orbital already exists and is not empty.')
-    expect(useStore.getState().modal).toBe('addProject')
+    expect(useStore.getState().modal).toBe('addRepo')
   })
 })
 
-describe('AddProject — GitHub account picker', () => {
+describe('AddRepo — GitHub account picker', () => {
   it('lists every signed-in account, defaulting to the active one, and hides itself with only one', async () => {
     await open('create')
     const picker = screen.getByLabelText(/GitHub account/) as HTMLSelectElement

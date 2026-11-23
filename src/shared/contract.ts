@@ -18,9 +18,9 @@ import type {
   GitStatus,
   Pane,
   ProfileDirInfo,
-  Project,
-  ProjectAgentPatch,
-  ProjectFolder,
+  Repo,
+  RepoAgentPatch,
+  RailFolder,
   RemoveWorktreeOptions,
   SearchQuery,
   SearchResults,
@@ -111,41 +111,41 @@ export const contract = {
   createWorkspace: invoke<(name: string) => Promise<WorkspaceInfo | null>>(),
   renameWorkspace: invoke<(workspaceId: string, name: string) => Promise<void>>(),
   /**
-   * Delete a workspace and everything in it (projects/worktrees/tasks rows —
+   * Delete a workspace and everything in it (repos/worktrees/tasks rows —
    * nothing on disk). The current workspace can't delete itself.
    */
   removeWorkspace: invoke<(workspaceId: string) => Promise<WorkspaceInfo[]>>(),
-  /** Write a workspace (projects + settings) to a shareable YAML via save dialog. */
+  /** Write a workspace (repos + settings) to a shareable YAML via save dialog. */
   exportWorkspace: invoke<(workspaceId: string) => Promise<string | null>>(),
   /** Create a new workspace from a shared YAML via open dialog. */
   importWorkspace: invoke<() => Promise<WorkspaceInfo | null>>(),
 
-  // projects
-  addProject: invoke<() => Promise<Project | null>>(),
-  removeProject: invoke<(projectId: string) => Promise<void>>(),
-  renameProject: invoke<(projectId: string, name: string) => Promise<void>>(),
+  // repos
+  addRepo: invoke<() => Promise<Repo | null>>(),
+  removeRepo: invoke<(repoId: string) => Promise<void>>(),
+  renameRepo: invoke<(repoId: string, name: string) => Promise<void>>(),
   /** Native folder picker; `null` when cancelled. */
   pickDirectory: invoke<(title?: string) => Promise<string | null>>(),
 
-  // project folders: how the rail groups projects. None of these touch a
-  // project's own row, its repo path, its worktrees or any setting.
+  // repo folders: how the rail groups repos. None of these touch a
+  // repo's own row, its repo path, its worktrees or any setting.
   /**
-   * Add a folder. With `projectId` it takes that project's place in the rail
+   * Add a folder. With `repoId` it takes that repo's place in the rail
    * and holds it; without, it goes at the top.
    */
-  createProjectFolder: invoke<(name: string, projectId?: string) => Promise<ProjectFolder>>(),
-  renameProjectFolder: invoke<(folderId: string, name: string) => Promise<void>>(),
-  /** Delete a folder. Its projects stay in Orbital, loose in the rail where the folder was. */
-  removeProjectFolder: invoke<(folderId: string) => Promise<void>>(),
-  setProjectFolderCollapsed: invoke<(folderId: string, collapsed: boolean) => Promise<void>>(),
+  createRailFolder: invoke<(name: string, repoId?: string) => Promise<RailFolder>>(),
+  renameRailFolder: invoke<(folderId: string, name: string) => Promise<void>>(),
+  /** Delete a folder. Its repos stay in Orbital, loose in the rail where the folder was. */
+  removeRailFolder: invoke<(folderId: string) => Promise<void>>(),
+  setRailFolderCollapsed: invoke<(folderId: string, collapsed: boolean) => Promise<void>>(),
   /**
-   * Put a project in `folderId` (`null` = the rail's top level), just before
-   * `beforeId` or last when that is null. `beforeId` names a project in that
-   * folder or, at the top level, a folder or a loose project.
+   * Put a repo in `folderId` (`null` = the rail's top level), just before
+   * `beforeId` or last when that is null. `beforeId` names a repo in that
+   * folder or, at the top level, a folder or a loose repo.
    */
-  placeProject: invoke<(projectId: string, folderId: string | null, beforeId: string | null) => Promise<void>>(),
-  /** Put a folder just before the top-level row `beforeId` (a folder or a loose project), or last when null. */
-  placeProjectFolder: invoke<(folderId: string, beforeId: string | null) => Promise<void>>(),
+  placeRepo: invoke<(repoId: string, folderId: string | null, beforeId: string | null) => Promise<void>>(),
+  /** Put a folder just before the top-level row `beforeId` (a folder or a loose repo), or last when null. */
+  placeRailFolder: invoke<(folderId: string, beforeId: string | null) => Promise<void>>(),
 
   // github (via the gh CLI)
   /**
@@ -163,12 +163,12 @@ export const contract = {
   githubCreateRepo: invoke<(opts: GithubCreateRepoOptions) => Promise<GithubCreatedRepo>>(),
   /**
    * Clone `owner/repo` into `<parentDir>/<repo>` as `account` and register it
-   * as a project, like `addProject` does for a folder picked by hand.
+   * as a repo, like `addRepo` does for a folder picked by hand.
    */
-  githubCloneRepo: invoke<(nameWithOwner: string, parentDir: string, account?: GithubAccountRef) => Promise<Project>>(),
+  githubCloneRepo: invoke<(nameWithOwner: string, parentDir: string, account?: GithubAccountRef) => Promise<Repo>>(),
 
   // worktrees / panes / tabs
-  createWorktree: invoke<(projectId: string, opts: CreateWorktreeOptions) => Promise<Worktree>>(),
+  createWorktree: invoke<(repoId: string, opts: CreateWorktreeOptions) => Promise<Worktree>>(),
   removeWorktree: invoke<(worktreeId: string, opts: RemoveWorktreeOptions) => Promise<void>>(),
   renameWorktree: invoke<(worktreeId: string, name: string) => Promise<void>>(),
   /**
@@ -178,10 +178,10 @@ export const contract = {
   syncWorktreeEnv: invoke<(worktreeId: string) => Promise<{ copied: string[] }>>(),
   /** Force-reset a Worktree's terminals (and its aggregate) to idle when the status is out of sync. */
   clearWorktreeStatus: invoke<(worktreeId: string) => Promise<void>>(),
-  /** Branches of a project's repo + what HEAD points at (for the New Worktree base-ref picker). */
-  listBranches: invoke<(projectId: string) => Promise<BranchInfo>>(),
-  /** Update a project's default agent profile / explicit executable path. */
-  setProjectAgent: invoke<(projectId: string, patch: ProjectAgentPatch) => Promise<void>>(),
+  /** Branches of a repo + what HEAD points at (for the New Worktree base-ref picker). */
+  listBranches: invoke<(repoId: string) => Promise<BranchInfo>>(),
+  /** Update a repo's default agent profile / explicit executable path. */
+  setRepoAgent: invoke<(repoId: string, patch: RepoAgentPatch) => Promise<void>>(),
   /**
    * What a typed profile directory resolves to (`~`/`%VAR%` expanded) and
    * whether it is there yet — so Settings can show the real path before a
@@ -334,7 +334,7 @@ export const contract = {
   cancelSearch: invoke<(searchId: string) => Promise<void>>(),
 
   // tasks
-  createTask: invoke<(projectId: string, title: string, description?: string, tags?: string[]) => Promise<Task>>(),
+  createTask: invoke<(repoId: string, title: string, description?: string, tags?: string[]) => Promise<Task>>(),
   updateTask: invoke<(taskId: string, patch: TaskPatch) => Promise<Task>>(),
   /** Tasks are archived, never deleted: hidden from the board and panel, but kept (with their number). */
   archiveTask: invoke<(taskId: string) => Promise<void>>(),
@@ -394,29 +394,29 @@ export const contract = {
    */
   openInEditor: invoke<(worktreeId: string, path: string) => Promise<void>>(),
   /**
-   * Open a PROJECT's repo directory in the OS file manager.
+   * Open a REPO's repo directory in the OS file manager.
    *
-   * The rail's project header offers this, and it cannot go through
-   * `openPath(worktreeId, '')`: a project only has a root Worktree row once
-   * `reconcileProjectWorktrees` has listed its checkouts, and that returns
+   * The rail's repo header offers this, and it cannot go through
+   * `openPath(worktreeId, '')`: a repo only has a root Worktree row once
+   * `reconcileRepoWorktrees` has listed its checkouts, and that returns
    * empty-handed for a path that is not a git repo — permanently, not just
    * until the first scan. "Open the folder and see why" is exactly what the
    * user wants in that state, so the action has to be reachable without a
    * Worktree.
    *
    * There is no `path` parameter, and that is the point: the only thing the
-   * renderer names is a project id, and main derives the directory from its own
+   * renderer names is a repo id, and main derives the directory from its own
    * stored `repoPath`. Nothing renderer-supplied reaches the OS, so there is no
    * path to contain — as opposed to re-admitting an absolute path over the
    * bridge, which is the hole the `(worktreeId, path)` shape closed.
    */
-  openProjectPath: invoke<(projectId: string) => Promise<void>>(),
+  openRepoPath: invoke<(repoId: string) => Promise<void>>(),
   /**
-   * Open an external terminal window at a PROJECT's repo directory. Same
-   * project-id-only contract, and the same reason for existing, as
-   * `openProjectPath`.
+   * Open an external terminal window at a REPO's repo directory. Same
+   * repo-id-only contract, and the same reason for existing, as
+   * `openRepoPath`.
    */
-  openProjectInTerminal: invoke<(projectId: string) => Promise<void>>(),
+  openRepoInTerminal: invoke<(repoId: string) => Promise<void>>(),
   /** Reveal the debug-log folder in the OS file manager (for the Settings "Open log folder" action). */
   openLogFolder: invoke<() => Promise<void>>(),
   windowMinimize: send<() => void>(),

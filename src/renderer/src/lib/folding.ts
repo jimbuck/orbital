@@ -216,7 +216,7 @@ function countNewlines(s: string): number {
 }
 
 /**
- * Project `value` with the ranges starting at the `folded` lines collapsed.
+ * Repo `value` with the ranges starting at the `folded` lines collapsed.
  * `tabSize` and `lang` decide where the ranges are (see `computeFoldRanges`).
  *
  * The line tables are built once, on first use, and shared by every question

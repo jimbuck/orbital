@@ -56,7 +56,7 @@ description: Report status, file and progress tasks, list sibling worktrees, ope
 allowed-tools:
   - Bash(orbital status *)
   - Bash(orbital whoami *)
-  - Bash(orbital projects *)
+  - Bash(orbital repos *)
   - Bash(orbital worktrees *)
   - Bash(orbital task list *)
   - Bash(orbital task show *)
@@ -82,7 +82,7 @@ set there; if it is absent, you are in an ordinary terminal and every command
 below will fail with \`not connected to Orbital\`. Check once rather than guessing:
 
 \`\`\`sh
-orbital whoami          # project, worktree, branch, path, status, dev servers
+orbital whoami          # repo, worktree, branch, path, status, dev servers
 \`\`\`
 
 Add \`--json\` to any command to get machine-readable output instead of a table —
@@ -107,7 +107,7 @@ lifecycle events and you do not need to call \`orbital status\` at all.
 
 ## Tasks
 
-A per-project tracker the human watches. File follow-up work you notice instead
+A per-repo tracker the human watches. File follow-up work you notice instead
 of expanding the scope of what you were asked to do.
 
 \`\`\`sh
@@ -154,27 +154,27 @@ orbital task start 12                               # worktree from task #12, br
 orbital worktree sync                               # copy the root checkout's env files into this worktree again
 \`\`\`
 
-A new worktree gets the project's env files (\`.env\`, agent config dirs) copied in
+A new worktree gets the repo's env files (\`.env\`, agent config dirs) copied in
 when it is created — once. They are not kept in sync afterwards, so if the root
 checkout's copies have changed, \`orbital worktree sync\` copies them again
 (overwriting this worktree's). \`task start\` is the scriptable form of the
 cockpit's play button: it creates the worktree, links the task to it, and moves
 the task to \`in-progress\`.
 
-## Other projects in this workspace
+## Other repos in this workspace
 
 \`\`\`sh
-orbital projects                                    # the workspace's projects: name, id, repo path (* = yours)
-orbital task list --project api                     # a sibling project's open tasks
-orbital task add "Bump the client" --project api    # file work against it
-orbital worktree new --project api --worktree feat/x
+orbital repos                                    # the workspace's repos: name, id, repo path (* = yours)
+orbital task list --repo api                     # a sibling repo's open tasks
+orbital task add "Bump the client" --repo api    # file work against it
+orbital worktree new --repo api --worktree feat/x
 \`\`\`
 
-Task and worktree commands are scoped to this terminal's project. \`--project <name|id>\`
+Task and worktree commands are scoped to this terminal's repo. \`--repo <name|id>\`
 (on \`task list/show/add/update/start/done/delete\`, \`worktrees\` and \`worktree new\`)
-points one at a sibling project in the same workspace instead. Passing it is the
+points one at a sibling repo in the same workspace instead. Passing it is the
 opt-in, so writes go through. Reach across only when the work calls for it, such as
-filing a bug that belongs to another repo, and tell the human which project you touched.
+filing a bug that belongs to another repo, and tell the human which repo you touched.
 
 ## Tabs and dev servers
 
@@ -223,7 +223,7 @@ function isOrbitalSkill(file: string): boolean {
 /**
  * Write the skill. Refuses to touch a SKILL.md that exists but is NOT ours —
  * the user (or another tool) owns that file, and a personal skill overrides a
- * project one, so silently replacing it could change how their sessions behave.
+ * repo one, so silently replacing it could change how their sessions behave.
  */
 export function install(agent: AgentConfig): ClaudeSkillStatus {
   const file = skillPath(agent)

@@ -30,8 +30,8 @@ import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './Modal
 import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
 import { Select } from './Select'
 
-/** Panel width shared by all three Add Project modes so switching does not resize the dialog. */
-export const ADD_PROJECT_WIDTH = 560
+/** Panel width shared by all three Add Repo modes so switching does not resize the dialog. */
+export const ADD_REPO_WIDTH = 560
 
 /* ============================================================================
  * GitHub context (who am I, my orgs, template lists) — loaded once per dialog
@@ -111,7 +111,7 @@ const VISIBILITY_LABEL: Record<GithubVisibility, string> = {
 
 /**
  * The folder most recently cloned into during this app run, so a second clone
- * defaults next to the first. Falls back to the parent of an existing project.
+ * defaults next to the first. Falls back to the parent of an existing repo.
  */
 let rememberedParentDir = ''
 
@@ -128,7 +128,7 @@ export function joinPath(parent: string, name: string): string {
 }
 
 function useDefaultParentDir(): string {
-  const firstRepo = useStore((s) => s.projects[0]?.repoPath)
+  const firstRepo = useStore((s) => s.repos[0]?.repoPath)
   return rememberedParentDir || (firstRepo ? parentOf(firstRepo) : '')
 }
 
@@ -423,7 +423,7 @@ export function CloneFromGithub({ github, modeSwitch, onDone }: FormProps): Reac
     <ModalShell
       title="Add repo"
       subtitle="Clone one of your GitHub repositories"
-      width={ADD_PROJECT_WIDTH}
+      width={ADD_REPO_WIDTH}
       onClose={onDone}
       footer={
         <>
@@ -744,7 +744,7 @@ export function CreateOnGithub({ github, modeSwitch, onDone }: FormProps): React
     <ModalShell
       title="Add repo"
       subtitle="Create a repository on GitHub and clone it"
-      width={ADD_PROJECT_WIDTH}
+      width={ADD_REPO_WIDTH}
       onClose={onDone}
       footer={
         <>

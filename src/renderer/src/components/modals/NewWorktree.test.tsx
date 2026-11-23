@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { CreateWorktreeOptions, Project } from '@shared/types'
+import type { CreateWorktreeOptions, Repo } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 import NewWorktree from './NewWorktree'
@@ -17,9 +17,9 @@ import NewWorktree from './NewWorktree'
  * this file owns "and this parent is wired to it correctly".
  */
 
-const createWorktree = vi.fn(async (projectId: string, opts: CreateWorktreeOptions) => ({
+const createWorktree = vi.fn(async (repoId: string, opts: CreateWorktreeOptions) => ({
   id: 'wt-1',
-  projectId,
+  repoId,
   name: opts.name,
   branch: 'x'
 }))
@@ -29,7 +29,7 @@ const listBranches = vi.fn(async () => ({
   head: 'main'
 }))
 
-const project: Project = {
+const repo: Repo = {
   id: 'p1',
   name: 'orbital',
   repoPath: 'C:/repo',
@@ -39,12 +39,12 @@ const project: Project = {
 
 function seed(): void {
   useStore.setState({
-    projects: [project],
+    repos: [repo],
     worktrees: [],
     tasks: [],
-    activeProjectId: project.id,
+    activeRepoId: repo.id,
     activeWorktreeId: null,
-    modalData: { project }
+    modalData: { repo }
   } as unknown as Parameters<typeof useStore.setState>[0])
 }
 

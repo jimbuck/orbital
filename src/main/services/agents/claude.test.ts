@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 
 vi.mock('./executable', () => ({
   resolveExecutable: async () => ({ file: 'cmd.exe', prefixArgs: ['/c', 'claude.cmd'] })
@@ -10,13 +10,13 @@ vi.mock('./executable', () => ({
 
 import { claudeProjectDirName, claudeProvider, claudeTranscriptPath } from './claude'
 
-const project = { id: 'p1', name: 'orbital', repoPath: 'C:\\Projects\\orbital' } as Project
-const worktree = { id: 'w1', projectId: 'p1', path: 'C:\\Projects\\orbital', branch: 'main' } as Worktree
+const repo = { id: 'p1', name: 'orbital', repoPath: 'C:\\Projects\\orbital' } as Repo
+const worktree = { id: 'w1', repoId: 'p1', path: 'C:\\Projects\\orbital', branch: 'main' } as Worktree
 
 describe('claudeProvider.resolveCommand', () => {
   it('starts a fresh session under the id Orbital minted', async () => {
     const cmd = await claudeProvider.resolveCommand({
-      project,
+      repo,
       worktree,
       briefingPath: null,
       session: { id: 'aaaaaaaa-0000-4000-8000-000000000001', resume: false }
@@ -27,7 +27,7 @@ describe('claudeProvider.resolveCommand', () => {
 
   it('resumes a stored session by id, keeping the briefing', async () => {
     const cmd = await claudeProvider.resolveCommand({
-      project,
+      repo,
       worktree,
       briefingPath: 'C:\\app\\brief.txt',
       session: { id: 'aaaaaaaa-0000-4000-8000-000000000001', resume: true }
@@ -43,7 +43,7 @@ describe('claudeProvider.resolveCommand', () => {
   })
 
   it('passes no session flag when none is given', async () => {
-    const cmd = await claudeProvider.resolveCommand({ project, worktree, briefingPath: null })
+    const cmd = await claudeProvider.resolveCommand({ repo, worktree, briefingPath: null })
     expect(cmd.args).toEqual(['/c', 'claude.cmd'])
   })
 

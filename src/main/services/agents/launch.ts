@@ -1,6 +1,6 @@
 import { delimiter as PATH_DELIM } from 'node:path'
 import { ENV, SUPPORTED_AGENTS, resolveAgentRef, type Worktree, type Tab } from '@shared/types'
-import { runtime, repo } from '../../runtime'
+import { runtime, tables } from '../../runtime'
 import { launchFailed } from '../../status'
 import { cliDir } from './paths'
 import { getProvider, type AgentProvider, type AgentSession, type SessionLookup } from './provider'
@@ -23,7 +23,8 @@ function terminalEnv(worktree: Worktree, tabId: string): Record<string, string> 
   return {
     [ENV.terminalId]: tabId,
     [ENV.worktreeId]: worktree.id,
-    [ENV.projectId]: worktree.projectId,
+    [ENV.repoId]: worktree.repoId,
+    [ENV.legacyRepoId]: worktree.repoId,
     [ENV.socket]: activeControlPipePath(),
     PATH: path,
     Path: path
@@ -53,15 +54,15 @@ export function recordAgentSession(tab: Tab, sessionId: unknown): void {
   if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return
   if (tab.config.agentSessionId === sessionId) return
   // Re-read: the tab's config may have moved on (a rename) since `tab` was fetched.
-  const current = repo.tabs.get(tab.id)
+  const current = tables.tabs.get(tab.id)
   if (!current) return
-  repo.tabs.updateConfig(tab.id, { ...current.config, agentSessionId: sessionId })
+  tables.tabs.updateConfig(tab.id, { ...current.config, agentSessionId: sessionId })
 }
 
 /** Session ids every agent tab currently holds — what a discovery must not claim twice. */
 function takenSessionIds(): Set<string> {
   const taken = new Set<string>()
-  for (const worktree of repo.worktrees.list()) {
+  for (const worktree of tables.worktrees.list()) {
     for (const pane of worktree.panes) {
       for (const tab of pane.tabs) {
         if (tab.type === 'agent' && tab.config.agentSessionId) taken.add(tab.config.agentSessionId.toLowerCase())
@@ -123,7 +124,7 @@ function discoverAgentSession(tab: Tab, provider: AgentProvider, lookup: Session
   logger.info('watching for agent session', { tab: tab.id, provider: provider.id, profileDir: lookup.profileDir, cwd: lookup.cwd })
   let attempt = 0
   const tick = async (): Promise<void> => {
-    const current = repo.tabs.get(tab.id)
+    const current = tables.tabs.get(tab.id)
     if (!current || current.config.agentSessionId) return
     if (Date.now() - launchedAt > DISCOVERY_DEADLINE_MS) {
       logger.info('gave up watching for agent session', { tab: tab.id, provider: provider.id })
@@ -152,17 +153,17 @@ function discoverAgentSession(tab: Tab, provider: AgentProvider, lookup: Session
  * before resumes its conversation rather than starting over (see agentSession).
  */
 async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
-  const project = repo.projects.get(worktree.projectId)
-  if (!project) return
+  const repo = tables.repos.get(worktree.repoId)
+  if (!repo) return
   // The configured profile this tab launches (profile dir, exec path, args, env).
   // Each reference is tried in turn, so a tab whose profile was deleted falls
-  // back to the project's default rather than to a bare provider. `agentProvider`
+  // back to the repo's default rather than to a bare provider. `agentProvider`
   // is what tabs created before profiles had ids stored.
   const agentConfig = resolveAgentRef(
     getSettings().agents,
     tab.config.agentId,
     tab.config.agentProvider,
-    project.defaultAgentId
+    repo.defaultAgentId
   )
   const provider = getProvider(agentConfig?.provider)
   const envVar = SUPPORTED_AGENTS.find((a) => a.id === provider.id)?.configDirEnvVar
@@ -177,7 +178,7 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
     // would leave an unread file behind on every launch.
     const briefingPath = provider.acceptsBriefingFile
       ? writeBriefing({
-          project,
+          repo,
           worktree,
           tabId: tab.id,
           providerName: provider.id === 'claude' ? 'Claude Code' : provider.displayName,
@@ -189,16 +190,16 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
             provider.id === 'claude' && !!agentConfig && claudeHooks.status(agentConfig).installed
         })
       : null
-    // A project-level path is the more specific override; the workspace
-    // agent's path fills in when the project doesn't set one.
-    const execPath = project.agentExecPath || agentConfig?.execPath
+    // A repo-level path is the more specific override; the workspace
+    // agent's path fills in when the repo doesn't set one.
+    const execPath = repo.agentExecPath || agentConfig?.execPath
     const lookup: SessionLookup = { profileDir, cwd: worktree.path, execPath }
     const session = await agentSession(tab, provider, lookup)
-    const command = await provider.resolveCommand({ project, worktree, briefingPath, execPath, session })
+    const command = await provider.resolveCommand({ repo, worktree, briefingPath, execPath, session })
     if (agentConfig?.args?.length) command.args.push(...agentConfig.args)
     // The tab may have been closed during the async executable lookup; don't spawn
     // a PTY nothing references (it could never be killed before app exit).
-    if (!repo.tabs.get(tab.id)) {
+    if (!tables.tabs.get(tab.id)) {
       deleteBriefing(worktree.id, tab.id)
       return
     }
@@ -220,7 +221,7 @@ async function spawnAgent(worktree: Worktree, tab: Tab): Promise<void> {
     // the CLI writes, so this tab too can resume next time.
     if (!session) discoverAgentSession(tab, provider, lookup, Date.now())
   } catch (err) {
-    if (!repo.tabs.get(tab.id)) return // tab gone during resolution — nothing to report
+    if (!tables.tabs.get(tab.id)) return // tab gone during resolution — nothing to report
     const msg = err instanceof Error ? err.message : String(err)
     runtime.terminals.notify(
       tab.id,

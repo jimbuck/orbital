@@ -2,7 +2,7 @@ import { dirname, basename } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { parse, stringify } from 'yaml'
-import { WORKSPACE_CONFIG_VERSION, type WorkspaceConfig, type WorkspaceProjectConfig } from '@shared/types'
+import { WORKSPACE_CONFIG_VERSION, type WorkspaceConfig, type WorkspaceRepoConfig } from '@shared/types'
 import { parseSettings } from '@shared/settings'
 
 /**
@@ -13,7 +13,7 @@ import { parseSettings } from '@shared/settings'
 
 const HEADER = `# Orbital workspace export.
 # Share this file to hand someone a workspace: Import Workspace in Orbital
-# recreates it (projects + workspace settings). Paths are absolute, so the
+# recreates it (repos + workspace settings). Paths are absolute, so the
 # importing machine needs the repos at the same locations (or edit them here).
 `
 
@@ -24,7 +24,7 @@ export function workspaceNameFromFile(file: string): string {
 
 /**
  * Coerce a parsed (possibly hand-authored or partial) document into a valid
- * {@link WorkspaceConfig}: fill a missing id/name/version, drop project entries
+ * {@link WorkspaceConfig}: fill a missing id/name/version, drop repo entries
  * with no path, and generate ids for entries that lack one or collide.
  */
 export function normalize(raw: unknown): WorkspaceConfig {
@@ -33,17 +33,18 @@ export function normalize(raw: unknown): WorkspaceConfig {
   const id = typeof r.id === 'string' && r.id ? r.id : randomUUID()
   const name = typeof r.name === 'string' && r.name ? r.name : 'Workspace'
 
-  const rawProjects = Array.isArray(r.projects) ? r.projects : []
+  // Files exported before the Project→Repo rename list them under `projects`.
+  const rawRepos = Array.isArray(r.repos) ? r.repos : Array.isArray(r.projects) ? r.projects : []
   const seen = new Set<string>()
-  const projects: WorkspaceProjectConfig[] = []
-  for (const item of rawProjects) {
+  const repos: WorkspaceRepoConfig[] = []
+  for (const item of rawRepos) {
     const p = (item ?? {}) as Record<string, unknown>
     const path = typeof p.path === 'string' ? p.path.trim() : ''
     if (!path) continue // an entry without a repo path is meaningless
     let pid = typeof p.id === 'string' && p.id ? p.id : ''
     if (!pid || seen.has(pid)) pid = randomUUID()
     seen.add(pid)
-    const entry: WorkspaceProjectConfig = {
+    const entry: WorkspaceRepoConfig = {
       id: pid,
       name: typeof p.name === 'string' && p.name ? p.name : (path.split(/[\\/]/).filter(Boolean).pop() ?? path),
       path
@@ -53,13 +54,13 @@ export function normalize(raw: unknown): WorkspaceConfig {
     const agentId = typeof p.agentId === 'string' && p.agentId ? p.agentId : p.agentProvider
     if (typeof agentId === 'string' && agentId) entry.agentId = agentId
     if (typeof p.agentExecPath === 'string' && p.agentExecPath) entry.agentExecPath = p.agentExecPath
-    projects.push(entry)
+    repos.push(entry)
   }
 
   // Workspace-scoped settings: keep only recognizably-typed fields.
   const settings: WorkspaceConfig['settings'] = parseSettings(r.settings)
 
-  return { version: WORKSPACE_CONFIG_VERSION, id, name, settings, projects }
+  return { version: WORKSPACE_CONFIG_VERSION, id, name, settings, repos }
 }
 
 /**

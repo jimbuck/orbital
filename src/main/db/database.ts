@@ -91,6 +91,8 @@ function migrate(d: Database.Database): void {
   // Before any CREATE/ADD COLUMN below can introduce the new name alongside the
   // old one (which would strand the stored value in a column nothing reads).
   renameAgentColumn(d)
+  // Then the Project→Repo rename, so everything below sees today's names.
+  renameProjectsToRepos(d)
 
   d.exec(`
     CREATE TABLE IF NOT EXISTS workspaces (
@@ -101,7 +103,7 @@ function migrate(d: Database.Database): void {
       last_opened_at INTEGER NOT NULL DEFAULT 0
     );
 
-    CREATE TABLE IF NOT EXISTS projects (
+    CREATE TABLE IF NOT EXISTS repos (
       id                     TEXT PRIMARY KEY,
       workspace_id           TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       name                   TEXT NOT NULL,
@@ -112,9 +114,9 @@ function migrate(d: Database.Database): void {
       added_at               INTEGER NOT NULL
     );
 
-    -- Rail folders: how the Projects panel is arranged, and nothing more. Kept
-    -- in tables of their own so filing a project never touches its row.
-    CREATE TABLE IF NOT EXISTS project_folders (
+    -- Rail folders: how the rail is arranged, and nothing more. Kept in tables
+    -- of their own so filing a repo never touches its row.
+    CREATE TABLE IF NOT EXISTS rail_folders (
       id           TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       name         TEXT NOT NULL,
@@ -122,22 +124,22 @@ function migrate(d: Database.Database): void {
       collapsed    INTEGER NOT NULL DEFAULT 0,
       created_at   INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_project_folders_workspace ON project_folders(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_rail_folders_workspace ON rail_folders(workspace_id);
 
-    -- Where a project sits in the rail: in which folder (NULL = the top level,
-    -- where it shares project_folders.position's order with the folders) and
-    -- how far down. project_id is the key, so a project is in one place. A
-    -- project with no row has never been arranged and is listed last.
-    CREATE TABLE IF NOT EXISTS project_rail_positions (
-      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-      folder_id  TEXT REFERENCES project_folders(id) ON DELETE CASCADE,
+    -- Where a repo sits in the rail: in which folder (NULL = the top level,
+    -- where it shares rail_folders.position's order with the folders) and how
+    -- far down. repo_id is the key, so a repo is in one place. A repo with no
+    -- row has never been arranged and is listed last.
+    CREATE TABLE IF NOT EXISTS rail_positions (
+      repo_id   TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
+      folder_id TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
       position   INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_project_rail_positions_folder ON project_rail_positions(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_rail_positions_folder ON rail_positions(folder_id);
 
     CREATE TABLE IF NOT EXISTS worktrees (
       id              TEXT PRIMARY KEY,
-      project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo_id         TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
       kind            TEXT NOT NULL,
       name            TEXT NOT NULL,
       path            TEXT NOT NULL,
@@ -148,7 +150,7 @@ function migrate(d: Database.Database): void {
       layout          TEXT NOT NULL DEFAULT '',
       created_at      INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_worktrees_project ON worktrees(project_id);
+    CREATE INDEX IF NOT EXISTS idx_worktrees_repo ON worktrees(repo_id);
 
     CREATE TABLE IF NOT EXISTS panes (
       id          TEXT PRIMARY KEY,
@@ -174,7 +176,7 @@ function migrate(d: Database.Database): void {
     CREATE TABLE IF NOT EXISTS tasks (
       id           TEXT PRIMARY KEY,
       seq          INTEGER,
-      project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo_id      TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
       title        TEXT NOT NULL,
       description  TEXT NOT NULL DEFAULT '',
       tags         TEXT NOT NULL DEFAULT '[]',
@@ -185,7 +187,7 @@ function migrate(d: Database.Database): void {
       updated_at   INTEGER NOT NULL,
       archived_at  INTEGER
     );
-    CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo_id);
 
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
@@ -195,8 +197,8 @@ function migrate(d: Database.Database): void {
 
   // Migrations for databases created before a column existed.
   addColumnIfMissing(d, 'worktrees', 'layout', "TEXT NOT NULL DEFAULT ''")
-  addColumnIfMissing(d, 'projects', 'default_agent_id', "TEXT NOT NULL DEFAULT 'claude'")
-  addColumnIfMissing(d, 'projects', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
+  addColumnIfMissing(d, 'repos', 'default_agent_id', "TEXT NOT NULL DEFAULT 'claude'")
+  addColumnIfMissing(d, 'repos', 'agent_exec_path', "TEXT NOT NULL DEFAULT ''")
   addColumnIfMissing(d, 'tasks', 'tags', "TEXT NOT NULL DEFAULT '[]'")
   addColumnIfMissing(d, 'tasks', 'seq', 'INTEGER')
   // '' (not NULL) so the column can be NOT NULL; mapTask reads it back as null:
@@ -208,20 +210,20 @@ function migrate(d: Database.Database): void {
   unlinkTasksFromMissingWorktrees(d)
   d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')
   const defaultWorkspaceId = ensureDefaultWorkspace(d)
-  scopeProjectsToWorkspaces(d, defaultWorkspaceId)
-  // Only after scoping — a pre-workspaces `projects` table lacks the column
+  scopeReposToWorkspaces(d, defaultWorkspaceId)
+  // Only after scoping — a pre-workspaces `repos` table lacks the column
   // these reference until the rebuild above has run.
   d.exec(`
-    CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
-    -- The same repo may be a project in several workspaces, but only once each.
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_ws_path ON projects(workspace_id, repo_path);
+    CREATE INDEX IF NOT EXISTS idx_repos_workspace ON repos(workspace_id);
+    -- The same repo may be in several workspaces, but only once each.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_ws_path ON repos(workspace_id, repo_path);
   `)
   migrateEnvPatternsToSettings(d)
   migrateEnvPatternsRecursive(d)
 }
 
 /**
- * Guarantee at least one workspace exists (every project row must belong to
+ * Guarantee at least one workspace exists (every repo row must belong to
  * one). The first-ever workspace is "Default", seeded with the workspace-scoped
  * slice of the legacy settings blob so custom env-sync patterns survive the
  * move into per-workspace settings. Returns the oldest workspace's id.
@@ -256,21 +258,21 @@ function ensureDefaultWorkspace(d: Database.Database): string {
 }
 
 /**
- * Move a pre-workspaces `projects` table under workspace scoping: add the
- * `workspace_id` column (all existing projects join the default workspace) and
+ * Move a pre-workspaces `repos` table under workspace scoping: add the
+ * `workspace_id` column (all existing repos join the default workspace) and
  * swap the global `repo_path` UNIQUE for a per-workspace one — the same repo
- * may be a project in several workspaces. SQLite can't alter constraints in
+ * may be in several workspaces. SQLite can't alter constraints in
  * place, so this is the standard rebuild-and-rename, done once (keyed on the
- * column's absence). Child tables reference projects by name, so they survive
+ * column's absence). Child tables reference repos by name, so they survive
  * the rename untouched (FK enforcement is suspended for the swap).
  */
-function scopeProjectsToWorkspaces(d: Database.Database, defaultWorkspaceId: string): void {
-  const cols = (d.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map((r) => r.name)
+function scopeReposToWorkspaces(d: Database.Database, defaultWorkspaceId: string): void {
+  const cols = (d.prepare('PRAGMA table_info(repos)').all() as Array<{ name: string }>).map((r) => r.name)
   if (cols.includes('workspace_id')) return
   d.pragma('foreign_keys = OFF')
   const tx = d.transaction(() => {
     d.exec(`
-      CREATE TABLE projects_new (
+      CREATE TABLE repos_new (
         id                     TEXT PRIMARY KEY,
         workspace_id           TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
         name                   TEXT NOT NULL,
@@ -282,14 +284,14 @@ function scopeProjectsToWorkspaces(d: Database.Database, defaultWorkspaceId: str
       );
     `)
     d.prepare(
-      `INSERT INTO projects_new (id, workspace_id, name, repo_path, env_sync_patterns, default_agent_id, agent_exec_path, added_at)
-       SELECT id, ?, name, repo_path, env_sync_patterns, default_agent_id, agent_exec_path, added_at FROM projects`
+      `INSERT INTO repos_new (id, workspace_id, name, repo_path, env_sync_patterns, default_agent_id, agent_exec_path, added_at)
+       SELECT id, ?, name, repo_path, env_sync_patterns, default_agent_id, agent_exec_path, added_at FROM repos`
     ).run(defaultWorkspaceId)
     d.exec(`
-      DROP TABLE projects;
-      ALTER TABLE projects_new RENAME TO projects;
-      CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_ws_path ON projects(workspace_id, repo_path);
+      DROP TABLE repos;
+      ALTER TABLE repos_new RENAME TO repos;
+      CREATE INDEX IF NOT EXISTS idx_repos_workspace ON repos(workspace_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_ws_path ON repos(workspace_id, repo_path);
     `)
   })
   try {
@@ -306,10 +308,13 @@ function scopeProjectsToWorkspaces(d: Database.Database, defaultWorkspaceId: str
  * modern `ALTER TABLE ... RENAME` updates the foreign-key references in child
  * tables automatically — so all existing projects, worktrees, tabs, layouts and
  * tasks survive the upgrade. Also remaps the `kind` value `'worktree'`→`'linked'`
- * to match the new WorktreeKind. Idempotent: no-op once `projects` exists.
+ * to match the new WorktreeKind. Idempotent: no-op once `projects` exists, or
+ * `repos` (what `projects` was renamed to next). The second check matters: after
+ * that rename a modern DB has `workspaces` and no `projects`, which is exactly
+ * what a pre-revamp DB looks like.
  */
 function renameLegacySchema(d: Database.Database): void {
-  if (!tableExists(d, 'workspaces') || tableExists(d, 'projects')) return
+  if (!tableExists(d, 'workspaces') || tableExists(d, 'projects') || tableExists(d, 'repos')) return
   const tx = d.transaction(() => {
     d.exec('ALTER TABLE workspaces RENAME TO projects')
 
@@ -352,6 +357,40 @@ function renameAgentColumn(d: Database.Database): void {
 }
 
 /**
+ * What the app called a project is a single git repo, and "project" now names
+ * a group of repos. Rename the table, its FK columns and the rail tables in
+ * place. ALTER TABLE ... RENAME rewrites the FK references in child tables, so
+ * worktrees, tasks and rail positions keep pointing at the same rows. The old
+ * indexes are dropped so the CREATE INDEX IF NOT EXISTS calls in migrate()
+ * install them under the new names. Idempotent: runs only while `projects`
+ * exists and `repos` does not.
+ */
+function renameProjectsToRepos(d: Database.Database): void {
+  if (!tableExists(d, 'projects') || tableExists(d, 'repos')) return
+  const tx = d.transaction(() => {
+    d.exec('ALTER TABLE projects RENAME TO repos')
+    if (tableExists(d, 'worktrees')) d.exec('ALTER TABLE worktrees RENAME COLUMN project_id TO repo_id')
+    if (tableExists(d, 'tasks')) d.exec('ALTER TABLE tasks RENAME COLUMN project_id TO repo_id')
+    if (tableExists(d, 'project_folders')) d.exec('ALTER TABLE project_folders RENAME TO rail_folders')
+    if (tableExists(d, 'project_rail_positions')) {
+      d.exec('ALTER TABLE project_rail_positions RENAME TO rail_positions')
+      d.exec('ALTER TABLE rail_positions RENAME COLUMN project_id TO repo_id')
+    }
+    for (const index of [
+      'idx_projects_workspace',
+      'idx_projects_ws_path',
+      'idx_worktrees_project',
+      'idx_tasks_project',
+      'idx_project_folders_workspace',
+      'idx_project_rail_positions_folder'
+    ]) {
+      d.exec(`DROP INDEX IF EXISTS ${index}`)
+    }
+  })
+  tx.immediate()
+}
+
+/**
  * Number tasks that predate the `seq` column: creation order, continuing after
  * the highest number already assigned. `seq` is the human-facing task number —
  * globally unique across all workspaces (the DB is global) and never reused;
@@ -390,11 +429,11 @@ function tableExists(d: Database.Database, name: string): boolean {
 }
 
 /**
- * One-time move of env-sync patterns from per-project rows to the global
+ * One-time move of env-sync patterns from per-repo rows to the global
  * settings blob: when the settings JSON has no `envSyncPatterns` key yet, seed
- * it with the union of every project's stored patterns plus the current
+ * it with the union of every repo's stored patterns plus the current
  * defaults, so custom globs survive the switch. The legacy
- * `projects.env_sync_patterns` column is left in place but no longer read.
+ * `repos.env_sync_patterns` column is left in place but no longer read.
  */
 function migrateEnvPatternsToSettings(d: Database.Database): void {
   const row = d.prepare("SELECT value FROM settings WHERE key = 'app'").get() as { value: string } | undefined
@@ -403,7 +442,7 @@ function migrateEnvPatternsToSettings(d: Database.Database): void {
     const parsed = JSON.parse(row.value)
     if (parsed && typeof parsed === 'object' && !('envSyncPatterns' in parsed)) {
       const union = new Set(DEFAULT_ENV_SYNC_PATTERNS)
-      const rows = d.prepare('SELECT env_sync_patterns FROM projects').all() as Array<{
+      const rows = d.prepare('SELECT env_sync_patterns FROM repos').all() as Array<{
         env_sync_patterns: string
       }>
       for (const r of rows) {

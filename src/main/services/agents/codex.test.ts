@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 
 vi.mock('./executable', () => ({
   resolveExecutable: async () => ({ file: 'cmd.exe', prefixArgs: ['/c', 'codex.cmd'] })
@@ -10,8 +10,8 @@ vi.mock('./executable', () => ({
 
 import { codexDiscoverThread, codexProvider, codexRolloutCwd, codexRolloutPath, codexThreadIdFromFilename } from './codex'
 
-const project = { id: 'p1', name: 'orbital', repoPath: 'C:\\Projects\\orbital' } as Project
-const worktree = { id: 'w1', projectId: 'p1', path: 'C:\\Projects\\orbital', branch: 'main' } as Worktree
+const repo = { id: 'p1', name: 'orbital', repoPath: 'C:\\Projects\\orbital' } as Repo
+const worktree = { id: 'w1', repoId: 'p1', path: 'C:\\Projects\\orbital', branch: 'main' } as Worktree
 
 const ID_A = 'aaaaaaaa-0000-4000-8000-000000000001'
 const ID_B = 'bbbbbbbb-0000-4000-8000-000000000002'
@@ -53,7 +53,7 @@ afterEach(() => {
 describe('codexProvider.resolveCommand', () => {
   it('runs `codex resume <id>` for a stored session', async () => {
     const cmd = await codexProvider.resolveCommand({
-      project,
+      repo,
       worktree,
       briefingPath: null,
       session: { id: ID_A, resume: true }
@@ -62,7 +62,7 @@ describe('codexProvider.resolveCommand', () => {
   })
 
   it('launches plain `codex` when there is nothing to resume', async () => {
-    const cmd = await codexProvider.resolveCommand({ project, worktree, briefingPath: null })
+    const cmd = await codexProvider.resolveCommand({ repo, worktree, briefingPath: null })
     expect(cmd.args).toEqual(['/c', 'codex.cmd'])
   })
 

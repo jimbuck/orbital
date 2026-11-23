@@ -1,12 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { existsSync, watch, type FSWatcher } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 import { git, type GitWorktreeEntry } from './git'
 
 /**
  * Git-worktree auto-discovery. Orbital is a worktree dashboard: EVERY checkout
- * of a project's repo should appear under the project, whether it was created
+ * of a repo should appear under the repo, whether it was created
  * in Orbital or with `git worktree add` in some terminal. `git worktree list`
  * is the source of truth; the DB rows only carry Orbital's per-worktree UI
  * state (tabs/panes/layout/status) for checkouts that actually exist.
@@ -50,9 +50,9 @@ export function pathsBeingCreated(): string[] {
 
 export interface WorktreeSyncPlan {
   /**
-   * Create the project's `root` Worktree row on this branch. Set when the rows
-   * have no root yet — a project that entered via the workspace YAML (rather
-   * than the Add Project picker) starts as a bare `projects` row.
+   * Create the repo's `root` Worktree row on this branch. Set when the rows
+   * have no root yet — a repo that entered via the workspace YAML (rather
+   * than the Add Repo picker) starts as a bare `repos` row.
    */
   createRoot: { branch: string } | null
   /** Checkouts git knows about that have no DB row yet — create rows for them. */
@@ -64,24 +64,24 @@ export interface WorktreeSyncPlan {
 }
 
 /**
- * Diff git's worktree list against the project's DB rows.
+ * Diff git's worktree list against the repo's DB rows.
  *
- * - The main checkout maps to the project's `root` row (never adopted/removed).
+ * - The main checkout maps to the repo's `root` row (never adopted/removed).
  * - Bare/prunable entries and directories that don't exist are not adoptable.
- * - `skipPaths` are never adopted here: other projects' repo roots (a checkout
- *   that IS another project belongs to that project's rail entry) and checkouts
+ * - `skipPaths` are never adopted here: other repos' repo roots (a checkout
+ *   that IS another repo belongs to that repo's rail entry) and checkouts
  *   Orbital is mid-create on ({@link pathsBeingCreated}).
  * - A linked row survives only while git still lists its path AND the directory
  *   exists; otherwise it is removed (its tabs/layout go with it — UI state is
  *   keyed to a live checkout).
  */
 export function planWorktreeSync(
-  project: Project,
+  repo: Repo,
   rows: Worktree[],
   entries: GitWorktreeEntry[],
   skipPaths: string[]
 ): WorktreeSyncPlan {
-  const rootKey = normPath(project.repoPath)
+  const rootKey = normPath(repo.repoPath)
   const skip = new Set(skipPaths.map(normPath))
   const rowByPath = new Map(rows.map((w) => [normPath(w.path), w]))
 
@@ -93,7 +93,7 @@ export function planWorktreeSync(
 
   const plan: WorktreeSyncPlan = { createRoot: null, adopt: [], remove: [], branchUpdates: [] }
 
-  // A YAML-authored project has no root row yet — create it on the checkout's
+  // A YAML-authored repo has no root row yet — create it on the checkout's
   // current branch so the rail header (and its git panel) work immediately.
   if (!rows.some((w) => w.kind === 'root')) {
     plan.createRoot = { branch: live.get(rootKey)?.branch ?? '(detached)' }
@@ -113,7 +113,7 @@ export function planWorktreeSync(
   }
 
   for (const row of rows) {
-    if (row.kind !== 'linked') continue // the root row lives and dies with the project
+    if (row.kind !== 'linked') continue // the root row lives and dies with the repo
     if (!live.has(normPath(row.path)) || !existsSync(row.path)) plan.remove.push(row)
   }
 

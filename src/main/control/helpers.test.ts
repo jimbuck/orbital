@@ -1,25 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ControlRequest, Project } from '@shared/types'
+import type { ControlRequest, Repo } from '@shared/types'
 
-// `repo.projects.list()` is workspace-scoped in the real repository; the stub
-// stands in for "this instance's workspace". A project of another workspace
+// `tables.repos.list()` is workspace-scoped in the real repository; the stub
+// stands in for "this instance's workspace". A repo of another workspace
 // is simply absent from it.
-const workspaceProjects: Project[] = []
+const workspaceRepos: Repo[] = []
 // Worktrees/tabs are NOT workspace-scoped in the real repository: lookups by id
 // find rows of any workspace, so these stubs hold foreign ones too.
-const worktrees = new Map<string, { id: string; projectId: string }>()
+const worktrees = new Map<string, { id: string; repoId: string }>()
 const tabs = new Map<string, { id: string; worktreeId: string }>()
 vi.mock('../runtime', () => ({
-  repo: {
-    projects: { list: () => workspaceProjects },
+  tables: {
+    repos: { list: () => workspaceRepos },
     worktrees: { get: (id: string) => worktrees.get(id) },
     tabs: { get: (id: string) => tabs.get(id) }
   }
 }))
 
-const { resolveProject, scopeRequest } = await import('./helpers')
+const { resolveRepo, scopeRequest } = await import('./helpers')
 
-const project = (id: string, name: string): Project => ({
+const repo = (id: string, name: string): Repo => ({
   id,
   name,
   repoPath: `C:\\repos\\${name}`,
@@ -30,86 +30,86 @@ const project = (id: string, name: string): Project => ({
 const req = (over: Partial<ControlRequest> = {}): ControlRequest => ({ cmd: 'task-list', args: {}, ...over })
 
 beforeEach(() => {
-  workspaceProjects.splice(
+  workspaceRepos.splice(
     0,
-    workspaceProjects.length,
-    project('aaaa1111-0000', 'web'),
-    project('bbbb2222-0000', 'API'),
-    project('cccc3333-0000', 'dup'),
-    project('cccc4444-0000', 'dup')
+    workspaceRepos.length,
+    repo('aaaa1111-0000', 'web'),
+    repo('bbbb2222-0000', 'API'),
+    repo('cccc3333-0000', 'dup'),
+    repo('cccc4444-0000', 'dup')
   )
   worktrees.clear()
   tabs.clear()
-  worktrees.set('wt-web', { id: 'wt-web', projectId: 'aaaa1111-0000' })
-  worktrees.set('wt-api', { id: 'wt-api', projectId: 'bbbb2222-0000' })
-  worktrees.set('wt-foreign', { id: 'wt-foreign', projectId: 'foreign-project' })
+  worktrees.set('wt-web', { id: 'wt-web', repoId: 'aaaa1111-0000' })
+  worktrees.set('wt-api', { id: 'wt-api', repoId: 'bbbb2222-0000' })
+  worktrees.set('wt-foreign', { id: 'wt-foreign', repoId: 'foreign-repo' })
   tabs.set('tab-web', { id: 'tab-web', worktreeId: 'wt-web' })
   tabs.set('tab-foreign', { id: 'tab-foreign', worktreeId: 'wt-foreign' })
 })
 
-describe('resolveProject', () => {
+describe('resolveRepo', () => {
   it('matches an exact id', () => {
-    expect(resolveProject('bbbb2222-0000').project?.name).toBe('API')
+    expect(resolveRepo('bbbb2222-0000').repo?.name).toBe('API')
   })
 
   it('matches a name case-insensitively', () => {
-    expect(resolveProject('api').project?.id).toBe('bbbb2222-0000')
+    expect(resolveRepo('api').repo?.id).toBe('bbbb2222-0000')
   })
 
   it('matches a unique id prefix', () => {
-    expect(resolveProject('aaaa').project?.name).toBe('web')
+    expect(resolveRepo('aaaa').repo?.name).toBe('web')
   })
 
   it('rejects ambiguous names and prefixes', () => {
-    expect(resolveProject('dup').error).toMatch(/ambiguous/)
-    expect(resolveProject('cccc').error).toMatch(/ambiguous/)
+    expect(resolveRepo('dup').error).toMatch(/ambiguous/)
+    expect(resolveRepo('cccc').error).toMatch(/ambiguous/)
   })
 
-  it('does not find projects outside the workspace', () => {
-    expect(resolveProject('zzzz9999-0000').error).toMatch(/no project/)
+  it('does not find repos outside the workspace', () => {
+    expect(resolveRepo('zzzz9999-0000').error).toMatch(/no repo/)
   })
 })
 
 describe('scopeRequest', () => {
-  it('keeps the caller project when no --project is given', () => {
-    expect(scopeRequest(req({ projectId: 'aaaa1111-0000' })).req?.projectId).toBe('aaaa1111-0000')
+  it('keeps the caller repo when no --repo is given', () => {
+    expect(scopeRequest(req({ repoId: 'aaaa1111-0000' })).req?.repoId).toBe('aaaa1111-0000')
   })
 
-  it('retargets the request at the --project sibling', () => {
-    const scoped = scopeRequest(req({ projectId: 'aaaa1111-0000', args: { project: 'api' } }))
-    expect(scoped.req?.projectId).toBe('bbbb2222-0000')
+  it('retargets the request at the --repo sibling', () => {
+    const scoped = scopeRequest(req({ repoId: 'aaaa1111-0000', args: { repo: 'api' } }))
+    expect(scoped.req?.repoId).toBe('bbbb2222-0000')
   })
 
-  it('works without an env project when --project is given', () => {
-    expect(scopeRequest(req({ args: { project: 'web' } })).req?.projectId).toBe('aaaa1111-0000')
+  it('works without an env repo when --repo is given', () => {
+    expect(scopeRequest(req({ args: { repo: 'web' } })).req?.repoId).toBe('aaaa1111-0000')
   })
 
-  it('fails on an unknown --project instead of falling back', () => {
-    expect(scopeRequest(req({ projectId: 'aaaa1111-0000', args: { project: 'nope' } })).error).toMatch(/no project/)
+  it('fails on an unknown --repo instead of falling back', () => {
+    expect(scopeRequest(req({ repoId: 'aaaa1111-0000', args: { repo: 'nope' } })).error).toMatch(/no repo/)
   })
 
-  it('rejects an env project id from another workspace', () => {
-    const scoped = scopeRequest(req({ cmd: 'worktree-new', projectId: 'foreign-id' }))
+  it('rejects an env repo id from another workspace', () => {
+    const scoped = scopeRequest(req({ cmd: 'worktree-new', repoId: 'foreign-id' }))
     expect(scoped.req).toBeUndefined()
     expect(scoped.error).toMatch(/not in this workspace/)
   })
 
-  it('rejects a --project id from another workspace', () => {
-    expect(scopeRequest(req({ args: { project: 'foreign-id' } })).error).toMatch(/no project/)
+  it('rejects a --repo id from another workspace', () => {
+    expect(scopeRequest(req({ args: { repo: 'foreign-id' } })).error).toMatch(/no repo/)
   })
 
-  it('passes requests without any project through', () => {
-    expect(scopeRequest(req({ cmd: 'status' })).req?.projectId).toBeUndefined()
+  it('passes requests without any repo through', () => {
+    expect(scopeRequest(req({ cmd: 'status' })).req?.repoId).toBeUndefined()
   })
 })
 
 describe('scopeRequest env worktree / terminal ids', () => {
-  it('accepts own worktree, terminal and matching project', () => {
-    const r = req({ cmd: 'whoami', projectId: 'aaaa1111-0000', worktreeId: 'wt-web', terminalId: 'tab-web' })
+  it('accepts own worktree, terminal and matching repo', () => {
+    const r = req({ cmd: 'whoami', repoId: 'aaaa1111-0000', worktreeId: 'wt-web', terminalId: 'tab-web' })
     expect(scopeRequest(r).req).toBeDefined()
   })
 
-  it('accepts a worktree id without a project id', () => {
+  it('accepts a worktree id without a repo id', () => {
     expect(scopeRequest(req({ worktreeId: 'wt-web' })).req).toBeDefined()
   })
 
@@ -121,9 +121,9 @@ describe('scopeRequest env worktree / terminal ids', () => {
     expect(scopeRequest(req({ cmd: 'status', terminalId: 'tab-foreign' })).error).toMatch(/terminal .* not in this workspace/)
   })
 
-  it('rejects a worktree that belongs to another project than the env project', () => {
-    const scoped = scopeRequest(req({ projectId: 'aaaa1111-0000', worktreeId: 'wt-api' }))
-    expect(scoped.error).toMatch(/does not belong to project/)
+  it('rejects a worktree that belongs to another repo than the env repo', () => {
+    const scoped = scopeRequest(req({ repoId: 'aaaa1111-0000', worktreeId: 'wt-api' }))
+    expect(scoped.error).toMatch(/does not belong to repo/)
   })
 
   it('rejects a terminal that is not in the given worktree', () => {
@@ -131,15 +131,15 @@ describe('scopeRequest env worktree / terminal ids', () => {
     expect(scoped.error).toMatch(/does not belong to worktree/)
   })
 
-  it('lets --project override the project without tripping the env consistency check', () => {
+  it('lets --repo override the repo without tripping the env consistency check', () => {
     const scoped = scopeRequest(
-      req({ projectId: 'aaaa1111-0000', worktreeId: 'wt-web', terminalId: 'tab-web', args: { project: 'api' } })
+      req({ repoId: 'aaaa1111-0000', worktreeId: 'wt-web', terminalId: 'tab-web', args: { repo: 'api' } })
     )
-    expect(scoped.req?.projectId).toBe('bbbb2222-0000')
+    expect(scoped.req?.repoId).toBe('bbbb2222-0000')
   })
 
-  it('still rejects a foreign worktree when --project is given', () => {
-    expect(scopeRequest(req({ worktreeId: 'wt-foreign', args: { project: 'api' } })).error).toMatch(/not in this workspace/)
+  it('still rejects a foreign worktree when --repo is given', () => {
+    expect(scopeRequest(req({ worktreeId: 'wt-foreign', args: { repo: 'api' } })).error).toMatch(/not in this workspace/)
   })
 
   it('passes stale ids (closed tab / removed worktree) through for the handlers to no-op', () => {

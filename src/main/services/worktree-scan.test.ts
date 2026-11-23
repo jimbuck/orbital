@@ -2,20 +2,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Project, Worktree } from '@shared/types'
+import type { Repo, Worktree } from '@shared/types'
 import type { GitWorktreeEntry } from './git'
 import { beginWorktreeCreate, endWorktreeCreate, pathsBeingCreated, planWorktreeSync } from './worktree-scan'
 
 let root = ''
-let project: Project
+let repo: Repo
 let rootRow: Worktree
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'orbital-scan-'))
   mkdirSync(join(root, 'repo'), { recursive: true })
   mkdirSync(join(root, 'wt'), { recursive: true })
-  project = { id: 'p1', name: 'repo', repoPath: join(root, 'repo') } as Project
-  rootRow = { id: 'w-root', projectId: 'p1', kind: 'root', name: 'main', path: join(root, 'repo'), branch: 'main' } as Worktree
+  repo = { id: 'p1', name: 'repo', repoPath: join(root, 'repo') } as Repo
+  rootRow = { id: 'w-root', repoId: 'p1', kind: 'root', name: 'main', path: join(root, 'repo'), branch: 'main' } as Worktree
 })
 afterEach(() => {
   endWorktreeCreate(join(root, 'wt'))
@@ -32,7 +32,7 @@ function entries(): GitWorktreeEntry[] {
 
 describe('adoption of unknown checkouts', () => {
   it('adopts a checkout git knows about that has no row', () => {
-    const plan = planWorktreeSync(project, [rootRow], entries(), [])
+    const plan = planWorktreeSync(repo, [rootRow], entries(), [])
     expect(plan.adopt).toEqual([{ path: join(root, 'wt'), name: 'wt', branch: 'feature' }])
   })
 
@@ -42,7 +42,7 @@ describe('adoption of unknown checkouts', () => {
     beginWorktreeCreate(join(root, 'wt'))
     expect(pathsBeingCreated()).toHaveLength(1)
 
-    const plan = planWorktreeSync(project, [rootRow], entries(), pathsBeingCreated())
+    const plan = planWorktreeSync(repo, [rootRow], entries(), pathsBeingCreated())
     expect(plan.adopt).toEqual([])
     // The in-flight checkout must not be torn down either.
     expect(plan.remove).toEqual([])
@@ -51,13 +51,13 @@ describe('adoption of unknown checkouts', () => {
     // Orbital is adoptable again.
     endWorktreeCreate(join(root, 'wt'))
     expect(pathsBeingCreated()).toEqual([])
-    expect(planWorktreeSync(project, [rootRow], entries(), pathsBeingCreated()).adopt).toHaveLength(1)
+    expect(planWorktreeSync(repo, [rootRow], entries(), pathsBeingCreated()).adopt).toHaveLength(1)
   })
 
   it('matches the claim regardless of path spelling', () => {
     // git reports forward slashes on Windows; the claim is registered with the
     // OS-native path Orbital computed.
     beginWorktreeCreate(join(root, 'wt').replace(/\\/g, '/'))
-    expect(planWorktreeSync(project, [rootRow], entries(), pathsBeingCreated()).adopt).toEqual([])
+    expect(planWorktreeSync(repo, [rootRow], entries(), pathsBeingCreated()).adopt).toEqual([])
   })
 })

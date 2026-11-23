@@ -1,7 +1,7 @@
 import type { FileSearchHit } from '@shared/types'
 import { fuzzyMatchPath } from '@shared/fuzzy'
 import { git } from './git'
-import * as repo from '../db/repositories'
+import * as tables from '../db/repositories'
 
 /**
  * The command palette's cross-Worktree file search.
@@ -88,7 +88,7 @@ export async function searchFiles(query: string, limit = DEFAULT_LIMIT): Promise
   const trimmed = query.trim()
   if (!trimmed) return []
 
-  const worktrees = repo.worktrees.listPaths()
+  const worktrees = tables.worktrees.listPaths()
   const listings = await Promise.all(
     worktrees.map(async (w) => ({ worktreeId: w.id, paths: await pathsFor(w.id, w.path) }))
   )

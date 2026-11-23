@@ -1,6 +1,6 @@
 import { IPC } from '@shared/contract'
 import { type Tab } from '@shared/types'
-import { repo } from '../runtime'
+import { tables } from '../runtime'
 import { writeTx } from '../db/database'
 import { splitAt, setRatio, edgeToSplit } from '../services/layout'
 import { closePane, closeTab, collapseIfEmpty, createTabInWorktree } from '../tabs'
@@ -18,22 +18,22 @@ export function register(): void {
   h(IPC.closeTab, (_e, tabId) => closeTab(tabId))
 
   h(IPC.renameTab, (_e, tabId, title) => {
-    const tab = repo.tabs.get(tabId)
+    const tab = tables.tabs.get(tabId)
     if (!tab) return
     // An empty title clears the override; JSON.stringify drops the undefined key.
-    repo.tabs.updateConfig(tabId, { ...tab.config, title: title.trim() || undefined })
+    tables.tabs.updateConfig(tabId, { ...tab.config, title: title.trim() || undefined })
     broadcast()
   })
 
   h(IPC.updateTabConfig, (_e, tabId, patch) => {
-    const tab = repo.tabs.get(tabId)
+    const tab = tables.tabs.get(tabId)
     if (!tab) return
-    repo.tabs.updateConfig(tabId, { ...tab.config, ...patch })
+    tables.tabs.updateConfig(tabId, { ...tab.config, ...patch })
     broadcast()
   })
 
   h(IPC.setActiveTab, (_e, paneId, tabId) => {
-    repo.tabs.setActive(paneId, tabId)
+    tables.tabs.setActive(paneId, tabId)
     broadcast()
   })
 
@@ -46,7 +46,7 @@ export function register(): void {
    * panes), but an invariant main depends on is main's to enforce.
    */
   const assertPaneInWorktree = (tab: Tab, paneId: string): void => {
-    const owner = repo.panes.worktreeIdOf(paneId)
+    const owner = tables.panes.worktreeIdOf(paneId)
     if (!owner) throw new Error(`pane ${paneId} not found`)
     if (owner !== tab.worktreeId) throw new Error('a tab cannot move to a pane in another worktree')
   }
@@ -54,22 +54,22 @@ export function register(): void {
   // `slot` places the tab at an insertion point in the target pane's strip
   // (see shared/tabOrder); a same-pane move with a slot is a reorder.
   h(IPC.moveTab, (_e, tabId, targetPaneId, slot) => {
-    const tab = repo.tabs.get(tabId)
+    const tab = tables.tabs.get(tabId)
     if (!tab) return
     if (tab.paneId === targetPaneId && slot === undefined) return
     assertPaneInWorktree(tab, targetPaneId)
     const source = tab.paneId
-    repo.tabs.move(tabId, targetPaneId, slot)
+    tables.tabs.move(tabId, targetPaneId, slot)
     if (source !== targetPaneId) collapseIfEmpty(tab.worktreeId, source)
     broadcast()
   })
 
   h(IPC.splitPane, (_e, worktreeId, paneId, dir, where) => {
-    const worktree = repo.worktrees.get(worktreeId)
+    const worktree = tables.worktrees.get(worktreeId)
     if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
     const pane = writeTx(() => {
-      const created = repo.panes.create(worktreeId)
-      repo.worktrees.setLayout(worktreeId, splitAt(worktree.layout, paneId, dir, where, created.id))
+      const created = tables.panes.create(worktreeId)
+      tables.worktrees.setLayout(worktreeId, splitAt(worktree.layout, paneId, dir, where, created.id))
       return created
     })
     broadcast()
@@ -79,9 +79,9 @@ export function register(): void {
   h(IPC.closePane, (_e, worktreeId, paneId) => closePane(worktreeId, paneId))
 
   h(IPC.moveTabToEdge, (_e, tabId, targetPaneId, edge) => {
-    const tab = repo.tabs.get(tabId)
+    const tab = tables.tabs.get(tabId)
     if (!tab) return
-    const worktree = repo.worktrees.get(tab.worktreeId)
+    const worktree = tables.worktrees.get(tab.worktreeId)
     if (!worktree) return
     // Splitting at a pane from another worktree would be a no-op on this
     // worktree's layout, leaving the fresh pane orphaned outside it.
@@ -90,18 +90,18 @@ export function register(): void {
     const { dir, where } = edgeToSplit(edge)
     // New pane, layout and tab move land together or not at all.
     writeTx(() => {
-      const pane = repo.panes.create(worktree.id)
-      repo.worktrees.setLayout(worktree.id, splitAt(worktree.layout, targetPaneId, dir, where, pane.id))
-      repo.tabs.move(tabId, pane.id)
+      const pane = tables.panes.create(worktree.id)
+      tables.worktrees.setLayout(worktree.id, splitAt(worktree.layout, targetPaneId, dir, where, pane.id))
+      tables.tabs.move(tabId, pane.id)
     })
     collapseIfEmpty(worktree.id, source)
     broadcast()
   })
 
   h(IPC.setSplitRatio, (_e, worktreeId, splitId, ratio) => {
-    const worktree = repo.worktrees.get(worktreeId)
+    const worktree = tables.worktrees.get(worktreeId)
     if (!worktree) return
-    repo.worktrees.setLayout(worktreeId, setRatio(worktree.layout, splitId, ratio))
+    tables.worktrees.setLayout(worktreeId, setRatio(worktree.layout, splitId, ratio))
     broadcast()
   })
 }

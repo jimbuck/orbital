@@ -1,16 +1,16 @@
 import { dialog, BrowserWindow } from 'electron'
 import { IPC } from '@shared/contract'
-import { runtime, repo } from '../runtime'
+import { runtime, tables } from '../runtime'
 import { git } from '../services/git'
 import { github } from '../services/github'
-import { addProject, removeProject } from '../worktree-lifecycle'
+import { addRepo, removeRepo } from '../worktree-lifecycle'
 import { handle, broadcast } from './handle'
 
-/** Projects: add / remove / rename, the rail folders they are filed in, their branches and their agent defaults. */
+/** Repos: add / remove / rename, the rail folders they are filed in, their branches and their agent defaults. */
 export function register(): void {
   const h = handle
-  // ---- projects ----
-  h(IPC.addProject, async () => {
+  // ---- repos ----
+  h(IPC.addRepo, async () => {
     const win = runtime.window ?? undefined
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Open a git repository' })
@@ -25,7 +25,7 @@ export function register(): void {
       })
       return null
     }
-    return addProject(dir)
+    return addRepo(dir)
   })
 
   h(IPC.pickDirectory, async (_e, title) => {
@@ -44,7 +44,7 @@ export function register(): void {
   )
   h(IPC.githubCreateRepo, (_e, opts) => github.createRepo(opts))
 
-  // Clone into <parentDir>/<repo>, then register it exactly as addProject does
+  // Clone into <parentDir>/<repo>, then register it exactly as addRepo does
   // for a folder picked by hand.
   h(IPC.githubCloneRepo, async (_e, nameWithOwner, parentDir, account) => {
     const repoName = String(nameWithOwner).split('/').pop() ?? ''
@@ -53,59 +53,59 @@ export function register(): void {
     if (!(await git.isRepo(dest))) {
       throw new Error(`Cloned ${nameWithOwner}, but ${dest} is not a git repository.`)
     }
-    return addProject(dest)
+    return addRepo(dest)
   })
 
-  h(IPC.removeProject, (_e, projectId) => removeProject(projectId))
+  h(IPC.removeRepo, (_e, repoId) => removeRepo(repoId))
 
-  h(IPC.renameProject, (_e, projectId, name) => {
+  h(IPC.renameRepo, (_e, repoId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    repo.projects.rename(projectId, trimmed)
+    tables.repos.rename(repoId, trimmed)
     broadcast()
   })
 
-  // ---- folders (the rail's grouping; see repo.projectFolders) ----
-  h(IPC.createProjectFolder, (_e, name, projectId) => {
-    const folder = repo.projectFolders.create(String(name ?? '').trim() || 'New Folder', projectId || undefined)
+  // ---- folders (the rail's grouping; see tables.railFolders) ----
+  h(IPC.createRailFolder, (_e, name, repoId) => {
+    const folder = tables.railFolders.create(String(name ?? '').trim() || 'New Folder', repoId || undefined)
     broadcast()
     return folder
   })
 
-  h(IPC.renameProjectFolder, (_e, folderId, name) => {
+  h(IPC.renameRailFolder, (_e, folderId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    repo.projectFolders.rename(folderId, trimmed)
+    tables.railFolders.rename(folderId, trimmed)
     broadcast()
   })
 
-  h(IPC.removeProjectFolder, (_e, folderId) => {
-    repo.projectFolders.remove(folderId)
+  h(IPC.removeRailFolder, (_e, folderId) => {
+    tables.railFolders.remove(folderId)
     broadcast()
   })
 
-  h(IPC.setProjectFolderCollapsed, (_e, folderId, collapsed) => {
-    repo.projectFolders.setCollapsed(folderId, !!collapsed)
+  h(IPC.setRailFolderCollapsed, (_e, folderId, collapsed) => {
+    tables.railFolders.setCollapsed(folderId, !!collapsed)
     broadcast()
   })
 
-  h(IPC.placeProject, (_e, projectId, folderId, beforeId) => {
-    repo.projectFolders.placeProject(projectId, folderId ?? null, beforeId ?? null)
+  h(IPC.placeRepo, (_e, repoId, folderId, beforeId) => {
+    tables.railFolders.placeRepo(repoId, folderId ?? null, beforeId ?? null)
     broadcast()
   })
 
-  h(IPC.placeProjectFolder, (_e, folderId, beforeId) => {
-    repo.projectFolders.placeFolder(folderId, beforeId ?? null)
+  h(IPC.placeRailFolder, (_e, folderId, beforeId) => {
+    tables.railFolders.placeFolder(folderId, beforeId ?? null)
     broadcast()
   })
 
-  h(IPC.listBranches, async (_e, projectId) => {
-    const project = repo.projects.get(projectId)
-    if (!project) return { branches: [], remotes: [], head: 'HEAD' }
+  h(IPC.listBranches, async (_e, repoId) => {
+    const repo = tables.repos.get(repoId)
+    if (!repo) return { branches: [], remotes: [], head: 'HEAD' }
     const [branches, allRemotes, head] = await Promise.all([
-      git.listBranches(project.repoPath).catch(() => [] as string[]),
-      git.listRemoteBranches(project.repoPath).catch(() => [] as string[]),
-      git.currentBranch(project.repoPath).catch(() => 'main')
+      git.listBranches(repo.repoPath).catch(() => [] as string[]),
+      git.listRemoteBranches(repo.repoPath).catch(() => [] as string[]),
+      git.currentBranch(repo.repoPath).catch(() => 'main')
     ])
     // Only surface remote branches that have no local counterpart — picking the
     // local one is always the better checkout target.
@@ -114,8 +114,8 @@ export function register(): void {
     return { branches, remotes, head }
   })
 
-  h(IPC.setProjectAgent, (_e, projectId, patch) => {
-    repo.projects.updateAgent(projectId, patch)
+  h(IPC.setRepoAgent, (_e, repoId, patch) => {
+    tables.repos.updateAgent(repoId, patch)
     broadcast()
   })
 }

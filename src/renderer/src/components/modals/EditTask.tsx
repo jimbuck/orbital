@@ -67,7 +67,7 @@ export default function EditTask(): JSX.Element {
 
   // Recently-used tags to suggest, so users reuse existing tags instead of
   // retyping and creating near-duplicates. Drawn from other tasks in the same
-  // project, archived ones included (archiving a task must not make its tags
+  // repo, archived ones included (archiving a task must not make its tags
   // vanish from here), ordered by how recently a task carrying the tag was touched.
   // Declared before the `if (!task)` early return to keep hook order stable;
   // guarded to return [] when there's no task to edit.
@@ -78,7 +78,7 @@ export default function EditTask(): JSX.Element {
     // For each tag, remember the most recent updatedAt of a task that carries it.
     const recency = new Map<string, number>()
     for (const t of [...allTasks, ...archivedTasks]) {
-      if (t.projectId !== task.projectId) continue
+      if (t.repoId !== task.repoId) continue
       for (const tag of t.tags) {
         if (selected.has(tag)) continue
         if (draft && !tag.toLowerCase().includes(draft)) continue

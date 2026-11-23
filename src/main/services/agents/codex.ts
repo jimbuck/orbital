@@ -159,7 +159,7 @@ export function codexDiscoverThread(
 export const codexProvider: AgentProvider = {
   id: 'codex',
   displayName: 'Codex',
-  // Used later to auto-suggest a provider per project; defined now, unused for now.
+  // Used later to auto-suggest a provider per repo; defined now, unused for now.
   detectFiles: ['AGENTS.md', '.codex'],
   // No --append-system-prompt-file equivalent: Codex reads its instructions from
   // AGENTS.md, so Orbital's go in the profile's global one (codex-instructions.ts).

@@ -49,12 +49,12 @@ function makeSettings(theme: ThemeMode, pair?: SystemPair): Settings {
 
 function seed(theme: ThemeMode, pair?: SystemPair): void {
   useStore.setState({
-    projects: [],
+    repos: [],
     worktrees: [],
     tasks: [],
     devServers: {},
     workspace: null,
-    activeProjectId: null,
+    activeRepoId: null,
     activeWorktreeId: null,
     alertCount: 0,
     updateStatus: { phase: 'idle' },
@@ -233,7 +233,7 @@ describe('TitleBar View menu — zoom', () => {
 })
 
 describe('TitleBar File menu — Open Recent Workspace', () => {
-  const ws = (id: string, name: string, lastOpenedAt: number) => ({ id, name, lastOpenedAt, projectCount: 1 })
+  const ws = (id: string, name: string, lastOpenedAt: number) => ({ id, name, lastOpenedAt, repoCount: 1 })
 
   function stubWorkspaces(list: ReturnType<typeof ws>[]): { openWorkspace: ReturnType<typeof vi.fn> } {
     const openWorkspace = vi.fn(async () => null)

@@ -1,5 +1,5 @@
 import { IPC } from '@shared/contract'
-import { repo } from '../runtime'
+import { tables } from '../runtime'
 import { createWorktree, removeWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
 import { resetWorktree } from '../status'
 import { handle, broadcast } from './handle'
@@ -8,9 +8,9 @@ import { handle, broadcast } from './handle'
 export function register(): void {
   const h = handle
   // ---- worktrees / panes / tabs ----
-  h(IPC.createWorktree, (_e, projectId, opts) =>
+  h(IPC.createWorktree, (_e, repoId, opts) =>
     createWorktree({
-      projectId,
+      repoId,
       branch: opts.branch,
       existingBranch: opts.existingBranch,
       name: opts.name,
@@ -24,7 +24,7 @@ export function register(): void {
   h(IPC.renameWorktree, (_e, worktreeId, name) => {
     const trimmed = name.trim()
     if (!trimmed) return
-    repo.worktrees.rename(worktreeId, trimmed)
+    tables.worktrees.rename(worktreeId, trimmed)
     broadcast()
   })
 

@@ -1,7 +1,7 @@
 import { shell, webContents } from 'electron'
 import { IPC } from '@shared/contract'
 import { isOpenableExternalUrl } from '@shared/urls'
-import { runtime, repo } from '../runtime'
+import { runtime, tables } from '../runtime'
 import { git } from '../services/git'
 import { logger } from '../services/logger'
 import { spawnExternalTerminal } from '../services/external-terminal'
@@ -9,7 +9,7 @@ import { spawnExternalEditor } from '../services/external-editor'
 import { getSettings } from '../services/settings'
 import { createTabInWorktree } from '../tabs'
 import { handle } from './handle'
-import { projectRepoPath, worktreeRepoPath } from './resolve'
+import { repoPathOf, worktreeRepoPath } from './resolve'
 
 /** Hand-offs to the OS and the embedded browser: external links, webview popups, Explorer, external terminals. */
 export function register(): void {
@@ -28,7 +28,7 @@ export function register(): void {
     if (!wc) return
     wc.setWindowOpenHandler((details) => {
       const url = details.url
-      if (/^https?:\/\//i.test(url) && repo.worktrees.get(worktreeId)) {
+      if (/^https?:\/\//i.test(url) && tables.worktrees.get(worktreeId)) {
         createTabInWorktree(worktreeId, paneId, 'browser', { url })
         runtime.broadcastState()
       }
@@ -88,8 +88,8 @@ export function register(): void {
    * a message, and every caller is an explicit click on a visible entry.
    *
    * An empty `path` means the checkout root, which is what a Worktree row's
-   * "Open in Explorer" / "Open in External Terminal" want. A PROJECT header's
-   * two equivalents do not come through here at all — see the project-scoped
+   * "Open in Explorer" / "Open in External Terminal" want. A REPO header's
+   * two equivalents do not come through here at all — see the repo-scoped
    * pair below, which need no Worktree to exist.
    */
   const worktreePath = (worktreeId: string, path: string): string =>
@@ -124,19 +124,19 @@ export function register(): void {
     spawnExternalEditor(getSettings().externalEditor, worktreePath(worktreeId, path))
   )
 
-  /* ---- Project-scoped hand-offs -------------------------------------------
+  /* ---- Repo-scoped hand-offs -------------------------------------------
    *
-   * The rail's project header offers "Open in Explorer" and "Open in External
+   * The rail's repo header offers "Open in Explorer" and "Open in External
    * Terminal" too, and those cannot route through the pair above. Both of those
-   * need a Worktree id, and a project does not always have one: the root row is
-   * created by `reconcileProjectWorktrees`, which returns without touching the
+   * need a Worktree id, and a repo does not always have one: the root row is
+   * created by `reconcileRepoWorktrees`, which returns without touching the
    * stored rows when `git worktree list` fails — a directory that was never a
    * repo, or is no longer readable. That is a PERMANENT state, not a gap before
    * the first scan, and it is precisely the state in which a user reaches for
    * "open the folder and let me look at why".
    *
-   * So these two take a project id and NOTHING else. The directory comes from
-   * `project.repoPath`, which main stored when the user picked the folder — the
+   * So these two take a repo id and NOTHING else. The directory comes from
+   * `repo.repoPath`, which main stored when the user picked the folder — the
    * same provenance as `worktreeRepoPath`'s `w.path`, and equally not something
    * the renderer can influence. With no renderer-supplied path in the call
    * there is nothing to contain, which is why `resolveInRepo` is absent here
@@ -144,13 +144,13 @@ export function register(): void {
    * alternative — letting the renderer pass the absolute path it can see in the
    * rail — is the exact shape this PR removed, and is not coming back.
    */
-  h(IPC.openProjectPath, async (_e, projectId) => {
+  h(IPC.openRepoPath, async (_e, repoId) => {
     // Same resolve-with-a-message quirk as `IPC.openPath` above; rethrowing is
     // what puts "the folder is gone" in front of a user whose repo moved.
-    const err = await shell.openPath(projectRepoPath(projectId))
+    const err = await shell.openPath(repoPathOf(repoId))
     if (err) throw new Error(err)
   })
-  h(IPC.openProjectInTerminal, (_e, projectId) => {
-    spawnExternalTerminal(projectRepoPath(projectId))
+  h(IPC.openRepoInTerminal, (_e, repoId) => {
+    spawnExternalTerminal(repoPathOf(repoId))
   })
 }

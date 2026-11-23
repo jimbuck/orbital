@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import type { FileSearchHit, Project, SearchResults, Settings, Task, Worktree } from '@shared/types'
+import type { FileSearchHit, Repo, SearchResults, Settings, Task, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 import CommandPalette, { parseQuery } from './CommandPalette'
 
@@ -23,14 +23,14 @@ const cancelSearch = vi.fn(async () => undefined)
 const createTab = vi.fn(async () => ({}) as never)
 const splitPane = vi.fn(async () => ({ id: 'newpane' }) as never)
 
-function project(id: string, name: string): Project {
+function repo(id: string, name: string): Repo {
   return { id, name, repoPath: `C:/repos/${name}`, defaultAgentId: 'claude', addedAt: 0 }
 }
 
-function worktree(id: string, projectId: string, name: string, branch: string): Worktree {
+function worktree(id: string, repoId: string, name: string, branch: string): Worktree {
   return {
     id,
-    projectId,
+    repoId,
     kind: 'linked',
     name,
     path: `C:/repos/${name}`,
@@ -43,11 +43,11 @@ function worktree(id: string, projectId: string, name: string, branch: string): 
   }
 }
 
-function task(id: string, seq: number, projectId: string, title: string): Task {
+function task(id: string, seq: number, repoId: string, title: string): Task {
   return {
     id,
     seq,
-    projectId,
+    repoId,
     title,
     description: '',
     tags: [],
@@ -72,10 +72,10 @@ const settings = {
   accentColor: null
 } as unknown as Settings
 
-/** Seed a two-project workspace and open the palette with `query` typed. */
+/** Seed a two-repo workspace and open the palette with `query` typed. */
 function seed(query: string): void {
   useStore.setState({
-    projects: [project('p1', 'orbital'), project('p2', 'website')],
+    repos: [repo('p1', 'orbital'), repo('p2', 'website')],
     worktrees: [
       worktree('w1', 'p1', 'main', 'main'),
       worktree('w2', 'p1', 'palette', 'feat/palette'),
@@ -85,7 +85,7 @@ function seed(query: string): void {
     settings,
     devServers: {},
     workspace: null,
-    activeProjectId: 'p1',
+    activeRepoId: 'p1',
     activeWorktreeId: 'w1',
     activePaneIds: {},
     alertCount: 0,
@@ -191,7 +191,7 @@ describe('CommandPalette', () => {
     expect(optionLabels().join(' ')).toContain('Settings')
   })
 
-  it('lists Worktrees in the @ view, each tagged with its project', () => {
+  it('lists Worktrees in the @ view, each tagged with its repo', () => {
     seed('@')
     render(<CommandPalette />)
     const rows = screen.getAllByRole('option')
@@ -214,7 +214,7 @@ describe('CommandPalette', () => {
     expect(optionLabels()[0]).toContain('#98 Command Palette and Global Search')
   })
 
-  it('shows which project and Worktree a file hit came from', async () => {
+  it('shows which repo and Worktree a file hit came from', async () => {
     searchFiles.mockResolvedValue([
       { worktreeId: 'w2', path: 'src/renderer/src/store.ts', score: 90 },
       { worktreeId: 'w3', path: 'src/store.ts', score: 80 }

@@ -172,7 +172,7 @@ describe('findAgentConfig', () => {
     expect(findAgentConfig(agents, 'claude-2')?.name).toBe('Claude (work)')
   })
 
-  // Tabs and project defaults stored before profiles had ids hold a provider id.
+  // Tabs and repo defaults stored before profiles had ids hold a provider id.
   it('falls back to the first profile of a provider, so legacy references resolve', () => {
     expect(findAgentConfig(agents, 'codex')?.id).toBe('codex')
     expect(findAgentConfig([{ id: 'personal', name: 'Personal', provider: 'claude' }], 'claude')?.id).toBe('personal')
@@ -194,7 +194,7 @@ describe('resolveAgentRef', () => {
     expect(resolveAgentRef(agents, 'codex', 'claude')?.id).toBe('codex')
   })
 
-  // A tab pointing at a deleted profile must fall through to the project's
+  // A tab pointing at a deleted profile must fall through to the repo's
   // default, not launch a bare provider with none of the workspace's config.
   it('skips a reference to a profile that no longer exists', () => {
     expect(resolveAgentRef(agents, 'claude-2', undefined, 'codex')?.id).toBe('codex')

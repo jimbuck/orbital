@@ -14,7 +14,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { aggregateStatus, type Project as ProjectModel, type TerminalStatus } from '@shared/types'
+import { aggregateStatus, type Repo as RepoModel, type TerminalStatus } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
 import WorktreeRow from './WorktreeRow'
@@ -34,8 +34,8 @@ type MenuStep = 'items' | 'confirmRemove' | 'move' | 'newFolder'
  * The expand/collapse chevron, carrying what the hidden Worktrees add up to.
  *
  * It is the control that hides them, so it is the right place to say what is
- * behind it — and a far quieter place than the project's own status dot, which
- * used to do this job and in doing so claimed the project itself was working
+ * behind it — and a far quieter place than the repo's own status dot, which
+ * used to do this job and in doing so claimed the repo itself was working
  * when it was one linked Worktree that was.
  *
  * Tinted in the app's status vocabulary (lib/status.tsx), and pulsing only
@@ -52,30 +52,30 @@ export function GroupChevron({ expanded, status }: { expanded: boolean; status: 
 }
 
 /**
- * A project (repo) header in the rail. The header row IS the root Worktree:
- * clicking it selects the project's root Worktree directly. Linked Worktrees
+ * A repo header in the rail. The header row IS the root Worktree:
+ * clicking it selects the repo's root Worktree directly. Linked Worktrees
  * live in the collapsible list below — the chevron only renders when there
- * are any. Right-click opens a context menu to rename the project inline, file
+ * are any. Right-click opens a context menu to rename the repo inline, file
  * it in a rail folder, start a new Worktree, clear a stuck root status, open the
- * repo in Explorer or an external terminal, or remove the project. The header
+ * repo in Explorer or an external terminal, or remove the repo. The header
  * can also be dragged: up and down its list to reorder it, onto a folder, or out
  * of one. The Rail owns the drop.
  */
-export default function Project({ project }: { project: ProjectModel }): JSX.Element {
-  const worktrees = useStore(useShallow((s) => s.worktrees.filter((w) => w.projectId === project.id)))
-  const expanded = useStore((s) => !!s.expanded[project.id])
-  const isActive = useStore((s) => s.activeProjectId === project.id)
+export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
+  const worktrees = useStore(useShallow((s) => s.worktrees.filter((w) => w.repoId === repo.id)))
+  const expanded = useStore((s) => !!s.expanded[repo.id])
+  const isActive = useStore((s) => s.activeRepoId === repo.id)
   const activeWorktreeId = useStore((s) => s.activeWorktreeId)
-  const setActiveProject = useStore((s) => s.setActiveProject)
+  const setActiveRepo = useStore((s) => s.setActiveRepo)
   const toggleExpanded = useStore((s) => s.toggleExpanded)
   const openModal = useStore((s) => s.openModal)
-  const folders = useStore((s) => s.projectFolders)
-  const folderId = folders.find((f) => f.projectIds.includes(project.id))?.id ?? null
+  const folders = useStore((s) => s.railFolders)
+  const folderId = folders.find((f) => f.repoIds.includes(repo.id))?.id ?? null
   const root = worktrees.find((w) => w.kind === 'root')
   const linked = worktrees.filter((w) => w.kind !== 'root')
   const rootActive = !!root && activeWorktreeId === root.id
   // The header row IS the root Worktree, so its dot is the ROOT's status and
-  // nothing else. Rolling every Worktree in the project into it meant a single
+  // nothing else. Rolling every Worktree in the repo into it meant a single
   // agent working in one linked Worktree painted two spinners down the rail —
   // one on the row that was working and one on a row that was not — which reads
   // as two things running rather than one thing, in there.
@@ -93,7 +93,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [step, setStep] = useState<MenuStep>('items')
   const [renaming, setRenaming] = useState(false)
-  const [draft, setDraft] = useState(project.name)
+  const [draft, setDraft] = useState(repo.name)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -112,31 +112,31 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
     setMenu(clampMenuPos(e, 210, 240))
   }
 
-  // Filing a project is a rail arrangement only: main records where the row
-  // sits and leaves the project itself untouched. It goes last in the folder
+  // Filing a repo is a rail arrangement only: main records where the row
+  // sits and leaves the repo itself untouched. It goes last in the folder
   // it is moved to.
   const moveTo = (target: string): void => {
-    fireAndForget(window.orbital.placeProject(project.id, target, null))
+    fireAndForget(window.orbital.placeRepo(repo.id, target, null))
     closeMenu()
   }
   // Out of its folder, it lands at the top level just below that folder, which
   // is the nearest place to where it was.
   const removeFromFolder = (): void => {
-    const rail = useStore.getState().projectRail
+    const rail = useStore.getState().railItems
     const at = rail.findIndex((item) => item.kind === 'folder' && item.id === folderId)
-    fireAndForget(window.orbital.placeProject(project.id, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
+    fireAndForget(window.orbital.placeRepo(repo.id, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
     closeMenu()
   }
 
   const startRename = (): void => {
-    setDraft(project.name)
+    setDraft(repo.name)
     setRenaming(true)
     closeMenu()
   }
   const commitRename = (): void => {
     const name = draft.trim()
     setRenaming(false)
-    if (name && name !== project.name) void window.orbital.renameProject(project.id, name)
+    if (name && name !== repo.name) void window.orbital.renameRepo(repo.id, name)
   }
   const onRenameKey = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') {
@@ -148,7 +148,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
     }
   }
 
-  const activate = (): void => setActiveProject(project.id)
+  const activate = (): void => setActiveRepo(repo.id)
   const onHeaderKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (renaming) return
     if (e.key === 'Enter' || e.key === ' ') {
@@ -158,8 +158,8 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
   }
 
   return (
-    // The data attribute is how the Rail tells which project a drag is over.
-    <div data-project-id={project.id} className="mb-1">
+    // The data attribute is how the Rail tells which repo a drag is over.
+    <div data-repo-id={repo.id} className="mb-1">
       <div
         role="button"
         tabIndex={0}
@@ -167,7 +167,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
         onKeyDown={onHeaderKey}
         onContextMenu={openMenu}
         draggable={!renaming}
-        onDragStart={(e) => beginRailDrag(e, { kind: 'project', id: project.id })}
+        onDragStart={(e) => beginRailDrag(e, { kind: 'repo', id: repo.id })}
         className={`group flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
           rootActive ? 'bg-panel-2' : isActive ? 'bg-hover' : 'hover:bg-hover'
         }`}
@@ -183,7 +183,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
             title={linkedStatus === 'idle' ? undefined : `Worktrees ${worktreeStatusLabel(linkedStatus)}`}
             onClick={(e) => {
               e.stopPropagation()
-              toggleExpanded(project.id)
+              toggleExpanded(repo.id)
             }}
             className="flex flex-none items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
           >
@@ -213,12 +213,12 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
             />
           ) : (
             <div className={`text-[13.5px] font-bold ${isActive ? 'text-text' : 'text-text-2'}`}>
-              {project.name}
+              {repo.name}
             </div>
           )}
           <div className="mt-px truncate font-mono text-[10.5px] text-faint">
             {root ? `${root.branch} · ` : ''}
-            {project.repoPath}
+            {repo.repoPath}
           </div>
         </div>
 
@@ -229,7 +229,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
             title="New Worktree"
             onClick={(e) => {
               e.stopPropagation()
-              openModal('newWorktree', { project })
+              openModal('newWorktree', { repo })
             }}
             className="flex size-5 flex-none items-center justify-center rounded-[6px] text-faint opacity-0 outline-none hover:bg-hover hover:text-text focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-accent/60 group-hover:opacity-100"
           >
@@ -251,7 +251,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
           ))}
           <button
             type="button"
-            onClick={() => openModal('newWorktree', { project })}
+            onClick={() => openModal('newWorktree', { repo })}
             className="mt-px flex items-center gap-[7px] rounded px-[9px] py-[6px] text-left text-[11.5px] text-faint outline-none hover:text-muted focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <Plus size={13} strokeWidth={1.5} className="flex-none" />
@@ -274,7 +274,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<Plus size={13} strokeWidth={1.5} />}
                 label="New Worktree"
                 onClick={() => {
-                  openModal('newWorktree', { project })
+                  openModal('newWorktree', { repo })
                   closeMenu()
                 }}
               />
@@ -291,8 +291,8 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 />
               )}
               {/* The two OS hand-offs are NOT behind that guard, and must not be.
-                  A project's root Worktree row is created by
-                  `reconcileProjectWorktrees`, which gives up without writing any
+                  A repo's root Worktree row is created by
+                  `reconcileRepoWorktrees`, which gives up without writing any
                   rows when `git worktree list` fails — a path that is not a git
                   repo, or has gone unreadable, never gets one. That state is
                   permanent, and it is exactly when a user wants to open the
@@ -300,7 +300,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                   the tools away at the moment they are needed.
 
                   They still don't send a path over the bridge: these two name
-                  the PROJECT and main reads its own stored `repoPath`, the same
+                  the REPO and main reads its own stored `repoPath`, the same
                   provenance as the Worktree path the `(worktreeId, path)` calls
                   resolve against. What is not coming back is the renderer
                   handing main an absolute path to open. */}
@@ -308,7 +308,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<FolderOpen size={13} strokeWidth={1.5} />}
                 label={`Open in ${fileManagerName}`}
                 onClick={() => {
-                  fireAndForget(window.orbital.openProjectPath(project.id))
+                  fireAndForget(window.orbital.openRepoPath(repo.id))
                   closeMenu()
                 }}
               />
@@ -316,7 +316,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
                 icon={<Terminal size={13} strokeWidth={1.5} />}
                 label="Open in External Terminal"
                 onClick={() => {
-                  fireAndForget(window.orbital.openProjectInTerminal(project.id))
+                  fireAndForget(window.orbital.openRepoInTerminal(repo.id))
                   closeMenu()
                 }}
               />
@@ -333,7 +333,7 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
           {step === 'move' && (
             <>
               <div className="truncate px-2 py-1.5 text-[11.5px] font-semibold text-text-2">
-                Move {project.name} to
+                Move {repo.name} to
               </div>
               {folders.map((folder) => (
                 <MenuItem
@@ -363,11 +363,11 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
 
           {step === 'newFolder' && (
             <MenuPrompt
-              label={`New folder for ${project.name}`}
+              label={`New folder for ${repo.name}`}
               placeholder="Folder name"
               confirmLabel="Create"
               onSubmit={(name) => {
-                fireAndForget(window.orbital.createProjectFolder(name, project.id))
+                fireAndForget(window.orbital.createRailFolder(name, repo.id))
                 closeMenu()
               }}
               onCancel={closeMenu}
@@ -376,12 +376,12 @@ export default function Project({ project }: { project: ProjectModel }): JSX.Ele
 
           {step === 'confirmRemove' && (
             <MenuConfirm
-              message={`Remove "${project.name}" from Orbital?`}
+              message={`Remove "${repo.name}" from Orbital?`}
               hint="The repo and its worktrees stay on disk; open terminals close."
               confirmLabel="Remove"
               danger={false}
               onConfirm={() => {
-                void window.orbital.removeProject(project.id)
+                void window.orbital.removeRepo(repo.id)
                 closeMenu()
               }}
               onCancel={closeMenu}

@@ -5,22 +5,22 @@ import { useStore } from '@renderer/store'
 import { cleanIpcError } from '@renderer/lib/ipcError'
 import { ModalShell, ghostBtn } from './ModalRoot'
 import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
-import { ADD_PROJECT_WIDTH, CloneFromGithub, CreateOnGithub, useGithubContext } from './AddProjectGithub'
+import { ADD_REPO_WIDTH, CloneFromGithub, CreateOnGithub, useGithubContext } from './AddRepoGithub'
 
 /**
- * Where the project comes from. Hoisted so the options array is a stable
+ * Where the repo comes from. Hoisted so the options array is a stable
  * reference rather than a fresh one on every keystroke in the forms below.
  */
-export type AddProjectMode = 'local' | 'clone' | 'create'
+export type AddRepoMode = 'local' | 'clone' | 'create'
 
-const MODES: readonly SegmentedOption<AddProjectMode>[] = [
+const MODES: readonly SegmentedOption<AddRepoMode>[] = [
   { value: 'local', label: 'Local folder' },
   { value: 'clone', label: 'Clone from GitHub' },
   { value: 'create', label: 'New GitHub repo' }
 ]
 
 /**
- * The Add Project dialog. Three ways in, one radio group at the top:
+ * The Add Repo dialog. Three ways in, one radio group at the top:
  *
  *  - **Local folder** — the native picker over a repo that already exists.
  *  - **Clone from GitHub** — pick one of your repositories (or type
@@ -35,9 +35,9 @@ const MODES: readonly SegmentedOption<AddProjectMode>[] = [
  * you are, your orgs, the template lists) is loaded here, above the two GitHub
  * forms, so flipping between them does not fetch it twice.
  */
-export default function AddProject(): React.JSX.Element {
+export default function AddRepo(): React.JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
-  const [mode, setMode] = useState<AddProjectMode>('local')
+  const [mode, setMode] = useState<AddRepoMode>('local')
   const github = useGithubContext(mode !== 'local')
 
   const modeSwitch = (
@@ -53,14 +53,14 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The native folder picker lives in main; a non-null result means a Project
+  // The native folder picker lives in main; a non-null result means a Repo
   // (and its root Worktree) was created and pushed into the store.
   const choose = async (): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      const project = await window.orbital.addProject()
-      if (project) onDone()
+      const repo = await window.orbital.addRepo()
+      if (repo) onDone()
       else setBusy(false) // dialog cancelled — keep the modal open
     } catch (e) {
       setError(cleanIpcError(e) || 'Could not open that folder as a repo.')
@@ -72,7 +72,7 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
     <ModalShell
       title="Add repo"
       subtitle="Open a local git repo in Orbital"
-      width={ADD_PROJECT_WIDTH}
+      width={ADD_REPO_WIDTH}
       onClose={onDone}
       footer={
         <button type="button" className={ghostBtn} onClick={onDone}>
@@ -83,7 +83,7 @@ function LocalFolder({ modeSwitch, onDone }: { modeSwitch: ReactNode; onDone: ()
       {modeSwitch}
 
       <p className="text-[12.5px] leading-relaxed text-text-3 text-pretty">
-        Point Orbital at a folder that already contains a git repository. We will register it as a project so you can
+        Point Orbital at a folder that already contains a git repository. We will register it as a repo so you can
         launch Worktrees against it.
       </p>
 

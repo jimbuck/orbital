@@ -132,7 +132,7 @@ export default function SearchTab({ tab, active }: { tab: Tab; active: boolean }
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const projects = useStore((s) => s.projects)
+  const repos = useStore((s) => s.repos)
   const worktrees = useStore((s) => s.worktrees)
 
   const search = useMemo<SearchQuery>(
@@ -163,7 +163,7 @@ export default function SearchTab({ tab, active }: { tab: Tab; active: boolean }
   const originOf = (id: string): string => {
     const w = worktrees.find((x) => x.id === id)
     if (!w) return 'unknown Worktree'
-    return `${projects.find((p) => p.id === w.projectId)?.name ?? '?'} › ${w.name}`
+    return `${repos.find((p) => p.id === w.repoId)?.name ?? '?'} › ${w.name}`
   }
 
   const allFiles = useMemo(() => results?.files ?? [], [results])

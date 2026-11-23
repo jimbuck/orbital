@@ -22,7 +22,7 @@ export default function TaskCardContextMenu({
 }): JSX.Element {
   const openModal = useStore((s) => s.openModal)
   const setActiveWorktree = useStore((s) => s.setActiveWorktree)
-  const project = useStore((s) => s.projects.find((p) => p.id === task.projectId))
+  const repo = useStore((s) => s.repos.find((p) => p.id === task.repoId))
   const hasWorktree = useStore((s) => !!task.worktreeId && s.worktrees.some((w) => w.id === task.worktreeId))
 
   const setStatus = (status: TaskStatus): void => {
@@ -54,7 +54,7 @@ export default function TaskCardContextMenu({
           icon={<Play size={13} strokeWidth={1.5} />}
           label="Start Worktree"
           onClick={() => {
-            openModal('newWorktree', { project, task })
+            openModal('newWorktree', { repo, task })
             onClose()
           }}
         />

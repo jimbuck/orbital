@@ -22,7 +22,7 @@ const store = vi.hoisted(() => ({
 
 vi.mock('./runtime', () => ({
   runtime: { broadcastState: store.state, broadcastAlert: store.alert },
-  repo: {
+  tables: {
     tabs: {
       get: (id: string) => store.tabs.get(id),
       updateStatus: (id: string, status: TerminalStatus) => {

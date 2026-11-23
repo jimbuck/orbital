@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
-import { isPtyTabType, type Project, type RemoveWorktreeOptions, type Worktree } from '@shared/types'
-import { runtime, repo } from './runtime'
+import { isPtyTabType, type Repo, type RemoveWorktreeOptions, type Worktree } from '@shared/types'
+import { runtime, tables } from './runtime'
 import { git } from './services/git'
 import { createLinkedWorktree, removeWorktree as removeCheckout } from './services/worktree'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
@@ -12,8 +12,8 @@ import { killWorktreeTerminals, releaseTabRuntime } from './tabs'
 import { forgetTabs } from './status'
 
 /**
- * Project and Worktree lifecycle. The window's IPC handlers and the CLI's
- * control handlers both come through here to add or remove a Project and to
+ * Repo and Worktree lifecycle. The window's IPC handlers and the CLI's
+ * control handlers both come through here to add or remove a Repo and to
  * create or remove a Worktree, so each of those is one sequence: the git
  * checkout, the rows, the task link, the watchers, background setup, teardown
  * with rollback, and the pushes that tell the window it happened.
@@ -24,7 +24,7 @@ import { forgetTabs } from './status'
 
 /** What a caller says to start a Worktree; everything else is decided here. */
 export interface CreateWorktreeInput {
-  projectId: string
+  repoId: string
   /** New branch to create (slugified). Defaults to the name, then the task's title. */
   branch?: string
   /** Check out this existing branch (local, or `origin/x` remote) instead of creating one. */
@@ -47,15 +47,15 @@ export interface CreateWorktreeInput {
  * task is starting it, whichever door the request came through.
  */
 export async function createWorktree(input: CreateWorktreeInput): Promise<Worktree> {
-  const project = repo.projects.get(input.projectId)
-  if (!project) throw new Error(`project ${input.projectId} not found`)
-  const task = input.taskId ? repo.tasks.get(input.taskId) : undefined
+  const repo = tables.repos.get(input.repoId)
+  if (!repo) throw new Error(`repo ${input.repoId} not found`)
+  const task = input.taskId ? tables.tasks.get(input.taskId) : undefined
   if (input.taskId && !task) throw new Error(`task ${input.taskId} not found`)
 
   const name = input.name?.trim() || task?.title
   const branch = input.branch?.trim() || name || `worktree-${Date.now()}`
   const created = await createLinkedWorktree({
-    project,
+    repo,
     branch,
     existingBranch: input.existingBranch,
     name,
@@ -63,12 +63,12 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
     taskId: task?.id ?? null
   })
   if (task && task.status !== 'in_progress' && task.status !== 'done') {
-    repo.tasks.update(task.id, { status: 'in_progress' })
+    tables.tasks.update(task.id, { status: 'in_progress' })
   }
   runtime.gitWatcher.watch(created.path)
-  beginWorktreeSetup(created, project.repoPath)
+  beginWorktreeSetup(created, repo.repoPath)
   announce()
-  return repo.worktrees.get(created.id) ?? created
+  return tables.worktrees.get(created.id) ?? created
 }
 
 /**
@@ -83,11 +83,11 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
  * rethrown.
  */
 export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOptions = {}): Promise<void> {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) return
   if (worktree.kind === 'root') throw new Error('the root Worktree cannot be removed')
-  const project = opts.removeWorktree ? repo.projects.get(worktree.projectId) : undefined
-  if (project) {
+  const repo = opts.removeWorktree ? tables.repos.get(worktree.repoId) : undefined
+  if (repo) {
     if (!opts.force && !(await git.status(worktree.path)).clean) {
       throw new Error('The worktree has uncommitted changes.')
     }
@@ -97,7 +97,7 @@ export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOpt
     runtime.gitWatcher.unwatch(worktree.path)
     killWorktreeTerminals(worktreeId)
     try {
-      await removeCheckout(project.repoPath, worktree.path, opts.force)
+      await removeCheckout(repo.repoPath, worktree.path, opts.force)
     } catch (err) {
       runtime.gitWatcher.watch(worktree.path)
       for (const pane of worktree.panes) {
@@ -108,34 +108,34 @@ export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOpt
     }
   }
   releaseWorktreeRuntime(worktree)
-  repo.worktrees.remove(worktreeId)
+  tables.worktrees.remove(worktreeId)
   announce()
 }
 
 /**
- * Add a git repository as a Project: its root Worktree, its watchers, and any
+ * Add a git repository as a Repo: its root Worktree, its watchers, and any
  * worktrees the repo already has (they show up immediately). Adding a path
- * that is already a Project returns that Project.
+ * that is already a Repo returns that Repo.
  */
-export async function addProject(repoPath: string): Promise<Project> {
-  await registerProject(repoPath)
-  const project = repo.projects.getByPath(repoPath)
-  if (!project) throw new Error(`project at ${repoPath} was not registered`)
-  await reconcileProjectWorktrees(project.id)
+export async function addRepo(repoPath: string): Promise<Repo> {
+  await registerRepo(repoPath)
+  const repo = tables.repos.getByPath(repoPath)
+  if (!repo) throw new Error(`repo at ${repoPath} was not registered`)
+  await reconcileRepoWorktrees(repo.id)
   announce()
-  return project
+  return repo
 }
 
-/** Remove a Project from the cockpit. Its checkouts stay on disk. */
-export function removeProject(projectId: string): void {
-  const project = repo.projects.get(projectId)
-  if (!project) return
-  for (const w of repo.worktrees.list()) {
-    if (w.projectId === projectId) releaseWorktreeRuntime(w)
+/** Remove a Repo from the cockpit. Its checkouts stay on disk. */
+export function removeRepo(repoId: string): void {
+  const repo = tables.repos.get(repoId)
+  if (!repo) return
+  for (const w of tables.worktrees.list()) {
+    if (w.repoId === repoId) releaseWorktreeRuntime(w)
   }
-  runtime.gitWatcher.unwatch(project.repoPath)
-  removeWorktreesWatcher(projectId)
-  repo.projects.remove(projectId)
+  runtime.gitWatcher.unwatch(repo.repoPath)
+  removeWorktreesWatcher(repoId)
+  tables.repos.remove(repoId)
   announce()
 }
 
@@ -213,57 +213,57 @@ const COPY_STALL_SECONDS = 60
  * catches up.
  */
 export async function syncWorktreeEnv(worktreeId: string): Promise<{ copied: string[] }> {
-  const worktree = repo.worktrees.get(worktreeId)
+  const worktree = tables.worktrees.get(worktreeId)
   if (!worktree) throw new Error(`worktree ${worktreeId} not found`)
   if (worktree.kind !== 'linked') throw new Error('the root checkout is what env files are synced from')
-  const project = repo.projects.get(worktree.projectId)
-  if (!project) throw new Error(`project ${worktree.projectId} not found`)
-  const copied = await syncEnvFiles(project.repoPath, worktree.path, getSettings().envSyncPatterns)
+  const repo = tables.repos.get(worktree.repoId)
+  if (!repo) throw new Error(`repo ${worktree.repoId} not found`)
+  const copied = await syncEnvFiles(repo.repoPath, worktree.path, getSettings().envSyncPatterns)
   logger.info('env files synced from root', { worktree: worktree.name, copied: copied.length })
   // The editor's file tree refetches on the git-changed push.
   runtime.broadcastGitChanged([worktreeId])
   return { copied }
 }
 
-/** Register a project: create its root Worktree and start its watchers. */
-async function registerProject(repoPath: string): Promise<Worktree | null> {
-  const existing = repo.projects.getByPath(repoPath)
+/** Register a repo: create its root Worktree and start its watchers. */
+async function registerRepo(repoPath: string): Promise<Worktree | null> {
+  const existing = tables.repos.getByPath(repoPath)
   if (existing) {
     runtime.gitWatcher.watch(repoPath)
     ensureWorktreesWatcher(existing)
-    return repo.worktrees.list().find((w) => w.projectId === existing.id && w.kind === 'root') ?? null
+    return tables.worktrees.list().find((w) => w.repoId === existing.id && w.kind === 'root') ?? null
   }
   const name = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath
-  const project = repo.projects.create({ name, repoPath })
+  const repo = tables.repos.create({ name, repoPath })
   const branch = await git.currentBranch(repoPath).catch(() => 'main')
-  const root = repo.worktrees.create({
-    projectId: project.id,
+  const root = tables.worktrees.create({
+    repoId: repo.id,
     kind: 'root',
     name: 'main',
     path: repoPath,
     branch
   })
   runtime.gitWatcher.watch(repoPath)
-  ensureWorktreesWatcher(project)
+  ensureWorktreesWatcher(repo)
   return root
 }
 
 /* ---- git worktree auto-discovery ---------------------------------------- */
 
-/** One admin-dir watcher per project so external worktree add/remove shows live. */
+/** One admin-dir watcher per repo so external worktree add/remove shows live. */
 const worktreesWatchers = new Map<string, WorktreesWatcher>()
 
-function ensureWorktreesWatcher(project: { id: string; repoPath: string }): void {
-  if (worktreesWatchers.has(project.id)) return
-  const watcher = new WorktreesWatcher(project.repoPath)
-  worktreesWatchers.set(project.id, watcher)
-  watcher.on('changed', () => void reconcileProjectWorktrees(project.id))
+function ensureWorktreesWatcher(repo: { id: string; repoPath: string }): void {
+  if (worktreesWatchers.has(repo.id)) return
+  const watcher = new WorktreesWatcher(repo.repoPath)
+  worktreesWatchers.set(repo.id, watcher)
+  watcher.on('changed', () => void reconcileRepoWorktrees(repo.id))
   void watcher.start()
 }
 
-function removeWorktreesWatcher(projectId: string): void {
-  worktreesWatchers.get(projectId)?.stop()
-  worktreesWatchers.delete(projectId)
+function removeWorktreesWatcher(repoId: string): void {
+  worktreesWatchers.get(repoId)?.stop()
+  worktreesWatchers.delete(repoId)
 }
 
 /** Stop every discovery watcher (app shutdown). */
@@ -284,70 +284,70 @@ function releaseWorktreeRuntime(worktree: Worktree): void {
 }
 
 /**
- * Make a project's Worktrees match `git worktree list`: adopt checkouts created
+ * Make a repo's Worktrees match `git worktree list`: adopt checkouts created
  * outside Orbital, drop rows whose checkout is gone (their tabs/layout go too —
  * UI state is keyed to a live checkout), and resync branches. Broadcasts only
  * when something actually changed.
  */
-export async function reconcileProjectWorktrees(projectId: string): Promise<void> {
-  const project = repo.projects.get(projectId)
-  if (!project) return
+export async function reconcileRepoWorktrees(repoId: string): Promise<void> {
+  const repo = tables.repos.get(repoId)
+  if (!repo) return
   let entries
   try {
-    entries = await git.worktreeList(project.repoPath)
+    entries = await git.worktreeList(repo.repoPath)
   } catch {
     return // repo dir missing or not a git repo — leave the stored rows alone
   }
   // Everything from here to the end of the apply below is synchronous, so it sees
   // one consistent picture: no create can slip in between the rows snapshot, the
   // in-flight list, and the writes.
-  const rows = repo.worktrees.list().filter((w) => w.projectId === projectId)
-  // A checkout that IS another project belongs to that project's rail entry; one
+  const rows = tables.worktrees.list().filter((w) => w.repoId === repoId)
+  // A checkout that IS another repo belongs to that repo's rail entry; one
   // Orbital is still creating gets its row from createLinkedWorktree, not here.
   const skip = [
-    ...repo.projects
+    ...tables.repos
       .list()
-      .filter((p) => p.id !== projectId)
+      .filter((p) => p.id !== repoId)
       .map((p) => p.repoPath),
     ...pathsBeingCreated()
   ]
-  const plan = planWorktreeSync(project, rows, entries, skip)
+  const plan = planWorktreeSync(repo, rows, entries, skip)
   if (!plan.createRoot && plan.adopt.length === 0 && plan.remove.length === 0 && plan.branchUpdates.length === 0) {
     return
   }
 
-  // A project that entered via the workspace YAML starts without a root row.
+  // A repo that entered via the workspace YAML starts without a root row.
   if (plan.createRoot) {
-    repo.worktrees.create({
-      projectId,
+    tables.worktrees.create({
+      repoId,
       kind: 'root',
       name: 'main',
-      path: project.repoPath,
+      path: repo.repoPath,
       branch: plan.createRoot.branch
     })
   }
   for (const a of plan.adopt) {
-    repo.worktrees.create({ projectId, kind: 'linked', name: a.name, path: a.path, branch: a.branch })
+    tables.worktrees.create({ repoId, kind: 'linked', name: a.name, path: a.path, branch: a.branch })
     runtime.gitWatcher.watch(a.path)
   }
   for (const row of plan.remove) {
     releaseWorktreeRuntime(row)
-    repo.worktrees.remove(row.id)
+    tables.worktrees.remove(row.id)
   }
-  for (const u of plan.branchUpdates) repo.worktrees.updateBranchByPath(u.path, u.branch)
+  for (const u of plan.branchUpdates) tables.worktrees.updateBranchByPath(u.path, u.branch)
 
   announce()
 }
 
-/** On startup, resume watchers for already-registered projects and their worktrees. */
-export function resumeProjects(): void {
+/** On startup, resume watchers for already-registered repos and their worktrees. */
+export function resumeRepos(): void {
   const checkouts = new Set<string>()
-  for (const project of repo.projects.list()) {
-    runtime.gitWatcher.watch(project.repoPath)
-    ensureWorktreesWatcher(project)
-    checkouts.add(project.repoPath)
+  for (const repo of tables.repos.list()) {
+    runtime.gitWatcher.watch(repo.repoPath)
+    ensureWorktreesWatcher(repo)
+    checkouts.add(repo.repoPath)
   }
-  for (const w of repo.worktrees.list()) {
+  for (const w of tables.worktrees.list()) {
     if (w.kind === 'linked' && existsSync(w.path)) {
       runtime.gitWatcher.watch(w.path)
       checkouts.add(w.path)
@@ -355,18 +355,18 @@ export function resumeProjects(): void {
       // that never finished) left its marker behind. Pick it up where it
       // stopped: the copy skips files the worktree already has.
       if (hasIncompleteCopy(w.path)) {
-        const project = repo.projects.get(w.projectId)
-        if (project) {
+        const repo = tables.repos.get(w.repoId)
+        if (repo) {
           logger.info('resuming interrupted node_modules copy', { worktree: w.name })
-          beginWorktreeSetup(w, project.repoPath)
+          beginWorktreeSetup(w, repo.repoPath)
         }
       }
     }
   }
-  // Reconcile every project against `git worktree list` (adopt checkouts created
+  // Reconcile every repo against `git worktree list` (adopt checkouts created
   // outside Orbital while it was closed, drop vanished ones), then resync
   // branches — they can move while the app is closed.
-  void Promise.all(repo.projects.list().map((p) => reconcileProjectWorktrees(p.id)))
+  void Promise.all(tables.repos.list().map((p) => reconcileRepoWorktrees(p.id)))
     .then(() => Promise.all([...checkouts].map((p) => runtime.refreshBranch(p))))
     .then(() => runtime.broadcastState())
 }
