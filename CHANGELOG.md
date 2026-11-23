@@ -2,6 +2,19 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.46.0](https://github.com/jimbuck/orbital/compare/v1.45.0...v1.46.0) (2026-11-23)
+
+
+### Features
+
+* **agents:** brief agents on their project and let them work across its repos ([fa32df0](https://github.com/jimbuck/orbital/commit/fa32df03ca36fa927d237ffa3301a23d3944a6fa))
+* group repos into projects ([6f7690e](https://github.com/jimbuck/orbital/commit/6f7690e7ff875e2b8f9f45c7f0e7879afbfbb0c8))
+* **projects:** neutral repo-list markers and an opt-in VS Code workspace file ([3e726e4](https://github.com/jimbuck/orbital/commit/3e726e47e8684e544eec00d27086b5aca684ed35))
+* **rail:** call the rail's entries repos, not projects ([13a83cc](https://github.com/jimbuck/orbital/commit/13a83cc8eedaf94505977189a9f2c2b7ef48f004))
+* **rail:** show projects as groups, with a session in each project ([be82073](https://github.com/jimbuck/orbital/commit/be820734cadc46400fe0faa749a5fc3b21684687))
+* **rail:** title the rail Projects and count projects ([c8b7d9f](https://github.com/jimbuck/orbital/commit/c8b7d9f540e07a4db851808d83ad52bf546dc246))
+* **tasks:** file tasks under projects, with the repo as an optional tag ([a83540b](https://github.com/jimbuck/orbital/commit/a83540bcce804fc550b29af9c967c9808f446f32))
+
 # [1.45.0](https://github.com/jimbuck/orbital/compare/v1.44.0...v1.45.0) (2026-11-17)
 
 
