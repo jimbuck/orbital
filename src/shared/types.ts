@@ -362,31 +362,54 @@ export interface Repo {
   /** Optional explicit path to the agent executable, overriding PATH lookup. */
   agentExecPath?: string
   addedAt: number
+  /** The {@link Project} this repo belongs to. Every repo is in exactly one. */
+  projectId: string
 }
 
 /**
- * A folder in the rail: a named, collapsible group of repos.
+ * A Project is a root folder plus the repos that belong together under it:
+ * one or more member repos and, optionally, a home repo among them. Every repo
+ * is in exactly one project; a repo added on its own gets a project of its own
+ * (named after it, rooted at its path), which the rail draws as a plain repo
+ * row. The rail arranges projects, not repos.
+ */
+export interface Project {
+  id: string
+  name: string
+  /** The folder the project lives in. For a one-repo project, that repo's path. */
+  rootPath: string
+  /** The member repo that is the project's home, or null. Always one of `repoIds`. */
+  homeRepoId: string | null
+  /** Whether Orbital may write its managed block into the home repo's agent files. */
+  managedBlock: boolean
+  /** The member repos in hand order, the home included. */
+  repoIds: string[]
+  createdAt: number
+}
+
+/**
+ * A folder in the rail: a named, collapsible group of projects.
  *
- * It arranges the Repos panel and does nothing else. A repo's row, repo
- * path, worktree locations, agent defaults and settings are the same in a
- * folder as out of one, which is why membership lives here and not as a field
- * on {@link Repo}; folders are also left out of the workspace export.
+ * It arranges the Repos panel and does nothing else. A project's repos, root,
+ * worktree locations, agent defaults and settings are the same in a folder as
+ * out of one, which is why membership lives here and not as a field on
+ * {@link Project}; folders are also left out of the workspace export.
  */
 export interface RailFolder {
   id: string
   name: string
-  /** Whether its repos are hidden. Persisted, so the rail comes back as it was left. */
+  /** Whether its projects are hidden. Persisted, so the rail comes back as it was left. */
   collapsed: boolean
-  /** The repos filed here, in the order the rail lists them. A repo is in at most one folder. */
-  repoIds: string[]
+  /** The projects filed here, in the order the rail lists them. A project is in at most one folder. */
+  projectIds: string[]
 }
 
 /**
- * One row at the rail's top level: a folder, or a repo that is in no folder.
- * The two share one order, so a folder can sit anywhere among the loose repos.
+ * One row at the rail's top level: a folder, or a project that is in no folder.
+ * The two share one order, so a folder can sit anywhere among the loose projects.
  */
 export interface RailItem {
-  kind: 'folder' | 'repo'
+  kind: 'folder' | 'project'
   id: string
 }
 
@@ -613,9 +636,11 @@ export type SettingsPatch = Partial<Settings>
 /** Full application state pushed to / pulled by the renderer. */
 export interface AppState {
   repos: Repo[]
-  /** The rail's folders, each with the repos filed in it. */
+  /** Every project in the workspace; each repo's `projectId` names one of these. */
+  projects: Project[]
+  /** The rail's folders, each with the projects filed in it. */
   railFolders: RailFolder[]
-  /** The rail's top level, in order: every folder and every repo that is in none. */
+  /** The rail's top level, in order: every folder and every project that is in none. */
   railItems: RailItem[]
   worktrees: Worktree[]
   tasks: Task[]
@@ -1119,6 +1144,21 @@ export interface WorkspaceRepoConfig {
 }
 
 /**
+ * One project entry in a workspace config file: how the file's repos are
+ * grouped. A repo no entry lists gets a project of its own on import.
+ */
+export interface WorkspaceProjectConfig {
+  id: string
+  name: string
+  /** Absolute path to the project's root folder. */
+  root: string
+  /** The home repo's id, one of `repos`. */
+  home?: string
+  /** Member repo ids, in order. */
+  repos: string[]
+}
+
+/**
  * The Export/Import Workspace file format (YAML). Workspaces themselves live in
  * the global DB; this shape exists purely for sharing a workspace between
  * machines or people.
@@ -1132,6 +1172,8 @@ export interface WorkspaceConfig {
   /** Workspace-scoped settings. Every field optional — defaults fill gaps. */
   settings?: Partial<WorkspaceSettings>
   repos: WorkspaceRepoConfig[]
+  /** How the repos are grouped. Absent (older files): one project per repo. */
+  projects?: WorkspaceProjectConfig[]
 }
 
 /** A workspace as listed in the picker (a row of the global `workspaces` table). */

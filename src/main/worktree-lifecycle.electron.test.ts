@@ -64,7 +64,7 @@ vi.mock('./services/worktree', async (importOriginal) => {
   return { ...actual, removeWorktree: vi.fn(actual.removeWorktree) }
 })
 
-const { createWorktree, removeWorktree, addRepo, removeRepo, stopWorktreesWatchers } = await import(
+const { createWorktree, removeWorktree, addRepo, removeRepo, removeProject, stopWorktreesWatchers } = await import(
   './worktree-lifecycle'
 )
 const checkout = await import('./services/worktree')
@@ -295,6 +295,26 @@ describe('adding and removing a Repo', () => {
     expect(rt.unwatch).toHaveBeenCalledWith(w.path)
     expect(rt.unwatch).toHaveBeenCalledWith(repoPath)
     expect(existsSync(w.path)).toBe(true)
+    expect(existsSync(repoPath)).toBe(true)
+    expect(rt.state).toHaveBeenCalled()
+  })
+
+  it('removes a Project: every repo in it is torn down like removeRepo, and the rows cascade away', async () => {
+    const w = await createWorktree({ repoId: repo.id, name: 'feature' })
+    const terminal = tables.tabs.create({ worktreeId: w.id, paneId: w.panes[0].id, type: 'terminal' })
+    const sibling = tables.repos.create({ name: 'sib', repoPath: join(dir, 'sib'), projectId: repo.projectId })
+    for (const spy of Object.values(rt)) spy.mockClear()
+
+    removeProject(repo.projectId)
+
+    expect(tables.projects.get(repo.projectId)).toBeUndefined()
+    expect(tables.repos.get(repo.id)).toBeUndefined()
+    expect(tables.repos.get(sibling.id)).toBeUndefined()
+    expect(tables.worktrees.list()).toEqual([])
+    expect(rt.kill).toHaveBeenCalledWith(terminal.id)
+    expect(rt.unwatch).toHaveBeenCalledWith(w.path)
+    expect(rt.unwatch).toHaveBeenCalledWith(repoPath)
+    expect(rt.unwatch).toHaveBeenCalledWith(sibling.repoPath)
     expect(existsSync(repoPath)).toBe(true)
     expect(rt.state).toHaveBeenCalled()
   })

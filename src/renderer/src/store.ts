@@ -3,6 +3,7 @@ import { fireAndForget } from './lib/bridge'
 import type {
   AppState,
   GitFileState,
+  Project,
   Repo,
   RailFolder,
   RailItem,
@@ -98,9 +99,11 @@ export interface EditorOpenRequest extends EditorOpenTarget {
 
 interface Data {
   repos: Repo[]
+  /** Every project; the rail arranges these (see Project). */
+  projects: Project[]
   /** The rail's folders, in rail order (see RailFolder). */
   railFolders: RailFolder[]
-  /** The rail's top level in order: folders and the repos in none of them. */
+  /** The rail's top level in order: folders and the projects in none of them. */
   railItems: RailItem[]
   worktrees: Worktree[]
   tasks: Task[]
@@ -189,7 +192,7 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
 }
 
 /**
- * Open the rail folder hiding `repoId`, if one is.
+ * Open the rail folder hiding `repoId` (that is, its project), if one is.
  *
  * A repo can be selected from places that are not its rail row (the command
  * palette, the needs-attention banner), and a selection the rail cannot show
@@ -197,14 +200,16 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
  * actions, never from applyState: a folder the user collapsed stays collapsed
  * through every state push, including the one at boot.
  */
-function revealRepo(folders: RailFolder[], repoId: string): void {
-  const hiding = folders.find((f) => f.collapsed && f.repoIds.includes(repoId))
+function revealRepo(folders: RailFolder[], repos: Repo[], repoId: string): void {
+  const projectId = repos.find((r) => r.id === repoId)?.projectId
+  const hiding = folders.find((f) => f.collapsed && !!projectId && f.projectIds.includes(projectId))
   if (hiding) fireAndForget(window.orbital.setRailFolderCollapsed(hiding.id, false))
 }
 
 export const useStore = create<Store>((set, get) => ({
   // data
   repos: [],
+  projects: [],
   railFolders: [],
   railItems: [],
   worktrees: [],
@@ -269,6 +274,7 @@ export const useStore = create<Store>((set, get) => ({
     // Keep previous references wherever the content did not change (see shareById).
     set({
       repos: shareById(prev.repos, s.repos),
+      projects: shareById(prev.projects, s.projects),
       railFolders: shareById(prev.railFolders, s.railFolders),
       railItems: share(prev.railItems, s.railItems),
       worktrees: shareById(prev.worktrees, s.worktrees),
@@ -285,7 +291,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setActiveRepo(id) {
-    revealRepo(get().railFolders, id)
+    revealRepo(get().railFolders, get().repos, id)
     const repoWorktrees = get().worktrees.filter((w) => w.repoId === id)
     const activeWorktreeId = (repoWorktrees.find((w) => w.kind === 'root') ?? repoWorktrees[0])?.id ?? null
     set((s) => ({
@@ -297,7 +303,7 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveWorktree(id) {
     const worktree = get().worktrees.find((w) => w.id === id)
-    if (worktree) revealRepo(get().railFolders, worktree.repoId)
+    if (worktree) revealRepo(get().railFolders, get().repos, worktree.repoId)
     set({ activeWorktreeId: id, activeRepoId: worktree ? worktree.repoId : get().activeRepoId })
   },
 

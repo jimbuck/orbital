@@ -90,8 +90,11 @@ describe('applyState structural sharing', () => {
   const settings = { theme: 'dark', alerts: { sound: true } } as unknown as Settings
   function appState(): AppState {
     return {
-      repos: [{ id: 'p1', name: 'P', repoPath: '/p' } as AppState['repos'][number]],
-      railFolders: [{ id: 'f1', name: 'Work', collapsed: false, repoIds: ['p1'] }],
+      repos: [{ id: 'p1', name: 'P', repoPath: '/p', projectId: 'pr1' } as AppState['repos'][number]],
+      projects: [
+        { id: 'pr1', name: 'P', rootPath: '/p', homeRepoId: null, managedBlock: true, repoIds: ['p1'], createdAt: 0 }
+      ],
+      railFolders: [{ id: 'f1', name: 'Work', collapsed: false, projectIds: ['pr1'] }],
       railItems: [{ kind: 'folder', id: 'f1' }],
       worktrees: [worktree('w1', ['a']), worktree('w2', ['c'])],
       tasks: [],
@@ -108,6 +111,7 @@ describe('applyState structural sharing', () => {
     useStore.getState().applyState(appState())
     const after = useStore.getState()
     expect(after.repos).toBe(before.repos)
+    expect(after.projects).toBe(before.projects)
     expect(after.railFolders).toBe(before.railFolders)
     expect(after.railItems).toBe(before.railItems)
     expect(after.worktrees).toBe(before.worktrees)
@@ -143,9 +147,14 @@ describe('selecting a repo hidden in a collapsed rail folder', () => {
     vi.stubGlobal('orbital', { setRailFolderCollapsed })
     useStore.setState({
       worktrees: [worktree('w1', ['a'])],
+      // Folders hold projects; the store finds a repo's folder through its project.
+      repos: [
+        { id: 'p1', name: 'P', repoPath: '/p', projectId: 'pr1' } as AppState['repos'][number],
+        { id: 'p2', name: 'Q', repoPath: '/q', projectId: 'pr2' } as AppState['repos'][number]
+      ],
       railFolders: [
-        { id: 'f-shut', name: 'Shut', collapsed: true, repoIds: ['p1'] },
-        { id: 'f-open', name: 'Open', collapsed: false, repoIds: ['p2'] }
+        { id: 'f-shut', name: 'Shut', collapsed: true, projectIds: ['pr1'] },
+        { id: 'f-open', name: 'Open', collapsed: false, projectIds: ['pr2'] }
       ]
     })
   })
@@ -172,7 +181,8 @@ describe('selecting a repo hidden in a collapsed rail folder', () => {
   it('never reopens a folder on a state push: one the user collapsed stays collapsed', () => {
     const state = useStore.getState()
     state.applyState({
-      repos: [{ id: 'p1', name: 'P', repoPath: '/p' } as AppState['repos'][number]],
+      repos: state.repos,
+      projects: [],
       railFolders: state.railFolders,
       railItems: state.railItems,
       worktrees: [worktree('w1', ['a'])],

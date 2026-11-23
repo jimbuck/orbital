@@ -24,7 +24,8 @@ const repo = (id: string, name: string): Repo => ({
   name,
   repoPath: `C:\\repos\\${name}`,
   defaultAgentId: 'claude',
-  addedAt: 0
+  addedAt: 0,
+  projectId: `project-${id}`
 })
 
 const req = (over: Partial<ControlRequest> = {}): ControlRequest => ({ cmd: 'task-list', args: {}, ...over })

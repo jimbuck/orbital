@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { getDb, writeTx } from './database'
 import {
   type Repo,
+  type Project,
   type RailFolder,
   type RailItem,
   type Worktree,
@@ -24,6 +25,7 @@ import {
 } from '@shared/types'
 import { leaf, defaultLayout, layoutCovers } from '../services/layout'
 import { placeTab } from '@shared/tabOrder'
+import { baseName, projectRootFor } from '../services/project-root'
 
 export const id = (): string => randomUUID()
 const now = (): number => Date.now()
@@ -37,7 +39,9 @@ function mapRepo(r: any): Repo {
     repoPath: r.repo_path,
     defaultAgentId: r.default_agent_id || 'claude',
     agentExecPath: r.agent_exec_path || undefined,
-    addedAt: r.added_at
+    addedAt: r.added_at,
+    // Never NULL once the boot heal has run (groupReposIntoProjects).
+    projectId: r.project_id ?? ''
   }
 }
 
@@ -197,8 +201,8 @@ export const repos = {
       .all(workspaceId ?? requireWorkspaceId())
       .map(mapRepo)
   },
-  get(pid: string): Repo | undefined {
-    const r = getDb().prepare('SELECT * FROM repos WHERE id = ?').get(pid)
+  get(rid: string): Repo | undefined {
+    const r = getDb().prepare('SELECT * FROM repos WHERE id = ?').get(rid)
     return r ? mapRepo(r) : undefined
   },
   getByPath(repoPath: string): Repo | undefined {
@@ -207,48 +211,357 @@ export const repos = {
       .get(requireWorkspaceId(), repoPath)
     return r ? mapRepo(r) : undefined
   },
-  create(input: { name: string; repoPath: string; workspaceId?: string }): Repo {
-    const pid = id()
-    getDb()
-      .prepare('INSERT INTO repos (id, workspace_id, name, repo_path, added_at) VALUES (?, ?, ?, ?, ?)')
-      .run(pid, input.workspaceId ?? requireWorkspaceId(), input.name, input.repoPath, now())
-    return repos.get(pid)!
-  },
-  remove(pid: string): void {
-    getDb().prepare('DELETE FROM repos WHERE id = ?').run(pid)
-  },
-  rename(pid: string, name: string): void {
-    getDb().prepare('UPDATE repos SET name = ? WHERE id = ?').run(name, pid)
-  },
-  updateAgent(pid: string, patch: { defaultAgentId?: string; agentExecPath?: string }): void {
+  /**
+   * Add a repo. Every repo is in a project: given `projectId` it joins that
+   * one, last among its repos (with the same promote rule as
+   * {@link projects.addRepo}); otherwise it gets a project of its own, named
+   * after it and rooted at its path, which the rail draws as a plain repo row.
+   */
+  create(input: { name: string; repoPath: string; workspaceId?: string; projectId?: string }): Repo {
+    const rid = id()
     writeTx(() => {
-      const cur = repos.get(pid)
+      const workspaceId = input.workspaceId ?? requireWorkspaceId()
+      const target = input.projectId ? projectRow(input.projectId) : undefined
+      if (input.projectId && target?.workspace_id !== workspaceId) {
+        throw new Error(`project ${input.projectId} is not in this workspace`)
+      }
+      const before = target ? memberIds(target.id) : []
+      const projectId = target?.id ?? insertProject(workspaceId, input.name, input.repoPath)
+      getDb()
+        .prepare(
+          `INSERT INTO repos (id, workspace_id, name, repo_path, added_at, project_id, project_position)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(rid, workspaceId, input.name, input.repoPath, now(), projectId, before.length)
+      if (target) promoteIfFlat(target, before)
+    })
+    return repos.get(rid)!
+  },
+  /**
+   * Delete a repo's rows (its worktrees and tasks cascade; a project it was
+   * home of loses its home). Its project goes too if this was its last repo,
+   * and is demoted if one repo and no home are left.
+   */
+  remove(rid: string): void {
+    writeTx(() => {
+      const repo = repoRow(rid)
+      if (!repo) return
+      getDb().prepare('DELETE FROM repos WHERE id = ?').run(rid)
+      if (repo.project_id) settleAfterLeave(repo.project_id)
+    })
+  },
+  rename(rid: string, name: string): void {
+    getDb().prepare('UPDATE repos SET name = ? WHERE id = ?').run(name, rid)
+  },
+  updateAgent(rid: string, patch: { defaultAgentId?: string; agentExecPath?: string }): void {
+    writeTx(() => {
+      const cur = repos.get(rid)
       if (!cur) return
       getDb()
         .prepare('UPDATE repos SET default_agent_id = ?, agent_exec_path = ? WHERE id = ?')
-        .run(patch.defaultAgentId ?? cur.defaultAgentId, patch.agentExecPath ?? cur.agentExecPath ?? '', pid)
+        .run(patch.defaultAgentId ?? cur.defaultAgentId, patch.agentExecPath ?? cur.agentExecPath ?? '', rid)
     })
   }
 }
 
 /* ============================================================================
- * Repo folders and the rail's order (scoped to the active workspace)
+ * Projects (scoped to the active workspace)
  *
- * Nothing here writes to `repos`. A folder is a row of its own, and where a
- * repo sits (which folder, how far down) is a row in
- * `rail_positions`, so filing, reordering and unfiling a repo leave
- * the repo exactly as it was.
+ * A project is a root folder plus 1..n member repos, one of which may be its
+ * home. Every repo is in exactly one project, so moving a repo is always
+ * "from one project to another", and the rules below keep a project's name
+ * and root honest as its membership changes:
+ *
+ *  - A project left with no repos is deleted (its rail row goes with it).
+ *  - DEMOTE: a project left with one repo and no home after losing one becomes
+ *    a plain repo row again, so it takes that repo's name and path. Otherwise
+ *    the rail would draw a flat row carrying a hidden name and root.
+ *  - PROMOTE: a flat project (one repo, no home) that gains a second repo is
+ *    re-rooted to the folder its repos share, and renamed after that folder if
+ *    its name was still the first repo's. It is not given a home: that would
+ *    write the managed block into a repo because of a drag.
+ *
+ * These are rows only. Removing a project here deletes its repos' rows; the
+ * watchers and terminals those repos had are the lifecycle layer's to stop
+ * (worktree-lifecycle.ts `removeProject`).
+ * ========================================================================== */
+
+interface ProjectRow {
+  id: string
+  workspace_id: string
+  name: string
+  root_path: string
+  home_repo_id: string | null
+  managed_block: number
+  created_at: number
+}
+
+interface RepoRow {
+  id: string
+  workspace_id: string
+  name: string
+  repo_path: string
+  project_id: string | null
+}
+
+function projectRow(pid: string): ProjectRow | undefined {
+  return getDb().prepare('SELECT * FROM projects WHERE id = ?').get(pid) as ProjectRow | undefined
+}
+
+function repoRow(rid: string): RepoRow | undefined {
+  return getDb()
+    .prepare('SELECT id, workspace_id, name, repo_path, project_id FROM repos WHERE id = ?')
+    .get(rid) as RepoRow | undefined
+}
+
+/** The order of a project's repos: by hand, then (for any never placed) oldest first. */
+const MEMBER_ORDER = 'project_position IS NULL, project_position, added_at, rowid'
+
+/** A project's repo ids in their order. */
+function memberIds(pid: string): string[] {
+  return (
+    getDb().prepare(`SELECT id FROM repos WHERE project_id = ? ORDER BY ${MEMBER_ORDER}`).all(pid) as Array<{
+      id: string
+    }>
+  ).map((r) => r.id)
+}
+
+/** Record `repoIds` as the project's repos, in that order (moving any that were elsewhere). */
+function writeMembers(pid: string, repoIds: string[]): void {
+  const set = getDb().prepare('UPDATE repos SET project_id = ?, project_position = ? WHERE id = ?')
+  repoIds.forEach((rid, i) => set.run(pid, i, rid))
+}
+
+function insertProject(workspaceId: string, name: string, rootPath: string): string {
+  const pid = id()
+  getDb()
+    .prepare('INSERT INTO projects (id, workspace_id, name, root_path, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(pid, workspaceId, name, rootPath, now())
+  return pid
+}
+
+function mapProject(r: ProjectRow, repoIds: string[]): Project {
+  return {
+    id: r.id,
+    name: r.name,
+    rootPath: r.root_path,
+    homeRepoId: r.home_repo_id ?? null,
+    managedBlock: r.managed_block === 1,
+    repoIds,
+    createdAt: r.created_at
+  }
+}
+
+/** Take a project's name and root from its one repo (the DEMOTE rule). */
+function demote(pid: string, rid: string): void {
+  const repo = repoRow(rid)
+  if (!repo) return
+  getDb().prepare('UPDATE projects SET name = ?, root_path = ? WHERE id = ?').run(repo.name, repo.repo_path, pid)
+}
+
+/**
+ * After a repo left `pid` (moved away or removed): delete the project if that
+ * was its last repo, demote it if one repo and no home are left.
+ */
+function settleAfterLeave(pid: string): void {
+  const project = projectRow(pid)
+  if (!project) return
+  const left = memberIds(pid)
+  if (left.length === 0) getDb().prepare('DELETE FROM projects WHERE id = ?').run(pid)
+  else if (left.length === 1 && project.home_repo_id === null) demote(pid, left[0])
+}
+
+/**
+ * The PROMOTE rule, for `target` having just gained a repo. `before` is who
+ * was in it until then; only a flat project (exactly one repo, no home) is
+ * promoted.
+ */
+function promoteIfFlat(target: ProjectRow, before: string[]): void {
+  if (before.length !== 1 || target.home_repo_id !== null) return
+  const original = repoRow(before[0])
+  const paths = memberIds(target.id)
+    .map((rid) => repoRow(rid)?.repo_path)
+    .filter((p): p is string => !!p)
+  const root = projectRootFor(paths)
+  const name = original && target.name === original.name ? baseName(root) || target.name : target.name
+  getDb().prepare('UPDATE projects SET name = ?, root_path = ? WHERE id = ?').run(name, root, target.id)
+}
+
+/** Clear `pid`'s home if it is `rid` (a repo on its way out). */
+function dropHome(pid: string, rid: string): void {
+  getDb().prepare('UPDATE projects SET home_repo_id = NULL WHERE id = ? AND home_repo_id = ?').run(pid, rid)
+}
+
+export const projects = {
+  /** The active workspace's projects, oldest first; pass `workspaceId` to read another's (export). */
+  list(workspaceId?: string): Project[] {
+    const ws = workspaceId ?? requireWorkspaceId()
+    const db = getDb()
+    const rows = db
+      .prepare('SELECT * FROM projects WHERE workspace_id = ? ORDER BY created_at, rowid')
+      .all(ws) as ProjectRow[]
+    const members = new Map<string, string[]>(rows.map((r) => [r.id, []]))
+    const repoRows = db
+      .prepare(`SELECT id, project_id FROM repos WHERE workspace_id = ? ORDER BY ${MEMBER_ORDER}`)
+      .all(ws) as Array<{ id: string; project_id: string | null }>
+    for (const r of repoRows) if (r.project_id) members.get(r.project_id)?.push(r.id)
+    return rows.map((r) => mapProject(r, members.get(r.id) ?? []))
+  },
+  get(pid: string): Project | undefined {
+    const r = projectRow(pid)
+    return r ? mapProject(r, memberIds(pid)) : undefined
+  },
+  /**
+   * A new project at `rootPath`. Given `repoIds`, those repos move into it in
+   * that order (their old projects settle as {@link projects.addRepo}
+   * describes); `homeRepoId`, if one of them, becomes its home. With no repos
+   * it is empty until one is added.
+   */
+  create(input: {
+    name: string
+    rootPath: string
+    workspaceId?: string
+    repoIds?: string[]
+    homeRepoId?: string | null
+  }): Project {
+    let pid = ''
+    writeTx(() => {
+      const workspaceId = input.workspaceId ?? requireWorkspaceId()
+      pid = insertProject(workspaceId, input.name, input.rootPath)
+      const moving = (input.repoIds ?? [])
+        .map((rid) => repoRow(rid))
+        .filter((r): r is RepoRow => !!r && r.workspace_id === workspaceId)
+      writeMembers(pid, moving.map((r) => r.id))
+      for (const r of moving) {
+        if (!r.project_id) continue
+        dropHome(r.project_id, r.id)
+        settleAfterLeave(r.project_id)
+      }
+      if (input.homeRepoId && moving.some((r) => r.id === input.homeRepoId)) {
+        getDb().prepare('UPDATE projects SET home_repo_id = ? WHERE id = ?').run(input.homeRepoId, pid)
+      }
+    })
+    return projects.get(pid)!
+  },
+  rename(pid: string, name: string): void {
+    getDb().prepare('UPDATE projects SET name = ? WHERE id = ?').run(name, pid)
+  },
+  setRoot(pid: string, rootPath: string): void {
+    getDb().prepare('UPDATE projects SET root_path = ? WHERE id = ?').run(rootPath, pid)
+  },
+  /**
+   * Make `rid` the project's home, or clear the home with null. The home must
+   * be one of the project's repos. Clearing it on a one-repo project makes it
+   * flat, so it is demoted.
+   */
+  setHome(pid: string, rid: string | null): void {
+    writeTx(() => {
+      if (!projectRow(pid)) return
+      const members = memberIds(pid)
+      if (rid !== null && !members.includes(rid)) throw new Error(`repo ${rid} is not in project ${pid}`)
+      getDb().prepare('UPDATE projects SET home_repo_id = ? WHERE id = ?').run(rid, pid)
+      if (rid === null && members.length === 1) demote(pid, members[0])
+    })
+  },
+  setManagedBlock(pid: string, on: boolean): void {
+    getDb().prepare('UPDATE projects SET managed_block = ? WHERE id = ?').run(on ? 1 : 0, pid)
+  },
+  /**
+   * Delete a project's rows and, through the cascade, its repos' (and their
+   * worktrees and tasks) and its rail position. Rows only: stop the repos'
+   * watchers and terminals first (worktree-lifecycle.ts `removeProject`).
+   */
+  remove(pid: string): void {
+    getDb().prepare('DELETE FROM projects WHERE id = ?').run(pid)
+  },
+  /**
+   * Move a repo into `pid`, just before `beforeRepoId` among its repos (last
+   * when null or not there). The same project reorders. From another project,
+   * the repo stops being that project's home if it was, the project it left
+   * is deleted or demoted, and `pid` is promoted if it was flat (see the
+   * rules above). Repos and projects from different workspaces never mix.
+   */
+  addRepo(pid: string, rid: string, beforeRepoId: string | null): void {
+    if (beforeRepoId === rid) return
+    writeTx(() => {
+      const repo = repoRow(rid)
+      const target = projectRow(pid)
+      if (!repo || !target || repo.workspace_id !== target.workspace_id) return
+      const before = memberIds(pid)
+      const list = before.filter((x) => x !== rid)
+      insertBefore(list, rid, (x) => x === beforeRepoId)
+      writeMembers(pid, list)
+      const source = repo.project_id
+      if (source === pid) return
+      if (source) {
+        dropHome(source, rid)
+        settleAfterLeave(source)
+      }
+      promoteIfFlat(target, before)
+    })
+  },
+  /**
+   * Take a repo out of its project into a new one of its own (named after
+   * it, rooted at its path), placed in the rail in `folderId` (null = top
+   * level) before `beforeId`. The project it left settles as in
+   * {@link projects.addRepo}. A repo already alone in a flat project just
+   * has that project placed. Returns the repo's project.
+   */
+  detachRepo(rid: string, folderId: string | null, beforeId: string | null): Project | undefined {
+    let pid: string | undefined
+    writeTx(() => {
+      const repo = repoRow(rid)
+      if (!repo) return
+      const source = repo.project_id ? projectRow(repo.project_id) : undefined
+      if (source && source.home_repo_id === null && memberIds(source.id).length === 1) {
+        pid = source.id
+      } else {
+        pid = insertProject(repo.workspace_id, repo.name, repo.repo_path)
+        writeMembers(pid, [rid])
+        if (source) {
+          dropHome(source.id, rid)
+          settleAfterLeave(source.id)
+        }
+      }
+      railFolders.placeProject(pid, folderId, beforeId)
+    })
+    return pid ? projects.get(pid) : undefined
+  },
+  /**
+   * Undo a grouping: clear the home, and give every repo but the last a
+   * project of its own, in order, where the group sits in the rail. The last
+   * repo keeps the group's project, demoted to a plain repo row.
+   */
+  ungroup(pid: string): void {
+    writeTx(() => {
+      if (!projectRow(pid)) return
+      const members = memberIds(pid)
+      getDb().prepare('UPDATE projects SET home_repo_id = NULL WHERE id = ?').run(pid)
+      const folderId = readRailLayout().folders.find((f) => f.projectIds.includes(pid))?.id ?? null
+      for (const rid of members.slice(0, -1)) projects.detachRepo(rid, folderId, pid)
+      if (members.length === 1) demote(pid, members[0])
+    })
+  }
+}
+
+/* ============================================================================
+ * Rail folders and the rail's order (scoped to the active workspace)
+ *
+ * Nothing here writes to `projects` or `repos`. A folder is a row of its own,
+ * and where a project sits (which folder, how far down) is a row in
+ * `rail_positions`, so filing, reordering and unfiling a project leave the
+ * project exactly as it was.
  *
  * The top level is one order shared by folders (`rail_folders.position`)
- * and loose repos (their `rail_positions.position`). Every write
- * renumbers the whole list it touched, so the two never collide. A repo
+ * and loose projects (their `rail_positions.position`). Every write
+ * renumbers the whole list it touched, so the two never collide. A project
  * that has never been arranged has no row and is listed last, oldest first.
  * ========================================================================== */
 
 interface RailLayout {
-  /** Folders in top-level order, each with its repos in order. */
+  /** Folders in top-level order, each with its projects in order. */
   folders: RailFolder[]
-  /** The top level: folders and loose repos, interleaved. */
+  /** The top level: folders and loose projects, interleaved. */
   rail: RailItem[]
 }
 
@@ -258,13 +571,13 @@ function readRailLayout(): RailLayout {
   const folderRows = db
     .prepare('SELECT * FROM rail_folders WHERE workspace_id = ? ORDER BY position, created_at, id')
     .all(workspaceId) as Array<{ id: string; name: string; collapsed: number; position: number }>
-  // Arranged repos first, by position; the rest (no row) after, oldest
+  // Arranged projects first, by position; the rest (no row) after, oldest
   // first, with rowid settling a tie the way insertion order would.
-  const repoRows = db
+  const projectRows = db
     .prepare(
-      `SELECT p.id, s.folder_id, s.position FROM repos p
-       LEFT JOIN rail_positions s ON s.repo_id = p.id
-       WHERE p.workspace_id = ? ORDER BY s.position IS NULL, s.position, p.added_at, p.rowid`
+      `SELECT p.id, s.folder_id, s.position FROM projects p
+       LEFT JOIN rail_positions s ON s.project_id = p.id
+       WHERE p.workspace_id = ? ORDER BY s.position IS NULL, s.position, p.created_at, p.rowid`
     )
     .all(workspaceId) as Array<{ id: string; folder_id: string | null; position: number | null }>
 
@@ -273,13 +586,13 @@ function readRailLayout(): RailLayout {
     item: { kind: 'folder', id: f.id },
     position: f.position
   }))
-  for (const p of repoRows) {
+  for (const p of projectRows) {
     const filed = p.folder_id === null ? undefined : members.get(p.folder_id)
     if (filed) filed.push(p.id)
-    else top.push({ item: { kind: 'repo', id: p.id }, position: p.position ?? Number.POSITIVE_INFINITY })
+    else top.push({ item: { kind: 'project', id: p.id }, position: p.position ?? Number.POSITIVE_INFINITY })
   }
   // A stable sort: where positions tie, folders (pushed first) stay ahead of
-  // repos and each kind keeps the order it was read in.
+  // projects and each kind keeps the order it was read in.
   top.sort((a, b) => (a.position === b.position ? 0 : a.position < b.position ? -1 : 1))
 
   return {
@@ -287,7 +600,7 @@ function readRailLayout(): RailLayout {
       id: f.id,
       name: f.name,
       collapsed: f.collapsed === 1,
-      repoIds: members.get(f.id) ?? []
+      projectIds: members.get(f.id) ?? []
     })),
     rail: top.map((t) => t.item)
   }
@@ -296,13 +609,13 @@ function readRailLayout(): RailLayout {
 function setRailPosition(pid: string, folderId: string | null, position: number): void {
   getDb()
     .prepare(
-      `INSERT INTO rail_positions (repo_id, folder_id, position) VALUES (?, ?, ?)
-       ON CONFLICT(repo_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
+      `INSERT INTO rail_positions (project_id, folder_id, position) VALUES (?, ?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
     )
     .run(pid, folderId, position)
 }
 
-/** Record `rail` as the top-level order. A repo in it is, by that, in no folder. */
+/** Record `rail` as the top-level order. A project in it is, by that, in no folder. */
 function writeRail(rail: RailItem[]): void {
   const setFolder = getDb().prepare('UPDATE rail_folders SET position = ? WHERE id = ?')
   rail.forEach((item, i) => {
@@ -311,9 +624,9 @@ function writeRail(rail: RailItem[]): void {
   })
 }
 
-/** Record `repoIds` as the folder's repos, in that order. */
-function writeFolderRepos(fid: string, repoIds: string[]): void {
-  repoIds.forEach((pid, i) => setRailPosition(pid, fid, i))
+/** Record `projectIds` as the folder's projects, in that order. */
+function writeFolderProjects(fid: string, projectIds: string[]): void {
+  projectIds.forEach((pid, i) => setRailPosition(pid, fid, i))
 }
 
 /** Insert `item` just before the entry `isBefore` matches, or last when none does. */
@@ -323,11 +636,11 @@ function insertBefore<T>(list: T[], item: T, isBefore: (entry: T) => boolean): v
 }
 
 export const railFolders = {
-  /** The active workspace's folders, each with its repos in rail order. */
+  /** The active workspace's folders, each with its projects in rail order. */
   list(): RailFolder[] {
     return readRailLayout().folders
   },
-  /** The rail's top level in order: folders and the repos in none of them. */
+  /** The rail's top level in order: folders and the projects in none of them. */
   rail(): RailItem[] {
     return readRailLayout().rail
   },
@@ -335,12 +648,12 @@ export const railFolders = {
     return railFolders.list().find((f) => f.id === fid)
   },
   /**
-   * A new, expanded folder. Given a repo it is made to hold, it takes that
-   * repo's place in the rail (or sits just below the folder the repo was
-   * in); otherwise it goes at the top, where a folder nobody has placed yet is
-   * sure to be seen.
+   * A new, expanded folder. Given a project it is made to hold, it takes that
+   * project's place in the rail (or sits just below the folder the project
+   * was in); otherwise it goes at the top, where a folder nobody has placed
+   * yet is sure to be seen.
    */
-  create(name: string, forRepoId?: string): RailFolder {
+  create(name: string, forProjectId?: string): RailFolder {
     const fid = id()
     writeTx(() => {
       const { folders, rail } = readRailLayout()
@@ -348,8 +661,8 @@ export const railFolders = {
         .prepare('INSERT INTO rail_folders (id, workspace_id, name, position, created_at) VALUES (?, ?, ?, 0, ?)')
         .run(fid, requireWorkspaceId(), name, now())
       const entry: RailItem = { kind: 'folder', id: fid }
-      const loose = rail.findIndex((item) => item.kind === 'repo' && item.id === forRepoId)
-      const holder = folders.find((f) => forRepoId !== undefined && f.repoIds.includes(forRepoId))
+      const loose = rail.findIndex((item) => item.kind === 'project' && item.id === forProjectId)
+      const holder = folders.find((f) => forProjectId !== undefined && f.projectIds.includes(forProjectId))
       if (loose !== -1) {
         rail.splice(loose, 1, entry)
       } else if (holder) {
@@ -357,9 +670,9 @@ export const railFolders = {
       } else {
         rail.unshift(entry)
       }
-      // Members before the top level, so the repo is filed by the time
+      // Members before the top level, so the project is filed by the time
       // writeRail (which no longer lists it) runs.
-      if (forRepoId !== undefined && (loose !== -1 || holder)) writeFolderRepos(fid, [forRepoId])
+      if (forProjectId !== undefined && (loose !== -1 || holder)) writeFolderProjects(fid, [forProjectId])
       writeRail(rail)
     })
     return railFolders.get(fid)!
@@ -368,7 +681,7 @@ export const railFolders = {
     getDb().prepare('UPDATE rail_folders SET name = ? WHERE id = ?').run(name, fid)
   },
   /**
-   * Delete a folder. Its repos are not deleted: they take the folder's
+   * Delete a folder. Its projects are not deleted: they take the folder's
    * place at the top level, in the order they had inside it.
    */
   remove(fid: string): void {
@@ -377,7 +690,7 @@ export const railFolders = {
       const folder = folders.find((f) => f.id === fid)
       if (!folder) return
       const at = rail.findIndex((item) => item.kind === 'folder' && item.id === fid)
-      rail.splice(at, 1, ...folder.repoIds.map((pid): RailItem => ({ kind: 'repo', id: pid })))
+      rail.splice(at, 1, ...folder.projectIds.map((pid): RailItem => ({ kind: 'project', id: pid })))
       // Before the delete: the rows now say "top level", so the cascade from
       // the folder finds none of them.
       writeRail(rail)
@@ -388,35 +701,36 @@ export const railFolders = {
     getDb().prepare('UPDATE rail_folders SET collapsed = ? WHERE id = ?').run(collapsed ? 1 : 0, fid)
   },
   /**
-   * Put a repo in `folderId` (null = the top level), just before `beforeId`
-   * or last when that is null or names nothing there. `beforeId` is a repo
-   * in that folder or, at the top level, a folder or a loose repo.
+   * Put a project in `folderId` (null = the top level), just before
+   * `beforeId` or last when that is null or names nothing there. `beforeId`
+   * is a project in that folder or, at the top level, a folder or a loose
+   * project.
    *
-   * A repo or folder that is gone, or belongs to another workspace, is not
+   * A project or folder that is gone, or belongs to another workspace, is not
    * in this workspace's layout, so the call does nothing.
    */
-  placeRepo(pid: string, folderId: string | null, beforeId: string | null): void {
+  placeProject(pid: string, folderId: string | null, beforeId: string | null): void {
     if (beforeId === pid) return
     writeTx(() => {
       const { folders, rail } = readRailLayout()
       const known =
-        rail.some((item) => item.kind === 'repo' && item.id === pid) ||
-        folders.some((f) => f.repoIds.includes(pid))
+        rail.some((item) => item.kind === 'project' && item.id === pid) ||
+        folders.some((f) => f.projectIds.includes(pid))
       if (!known) return
-      const top = rail.filter((item) => !(item.kind === 'repo' && item.id === pid))
+      const top = rail.filter((item) => !(item.kind === 'project' && item.id === pid))
       if (folderId === null) {
-        insertBefore(top, { kind: 'repo', id: pid }, (item) => item.id === beforeId)
+        insertBefore(top, { kind: 'project', id: pid }, (item) => item.id === beforeId)
       } else {
         const folder = folders.find((f) => f.id === folderId)
         if (!folder) return
-        const filed = folder.repoIds.filter((x) => x !== pid)
+        const filed = folder.projectIds.filter((x) => x !== pid)
         insertBefore(filed, pid, (x) => x === beforeId)
-        writeFolderRepos(folderId, filed)
+        writeFolderProjects(folderId, filed)
       }
       writeRail(top)
     })
   },
-  /** Put a folder just before the top-level row `beforeId` (a folder or a loose repo), or last when null or unknown. */
+  /** Put a folder just before the top-level row `beforeId` (a folder or a loose project), or last when null or unknown. */
   placeFolder(fid: string, beforeId: string | null): void {
     if (beforeId === fid) return
     writeTx(() => {
@@ -856,6 +1170,7 @@ export function getAppState(): Omit<AppState, 'devServers' | 'settings' | 'works
   const rail = readRailLayout()
   return {
     repos: repos.list(),
+    projects: projects.list(),
     railFolders: rail.folders,
     railItems: rail.rail,
     worktrees: worktrees.list(),

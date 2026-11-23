@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, within } from '@testing-library/react'
-import type { Repo, RailFolder, RailItem, Worktree } from '@shared/types'
+import type { Project, Repo, RailFolder, RailItem, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 import Rail from './Rail'
@@ -15,7 +15,24 @@ import { endRailDrag } from './folders'
 
 let bridge: Record<string, ReturnType<typeof vi.fn>>
 
-const repo = (id: string): Repo => ({ id, name: id, repoPath: `C:/${id}`, defaultAgentId: 'claude', addedAt: 0 })
+/** Each repo is alone in a project of the same id; the rail arranges (and drags) the project. */
+const repo = (id: string): Repo => ({
+  id,
+  name: id,
+  repoPath: `C:/${id}`,
+  defaultAgentId: 'claude',
+  addedAt: 0,
+  projectId: id
+})
+const project = (id: string): Project => ({
+  id,
+  name: id,
+  rootPath: `C:/${id}`,
+  homeRepoId: null,
+  managedBlock: true,
+  repoIds: [id],
+  createdAt: 0
+})
 
 const worktree = (repoId: string, status: Worktree['status'] = 'idle'): Worktree => ({
   id: `w-${repoId}`,
@@ -31,11 +48,11 @@ const worktree = (repoId: string, status: Worktree['status'] = 'idle'): Worktree
   panes: []
 })
 
-const folder = (id: string, repoIds: string[], collapsed = false): RailFolder => ({
+const folder = (id: string, projectIds: string[], collapsed = false): RailFolder => ({
   id,
   name: id,
   collapsed,
-  repoIds
+  projectIds
 })
 
 /**
@@ -45,6 +62,7 @@ const folder = (id: string, repoIds: string[], collapsed = false): RailFolder =>
 function renderRail(folders: RailFolder[], worktrees: Worktree[] = [], rail: RailItem[] = []): void {
   useStore.setState({
     repos: [repo('alpha'), repo('beta'), repo('gamma')],
+    projects: [project('alpha'), project('beta'), project('gamma')],
     railFolders: folders,
     railItems: rail,
     worktrees,
@@ -76,7 +94,7 @@ beforeEach(() => {
     renameRailFolder: vi.fn(async () => undefined),
     removeRailFolder: vi.fn(async () => undefined),
     setRailFolderCollapsed: vi.fn(async () => undefined),
-    placeRepo: vi.fn(async () => undefined),
+    placeProject: vi.fn(async () => undefined),
     placeRailFolder: vi.fn(async () => undefined)
   }
   vi.stubGlobal('orbital', bridge)
@@ -101,9 +119,9 @@ describe('rail folders — layout', () => {
 
   it('lists the top level in its own order, with a folder between loose repos', () => {
     renderRail([folder('work', ['beta'])], [], [
-      { kind: 'repo', id: 'gamma' },
+      { kind: 'project', id: 'gamma' },
       { kind: 'folder', id: 'work' },
-      { kind: 'repo', id: 'alpha' }
+      { kind: 'project', id: 'alpha' }
     ])
     expect(names()).toEqual(['gamma', 'beta', 'alpha'])
   })
@@ -219,7 +237,7 @@ describe('rail folders — dragging a repo', () => {
     expect(folderBox('work').firstElementChild?.className).toContain('ring-accent/50')
     fireEvent.drop(header('work'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('alpha', 'work', null)
+    expect(bridge.placeProject).toHaveBeenCalledWith('alpha', 'work', null)
     expect(folderBox('work').firstElementChild?.className).not.toContain('ring-accent/50')
   })
 
@@ -233,7 +251,7 @@ describe('rail folders — dragging a repo', () => {
     expect(folderBox('work').firstElementChild?.className).not.toContain('ring-accent/50')
     fireEvent.drop(repoRow('alpha'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('gamma', 'work', 'alpha')
+    expect(bridge.placeProject).toHaveBeenCalledWith('gamma', 'work', 'alpha')
     expect(marker()).toBeNull()
   })
 
@@ -243,7 +261,7 @@ describe('rail folders — dragging a repo', () => {
     fireEvent.dragStart(repoRow('alpha'), { dataTransfer: dataTransfer() })
     dropAt(repoRow('beta'), LOWER)
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('alpha', 'work', 'gamma')
+    expect(bridge.placeProject).toHaveBeenCalledWith('alpha', 'work', 'gamma')
   })
 
   it('reorders the loose repos at the top level', () => {
@@ -254,7 +272,7 @@ describe('rail folders — dragging a repo', () => {
     expect(marker()).toBeTruthy()
     fireEvent.drop(repoRow('alpha'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('gamma', null, 'alpha')
+    expect(bridge.placeProject).toHaveBeenCalledWith('gamma', null, 'alpha')
   })
 
   it('takes a repo out of its folder to the place it is dropped at', () => {
@@ -263,7 +281,7 @@ describe('rail folders — dragging a repo', () => {
     fireEvent.dragStart(repoRow('beta'), { dataTransfer: dataTransfer() })
     fireEvent.drop(repoRow('gamma'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('beta', null, 'gamma')
+    expect(bridge.placeProject).toHaveBeenCalledWith('beta', null, 'gamma')
   })
 
   it('moves a loose repo into a folder at the place it is dropped at', () => {
@@ -272,7 +290,7 @@ describe('rail folders — dragging a repo', () => {
     fireEvent.dragStart(repoRow('gamma'), { dataTransfer: dataTransfer() })
     fireEvent.drop(repoRow('beta'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('gamma', 'work', 'beta')
+    expect(bridge.placeProject).toHaveBeenCalledWith('gamma', 'work', 'beta')
   })
 
   it('goes above a folder, not into it, from the top edge of its header', () => {
@@ -281,7 +299,7 @@ describe('rail folders — dragging a repo', () => {
     fireEvent.dragStart(repoRow('gamma'), { dataTransfer: dataTransfer() })
     dropAt(header('work'), TOP_EDGE)
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('gamma', null, 'work')
+    expect(bridge.placeProject).toHaveBeenCalledWith('gamma', null, 'work')
   })
 
   it('goes last when dropped below every row', () => {
@@ -290,7 +308,7 @@ describe('rail folders — dragging a repo', () => {
     fireEvent.dragStart(repoRow('alpha'), { dataTransfer: dataTransfer() })
     fireEvent.drop(emptyRail(), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).toHaveBeenCalledWith('alpha', null, null)
+    expect(bridge.placeProject).toHaveBeenCalledWith('alpha', null, null)
   })
 
   it('does nothing when a repo is dropped where it already is', () => {
@@ -304,7 +322,7 @@ describe('rail folders — dragging a repo', () => {
     fireEvent.dragStart(repoRow('alpha'), { dataTransfer: dataTransfer() })
     fireEvent.drop(repoRow('gamma'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRepo).not.toHaveBeenCalled()
+    expect(bridge.placeProject).not.toHaveBeenCalled()
   })
 })
 
@@ -318,7 +336,7 @@ describe('rail folders — dragging a folder', () => {
     fireEvent.drop(repoRow('beta'), { dataTransfer: dataTransfer() })
 
     expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', 'beta')
-    expect(bridge.placeRepo).not.toHaveBeenCalled()
+    expect(bridge.placeProject).not.toHaveBeenCalled()
   })
 
   it('goes before another folder from the upper half of its header, and after it from the lower', () => {
@@ -342,7 +360,7 @@ describe('rail folders — dragging a folder', () => {
     dropAt(repoRow('beta'), LOWER)
 
     expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', 'alpha')
-    expect(bridge.placeRepo).not.toHaveBeenCalled()
+    expect(bridge.placeProject).not.toHaveBeenCalled()
   })
 
   it('goes last when dropped below every row', () => {
@@ -360,7 +378,7 @@ describe('rail folders — other drags', () => {
     renderRail([folder('work', ['beta'])])
     fireEvent.drop(header('work'), { dataTransfer: dataTransfer() })
     fireEvent.drop(repoRow('alpha'), { dataTransfer: dataTransfer() })
-    expect(bridge.placeRepo).not.toHaveBeenCalled()
+    expect(bridge.placeProject).not.toHaveBeenCalled()
     expect(bridge.placeRailFolder).not.toHaveBeenCalled()
   })
 })

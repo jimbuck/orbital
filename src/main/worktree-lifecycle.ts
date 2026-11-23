@@ -117,8 +117,8 @@ export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOpt
  * worktrees the repo already has (they show up immediately). Adding a path
  * that is already a Repo returns that Repo.
  */
-export async function addRepo(repoPath: string): Promise<Repo> {
-  await registerRepo(repoPath)
+export async function addRepo(repoPath: string, projectId?: string): Promise<Repo> {
+  await registerRepo(repoPath, projectId)
   const repo = tables.repos.getByPath(repoPath)
   if (!repo) throw new Error(`repo at ${repoPath} was not registered`)
   await reconcileRepoWorktrees(repo.id)
@@ -130,13 +130,33 @@ export async function addRepo(repoPath: string): Promise<Repo> {
 export function removeRepo(repoId: string): void {
   const repo = tables.repos.get(repoId)
   if (!repo) return
-  for (const w of tables.worktrees.list()) {
-    if (w.repoId === repoId) releaseWorktreeRuntime(w)
-  }
-  runtime.gitWatcher.unwatch(repo.repoPath)
-  removeWorktreesWatcher(repoId)
+  releaseRepoRuntime(repo)
   tables.repos.remove(repoId)
   announce()
+}
+
+/**
+ * Remove a Project and every repo in it from the cockpit, each repo's
+ * runtime torn down as {@link removeRepo} does. Nothing on disk changes.
+ */
+export function removeProject(projectId: string): void {
+  const project = tables.projects.get(projectId)
+  if (!project) return
+  for (const repoId of project.repoIds) {
+    const repo = tables.repos.get(repoId)
+    if (repo) releaseRepoRuntime(repo)
+  }
+  tables.projects.remove(projectId)
+  announce()
+}
+
+/** Stop everything a Repo holds open: its Worktrees' terminals and status, and its watchers. */
+function releaseRepoRuntime(repo: Repo): void {
+  for (const w of tables.worktrees.list()) {
+    if (w.repoId === repo.id) releaseWorktreeRuntime(w)
+  }
+  runtime.gitWatcher.unwatch(repo.repoPath)
+  removeWorktreesWatcher(repo.id)
 }
 
 /** The set of Worktrees changed: push the state, and the alert their statuses feed. */
@@ -225,8 +245,11 @@ export async function syncWorktreeEnv(worktreeId: string): Promise<{ copied: str
   return { copied }
 }
 
-/** Register a repo: create its root Worktree and start its watchers. */
-async function registerRepo(repoPath: string): Promise<Worktree | null> {
+/**
+ * Register a repo: create its root Worktree and start its watchers. It joins
+ * `projectId` when given, and otherwise gets a project of its own.
+ */
+async function registerRepo(repoPath: string, projectId?: string): Promise<Worktree | null> {
   const existing = tables.repos.getByPath(repoPath)
   if (existing) {
     runtime.gitWatcher.watch(repoPath)
@@ -234,7 +257,7 @@ async function registerRepo(repoPath: string): Promise<Worktree | null> {
     return tables.worktrees.list().find((w) => w.repoId === existing.id && w.kind === 'root') ?? null
   }
   const name = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath
-  const repo = tables.repos.create({ name, repoPath })
+  const repo = tables.repos.create({ name, repoPath, projectId })
   const branch = await git.currentBranch(repoPath).catch(() => 'main')
   const root = tables.worktrees.create({
     repoId: repo.id,

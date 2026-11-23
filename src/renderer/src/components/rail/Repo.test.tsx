@@ -25,7 +25,8 @@ const repo: RepoModel = {
   name: 'orbital',
   repoPath: 'C:/repo',
   defaultAgentId: 'claude',
-  addedAt: 0
+  addedAt: 0,
+  projectId: 'pr1'
 }
 
 const rootWorktree: Worktree = {
@@ -49,7 +50,7 @@ beforeEach(() => {
     clearWorktreeStatus: vi.fn(async () => undefined),
     renameRepo: vi.fn(async () => undefined),
     removeRepo: vi.fn(async () => undefined),
-    placeRepo: vi.fn(async () => undefined),
+    placeProject: vi.fn(async () => undefined),
     createRailFolder: vi.fn(async () => undefined)
   }
   vi.stubGlobal('orbital', bridge)
@@ -156,10 +157,11 @@ describe('repo context menu', () => {
 })
 
 describe('repo context menu — Move to Folder', () => {
-  const work: RailFolder = { id: 'f-work', name: 'Work', collapsed: false, repoIds: [] }
-  const play: RailFolder = { id: 'f-play', name: 'Play', collapsed: false, repoIds: [repo.id] }
+  // Folders hold projects: the repo is filed through its project.
+  const work: RailFolder = { id: 'f-work', name: 'Work', collapsed: false, projectIds: [] }
+  const play: RailFolder = { id: 'f-play', name: 'Play', collapsed: false, projectIds: [repo.projectId] }
 
-  it('lists the folders in place of the menu and files the repo in the one picked', () => {
+  it('lists the folders in place of the menu and files the repo project in the one picked', () => {
     openMenu([], [work, play])
     fireEvent.click(screen.getByText('Move to Folder'))
 
@@ -168,8 +170,8 @@ describe('repo context menu — Move to Folder', () => {
     expect((screen.getByRole('menuitem', { name: /Play/ }) as HTMLButtonElement).disabled).toBe(true)
 
     fireEvent.click(screen.getByText('Work'))
-    // A repo id and a folder id (last in it), and nothing else: no path, no setting.
-    expect(bridge.placeRepo.mock.calls).toEqual([[repo.id, work.id, null]])
+    // A project id and a folder id (last in it), and nothing else: no path, no setting.
+    expect(bridge.placeProject.mock.calls).toEqual([[repo.projectId, work.id, null]])
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
@@ -181,7 +183,7 @@ describe('repo context menu — Move to Folder', () => {
     fireEvent.click(screen.getByText('Move to Folder'))
     fireEvent.click(screen.getByText('Remove from Folder'))
     // Below Play is before Work, the row that follows it.
-    expect(bridge.placeRepo).toHaveBeenCalledWith(repo.id, null, work.id)
+    expect(bridge.placeProject).toHaveBeenCalledWith(repo.projectId, null, work.id)
   })
 
   it('takes the repo out to the end when its folder is the last row', () => {
@@ -191,7 +193,7 @@ describe('repo context menu — Move to Folder', () => {
     ])
     fireEvent.click(screen.getByText('Move to Folder'))
     fireEvent.click(screen.getByText('Remove from Folder'))
-    expect(bridge.placeRepo).toHaveBeenCalledWith(repo.id, null, null)
+    expect(bridge.placeProject).toHaveBeenCalledWith(repo.projectId, null, null)
   })
 
   it('offers only New Folder when there is none yet, and creates one holding the repo', () => {
@@ -202,7 +204,7 @@ describe('repo context menu — Move to Folder', () => {
     fireEvent.click(screen.getByText('New Folder…'))
     fireEvent.change(screen.getByPlaceholderText('Folder name'), { target: { value: 'Clients' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-    expect(bridge.createRailFolder).toHaveBeenCalledWith('Clients', repo.id)
+    expect(bridge.createRailFolder).toHaveBeenCalledWith('Clients', repo.projectId)
     expect(screen.queryByRole('menu')).toBeNull()
   })
 })

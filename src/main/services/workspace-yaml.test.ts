@@ -109,3 +109,47 @@ describe('workspace-yaml normalize — shell, logging, open action, alerts', () 
     expect(cfg.settings).toBeUndefined()
   })
 })
+
+describe('workspace-yaml normalize — projects', () => {
+  const repos = [
+    { id: 'a', name: 'api', path: 'C:/src/acme/api' },
+    { id: 'b', name: 'web', path: 'C:/src/acme/web' },
+    { id: 'c', name: 'docs', path: 'C:/src/docs' }
+  ]
+
+  it('keeps the grouping beside the repos list', () => {
+    const cfg = normalize({
+      id: 'ws',
+      name: 'Work',
+      repos,
+      projects: [{ id: 'p', name: 'Acme', root: 'C:/src/acme', home: 'a', repos: ['a', 'b'] }]
+    })
+    expect(cfg.repos.map((r) => r.id)).toEqual(['a', 'b', 'c'])
+    expect(cfg.projects).toEqual([{ id: 'p', name: 'Acme', root: 'C:/src/acme', home: 'a', repos: ['a', 'b'] }])
+  })
+
+  it('drops unknown and already-claimed members, a home that is not a member, and empty projects', () => {
+    const cfg = normalize({
+      id: 'ws',
+      name: 'Work',
+      repos,
+      projects: [
+        { id: 'p', root: 'C:/src/acme', home: 'c', repos: ['a', 'zzz', 'a'] },
+        { id: 'p', name: 'Again', repos: ['a', 'b'] },
+        { id: 'q', name: 'Nobody', root: 'C:/x', repos: ['nope'] }
+      ]
+    })
+    expect(cfg.projects).toEqual([
+      { id: 'p', name: 'acme', root: 'C:/src/acme', repos: ['a'] },
+      // A repeated id is replaced; no root falls back to the first member's path.
+      { id: expect.any(String), name: 'Again', root: 'C:/src/acme/web', repos: ['b'] }
+    ])
+    expect(cfg.projects![1].id).not.toBe('p')
+  })
+
+  it('reads `projects` without `repos` as the repo list of a file from before the rename', () => {
+    const cfg = normalize({ id: 'ws', name: 'Old', projects: [{ id: 'x', name: 'x', path: 'C:/x' }] })
+    expect(cfg.repos).toEqual([{ id: 'x', name: 'x', path: 'C:/x' }])
+    expect(cfg.projects).toBeUndefined()
+  })
+})

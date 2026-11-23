@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import { Folder as FolderClosed, FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { aggregateStatus, type Repo as RepoModel, type RailFolder } from '@shared/types'
+import { aggregateStatus, type RailFolder } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { worktreeStatusLabel } from '@renderer/lib/status'
 import { fireAndForget } from '@renderer/lib/bridge'
 import Repo, { GroupChevron } from './Repo'
 import { ContextMenu, MenuConfirm, MenuItem, clampMenuPos, type MenuPos } from './menu'
-import { beginRailDrag } from './folders'
+import { beginRailDrag, type ProjectRow } from './folders'
 
 /** Where a dragged row would be inserted. Zero-height, so showing it never shifts the rows it sits between. */
 export function SlotMarker(): JSX.Element {
@@ -65,11 +65,11 @@ function RenameField({
 }
 
 /**
- * A folder in the rail: a named, collapsible group of repos.
+ * A folder in the rail: a named, collapsible group of projects.
  *
- * It is an arrangement of the panel and nothing else. The repos inside are
- * the same `Repo` rows the loose list renders, and nothing about them (repo
- * path, worktrees, agent, settings) depends on which folder they sit in.
+ * It is an arrangement of the panel and nothing else. The projects inside are
+ * the same rows the loose list renders, and nothing about them (paths,
+ * worktrees, agent, settings) depends on which folder they sit in.
  *
  * The whole header toggles the folder, since there is nothing to select here
  * the way a repo header selects its root Worktree. Collapsed, the chevron
@@ -77,33 +77,37 @@ function RenameField({
  * vocabulary a repo's chevron uses for its hidden Worktrees. Right-click
  * renames or deletes it; deleting only ungroups. The header drags to move the
  * folder along the rail. The Rail owns every drop: it passes `dropInto` while
- * a dragged repo would be filed here, and `dropSlot` while one would be
- * inserted at a place among the repos already inside.
+ * a dragged project would be filed here, and `dropSlot` while one would be
+ * inserted at a place among the projects already inside.
  */
 export default function Folder({
   folder,
-  repos,
+  projects,
   dropInto,
   dropSlot,
   renaming,
   onRenaming
 }: {
   folder: RailFolder
-  repos: RepoModel[]
-  /** A dragged repo would land in this folder if dropped now. */
+  projects: ProjectRow[]
+  /** A dragged project would land in this folder if dropped now. */
   dropInto: boolean
-  /** The index among `repos` a dragged repo would be inserted before (its length = last), or null. */
+  /** The index among `projects` a dragged one would be inserted before (its length = last), or null. */
   dropSlot: number | null
   /** Controlled by the Rail, so a folder it has just created can open straight into its name. */
   renaming: boolean
   onRenaming: (renaming: boolean) => void
 }): JSX.Element {
-  // Every Worktree under the folder, roots included: collapsed, none of its
-  // repos' own dots are on screen, so this is the only place they report.
-  const statuses = useStore(
-    useShallow((s) => s.worktrees.filter((w) => folder.repoIds.includes(w.repoId)).map((w) => w.status))
+  // The repos of the projects filed here. Every Worktree under the folder,
+  // roots included: collapsed, none of its repos' own dots are on screen, so
+  // this is the only place they report.
+  const repoIds = useStore(
+    useShallow((s) => s.repos.filter((r) => folder.projectIds.includes(r.projectId)).map((r) => r.id))
   )
-  const holdsActive = useStore((s) => !!s.activeRepoId && folder.repoIds.includes(s.activeRepoId))
+  const statuses = useStore(
+    useShallow((s) => s.worktrees.filter((w) => repoIds.includes(w.repoId)).map((w) => w.status))
+  )
+  const holdsActive = useStore((s) => !!s.activeRepoId && repoIds.includes(s.activeRepoId))
   const expanded = !folder.collapsed
   const status = aggregateStatus(statuses)
   const needsAttention = statuses.filter((s) => s === 'needs_attention').length
@@ -136,7 +140,7 @@ export default function Folder({
   }
 
   const Icon = expanded ? FolderOpen : FolderClosed
-  const count = `${repos.length} repo${repos.length === 1 ? '' : 's'}`
+  const count = `${repoIds.length} repo${repoIds.length === 1 ? '' : 's'}`
 
   return (
     // The data attribute is how the Rail tells which folder a drag is over. The
@@ -196,22 +200,22 @@ export default function Folder({
           )}
           {!renaming && (
             <span title={count} className="flex-none font-mono text-[10px] text-faint">
-              {repos.length}
+              {repoIds.length}
             </span>
           )}
         </div>
 
         {expanded && (
           <div className="ml-[15px] border-l border-line-2 pl-[5px] pt-[2px]">
-            {repos.length > 0 ? (
+            {projects.length > 0 ? (
               <>
-                {repos.map((repo, i) => (
-                  <div key={repo.id}>
+                {projects.map((row, i) => (
+                  <div key={row.id}>
                     {dropSlot === i && <SlotMarker />}
-                    <Repo repo={repo} />
+                    <Repo repo={row.repo} />
                   </div>
                 ))}
-                {dropSlot === repos.length && <SlotMarker />}
+                {dropSlot === projects.length && <SlotMarker />}
               </>
             ) : (
               <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">Empty. Drag a repo here.</div>
@@ -238,13 +242,13 @@ export default function Folder({
                 label="Delete Folder"
                 danger
                 // An empty folder holds nothing to lose track of, so it just goes.
-                onClick={() => (repos.length > 0 ? setConfirming(true) : remove())}
+                onClick={() => (repoIds.length > 0 ? setConfirming(true) : remove())}
               />
             </>
           ) : (
             <MenuConfirm
               message={`Delete the folder "${folder.name}"?`}
-              hint={`Its ${count} stay${repos.length === 1 ? 's' : ''} in Orbital, ungrouped. Nothing on disk changes.`}
+              hint={`Its ${count} stay${repoIds.length === 1 ? 's' : ''} in Orbital, ungrouped. Nothing on disk changes.`}
               confirmLabel="Delete Folder"
               danger={false}
               onConfirm={remove}

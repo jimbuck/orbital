@@ -23,10 +23,10 @@ const HEADER_BUTTON =
   'flex size-6 flex-none items-center justify-center rounded-[7px] border border-line-2 text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /**
- * What the pointer of a drag is over: the repo and the folder it is inside
+ * What the pointer of a drag is over: the project and the folder it is inside
  * of, each with where on its header row the pointer sits. The header (the first
  * row of the block) is what is measured, not the whole block, so an open
- * repo's Worktrees and an open folder's repos all count as "below".
+ * project's Worktrees and an open folder's projects all count as "below".
  */
 function railOverAt(e: DragEvent): RailOver {
   const target = e.target as HTMLElement
@@ -36,7 +36,7 @@ function railOverAt(e: DragEvent): RailOver {
     return !!box && y > box.top + box.height / 2
   }
 
-  const repoEl = target.closest<HTMLElement>('[data-repo-id]')
+  const projectEl = target.closest<HTMLElement>('[data-project-id]')
   const folderEl = target.closest<HTMLElement>('[data-folder-id]')
   const folderHeader = folderEl?.querySelector('[data-folder-header]')
   const box = folderHeader?.getBoundingClientRect()
@@ -48,7 +48,9 @@ function railOverAt(e: DragEvent): RailOver {
   }
 
   return {
-    repo: repoEl ? { id: repoEl.dataset.repoId ?? '', lowerHalf: below(repoEl.firstElementChild) } : null,
+    project: projectEl
+      ? { id: projectEl.dataset.projectId ?? '', lowerHalf: below(projectEl.firstElementChild) }
+      : null,
     folder: folderEl ? { id: folderEl.dataset.folderId ?? '', lowerHalf: below(folderHeader), edge } : null
   }
 }
@@ -58,15 +60,18 @@ function railOverAt(e: DragEvent): RailOver {
  * group of Worktrees, with add-repo and new-folder affordances up top and a
  * terminal tally in the footer.
  *
- * Repos can be filed in folders, and the rail's order is the user's: a
- * folder sits anywhere among the loose repos, and repos are ordered by
- * hand both at the top level and inside a folder. All of that only arranges
+ * What the rail arranges is projects: each one is drawn through its repo (one
+ * per project, for now). Projects can be filed in folders, and the rail's
+ * order is the user's: a folder sits anywhere among the loose projects, and
+ * projects are ordered by hand both at the top level and inside a folder.
+ * All of that only arranges
  * this panel. The rail is also the one drop zone for its own drags. What a
  * drop would do is decided by `dropTargetFor`; this component turns the
  * pointer into its inputs and paints the answer.
  */
 export default function Rail(): JSX.Element {
   const repos = useStore((s) => s.repos)
+  const projects = useStore((s) => s.projects)
   const folders = useStore((s) => s.railFolders)
   const rail = useStore((s) => s.railItems)
   const openModal = useStore((s) => s.openModal)
@@ -77,7 +82,7 @@ export default function Rail(): JSX.Element {
     max: 440,
     handleEdge: 'right'
   })
-  const rows = useMemo(() => railRows(repos, folders, rail), [repos, folders, rail])
+  const rows = useMemo(() => railRows(projects, repos, folders, rail), [projects, repos, folders, rail])
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
   // The folder whose name is being edited. Held here, not in the folder, so
   // that one created from the header button opens straight into its name.
@@ -119,7 +124,7 @@ export default function Rail(): JSX.Element {
     if (drag.kind === 'folder') {
       fireAndForget(window.orbital.placeRailFolder(drag.id, beforeId))
     } else {
-      fireAndForget(window.orbital.placeRepo(drag.id, target.folderId, beforeId))
+      fireAndForget(window.orbital.placeProject(drag.id, target.folderId, beforeId))
     }
   }
 
@@ -168,7 +173,7 @@ export default function Rail(): JSX.Element {
             {row.kind === 'folder' ? (
               <Folder
                 folder={row.folder}
-                repos={row.repos}
+                projects={row.projects}
                 dropInto={dropTarget?.kind === 'into' && dropTarget.folderId === row.id}
                 dropSlot={slotIn(row.id)}
                 renaming={renamingFolderId === row.id}

@@ -17,6 +17,7 @@ import type {
   GitLogPage,
   GitStatus,
   Pane,
+  Project,
   ProfileDirInfo,
   Repo,
   RepoAgentPatch,
@@ -127,24 +128,51 @@ export const contract = {
   /** Native folder picker; `null` when cancelled. */
   pickDirectory: invoke<(title?: string) => Promise<string | null>>(),
 
-  // repo folders: how the rail groups repos. None of these touch a
-  // repo's own row, its repo path, its worktrees or any setting.
+  // projects: a root folder and the repos that belong together under it.
+  // Every repo is in exactly one project.
   /**
-   * Add a folder. With `repoId` it takes that repo's place in the rail
+   * Move a repo into a project, just before `beforeRepoId` among its repos
+   * (last when null). The same project reorders. The project it left is
+   * deleted when empty, and reset to its one remaining repo's name and path
+   * when it has no home; a one-repo project that gains a second is re-rooted
+   * to the folder they share.
+   */
+  addRepoToProject: invoke<(projectId: string, repoId: string, beforeRepoId: string | null) => Promise<void>>(),
+  /**
+   * Take a repo out of its project into a new one of its own, placed in the
+   * rail like `placeProject`. Resolves to the repo's project (null if the repo
+   * is gone).
+   */
+  detachRepo: invoke<(repoId: string, folderId: string | null, beforeId: string | null) => Promise<Project | null>>(),
+  /** Make one of the project's repos its home, or clear the home with null. */
+  setProjectHome: invoke<(projectId: string, repoId: string | null) => Promise<void>>(),
+  /** Pick the project's root folder with the native picker. Resolves to the new root, or null when cancelled. */
+  setProjectRoot: invoke<(projectId: string) => Promise<string | null>>(),
+  setProjectManagedBlock: invoke<(projectId: string, on: boolean) => Promise<void>>(),
+  renameProject: invoke<(projectId: string, name: string) => Promise<void>>(),
+  /** Clear the home and give every repo a project of its own, where the project was in the rail. */
+  ungroupProject: invoke<(projectId: string) => Promise<void>>(),
+  /** Remove a project and all its repos from Orbital. Nothing on disk changes. */
+  removeProject: invoke<(projectId: string) => Promise<void>>(),
+
+  // rail folders: how the rail groups projects. None of these touch a
+  // project's or repo's own row, paths, worktrees or any setting.
+  /**
+   * Add a folder. With `projectId` it takes that project's place in the rail
    * and holds it; without, it goes at the top.
    */
-  createRailFolder: invoke<(name: string, repoId?: string) => Promise<RailFolder>>(),
+  createRailFolder: invoke<(name: string, projectId?: string) => Promise<RailFolder>>(),
   renameRailFolder: invoke<(folderId: string, name: string) => Promise<void>>(),
-  /** Delete a folder. Its repos stay in Orbital, loose in the rail where the folder was. */
+  /** Delete a folder. Its projects stay in Orbital, loose in the rail where the folder was. */
   removeRailFolder: invoke<(folderId: string) => Promise<void>>(),
   setRailFolderCollapsed: invoke<(folderId: string, collapsed: boolean) => Promise<void>>(),
   /**
-   * Put a repo in `folderId` (`null` = the rail's top level), just before
-   * `beforeId` or last when that is null. `beforeId` names a repo in that
-   * folder or, at the top level, a folder or a loose repo.
+   * Put a project in `folderId` (`null` = the rail's top level), just before
+   * `beforeId` or last when that is null. `beforeId` names a project in that
+   * folder or, at the top level, a folder or a loose project.
    */
-  placeRepo: invoke<(repoId: string, folderId: string | null, beforeId: string | null) => Promise<void>>(),
-  /** Put a folder just before the top-level row `beforeId` (a folder or a loose repo), or last when null. */
+  placeProject: invoke<(projectId: string, folderId: string | null, beforeId: string | null) => Promise<void>>(),
+  /** Put a folder just before the top-level row `beforeId` (a folder or a loose project), or last when null. */
   placeRailFolder: invoke<(folderId: string, beforeId: string | null) => Promise<void>>(),
 
   // github (via the gh CLI)

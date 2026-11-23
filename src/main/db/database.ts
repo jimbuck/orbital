@@ -103,6 +103,25 @@ function migrate(d: Database.Database): void {
       last_opened_at INTEGER NOT NULL DEFAULT 0
     );
 
+    -- A project: a root folder and the repos that belong together under it.
+    -- Every repo is in exactly one (repos.project_id). home_repo_id is one of
+    -- its members or NULL; removing that repo clears it.
+    CREATE TABLE IF NOT EXISTS projects (
+      id            TEXT PRIMARY KEY,
+      workspace_id  TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      root_path     TEXT NOT NULL,
+      home_repo_id  TEXT REFERENCES repos(id) ON DELETE SET NULL,
+      managed_block INTEGER NOT NULL DEFAULT 1,
+      created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
+
+    -- project_id is nullable here only because ALTER TABLE ADD COLUMN cannot
+    -- add a NOT NULL reference to an existing table, and both shapes must end
+    -- up alike. The repositories never write NULL, and groupReposIntoProjects
+    -- heals any row that has one on every boot. project_position orders a
+    -- project's repos by hand.
     CREATE TABLE IF NOT EXISTS repos (
       id                     TEXT PRIMARY KEY,
       workspace_id           TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -111,11 +130,13 @@ function migrate(d: Database.Database): void {
       env_sync_patterns      TEXT NOT NULL DEFAULT '[]',
       default_agent_id       TEXT NOT NULL DEFAULT 'claude',
       agent_exec_path        TEXT NOT NULL DEFAULT '',
-      added_at               INTEGER NOT NULL
+      added_at               INTEGER NOT NULL,
+      project_id             TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      project_position       INTEGER
     );
 
     -- Rail folders: how the rail is arranged, and nothing more. Kept in tables
-    -- of their own so filing a repo never touches its row.
+    -- of their own so filing a project never touches its row.
     CREATE TABLE IF NOT EXISTS rail_folders (
       id           TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -126,13 +147,14 @@ function migrate(d: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_rail_folders_workspace ON rail_folders(workspace_id);
 
-    -- Where a repo sits in the rail: in which folder (NULL = the top level,
+    -- Where a project sits in the rail: in which folder (NULL = the top level,
     -- where it shares rail_folders.position's order with the folders) and how
-    -- far down. repo_id is the key, so a repo is in one place. A repo with no
-    -- row has never been arranged and is listed last.
+    -- far down. project_id is the key, so a project is in one place. A project
+    -- with no row has never been arranged and is listed last. (Before projects
+    -- existed this was keyed by repo_id; groupReposIntoProjects rebuilds it.)
     CREATE TABLE IF NOT EXISTS rail_positions (
-      repo_id   TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
-      folder_id TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
+      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+      folder_id  TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
       position   INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_rail_positions_folder ON rail_positions(folder_id);
@@ -218,6 +240,12 @@ function migrate(d: Database.Database): void {
     -- The same repo may be in several workspaces, but only once each.
     CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_ws_path ON repos(workspace_id, repo_path);
   `)
+  // Also only after scoping: its rebuild keeps the columns it lists, and these
+  // two are not among them.
+  addColumnIfMissing(d, 'repos', 'project_id', 'TEXT REFERENCES projects(id) ON DELETE CASCADE')
+  addColumnIfMissing(d, 'repos', 'project_position', 'INTEGER')
+  d.exec('CREATE INDEX IF NOT EXISTS idx_repos_project ON repos(project_id)')
+  groupReposIntoProjects(d)
   migrateEnvPatternsToSettings(d)
   migrateEnvPatternsRecursive(d)
 }
@@ -363,7 +391,9 @@ function renameAgentColumn(d: Database.Database): void {
  * worktrees, tasks and rail positions keep pointing at the same rows. The old
  * indexes are dropped so the CREATE INDEX IF NOT EXISTS calls in migrate()
  * install them under the new names. Idempotent: runs only while `projects`
- * exists and `repos` does not.
+ * exists and `repos` does not. That guard is also what keeps it off the NEW
+ * `projects` table (groups of repos, see groupReposIntoProjects): wherever
+ * that table exists, `repos` exists beside it.
  */
 function renameProjectsToRepos(d: Database.Database): void {
   if (!tableExists(d, 'projects') || tableExists(d, 'repos')) return
@@ -386,6 +416,76 @@ function renameProjectsToRepos(d: Database.Database): void {
     ]) {
       d.exec(`DROP INDEX IF EXISTS ${index}`)
     }
+  })
+  tx.immediate()
+}
+
+/**
+ * Put every repo in a project. Projects arrived after repos: a database from
+ * before them has repos with no `project_id` and a rail keyed by repo. Each
+ * such repo gets a project of its own, named after it and rooted at its path
+ * (what the rail draws as a plain repo row), dated by the repo's `added_at` so
+ * the unarranged end of the rail keeps its order. Then `rail_positions` is
+ * rebuilt keyed by project, each row taking over its repo's folder and
+ * position, so the rail looks exactly as it did.
+ *
+ * It is also the heal for what SQL cannot hold: a repo with no project (the
+ * column is nullable, see the CREATE in migrate) gets one, and a home that is
+ * not a member of its project is cleared. Runs on every boot; with nothing to
+ * mend it is two reads and an update that matches no rows.
+ *
+ * The boot orders it has to survive, given that `projects` once named what is
+ * now `repos`: renameProjectsToRepos runs first and only while `repos` is
+ * absent, so by the time this runs `projects` is always the new table (made by
+ * the CREATE in migrate wherever it was missing) — on a fresh database, a
+ * pre-revamp one, a v1.45 one, one from before projects, or one already
+ * grouped.
+ */
+function groupReposIntoProjects(d: Database.Database): void {
+  const tx = d.transaction(() => {
+    // Read under the write lock: another instance may be booting too.
+    const orphans = d
+      .prepare(
+        `SELECT id, workspace_id, name, repo_path, added_at FROM repos
+         WHERE project_id IS NULL OR project_id NOT IN (SELECT id FROM projects)
+         ORDER BY added_at, rowid`
+      )
+      .all() as Array<{ id: string; workspace_id: string; name: string; repo_path: string; added_at: number }>
+    const insert = d.prepare(
+      'INSERT INTO projects (id, workspace_id, name, root_path, created_at) VALUES (?, ?, ?, ?, ?)'
+    )
+    const join = d.prepare('UPDATE repos SET project_id = ?, project_position = 0 WHERE id = ?')
+    for (const r of orphans) {
+      const pid = randomUUID()
+      insert.run(pid, r.workspace_id, r.name, r.repo_path, r.added_at)
+      join.run(pid, r.id)
+    }
+
+    const railCols = (d.prepare('PRAGMA table_info(rail_positions)').all() as Array<{ name: string }>).map(
+      (c) => c.name
+    )
+    if (railCols.includes('repo_id')) {
+      d.exec(`
+        CREATE TABLE rail_positions_new (
+          project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+          folder_id  TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
+          position   INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO rail_positions_new (project_id, folder_id, position)
+          SELECT r.project_id, s.folder_id, s.position
+          FROM rail_positions s JOIN repos r ON r.id = s.repo_id
+          ORDER BY s.position;
+        DROP TABLE rail_positions;
+        ALTER TABLE rail_positions_new RENAME TO rail_positions;
+        CREATE INDEX IF NOT EXISTS idx_rail_positions_folder ON rail_positions(folder_id);
+      `)
+    }
+
+    d.exec(
+      `UPDATE projects SET home_repo_id = NULL
+       WHERE home_repo_id IS NOT NULL AND NOT EXISTS
+         (SELECT 1 FROM repos r WHERE r.id = projects.home_repo_id AND r.project_id = projects.id)`
+    )
   })
   tx.immediate()
 }

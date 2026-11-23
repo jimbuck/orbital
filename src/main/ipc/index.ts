@@ -1,5 +1,6 @@
 import * as workspace from './workspace'
 import * as repos from './repos'
+import * as projects from './projects'
 import * as agentConfig from './agent-config'
 import * as worktrees from './worktrees'
 import * as layout from './layout'
@@ -21,6 +22,7 @@ export { resumeTerminals, watchPtyExits } from '../tabs'
 export function registerIpc(): void {
   workspace.register()
   repos.register()
+  projects.register()
   agentConfig.register()
   worktrees.register()
   layout.register()

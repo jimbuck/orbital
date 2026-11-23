@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { controlPipePath, type WorkspaceConfig, type WorkspaceInfo } from '@shared/types'
 import { getDb, initDb } from '../db/database'
-import { repos, requireWorkspaceId, setActiveWorkspaceId, workspaces } from '../db/repositories'
+import { projects, repos, requireWorkspaceId, setActiveWorkspaceId, workspaces } from '../db/repositories'
 import { readWorkspaceYaml, writeWorkspaceYaml } from './workspace-yaml'
 
 /**
@@ -136,7 +136,7 @@ export function migrateLegacyWorkspaceFiles(globalRoot: string): void {
   }
 }
 
-/** Serialize a workspace (repos + settings) to a shareable export file. */
+/** Serialize a workspace (repos, their projects, settings) to a shareable export file. */
 export function exportWorkspaceToFile(workspaceId: string, file: string): void {
   const ws = workspaces.get(workspaceId)
   if (!ws) throw new Error(`workspace ${workspaceId} not found`)
@@ -151,6 +151,16 @@ export function exportWorkspaceToFile(workspaceId: string, file: string): void {
       if (p.defaultAgentId && p.defaultAgentId !== 'claude') entry.agentId = p.defaultAgentId
       if (p.agentExecPath) entry.agentExecPath = p.agentExecPath
       return entry
+    }),
+    projects: projects.list(workspaceId).map((p) => {
+      const entry: NonNullable<WorkspaceConfig['projects']>[number] = {
+        id: p.id,
+        name: p.name,
+        root: p.rootPath,
+        repos: p.repoIds
+      }
+      if (p.homeRepoId) entry.home = p.homeRepoId
+      return entry
     })
   }
   writeWorkspaceYaml(file, config)
@@ -159,7 +169,9 @@ export function exportWorkspaceToFile(workspaceId: string, file: string): void {
 /**
  * Create a new workspace from an export file. Ids are kept when free (so a
  * workspace round-trips across machines) and regenerated on collision — an
- * import NEVER merges into or overwrites an existing workspace.
+ * import NEVER merges into or overwrites an existing workspace. Repos are
+ * grouped into the file's projects; a repo none of them lists (every repo,
+ * for a file from before projects) gets a project of its own.
  */
 export function importWorkspaceFromFile(file: string): WorkspaceInfo {
   const config = readWorkspaceYaml(file)
@@ -169,6 +181,7 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
   const workspaceId = wsIdTaken ? randomUUID() : config.id
   const now = Date.now()
   const repoIdTaken = db.prepare('SELECT 1 FROM repos WHERE id = ?')
+  const projectIdTaken = db.prepare('SELECT 1 FROM projects WHERE id = ?')
 
   const tx = db.transaction(() => {
     db.prepare('INSERT INTO workspaces (id, name, settings, created_at, last_opened_at) VALUES (?, ?, ?, ?, 0)').run(
@@ -177,22 +190,38 @@ export function importWorkspaceFromFile(file: string): WorkspaceInfo {
       JSON.stringify(config.settings ?? {}),
       now
     )
-    const insert = db.prepare(
-      `INSERT INTO repos (id, workspace_id, name, repo_path, default_agent_id, agent_exec_path, added_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    const insertProject = db.prepare(
+      'INSERT INTO projects (id, workspace_id, name, root_path, created_at) VALUES (?, ?, ?, ?, ?)'
     )
+    const insert = db.prepare(
+      `INSERT INTO repos (id, workspace_id, name, repo_path, default_agent_id, agent_exec_path, added_at,
+                          project_id, project_position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    const setHome = db.prepare('UPDATE projects SET home_repo_id = ? WHERE id = ?')
+    // Where each of the file's repos goes: its project and place in it.
+    // normalize() has already made every member id name a repo, once.
+    const placement = new Map<string, { projectId: string; position: number }>()
+    const homes: Array<{ projectId: string; repoId: string }> = []
     let seq = now
-    for (const p of config.repos) {
-      insert.run(
-        repoIdTaken.get(p.id) ? randomUUID() : p.id,
-        workspaceId,
-        p.name,
-        p.path,
-        p.agentId || 'claude',
-        p.agentExecPath ?? '',
-        seq++
-      )
+    for (const p of config.projects ?? []) {
+      const projectId = projectIdTaken.get(p.id) ? randomUUID() : p.id
+      insertProject.run(projectId, workspaceId, p.name, p.root, seq++)
+      p.repos.forEach((rid, position) => placement.set(rid, { projectId, position }))
+      if (p.home) homes.push({ projectId, repoId: p.home })
     }
+    const newRepoId = new Map<string, string>()
+    for (const p of config.repos) {
+      const rid = repoIdTaken.get(p.id) ? randomUUID() : p.id
+      newRepoId.set(p.id, rid)
+      let at = placement.get(p.id)
+      if (!at) {
+        at = { projectId: randomUUID(), position: 0 }
+        insertProject.run(at.projectId, workspaceId, p.name, p.path, seq)
+      }
+      insert.run(rid, workspaceId, p.name, p.path, p.agentId || 'claude', p.agentExecPath ?? '', seq++, at.projectId, at.position)
+    }
+    for (const h of homes) setHome.run(newRepoId.get(h.repoId) ?? h.repoId, h.projectId)
   })
   tx.immediate()
   return workspaces.get(workspaceId)!

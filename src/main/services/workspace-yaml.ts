@@ -2,7 +2,12 @@ import { dirname, basename } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { parse, stringify } from 'yaml'
-import { WORKSPACE_CONFIG_VERSION, type WorkspaceConfig, type WorkspaceRepoConfig } from '@shared/types'
+import {
+  WORKSPACE_CONFIG_VERSION,
+  type WorkspaceConfig,
+  type WorkspaceProjectConfig,
+  type WorkspaceRepoConfig
+} from '@shared/types'
 import { parseSettings } from '@shared/settings'
 
 /**
@@ -13,8 +18,9 @@ import { parseSettings } from '@shared/settings'
 
 const HEADER = `# Orbital workspace export.
 # Share this file to hand someone a workspace: Import Workspace in Orbital
-# recreates it (repos + workspace settings). Paths are absolute, so the
-# importing machine needs the repos at the same locations (or edit them here).
+# recreates it (repos, how they are grouped into projects, and workspace
+# settings). Paths are absolute, so the importing machine needs the repos at
+# the same locations (or edit them here).
 `
 
 /** Human name for a workspace derived from a file path ("team.yaml" → "team"). */
@@ -33,8 +39,11 @@ export function normalize(raw: unknown): WorkspaceConfig {
   const id = typeof r.id === 'string' && r.id ? r.id : randomUUID()
   const name = typeof r.name === 'string' && r.name ? r.name : 'Workspace'
 
-  // Files exported before the Project→Repo rename list them under `projects`.
-  const rawRepos = Array.isArray(r.repos) ? r.repos : Array.isArray(r.projects) ? r.projects : []
+  // Files exported before the Project→Repo rename list their repos under
+  // `projects`. Since then `repos` is always written, so `projects` without
+  // it is that old list, and `projects` beside it is the grouping.
+  const legacy = !Array.isArray(r.repos) && Array.isArray(r.projects)
+  const rawRepos = Array.isArray(r.repos) ? r.repos : legacy ? (r.projects as unknown[]) : []
   const seen = new Set<string>()
   const repos: WorkspaceRepoConfig[] = []
   for (const item of rawRepos) {
@@ -60,7 +69,46 @@ export function normalize(raw: unknown): WorkspaceConfig {
   // Workspace-scoped settings: keep only recognizably-typed fields.
   const settings: WorkspaceConfig['settings'] = parseSettings(r.settings)
 
-  return { version: WORKSPACE_CONFIG_VERSION, id, name, settings, repos }
+  const config: WorkspaceConfig = { version: WORKSPACE_CONFIG_VERSION, id, name, settings, repos }
+  if (!legacy && Array.isArray(r.projects)) config.projects = normalizeProjects(r.projects, repos)
+  return config
+}
+
+/**
+ * Keep the project entries that still make sense against `repos`: member ids
+ * that name a repo in the file and are not already claimed by an earlier
+ * project, a home that is one of the members, a root (else the first
+ * member's path) and a name (else the root's last segment). A project left
+ * with no members is dropped; its repos, if any, get projects of their own on
+ * import.
+ */
+function normalizeProjects(raw: unknown[], repos: WorkspaceRepoConfig[]): WorkspaceProjectConfig[] {
+  const repoPath = new Map(repos.map((r) => [r.id, r.path]))
+  const claimed = new Set<string>()
+  const seen = new Set<string>()
+  const out: WorkspaceProjectConfig[] = []
+  for (const item of raw) {
+    const p = (item ?? {}) as Record<string, unknown>
+    const members = (Array.isArray(p.repos) ? p.repos : []).filter(
+      (rid): rid is string => typeof rid === 'string' && repoPath.has(rid) && !claimed.has(rid)
+    )
+    const unique = [...new Set(members)]
+    if (unique.length === 0) continue
+    for (const rid of unique) claimed.add(rid)
+    let pid = typeof p.id === 'string' && p.id ? p.id : ''
+    if (!pid || seen.has(pid)) pid = randomUUID()
+    seen.add(pid)
+    const root = typeof p.root === 'string' && p.root.trim() ? p.root.trim() : (repoPath.get(unique[0]) ?? '')
+    const entry: WorkspaceProjectConfig = {
+      id: pid,
+      name: typeof p.name === 'string' && p.name ? p.name : (root.split(/[\\/]/).filter(Boolean).pop() ?? root),
+      root,
+      repos: unique
+    }
+    if (typeof p.home === 'string' && unique.includes(p.home)) entry.home = p.home
+    out.push(entry)
+  }
+  return out
 }
 
 /**

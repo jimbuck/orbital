@@ -70,7 +70,9 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
   const toggleExpanded = useStore((s) => s.toggleExpanded)
   const openModal = useStore((s) => s.openModal)
   const folders = useStore((s) => s.railFolders)
-  const folderId = folders.find((f) => f.repoIds.includes(repo.id))?.id ?? null
+  // The rail arranges the repo's PROJECT (one repo each, for now), so that is
+  // what is filed, dragged and placed.
+  const folderId = folders.find((f) => f.projectIds.includes(repo.projectId))?.id ?? null
   const root = worktrees.find((w) => w.kind === 'root')
   const linked = worktrees.filter((w) => w.kind !== 'root')
   const rootActive = !!root && activeWorktreeId === root.id
@@ -112,11 +114,11 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
     setMenu(clampMenuPos(e, 210, 240))
   }
 
-  // Filing a repo is a rail arrangement only: main records where the row
-  // sits and leaves the repo itself untouched. It goes last in the folder
-  // it is moved to.
+  // Filing a project is a rail arrangement only: main records where the row
+  // sits and leaves the project and its repo untouched. It goes last in the
+  // folder it is moved to.
   const moveTo = (target: string): void => {
-    fireAndForget(window.orbital.placeRepo(repo.id, target, null))
+    fireAndForget(window.orbital.placeProject(repo.projectId, target, null))
     closeMenu()
   }
   // Out of its folder, it lands at the top level just below that folder, which
@@ -124,7 +126,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
   const removeFromFolder = (): void => {
     const rail = useStore.getState().railItems
     const at = rail.findIndex((item) => item.kind === 'folder' && item.id === folderId)
-    fireAndForget(window.orbital.placeRepo(repo.id, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
+    fireAndForget(window.orbital.placeProject(repo.projectId, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
     closeMenu()
   }
 
@@ -158,8 +160,8 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
   }
 
   return (
-    // The data attribute is how the Rail tells which repo a drag is over.
-    <div data-repo-id={repo.id} className="mb-1">
+    // The data attribute is how the Rail tells which project a drag is over.
+    <div data-project-id={repo.projectId} className="mb-1">
       <div
         role="button"
         tabIndex={0}
@@ -167,7 +169,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
         onKeyDown={onHeaderKey}
         onContextMenu={openMenu}
         draggable={!renaming}
-        onDragStart={(e) => beginRailDrag(e, { kind: 'repo', id: repo.id })}
+        onDragStart={(e) => beginRailDrag(e, { kind: 'project', id: repo.projectId })}
         className={`group flex cursor-pointer items-center gap-2 rounded-[8px] px-[9px] py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
           rootActive ? 'bg-panel-2' : isActive ? 'bg-hover' : 'hover:bg-hover'
         }`}
@@ -367,7 +369,7 @@ export default function Repo({ repo }: { repo: RepoModel }): JSX.Element {
               placeholder="Folder name"
               confirmLabel="Create"
               onSubmit={(name) => {
-                fireAndForget(window.orbital.createRailFolder(name, repo.id))
+                fireAndForget(window.orbital.createRailFolder(name, repo.projectId))
                 closeMenu()
               }}
               onCancel={closeMenu}
