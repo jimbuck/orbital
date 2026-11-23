@@ -56,7 +56,7 @@ export default defineConfig({
           label: 'Concepts',
           items: [
             { label: 'Workspaces', slug: 'concepts/workspaces' },
-            { label: 'Projects, worktrees & tabs', slug: 'concepts/projects-and-worktrees' },
+            { label: 'Repos, worktrees & tabs', slug: 'concepts/repos-and-worktrees' },
             { label: 'Status & alerts', slug: 'concepts/status-and-alerts' }
           ]
         },

@@ -43,12 +43,12 @@ subscription instead of metered API tokens. Orbital launches **Claude Code**,
 Code. The full product spec lives in
 [`Orbital_PRD_v1.1.md`](./Orbital_PRD_v1.1.md).
 
-![The Orbital cockpit: projects and worktrees in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)
+![The Orbital cockpit: repos and worktrees in the left rail, a live terminal in the middle, git panel and task tracker on the right](website/src/assets/screenshots/01-cockpit-overview.png)
 
 ## What you get
 
 ### Worktrees: one isolated working surface per stream of work
-- Every project (a local git repo) starts with a **root worktree** on your main
+- Every repo starts with a **root worktree** on your main
   checkout, and can spawn **linked worktrees** — each is a real `git worktree`
   on its own branch, created in one click (with a base-ref picker), so agents
   never trample each other's changes.
@@ -81,7 +81,7 @@ Code. The full product spec lives in
 
 ### Status: know who needs you without looking
 Each terminal carries a status — `idle · working · needs-attention · error ·
-done` — and every worktree and project rolls up the most urgent one. When an
+done` — and every worktree and repo rolls up the most urgent one. When an
 agent flips to needs-attention you get a **three-way alert**: the rail badge
 pulses, a title-bar banner appears, and the taskbar (or Dock) icon gets a badge
 (plus an optional chime). Each is individually toggleable in Settings.
@@ -110,15 +110,15 @@ takes no briefing file. Both are opt-in from Settings, previewed first, and
 removed cleanly.
 
 ### Tasks: capture work, launch it as a worktree
-- A lightweight per-project tracker: capture with one keystroke, edit titles
+- A lightweight per-repo tracker: capture with one keystroke, edit titles
   inline, move through `todo → in progress → ready for review → done`.
 - **Start a worktree from a task** — one click creates the branch + worktree +
   terminal, pre-linked so the task shows where its work lives.
-- A **full board view** across all projects with drag-and-drop between both
-  status columns and project lanes.
+- A **full board view** across all repos with drag-and-drop between both
+  status columns and repo lanes.
 - Agents can file follow-up work themselves with `orbital task add`.
 
-![The all-projects task board with drag-and-drop swim-lanes](website/src/assets/screenshots/10-board-all.png)
+![The all-repos task board with drag-and-drop swim-lanes](website/src/assets/screenshots/10-board-all.png)
 
 ### The `orbital` CLI
 Every worktree terminal has `orbital` on PATH, wired back to the app over a local
@@ -126,9 +126,9 @@ pipe — so agents can drive the cockpit:
 
 ```sh
 orbital status <idle|working|needs-attention|error|done>   # set this terminal's status
-orbital whoami                                             # project, worktree, branch, path, task, servers
-orbital projects                                           # this workspace's projects (name, id, repo path)
-orbital worktrees                                          # list worktrees in this project
+orbital whoami                                             # repo, worktree, branch, path, task, servers
+orbital repos                                              # this workspace's repos (name, id, repo path)
+orbital worktrees                                          # list worktrees in this repo
 orbital worktree new [--worktree <branch>] [--existing-branch <b>] [--base <ref>] [name]
 orbital tab new <terminal|browser|editor|agent> [arg]      # open a tab in this worktree
 orbital task add "<title>" [--description <text>] [--tags <a,b>]   # capture a task
@@ -144,8 +144,8 @@ orbital server remove <url|port>                           # deregister it
 orbital server list                                        # this worktree's live servers
 ```
 
-Task and worktree commands act on this terminal's project. Add
-`--project <name|id>` to target a sibling project in the same workspace; passing
+Task and worktree commands act on this terminal's repo. Add
+`--repo <name|id>` to target a sibling repo in the same workspace; passing
 the flag is the opt-in, so writes are allowed with it.
 
 Every command takes `--json` for machine-readable output — see the
@@ -171,7 +171,7 @@ worktrees, so the panel is always current.
 ### Quality of life
 - Frameless, keyboard-friendly dark UI designed for long sessions.
 - Everything persists in SQLite under your user profile — never inside a repo.
-- Right-click a project to remove it from Orbital (repo and worktrees stay on
+- Right-click a repo to remove it from Orbital (repo and worktrees stay on
   disk); hover any task card to delete it, with an inline confirm.
 - Packaged builds **auto-update in the background** from GitHub releases; a
   quiet pill in the title bar tells you when a restart will finish the update.
@@ -180,7 +180,7 @@ worktrees, so the panel is always current.
 
 The workflow Orbital is built around:
 
-1. **Add your repos** as projects (the **+** in the left rail).
+1. **Add your repos** (the **+** in the left rail).
 2. **Install the Claude Code hooks** (Settings → Claude status hooks) so
    statuses take care of themselves.
 3. **Capture tasks as they occur to you** — yours or your agents' — instead of

@@ -29,7 +29,7 @@ type Handler = (req: ControlRequest) => Promise<ControlResponse>
 
 /** `task archive` / `task unarchive` (and the legacy `task delete`). */
 async function archiveTask(req: ControlRequest, archive: boolean): Promise<ControlResponse> {
-  if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+  if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
   const idArg = String(req.args.id ?? '').trim()
   if (!idArg) return { ok: false, error: 'task id required' }
   const { task, error } = resolveTask(req.repoId, idArg)
@@ -107,7 +107,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: list }
   },
   'worktree-new': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
     const repo = tables.repos.get(req.repoId)
     if (!repo) return { ok: false, error: 'repo not found' }
     // A task number/id may come along: the Worktree is then started from that
@@ -197,7 +197,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return status ? { ok: true, data: { status } } : { ok: true }
   },
   'task-add': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
     const title = String(req.args.title ?? '').trim()
     if (!title) return { ok: false, error: 'task title required' }
     const task = tables.tasks.create({
@@ -213,7 +213,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: { id: task.id, seq: task.seq, title: task.title, repo: repoName(req) } }
   },
   'task-list': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
     const all = req.args.all === true || req.args.all === 'true'
     const archived = req.args.archived === true || req.args.archived === 'true'
     // Explicit --status implies --all: asking for `done` and getting nothing
@@ -235,7 +235,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: list }
   },
   'task-show': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
     const idArg = String(req.args.id ?? '').trim()
     if (!idArg) return { ok: false, error: 'task id required' }
     const { task, error } = resolveTask(req.repoId, idArg)
@@ -243,7 +243,7 @@ const handlers: Record<ControlCommand, Handler> = {
     return { ok: true, data: taskDto(task) }
   },
   'task-update': async (req) => {
-    if (!req.repoId) return { ok: false, error: 'no ORBITAL_PROJECT_ID in environment' }
+    if (!req.repoId) return { ok: false, error: 'no ORBITAL_REPO_ID in environment' }
     const idArg = String(req.args.id ?? '').trim()
     if (!idArg) return { ok: false, error: 'task id required' }
     const { task, error } = resolveTask(req.repoId, idArg)
@@ -299,7 +299,7 @@ export async function handleControl(req: ControlRequest): Promise<ControlRespons
   const handler = Object.prototype.hasOwnProperty.call(handlers, req.cmd) ? handlers[req.cmd] : undefined
   if (!handler) return { ok: false, error: `unknown command '${String(req.cmd)}'` }
   try {
-    // Resolve `--repo` / validate ORBITAL_PROJECT_ID against this workspace
+    // Resolve `--repo` / validate ORBITAL_REPO_ID against this workspace
     // up front, so every handler's `req.repoId` is one it may act on.
     const scoped = scopeRequest(req)
     if (!scoped.req) return { ok: false, error: scoped.error }

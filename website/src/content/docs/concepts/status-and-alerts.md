@@ -18,9 +18,9 @@ for *needs-attention*, a red core for *error*, a heavy green ring for *done*,
 and a thin grey ring at rest.
 
 A worktree surfaces the most attention-worthy status among its terminals
-(`needs-attention` beats `error` beats `working` …). A project's header row is
+(`needs-attention` beats `error` beats `working` …). A repo's header row is
 its root worktree, so its dot reports the root alone. The linked worktrees
-beneath it roll up into the project's chevron, which takes their most urgent
+beneath it roll up into the repo's chevron, which takes their most urgent
 colour and, while collapsed, pulses for needs-attention or error. One glance at
 the rail answers "who needs me?"
 
@@ -30,7 +30,7 @@ the rail answers "who needs me?"
 
 When a worktree flips to needs-attention:
 
-1. The **rail** shows an amber count badge on the project (counting its linked
+1. The **rail** shows an amber count badge on the repo (counting its linked
    worktrees) and a "needs you" label on the worktree.
 2. The **title bar** shows an "N agents need you" banner.
 3. The **taskbar** icon lights up — the orbiting satellite in the app icon

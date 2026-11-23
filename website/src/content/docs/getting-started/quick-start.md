@@ -5,24 +5,24 @@ description: From zero to two parallel agents in five minutes.
 
 This walkthrough uses **nebula-shop**, an example storefront repo.
 
-## 1. Add a project
+## 1. Add a repo
 
-Click the **+** at the top of the left rail (or **File ▸ Add Project…**) and
+Click the **+** at the top of the left rail (or **File ▸ Add Repo…**) and
 pick your repo's folder. With the GitHub CLI signed in, you can also clone one
 of your GitHub repositories or create a new one from the same dialog. The repo
-appears as a project with a **root worktree** (`main`) bound to your normal
+appears in the rail with a **root worktree** (`main`) bound to your normal
 checkout.
 
-![The cockpit after adding a project](../../../assets/screenshots/01-cockpit-overview.png)
+![The cockpit after adding a repo](../../../assets/screenshots/01-cockpit-overview.png)
 
 ## 2. Capture some tasks
 
 Type into **Capture a task…** in the right panel and press Enter. Tasks are
-per-project and take one keystroke to file — capture first, triage later.
+per-repo and take one keystroke to file — capture first, triage later.
 
 ## 3. Start a worktree for parallel work
 
-Click **New Worktree** under the project (or press the ▶ button on
+Click **New Worktree** under the repo (or press the ▶ button on
 a task to pre-link it). Name it, then either create a new branch (forked from
 the base ref you pick) or open an existing one.
 

@@ -12,7 +12,7 @@ Orbital, and this is how to behave.
 
 Orbital runs several agent sessions side by side, each in its own git
 worktree. A human is watching all of them from one window. They see a status
-dot for your terminal, a task board for the project, and a list of dev
+dot for your terminal, a task board for the repo, and a list of dev
 servers, and you control all three with the `orbital` CLI on your `PATH`.
 
 Check once rather than guessing:
@@ -22,7 +22,7 @@ orbital whoami
 ```
 
 ```
-project      nebula-shop
+repo         nebula-shop
 worktree     Checkout flow (linked)
 branch       checkout-flow
 path         C:\Projects\.orbital-worktrees\nebula-shop\checkout-flow
@@ -107,7 +107,7 @@ started:
 | Codex (tab or terminal) | A managed block in the profile's `AGENTS.md`, if installed |
 | Cursor, or anything else | Nothing automatic. `orbital help` prints the usage. |
 
-The briefing tells the agent its project, worktree, path and branch, then the
+The briefing tells the agent its repo, worktree, path and branch, then the
 same conventions as above. It lives in Orbital's app-data folder and never in
 your repository.
 

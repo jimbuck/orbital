@@ -16,7 +16,7 @@ A prefix picks what you're searching:
 |---|---|
 | `>` | commands (what Ctrl+Shift+P starts with) |
 | `/` | text inside files |
-| `@` | worktrees, across every project |
+| `@` | worktrees, across every repo |
 | `#` | tasks, by number or title |
 | nothing | a mix of file names, commands, worktrees and tasks |
 
@@ -33,7 +33,7 @@ Enter should never be enough to reach Discard All.
 ### Files across worktrees
 
 File-name search covers every worktree in the workspace, since running several
-checkouts at once is the point. Each hit names the project and worktree it came
+checkouts at once is the point. Each hit names the repo and worktree it came
 from, which is the only way to tell two copies of `config.ts` apart. The list
 comes from git's own file list (tracked files plus untracked files that aren't
 ignored) and refreshes when a checkout changes.
@@ -54,7 +54,7 @@ orbital tab new search "TODO("
 - Toggle **Match case**, **Whole word** and **Regular expression** next to the
   query.
 - **Files to include** takes globs, e.g. `src/**, *.ts`.
-- The scope reaches from this worktree to the whole project or the whole
+- The scope reaches from this worktree to the whole repo or the whole
   workspace.
 - Pick a hit to open the file scrolled to that line, with a brief flash. It
   opens in a pane other than the one holding the results, so the list stays in

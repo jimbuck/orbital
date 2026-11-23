@@ -11,7 +11,7 @@ description: Install Orbital on Windows, macOS or Linux, or build it from source
   **Claude Code**, **Codex** and **Cursor** as agent tabs, and any interactive
   CLI runs fine in a plain worktree terminal.
 - Optional: the [GitHub CLI](https://cli.github.com) (`gh`), signed in, to clone
-  or create GitHub repositories from the Add Project dialog.
+  or create GitHub repositories from the Add Repo dialog.
 
 ## Install the app
 

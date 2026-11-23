@@ -1,19 +1,19 @@
 ---
-title: Projects, Worktrees & tabs
+title: Repos, Worktrees & tabs
 description: Orbital's core model — how repos, worktrees, panes, and tabs fit together.
 ---
 
-## Projects
+## Repos
 
-A **project** is a local git repository opened in Orbital. The left rail lists
-every project with an aggregate status dot and its worktrees. Add one with the
-**+** button or **File ▸ Add Project…**; remove one from Orbital by
-right-clicking its header (the repo and its worktrees stay on disk). Projects
+A **repo** is a local git repository opened in Orbital. The left rail lists
+every repo with an aggregate status dot and its worktrees. Add one with the
+**+** button or **File ▸ Add Repo…**; remove one from Orbital by
+right-clicking its header (the repo and its worktrees stay on disk). Repos
 belong to a [workspace](/orbital/concepts/workspaces/).
 
-![The Add Project dialog](../../../assets/screenshots/14-add-project.png)
+![The Add Repo dialog](../../../assets/screenshots/14-add-project.png)
 
-The **Add project** dialog has three sources:
+The **Add repo** dialog has three sources:
 
 - **Local folder** — pick a folder that is already a git repository.
 - **Clone from GitHub** — pick one of your repositories (or type `owner/repo`)
@@ -40,7 +40,7 @@ handing `gh` the account's token for each call, so it never runs
 
 A **worktree** is a working surface bound to one working directory:
 
-- The **root worktree** (`main` badge) is your normal checkout. Every project has
+- The **root worktree** (`main` badge) is your normal checkout. Every repo has
   exactly one, and it can't be removed.
 - **Linked worktrees** are real `git worktree` checkouts on their own branch,
   created via **New Worktree** or from a task. They live in a
@@ -49,13 +49,13 @@ A **worktree** is a working surface bound to one working directory:
   the repo itself.
 
 Orbital is a worktree *dashboard*, not just a worktree creator: every checkout
-`git worktree list` reports shows up under the project automatically, wherever
+`git worktree list` reports shows up under the repo automatically, wherever
 it lives and however it was created. Run `git worktree add` in any terminal and
 the new worktree appears in the rail within a second; remove one externally and
 its entry (with its tabs and layout) goes away. Discovery runs at launch and
 live, by watching each repo's `.git/worktrees` directory.
 
-**New Worktree** (on the project row, **File ▸ New Worktree…**, or the ▶ on a
+**New Worktree** (on the repo row, **File ▸ New Worktree…**, or the ▶ on a
 task) leads with the worktree's name and offers two choices:
 
 - **Create a new branch.** The branch name follows the worktree name until you
@@ -81,7 +81,7 @@ removed.
 
 ### Env-file copy
 
-A new worktree gets the project's untracked env files copied in from the root
+A new worktree gets the repo's untracked env files copied in from the root
 checkout: `.env` and `.env.*` at any depth, agent config directories like
 `.claude/`, and `node_modules/`, which copies in the background while the rail
 shows the worktree as setting up. Your feature branch runs straight away. The
@@ -106,7 +106,7 @@ Each worktree owns a **split tree of panes**, each pane a strip of tabs:
   one; Ctrl+click, or Cmd+click on macOS, uses your system browser).
 - **Editor** — file tree, open-file pills, syntax-highlighted source, diffs,
   previews, images. See [The editor](/orbital/guides/editor/).
-- **Search** — content search across the checkout, the project or the whole
+- **Search** — content search across the checkout, the repo or the whole
   workspace. See [Command palette & search](/orbital/guides/command-palette/).
 
 ![A linked worktree with split panes](../../../assets/screenshots/03-linked-worktree.png)

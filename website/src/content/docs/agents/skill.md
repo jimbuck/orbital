@@ -24,7 +24,7 @@ description: Report status, file and progress tasks, list sibling worktrees, ope
 allowed-tools:
   - Bash(orbital status *)
   - Bash(orbital whoami *)
-  - Bash(orbital projects *)
+  - Bash(orbital repos *)
   - Bash(orbital worktrees *)
   - Bash(orbital task list *)
   - Bash(orbital task show *)
@@ -50,7 +50,7 @@ set there; if it is absent, you are in an ordinary terminal and every command
 below will fail with `not connected to Orbital`. Check once rather than guessing:
 
 ```sh
-orbital whoami          # project, worktree, branch, path, status, dev servers
+orbital whoami          # repo, worktree, branch, path, status, dev servers
 ```
 
 Add `--json` to any command to get machine-readable output instead of a table —
@@ -75,7 +75,7 @@ lifecycle events and you do not need to call `orbital status` at all.
 
 ## Tasks
 
-A per-project tracker the human watches. File follow-up work you notice instead
+A per-repo tracker the human watches. File follow-up work you notice instead
 of expanding the scope of what you were asked to do.
 
 ```sh
@@ -122,27 +122,27 @@ orbital task start 12                               # worktree from task #12, br
 orbital worktree sync                               # copy the root checkout's env files into this worktree again
 ```
 
-A new worktree gets the project's env files (`.env`, agent config dirs) copied in
+A new worktree gets the repo's env files (`.env`, agent config dirs) copied in
 when it is created — once. They are not kept in sync afterwards, so if the root
 checkout's copies have changed, `orbital worktree sync` copies them again
 (overwriting this worktree's). `task start` is the scriptable form of the
 cockpit's play button: it creates the worktree, links the task to it, and moves
 the task to `in-progress`.
 
-## Other projects in this workspace
+## Other repos in this workspace
 
 ```sh
-orbital projects                                    # the workspace's projects: name, id, repo path (* = yours)
-orbital task list --project api                     # a sibling project's open tasks
-orbital task add "Bump the client" --project api    # file work against it
-orbital worktree new --project api --worktree feat/x
+orbital repos                                    # the workspace's repos: name, id, repo path (* = yours)
+orbital task list --repo api                     # a sibling repo's open tasks
+orbital task add "Bump the client" --repo api    # file work against it
+orbital worktree new --repo api --worktree feat/x
 ```
 
-Task and worktree commands are scoped to this terminal's project. `--project <name|id>`
+Task and worktree commands are scoped to this terminal's repo. `--repo <name|id>`
 (on `task list/show/add/update/start/done/delete`, `worktrees` and `worktree new`)
-points one at a sibling project in the same workspace instead. Passing it is the
+points one at a sibling repo in the same workspace instead. Passing it is the
 opt-in, so writes go through. Reach across only when the work calls for it, such as
-filing a bug that belongs to another repo, and tell the human which project you touched.
+filing a bug that belongs to another repo, and tell the human which repo you touched.
 
 ## Tabs and dev servers
 
@@ -187,17 +187,17 @@ When `ORBITAL_WORKTREE_ID` is set, this session is running inside a worktree of
 the Orbital cockpit, and the `orbital` CLI on your PATH talks to it. If that
 variable is NOT set, ignore this section — the CLI has no cockpit to reach.
 
-- `orbital whoami` — project, worktree, branch, path, status, linked task, dev servers.
+- `orbital whoami` — repo, worktree, branch, path, status, linked task, dev servers.
 - `orbital status <working|needs-attention|idle|error|done>` — keep the cockpit honest
   about what you are doing. `needs-attention` is what makes the human look at this
   worktree, so set it when you are genuinely blocked on them.
 - `orbital task add "<title>"` — file follow-up work you notice instead of expanding
-  the current change; `orbital task list` to see the project's open tasks.
+  the current change; `orbital task list` to see the repo's open tasks.
 - `orbital task update <n> --status in-progress` the moment you start work on a task,
   and `orbital task done <n>` when it is finished. The board is how the human sees
   what is underway; a task left in `todo` while you work on it reads as unclaimed.
-- `orbital projects` lists the other projects in this workspace. Task and worktree
-  commands stay scoped to this project unless you pass `--project <name|id>`, which
+- `orbital repos` lists the other repos in this workspace. Task and worktree
+  commands stay scoped to this repo unless you pass `--repo <name|id>`, which
   is the explicit opt-in to read or write a sibling's tasks and worktrees.
 - `orbital server add <port>` when you start a dev server, `orbital server remove <port>`
   when you stop it, so the human can open it in one click.

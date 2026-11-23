@@ -28,11 +28,11 @@ pipeline (rail badge, title-bar banner, taskbar badge, optional chime).
 orbital whoami
 ```
 
-Everything the cockpit knows about the calling terminal — project, worktree,
+Everything the cockpit knows about the calling terminal — repo, worktree,
 branch, path, current status, linked task, and registered dev servers:
 
 ```
-project      orbital
+repo         orbital
 worktree     Login flow (linked)
 branch       feature/login
 path         C:\Projects\.orbital-worktrees\orbital\feature-login
@@ -41,14 +41,14 @@ task         #12 Add checkout flow (in_progress)
 servers      http://localhost:5173/
 ```
 
-## Projects
+## Repos
 
 ```sh
-orbital projects
+orbital repos
 ```
 
-Lists the projects in this instance's workspace: name, id, and repo path. The
-calling terminal's own project is marked `*`.
+Lists the repos in this instance's workspace: name, id, and repo path. The
+calling terminal's own repo is marked `*`.
 
 ```
    NAME  ID                                    REPO PATH
@@ -56,30 +56,30 @@ calling terminal's own project is marked `*`.
    api   b82d4e61-0a3c-4f9e-8b5d-1c7a2e9f6d34  C:\Projects\api
 ```
 
-Task and worktree commands act on the calling terminal's project. Add
-`--project <name|id>` to `worktrees`, `worktree new`, or any `task` command to
-target a sibling project in the same workspace instead. The name match ignores
+Task and worktree commands act on the calling terminal's repo. Add
+`--repo <name|id>` to `worktrees`, `worktree new`, or any `task` command to
+target a sibling repo in the same workspace instead. The name match ignores
 case, and a unique id prefix works too. Passing the flag is the opt-in: without
-it nothing reaches beyond your own project, and with it reads and writes both go
-through. Projects in other workspaces are never reachable, and neither the
-flag nor a spoofed `ORBITAL_PROJECT_ID` gets past that check.
+it nothing reaches beyond your own repo, and with it reads and writes both go
+through. Repos in other workspaces are never reachable, and neither the
+flag nor a spoofed `ORBITAL_REPO_ID` gets past that check.
 
 ```sh
-orbital task list --project api
-orbital task add "Bump the client to v2" --project api
-orbital worktree new --project api --worktree feat/v2-client
+orbital task list --repo api
+orbital task add "Bump the client to v2" --repo api
+orbital worktree new --repo api --worktree feat/v2-client
 ```
 
 ## Worktrees
 
 ```sh
-orbital worktrees [--project <name|id>]
+orbital worktrees [--repo <name|id>]
 ```
 
-Lists the project's worktrees: status, name, branch, id.
+Lists the repo's worktrees: status, name, branch, id.
 
 ```sh
-orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--project <name|id>] [name]
+orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base <ref>] [--task <number>] [--repo <name|id>] [name]
 ```
 
 Creates a linked worktree. The branch is slugified; an existing branch of that
@@ -135,8 +135,8 @@ orbital task archive <number|id>
 orbital task unarchive <number|id>
 ```
 
-Every `task` command also takes `--project <name|id>` to work on a sibling
-project's tasks (see [Projects](#projects)).
+Every `task` command also takes `--repo <name|id>` to work on a sibling
+repo's tasks (see [Repos](#repos)).
 
 - `task list` prints open tasks by number (`--all` includes done and archived
   ones; an explicit `--status` also shows done ones; `--archived` shows only
@@ -186,7 +186,8 @@ Orbital injects these into every worktree terminal:
 |---|---|
 | `ORBITAL_TERMINAL_ID` | The calling terminal's tab id |
 | `ORBITAL_WORKTREE_ID` | The worktree the terminal belongs to |
-| `ORBITAL_PROJECT_ID` | The worktree's project |
+| `ORBITAL_REPO_ID` | The worktree's repo |
+| `ORBITAL_PROJECT_ID` | Same value as `ORBITAL_REPO_ID`, kept for older scripts |
 | `ORBITAL_SOCKET` | The control pipe the CLI connects to |
 
 `ORBITAL_WORKTREE_ID` is the reliable "am I inside Orbital?" check.
@@ -196,3 +197,5 @@ silently outside Orbital sessions and never blocks Claude.
 
 > `orbital flights` and `orbital flight new` still work as hidden aliases for the
 > renamed `worktrees` / `worktree new` commands, so existing scripts keep running.
+> Likewise, `orbital projects` and `--project <name|id>` are deprecated aliases for
+> `orbital repos` and `--repo <name|id>`.

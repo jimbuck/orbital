@@ -90,7 +90,7 @@ function validateEnvIds(req: ControlRequest, repoIds: Set<string>): string | und
  * Settle which repo a request acts on, before any handler sees it.
  *
  * Without `--repo` a command stays scoped to the calling terminal's repo
- * (ORBITAL_PROJECT_ID). Passing `--repo` explicitly is the opt-in to reach a
+ * (ORBITAL_REPO_ID). Passing `--repo` explicitly is the opt-in to reach a
  * sibling repo — reads and writes alike. Either way the id must belong to
  * this instance's workspace: the env is client-supplied, so a spoofed id must
  * not reach another workspace's repo (e.g. through `worktree new`). The

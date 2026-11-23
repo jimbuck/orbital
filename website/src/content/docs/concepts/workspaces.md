@@ -1,9 +1,9 @@
 ---
 title: Workspaces
-description: Group projects into workspaces, each in its own window with its own settings.
+description: Group repos into workspaces, each in its own window with its own settings.
 ---
 
-A **workspace** is a named set of projects that opens in its own Orbital
+A **workspace** is a named set of repos that opens in its own Orbital
 window. Most people start with one. A second one earns its place when two sets
 of work should never mix: a *Personal* workspace with your side projects and a
 *Work* workspace with the company repos, each launching agents against its own
@@ -16,7 +16,7 @@ Claude profile.
 Everything you configure lives on the workspace, so two windows can look and
 behave differently:
 
-- its projects, and through them their worktrees, tabs and tasks
+- its repos, and through them their worktrees, tabs and tasks
 - the theme and accent colour, so each window is recognisable at a glance
 - agent profiles (a work Claude and a personal Claude, say), the default shell,
   alert toggles, env-file patterns, periodic fetch, zoom level and the default
@@ -51,7 +51,7 @@ and the OS window title. Give each workspace a different **accent colour**
 
 ## Sharing a workspace
 
-The YAML export carries the project list and the workspace's settings, so a
+The YAML export carries the repo list and the workspace's settings, so a
 teammate can import the same setup:
 
 ```yaml
@@ -59,7 +59,7 @@ teammate can import the same setup:
 version: 1
 id: 3f9c2a4e-8b1d-4c7a-9e21-5d6f0a7b8c90
 name: Work
-projects:
+repos:
   - name: comet-api
     path: C:\Work\comet-api
   - name: nebula-shop

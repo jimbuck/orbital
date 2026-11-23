@@ -3,14 +3,14 @@ title: Tasks
 description: Capture work in one keystroke, launch it as a worktree, and let agents work the same board.
 ---
 
-Each project has a lightweight task tracker in the right panel, built for
+Each repo has a lightweight task tracker in the right panel, built for
 capture speed rather than ceremony.
 
 ## Capturing
 
 Type into **Capture a task…** and press Enter. The task lands in the active
-project as `todo` with the next task number. Numbers are unique across all
-your projects, so `#42` always means one task.
+repo as `todo` with the next task number. Numbers are unique across all
+your repos, so `#42` always means one task.
 
 Each card shows its number and title, a status chip, tags, a link to its
 worktree when it has one, and a small mark when an agent filed it rather than
@@ -42,12 +42,12 @@ an **Unarchive** button.
 ## The full board
 
 The expand button at the top of the task list opens the **full board**: every
-project as a swim-lane across the status columns. Drag cards between columns to
-change status, and between lanes to move a task to another project. Hover an
+repo as a swim-lane across the status columns. Drag cards between columns to
+change status, and between lanes to move a task to another repo. Hover an
 empty spot in a column to add a task straight into it. The same board is on
 **View ▸ All Tasks…**.
 
-![The all-projects board](../../../assets/screenshots/10-board-all.png)
+![The all-repos board](../../../assets/screenshots/10-board-all.png)
 
 ## From task to worktree
 

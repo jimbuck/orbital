@@ -34,13 +34,13 @@ Several profiles of one CLI are fine. A personal Claude on
 the new-tab menu, and each reads its own login, settings, hooks and skills.
 From a terminal, `orbital tab new agent "Claude (work)"` boots one by name.
 
-Each project picks a **default agent** for agent tabs, and can override the
-executable path for that project alone. See
+Each repo picks a **default agent** for agent tabs, and can override the
+executable path for that repo alone. See
 [Settings ▸ Agents](/orbital/reference/settings/#agents).
 
 ## The briefing
 
-Agent tabs launch with a short generated briefing: which project/worktree/branch
+Agent tabs launch with a short generated briefing: which repo/worktree/branch
 the agent is in, and how to use the `orbital` CLI — filing tasks, progressing
 the task board, and registering dev servers. The briefing lives in Orbital's own
 app-data folder, never in your repo.

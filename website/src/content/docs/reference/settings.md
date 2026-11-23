@@ -92,10 +92,10 @@ before installing; the installs write into the saved profile directory.
 
 ![Agent profiles in Settings](../../../assets/screenshots/16-settings-agents.png)
 
-Below the profiles are two per-**project** settings for the project you're on:
+Below the profiles are two per-**repo** settings for the repo you're on:
 
 - **Default agent** is the profile an agent tab boots when you don't pick one.
-- **Executable path** overrides the profile's own path for this project only.
+- **Executable path** overrides the profile's own path for this repo only.
 
 ## Debug logging
 
