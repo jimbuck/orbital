@@ -8,6 +8,8 @@ import type { Project, Repo, Task, Worktree } from '@shared/types'
  * The rules, from the board spec:
  *  - A project is single when it has fewer than two repos. A single project
  *    shows no lanes, no repo chips and no repo pickers.
+ *  - The board has a lane only for a repo that has a task. Tagging a task
+ *    with a repo is optional, and a board with no tagged task has no lanes.
  *  - A task's lane is its repo when that repo is in the project, else the
  *    Project lane (a stale or foreign tag reads as none; no task is dropped).
  *  - A project's repos are listed home first, then the rest in hand order.
@@ -59,16 +61,23 @@ export function taskLaneKey(task: Pick<Task, 'repoId'>, project: Pick<Project, '
 }
 
 /**
- * The board's lanes. Multi: the Project lane, then a lane per repo in
- * {@link projectRepos} order. Single: one lane holding every task, filed
- * under the sole repo (null with none).
+ * The board's lanes. Multi: the Project lane, then a lane for each repo that
+ * has a task, in {@link projectRepos} order. A repo with no task gets no
+ * lane, so a project whose tasks are all untagged is one plain board (`laned`
+ * is false) however many repos it has. Single: one lane holding every task,
+ * filed under the sole repo (null with none).
  */
-export function boardLanes(project: Project, repos: Repo[], tasks: Task[]): { single: boolean; lanes: BoardLane[] } {
+export function boardLanes(
+  project: Project,
+  repos: Repo[],
+  tasks: Task[]
+): { single: boolean; laned: boolean; lanes: BoardLane[] } {
   const mine = tasks.filter((t) => t.projectId === project.id)
   if (isSingleProject(project)) {
     const only = projectRepos(project, repos)[0]
     return {
       single: true,
+      laned: false,
       lanes: [
         {
           key: PROJECT_LANE,
@@ -90,15 +99,17 @@ export function boardLanes(project: Project, repos: Repo[], tasks: Task[]): { si
     }
   ]
   for (const r of projectRepos(project, repos)) {
+    const own = mine.filter((t) => t.repoId === r.id)
+    if (own.length === 0) continue
     lanes.push({
       key: r.id,
       repoId: r.id,
       kind: r.id === project.homeRepoId ? 'home' : 'repo',
       name: r.name,
-      tasks: mine.filter((t) => t.repoId === r.id)
+      tasks: own
     })
   }
-  return { single: false, lanes }
+  return { single: false, laned: lanes.length > 1, lanes }
 }
 
 /** Rule 5: the worktree that pins this task's repo, else null. */

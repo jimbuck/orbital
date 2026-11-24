@@ -93,6 +93,10 @@ export function TaskRepoChip({
   )
 }
 
+/** A tag on a task card, wherever the card is drawn. */
+export const TASK_TAG_CHIP =
+  'inline-flex items-center rounded-chip border border-line-2 bg-panel-2 px-[6px] py-px text-[9.5px] font-semibold text-text-3'
+
 /**
  * Read-only tag chips shown on a task card, after an optional `leading` item
  * (the scope chip). Editing tags (and every other task field) lives in the
@@ -105,10 +109,7 @@ export function TaskTagsDisplay({ task, leading }: { task: Task; leading?: React
     <div className="mt-1.5 flex flex-wrap items-center gap-1">
       {leading}
       {task.tags.map((tag) => (
-        <span
-          key={tag}
-          className="inline-flex items-center rounded-chip border border-line-2 bg-panel-2 px-[6px] py-px text-[9.5px] font-semibold text-text-3"
-        >
+        <span key={tag} className={TASK_TAG_CHIP}>
           {tag}
         </span>
       ))}

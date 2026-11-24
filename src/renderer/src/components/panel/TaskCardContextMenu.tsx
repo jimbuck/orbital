@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react'
-import { Archive, ChevronRight, FolderGit2, Pencil, Play } from 'lucide-react'
+import { Archive, ChevronRight, Copy, CopyPlus, FolderGit2, Pencil, Play } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import { TASK_STATUSES, taskStatusLabel, taskColumnDot } from '@renderer/lib/status'
 import { isSingleProject, repoLock, taskLaneKey, PROJECT_LANE } from '@renderer/lib/taskScope'
@@ -9,11 +9,11 @@ import TaskRepoStep from './TaskRepoStep'
 
 /**
  * Right-click context menu for a task card: edit, bridge to a Worktree, file
- * it under a repo, quick status changes, and archive (reversible, so
- * unconfirmed). Shared by the panel tracker and the full board so a card
- * offers the same actions wherever it's shown. The owning card holds the
- * open/position state and renders this when set; the tracker's scope chip
- * opens it straight at the Repo step.
+ * it under a repo, quick status changes, copy its reference, duplicate it,
+ * and archive (reversible, so unconfirmed). Shared by the panel tracker and
+ * the full board so a card offers the same actions wherever it's shown. The
+ * owning card holds the open/position state and renders this when set; the
+ * tracker's scope chip opens it straight at the Repo step.
  */
 export default function TaskCardContextMenu({
   task,
@@ -69,6 +69,8 @@ export default function TaskCardContextMenu({
           onClick={() => {
             if (task.worktreeId) setActiveWorktree(task.worktreeId)
             onClose()
+            // Going there means leaving the board, if this card is on it.
+            openModal(null)
           }}
         />
       ) : (
@@ -109,6 +111,31 @@ export default function TaskCardContextMenu({
       })}
 
       <div className="my-1 h-px bg-soft" />
+      <MenuItem
+        icon={<Copy size={13} strokeWidth={1.5} />}
+        label="Copy reference"
+        hint={`#${task.seq}`}
+        onClick={() => {
+          // What you would paste into a commit message or a prompt.
+          void navigator.clipboard?.writeText(`#${task.seq} ${task.title}`).catch(() => undefined)
+          onClose()
+        }}
+      />
+      <MenuItem
+        icon={<CopyPlus size={13} strokeWidth={1.5} />}
+        label="Duplicate"
+        onClick={() => {
+          // A fresh Todo with the same title, description, tags and repo; never the worktree.
+          void window.orbital.createTask(
+            task.projectId,
+            task.title,
+            laneKey === PROJECT_LANE ? null : laneKey,
+            task.description,
+            task.tags
+          )
+          onClose()
+        }}
+      />
       <MenuItem
         icon={<Archive size={13} strokeWidth={1.5} />}
         label="Archive task"

@@ -124,7 +124,7 @@ export default function TaskTracker(): JSX.Element {
       step: 'repo',
       pos: {
         x: Math.max(0, Math.min(box.left, window.innerWidth - 210 - 12)),
-        y: Math.max(0, Math.min(box.bottom + 4, window.innerHeight - 330))
+        y: Math.max(0, Math.min(box.bottom + 4, window.innerHeight - 390))
       }
     })
   }
@@ -147,7 +147,7 @@ export default function TaskTracker(): JSX.Element {
         key={task.id}
         onContextMenu={(e) => {
           e.preventDefault()
-          setMenu({ task, step: 'items', pos: clampMenuPos(e, 210, 330) })
+          setMenu({ task, step: 'items', pos: clampMenuPos(e, 210, 390) })
         }}
         className="group relative p-3 rounded-card bg-panel border border-line-2 hover:border-line-strong transition-colors"
       >

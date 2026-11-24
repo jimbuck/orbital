@@ -85,14 +85,31 @@ describe('boardLanes', () => {
   ]
 
   it('puts the Project lane first, then home, then the members, and a stale tag in Project', () => {
-    const { single, lanes } = boardLanes(acme, repos, tasks)
+    const { single, laned, lanes } = boardLanes(acme, repos, [...tasks, task('t-home', 'home')])
     expect(single).toBe(false)
+    expect(laned).toBe(true)
     expect(lanes.map((l) => [l.key, l.kind, l.name, l.repoId, l.tasks.map((t) => t.id)])).toEqual([
       ['project', 'project', 'Project', null, ['t-none', 't-stale']],
-      ['home', 'home', 'home', 'home', []],
+      ['home', 'home', 'home', 'home', ['t-home']],
       ['api', 'repo', 'api', 'api', ['t-api']],
       ['web', 'repo', 'web', 'web', ['t-web']]
     ])
+  })
+
+  it('gives a lane only to a repo that has a task', () => {
+    // Nothing is filed under home, so it has no lane; the Project lane stays even when empty.
+    const some = boardLanes(acme, repos, [task('t-api', 'api')])
+    expect(some.laned).toBe(true)
+    expect(some.lanes.map((l) => [l.key, l.tasks.length])).toEqual([
+      ['project', 0],
+      ['api', 1]
+    ])
+    // No task names a repo of the project: one plain board, with new tasks left untagged.
+    for (const untagged of [[], [task('t-none', null), task('t-stale', 'gone')]]) {
+      const plain = boardLanes(acme, repos, untagged)
+      expect(plain).toMatchObject({ single: false, laned: false })
+      expect(plain.lanes.map((l) => [l.key, l.repoId, l.tasks.length])).toEqual([['project', null, untagged.length]])
+    }
   })
 
   it('is single below two repos: one lane with every task, filed under the sole repo or none', () => {
@@ -100,8 +117,9 @@ describe('boardLanes', () => {
       [[], null],
       [['home'], 'home']
     ] as const) {
-      const { single, lanes } = boardLanes({ ...acme, repoIds: [...repoIds] }, repos, tasks)
+      const { single, laned, lanes } = boardLanes({ ...acme, repoIds: [...repoIds] }, repos, tasks)
       expect(single).toBe(true)
+      expect(laned).toBe(false)
       expect(lanes).toHaveLength(1)
       expect(lanes[0]).toMatchObject({ key: 'project', repoId })
       expect(lanes[0].tasks.map((t) => t.id)).toEqual(['t-api', 't-none', 't-stale', 't-web'])

@@ -6,16 +6,23 @@ import { useArchivedTasks } from '@renderer/lib/useArchivedTasks'
 import { formatTaskTime } from '@renderer/components/panel/TaskMeta'
 import { ModalShell, ghostBtn } from './ModalRoot'
 
+/** modalData payload: the project whose archive to show. Without it, the active project's. */
+export interface ArchivedTasksData {
+  projectId?: string
+}
+
 /**
- * The active project's archived tasks, newest archive first,
- * each with an Unarchive action. Opened from the full board's header; stacks
- * over it, so closing returns to the board. There is no purge: archived rows
- * stay in the database for good.
+ * One project's archived tasks, newest archive first, each with an Unarchive
+ * action. Opened from the full board's header for the project the board is
+ * showing; stacks over it, so closing returns to the board. There is no
+ * purge: archived rows stay in the database for good.
  */
 export default function ArchivedTasks(): JSX.Element {
   const closeModal = useStore((s) => s.closeModal)
   const repos = useStore((s) => s.repos)
-  const project = useStore(activeProject)
+  const project = useStore(
+    (s) => s.projects.find((p) => p.id === (s.modalData as ArchivedTasksData | null)?.projectId) ?? activeProject(s)
+  )
   const archived = useArchivedTasks()
   // Rows being unarchived, so a double click doesn't fire twice while the
   // refreshed list is on its way.

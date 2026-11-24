@@ -51,24 +51,58 @@ worktree's repo: its repo can't change until the worktree is removed.
 
 Tasks are archived, never deleted: an archived task leaves the board and the
 task list but keeps its number, and its tags still show up as suggestions.
-The **Archived tasks** link at the top of the full board lists the active
-project's, each with an **Unarchive** button.
+The **Archived tasks** link at the top of the full board lists the archived
+tasks of the project the board is showing, each with an **Unarchive** button.
 
 `draft` is for half-formed ideas you don't want to read as ready work.
 
 ## The full board
 
 The expand button at the top of the task list opens the **full board** for
-the active project. With more than one repo it has a lane per repo across the
-status columns: first **Project** for tasks filed under no repo, then the home
-repo, then the other repos. Drag cards between columns to change status, and
-between lanes to file a task under another repo (into **Project** to clear its
-repo). A card with a worktree stays in its lane. A project with one repo gets
-one lane. Hover an empty spot in a column to add a task straight into it. The
-same board is on **View ▸ Task Board…**; switch project in the rail and the
-board follows.
+the active project. It shows one project at a time: to look at another
+project's tasks without leaving your session, pick it from the dropdown in the
+board's title.
+
+Filing a task under a repo is optional, so the board only has lanes when some
+task is filed under one: first **Project** for tasks filed under no repo, then
+a lane for each repo that has a task, home repo first. A repo with no tasks
+has no lane, and a project whose tasks are all unfiled is one plain board.
+Drag cards between columns to change status, and between lanes to file a task
+under another repo (into **Project** to clear its repo). To file a task under
+a repo that has no lane yet, use **Repo** in the card's right-click menu or in
+Edit Task. A card with a worktree stays in its lane. Click a lane's name to
+fold it away; folded, it shows how many tasks it holds in each status, and a
+card dropped on it is filed under its repo. The same board is on **View ▸ Task
+Board…**.
 
 ![The task board](../../../assets/screenshots/10-board-all.png)
+
+### Cards
+
+A card shows the task's number and title, the first lines of its description,
+its tags, and the worktree it is being worked in with that worktree's live
+status. Click a card to open the task. Click the worktree to go to it.
+
+Hover a card for its buttons: **▷** starts a worktree from it, the trash
+archives it once it is done, and **⋯** opens its menu. The same menu is on a
+right-click: edit, start or go to its worktree, file it under a repo, set its
+status, copy its reference (`#12 Title`), duplicate it, or archive it.
+
+### Adding and finding tasks
+
+- **New Task** in the header, or <kbd>N</kbd>, starts a task in Todo. The
+  **+** on a column or a lane starts one there, as does **Add Task** at the
+  foot of a cell or a double-click on its empty space.
+- Enter adds the task and keeps the input open for the next one. Escape, or
+  an empty Enter, finishes.
+- **Filter tasks**, or <kbd>/</kbd>, narrows the board to cards whose number,
+  title, tags or description match. Escape clears it.
+
+### Right-click menus
+
+Every part of the board has a menu: a column (new task there, and on Done,
+archive all its tasks), a lane (new task, go to its repo, start a worktree in
+it, collapse it), a cell, and the board's empty space.
 
 ## From task to worktree
 
