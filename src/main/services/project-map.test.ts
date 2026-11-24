@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Project, Repo, Task, Worktree } from '@shared/types'
+import type { Project, RailFolder, Repo, Task, Worktree } from '@shared/types'
 
 vi.mock('../runtime', () => ({ tables: {} }))
 
-const { agentAddDirs, assembleProjectMap, branchFromStatusHeader, relativePath, sessionRole } = await import(
-  './project-map'
-)
+const { agentAddDirs, assembleProjectMap, branchFromStatusHeader, railFolderPaths, relativePath, sessionRole } =
+  await import('./project-map')
 
 const repo = (id: string, path: string): Repo => ({
   id,
@@ -143,5 +142,53 @@ describe('assembleProjectMap', () => {
     // No probe: unknown rather than a guess.
     expect(map.repos.find((r) => r.id === 'web')).toMatchObject({ remote: null, dirty: null, openTasks: 1 })
     expect(map.openTasks).toBe(2)
+    // No folders given: nobody is filed anywhere.
+    expect(map.repos.map((r) => r.folder)).toEqual([null, null, null])
+  })
+
+  it("says which of the project's rail folders each repo is filed in, by path", () => {
+    const folder = (
+      id: string,
+      name: string,
+      projectId: string | null,
+      parentId: string | null,
+      repoIds: string[]
+    ): RailFolder => ({
+      id,
+      name,
+      collapsed: false,
+      projectId,
+      parentId,
+      items: repoIds.map((rid) => ({ kind: 'repo', id: rid }))
+    })
+    const folders = [
+      folder('f1', 'Services', 'p1', null, ['web']),
+      folder('f2', 'Core', 'p1', 'f1', ['api', 'home']),
+      // A folder of projects, and another project's folder, say nothing about these repos.
+      folder('f3', 'Work', null, null, []),
+      folder('f4', 'Theirs', 'p2', null, ['api'])
+    ]
+    expect([...railFolderPaths(folders)]).toEqual([
+      ['f1', 'Services'],
+      ['f2', 'Services/Core'],
+      ['f3', 'Work'],
+      ['f4', 'Theirs']
+    ])
+    const map = assembleProjectMap({
+      project: project(),
+      members: repos,
+      worktrees: [],
+      tasks: [],
+      probes: new Map(),
+      currentRepoId: null,
+      steering: () => [],
+      folders
+    })
+    // The home is the project's header in the rail, wherever the arrangement files it.
+    expect(map.repos.map((r) => [r.id, r.folder])).toEqual([
+      ['home', null],
+      ['api', 'Services/Core'],
+      ['web', 'Services']
+    ])
   })
 })

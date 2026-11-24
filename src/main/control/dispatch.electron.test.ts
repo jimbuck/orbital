@@ -26,6 +26,8 @@ vi.mock('../services/settings', () => ({
   })
 }))
 vi.mock('../services/logger', () => ({ logger: { cli: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() } }))
+const scheduleProjectPointers = vi.fn()
+vi.mock('../services/project-pointers', () => ({ scheduleProjectPointers }))
 vi.mock('../services/agents/launch', () => ({}))
 const createTabInWorktree = vi.fn((worktreeId: string, _pane: string | null, type: string, config: unknown) => ({
   id: 'tab-new',
@@ -308,5 +310,103 @@ describe('projects', () => {
       const res = await handleControl({ cmd: 'worktree-new', worktreeId: folder.id, projectId: project.id, args: {} })
       expect(res.error).toMatch(/pass --repo <name\|id> \(`orbital project` lists its repos\)/)
     })
+  })
+})
+
+describe('orbital folder', () => {
+  type Row = { kind: string; name: string; path?: string; items?: Row[] }
+  /** A group "src" of a (the home), b, c and d; `a.id` stands in for the calling terminal's repo. */
+  const group = (): { pid: string; ids: Record<string, string> } => {
+    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((name) => tables.repos.create({ name, repoPath: `C:/src/${name}` }))
+    for (const r of [b, c, d]) tables.projects.addRepo(a.projectId, r.id, null)
+    tables.projects.setHome(a.projectId, a.id)
+    return { pid: a.projectId, ids: { a: a.id, b: b.id, c: c.id, d: d.id } }
+  }
+  const view = (rows: Row[]): string[] =>
+    rows.map((row) => (row.kind === 'folder' ? `${row.name}[${view(row.items ?? []).join(' ')}]` : row.name))
+
+  it("arranges the calling project's repos: add, nest, move, rename, remove", async () => {
+    const { pid, ids } = group()
+    const at = (cmd: ControlRequest['cmd'], args: Record<string, unknown> = {}) =>
+      handleControl({ cmd, repoId: ids.b, args })
+    const tree = async (): Promise<string[]> => view(((await at('folder-list')).data as { items: Row[] }).items)
+
+    // The home is the project's header, so it is not a row; no folders yet.
+    expect(await at('folder-list')).toMatchObject({ ok: true, data: { scope: 'project', project: 'src' } })
+    expect(await tree()).toEqual(['b', 'c', 'd'])
+
+    // New folders go last, in the order they are made, so a script's folders read as written.
+    expect(await at('folder-add', { name: 'Games' })).toMatchObject({ ok: true, data: { name: 'Games', path: 'Games' } })
+    expect(await at('folder-add', { name: 'Engines', in: 'games' })).toMatchObject({
+      ok: true,
+      data: { path: 'Games/Engines' }
+    })
+    await at('folder-add', { name: 'Sites' })
+    expect(await tree()).toEqual(['b', 'c', 'd', 'Games[Engines[]]', 'Sites[]'])
+
+    // By name, by path, case aside; --before places it among the rows already there.
+    expect(await at('folder-move', { row: 'c', to: 'Games/Engines' })).toMatchObject({
+      ok: true,
+      data: { kind: 'repo', name: 'c', folder: 'Games/Engines' }
+    })
+    await at('folder-move', { row: 'D', to: 'games', before: 'Engines' })
+    expect(await tree()).toEqual(['b', 'Games[d Engines[c]]', 'Sites[]'])
+    await at('folder-move', { row: 'Sites', top: true, before: 'b' })
+    await at('folder-move', { row: 'c', top: true })
+    expect(await tree()).toEqual(['Sites[]', 'b', 'Games[d Engines[]]', 'c'])
+    // The flat order of the project follows, and its managed repo list is refreshed for it.
+    expect(tables.projects.get(pid)!.repoIds.map((rid) => tables.repos.get(rid)!.name)).toEqual(['a', 'b', 'd', 'c'])
+    expect(scheduleProjectPointers).toHaveBeenCalled()
+
+    expect(await at('folder-rename', { folder: 'Games', name: 'Game dev' })).toMatchObject({
+      ok: true,
+      data: { name: 'Game dev', was: 'Games' }
+    })
+    // Removing a folder leaves what was in it where the folder was.
+    expect(await at('folder-remove', { folder: 'Game dev' })).toMatchObject({ ok: true, data: { released: 2 } })
+    expect(await tree()).toEqual(['Sites[]', 'b', 'd', 'Engines[]', 'c'])
+    // Nothing about a repo itself moved.
+    expect(tables.repos.get(ids.c)).toMatchObject({ repoPath: 'C:/src/c', projectId: pid })
+  })
+
+  it('refuses what the rail refuses, and says why', async () => {
+    const { ids } = group()
+    const at = (cmd: ControlRequest['cmd'], args: Record<string, unknown> = {}) =>
+      handleControl({ cmd, repoId: ids.b, args })
+    await at('folder-add', { name: 'Games' })
+    await at('folder-add', { name: 'Engines', in: 'Games' })
+    await at('folder-add', { name: 'Tools' })
+    await at('folder-add', { name: 'Engines', in: 'Tools' })
+
+    expect(await at('folder-move', { row: 'Games', to: 'Games/Engines' })).toEqual({
+      ok: false,
+      error: "folder 'Games' cannot go inside itself"
+    })
+    expect((await at('folder-move', { row: 'c' })).error).toBe('say where it goes: --to <folder>, or --top')
+    // Two folders share the name, neither at the top: the path says which.
+    expect((await at('folder-move', { row: 'c', to: 'Engines' })).error).toMatch(
+      /folder 'Engines' is ambiguous: Games\/Engines \(.*\), Tools\/Engines/
+    )
+    expect((await at('folder-move', { row: 'c', to: 'tools/engines' })).ok).toBe(true)
+    expect((await at('folder-move', { row: 'a', to: 'Games' })).error).toMatch(/'a' is the home repo of 'src'/)
+    expect((await at('folder-move', { row: 'nope', to: 'Games' })).error).toMatch(/no repo or folder 'nope' in project 'src'/)
+    expect((await at('folder-remove', { folder: 'nope' })).error).toMatch(/no folder 'nope' among the repos of project 'src'/)
+    expect((await at('folder-add', { name: '  ' })).error).toBe('folder name required')
+  })
+
+  it('needs --rail in a project that is a single repo, and then arranges projects', async () => {
+    expect((await run('folder-list')).error).toMatch(/project 'p' is a single repo.*pass --rail/)
+    const other = tables.repos.create({ name: 'q', repoPath: 'C:/q' })
+
+    expect(await run('folder-add', { name: 'Work', rail: true })).toMatchObject({ ok: true, data: { scope: 'rail' } })
+    await run('folder-add', { name: 'Clients', in: 'Work', rail: true })
+    expect(await run('folder-move', { row: 'q', to: 'Work/Clients', rail: true })).toMatchObject({
+      ok: true,
+      data: { kind: 'project', name: 'q', folder: 'Work/Clients' }
+    })
+    const listed = (await run('folder-list', { rail: true })).data as { scope: string; items: Row[] }
+    expect(listed.scope).toBe('rail')
+    expect(view(listed.items)).toEqual(['p', 'Work[Clients[q]]'])
+    expect(tables.repos.get(other.id)).toMatchObject({ repoPath: 'C:/q', projectId: other.projectId })
   })
 })

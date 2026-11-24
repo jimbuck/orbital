@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
-import type { Project, Repo, Task, Worktree } from '@shared/types'
+import type { Project, RailFolder, Repo, Task, Worktree } from '@shared/types'
 import { tables } from '../runtime'
 
 /* ---- roles ---------------------------------------------------------------- */
@@ -116,6 +116,12 @@ export interface RepoMapEntry {
   openTasks: number
   /** Agent steering files at the repo root, in the order agents read them. */
   steering: string[]
+  /**
+   * The folder the cockpit's rail files it in among the project's repos, as a
+   * path of names (`Games/Engines`), or null when it is in none. How the person
+   * groups the repos on screen; it says nothing about where they are on disk.
+   */
+  folder: string | null
 }
 
 export interface ProjectMap {
@@ -137,6 +143,26 @@ export interface RepoProbe {
 
 const STEERING_FILES = ['AGENTS.md', 'CLAUDE.md']
 
+/**
+ * Each rail folder's path of names from the top of its list, by folder id:
+ * `Games`, `Games/Engines`. Folders of projects and of a project's repos
+ * alike; a parent that is missing ends the path there.
+ */
+export function railFolderPaths(folders: RailFolder[]): Map<string, string> {
+  const byId = new Map(folders.map((f) => [f.id, f]))
+  const paths = new Map<string, string>()
+  for (const folder of folders) {
+    const names: string[] = []
+    const seen = new Set<string>()
+    for (let at: RailFolder | undefined = folder; at && !seen.has(at.id); at = at.parentId ? byId.get(at.parentId) : undefined) {
+      seen.add(at.id)
+      names.unshift(at.name)
+    }
+    paths.set(folder.id, names.join('/'))
+  }
+  return paths
+}
+
 /** Build the map from rows already in hand plus the git probes (pure apart from `steering`). */
 export function assembleProjectMap(input: {
   project: Project
@@ -146,9 +172,17 @@ export function assembleProjectMap(input: {
   probes: Map<string, RepoProbe>
   currentRepoId: string | null
   steering?: (repoPath: string) => string[]
+  /** The workspace's rail folders, to say which of the project's own each repo is filed in. */
+  folders?: RailFolder[]
 }): ProjectMap {
   const { project, members, worktrees, tasks, probes, currentRepoId } = input
   const steering = input.steering ?? steeringFiles
+  const folders = (input.folders ?? []).filter((f) => f.projectId === project.id)
+  const paths = railFolderPaths(folders)
+  const folderOf = new Map<string, string>()
+  for (const folder of folders) {
+    for (const item of folder.items) if (item.kind === 'repo') folderOf.set(item.id, paths.get(folder.id) ?? folder.name)
+  }
   const seqOf = new Map(tasks.map((t) => [t.id, t.seq]))
   const open = tasks.filter((t) => t.projectId === project.id && t.status !== 'done' && t.archivedAt == null)
   const home = project.homeRepoId ? members.find((r) => r.id === project.homeRepoId) : undefined
@@ -173,7 +207,9 @@ export function assembleProjectMap(input: {
           .filter((w) => w.repoId === r.id && w.kind === 'linked')
           .map((w) => ({ name: w.name, branch: w.branch, path: w.path, task: w.taskId ? (seqOf.get(w.taskId) ?? null) : null })),
         openTasks: open.filter((t) => t.repoId === r.id).length,
-        steering: steering(r.repoPath)
+        steering: steering(r.repoPath),
+        // The home is the project's header in the rail, wherever the arrangement files it.
+        folder: r.id === project.homeRepoId ? null : (folderOf.get(r.id) ?? null)
       }
     }),
     // A tag naming a repo outside the project counts as none, as on the board.
@@ -281,6 +317,7 @@ export async function loadProjectMap(projectId: string, currentRepoId: string | 
     worktrees: tables.worktrees.list(),
     tasks: tables.tasks.list('active'),
     probes,
-    currentRepoId
+    currentRepoId,
+    folders: tables.railFolders.list()
   })
 }

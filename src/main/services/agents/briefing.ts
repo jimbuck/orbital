@@ -133,7 +133,9 @@ function repoLines(r: RepoMapEntry): string[] {
   const facts = [
     r.remote ? `remote ${r.remote}` : 'no remote',
     `root checkout on ${checkoutState(r)}`,
-    `${r.openTasks} open task${r.openTasks === 1 ? '' : 's'}`
+    `${r.openTasks} open task${r.openTasks === 1 ? '' : 's'}`,
+    // How the person groups the repos in the cockpit; it is not a path on disk.
+    ...(r.folder ? [`in the cockpit folder "${r.folder}"`] : [])
   ]
   const out = [head, `  ${facts.join('; ')}`]
   for (const w of r.worktrees) {
@@ -178,6 +180,7 @@ function projectSection(
       '- `orbital worktree new --repo <name> [--task <n>] [--worktree <branch>]` — open a worktree in one repo for a piece of the work.',
       '- `orbital tab new agent --repo <name> [--worktree <name|branch>] --prompt "<instructions>"` — start an agent in that repo (its root checkout, or the named worktree) with its instructions.',
       '- `orbital task add "<title>" [--repo <name>]` — file work for the whole project, or with `--repo` against one repo.',
+      "- `orbital folder list` — how the cockpit's rail groups these repos into folders; `orbital folder add|move|rename|remove` rearranges them when asked to. Folders are for the eye only: nothing moves on disk.",
       'Plan here, then hand each repo its part. Prefer a worktree per change over editing a root checkout directly.'
     )
     if (worktree.kind === 'folder') {

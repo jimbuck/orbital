@@ -50,7 +50,8 @@ const map: ProjectMap = {
       current: false,
       worktrees: [],
       openTasks: 0,
-      steering: []
+      steering: [],
+      folder: null
     },
     {
       id: 'api',
@@ -64,7 +65,8 @@ const map: ProjectMap = {
       current: false,
       worktrees: [{ name: 'health', branch: 'feat/health', path: 'C:\\wt\\api-health', task: 7 }],
       openTasks: 2,
-      steering: ['AGENTS.md']
+      steering: ['AGENTS.md'],
+      folder: 'Services/Core'
     }
   ],
   openTasks: 3

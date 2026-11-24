@@ -49,6 +49,9 @@ describe('the generated SKILL.md', () => {
     expect(tools).toContain('Bash(orbital status *)')
     // Creating worktrees/tabs and archiving tasks should still prompt.
     expect(tools.some((t) => /worktree new|tab new|task (delete|archive|unarchive)/.test(t))).toBe(false)
+    // Reading the rail's folders is free; rearranging them is the human's call.
+    expect(tools).toContain('Bash(orbital folder list *)')
+    expect(tools.some((t) => /folder (add|move|rename|remove|\*)/.test(t))).toBe(false)
   })
 })
 
@@ -139,6 +142,15 @@ describe('staying current', () => {
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, '---\nname: orbital\n---\nmine\n', 'utf8')
     expect(status(agent)).toMatchObject({ installed: false, foreign: true, outdated: false })
+  })
+})
+
+describe('what it tells an agent about folders', () => {
+  it('documents every folder command, and that folders change nothing on disk', () => {
+    const md = skillMarkdown()
+    for (const verb of ['list', 'add', 'move', 'rename', 'remove']) expect(md).toContain(`orbital folder ${verb}`)
+    expect(md).toMatch(/nothing moves on disk/)
+    expect(md).toMatch(/rearrange them only when asked/)
   })
 })
 

@@ -46,7 +46,7 @@ Orbital registers one hook per lifecycle event, each invoking its own CLI:
 Three details matter:
 
 - **`orbital hook <event>`, not `orbital status <x>`.** The event→status policy
-  lives in the app (`hookEventToStatus` in `src/main/ipc.ts`), so settings.json
+  lives in the app (`hookEventToStatus` in `src/main/status.ts`), so settings.json
   stays a dumb list of invocations and the mapping can change without rewriting
   your config.
 - **An absolute path to the shim**, because these hooks fire for *every* Claude
@@ -91,6 +91,30 @@ Agent tabs are briefed about the CLI when they launch. A `claude` you start by
 hand in a terminal tab is not — it is an ordinary session that happens to have
 `orbital` on its `PATH`. Installing the skill closes that gap: Claude loads it
 when the cockpit becomes relevant, and it documents the whole CLI.
+
+The skill's frontmatter pre-approves the commands that only read or report
+(`status`, `whoami`, `project`, `repos`, `worktrees`, `task list/show/add/update/done`,
+`server`, `folder list`), so an agent can say what it is doing without a
+permission prompt. The ones that change the cockpit's layout or create things
+(`worktree new`, `tab new`, `task archive`, `folder add/move/rename/remove`)
+still ask.
+
+## After an Orbital update
+
+The hooks, the skill and the Codex block are written once, at install, so an
+update that changes any of them leaves the copies in your profile behind. The
+card in **Settings → Agents** then reads **Update available**:
+
+1. Open **Settings → Agents** and find the profile's card.
+2. Press **Update** on each piece marked **Update available**. It rewrites only
+   Orbital's own entries, file or block, in place.
+3. Repeat for every profile you run: each one has its own directory, so each
+   has its own copies.
+
+The skill changes whenever the CLI gains commands (most recently
+`orbital folder`, for the rail's folders). The hooks change when Orbital
+registers a new event or the app moves, since each hook holds the absolute path
+to the CLI shim.
 
 It refuses to overwrite a `SKILL.md` it did not write, and only ever deletes one
 carrying its own `managed-by: orbital` marker.

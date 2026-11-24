@@ -23,6 +23,7 @@ import { getProvider } from '../services/agents/provider'
 import { loadProjectMap } from '../services/project-map'
 import { createTabInWorktree } from '../tabs'
 import { createWorktree, syncWorktreeEnv } from '../worktree-lifecycle'
+import { addFolder, listFolders, moveToFolder, removeFolder, renameFolder } from './folders'
 import { hookFired, statusReported } from '../status'
 import {
   noRepoError,
@@ -73,6 +74,12 @@ function taskProject(req: ControlRequest): { project?: Project; error?: string }
   const pid = repoGiven(req) && req.repoId ? tables.repos.get(req.repoId)?.projectId : projectIdOf(req)
   const project = pid ? tables.projects.get(pid) : undefined
   return project ? { project } : { error: 'no ORBITAL_WORKTREE_ID in environment' }
+}
+
+/** {@link taskProject} as the pair the folder commands take: the project, and why there is none. */
+function projectOrError(req: ControlRequest): [Project | undefined, string | undefined] {
+  const { project, error } = taskProject(req)
+  return [project, error]
 }
 
 /** The `id` argument resolved in the request's project. */
@@ -470,6 +477,13 @@ const handlers: Record<ControlCommand, Handler> = {
     if (!req.worktreeId) return { ok: false, error: 'no ORBITAL_WORKTREE_ID in environment' }
     return { ok: true, data: runtime.devServersFor(req.worktreeId) }
   },
+  // The rail's folders. Like tasks they are about a project, so they work
+  // from any of its terminals, the folder session included.
+  'folder-list': async (req) => listFolders(req, ...projectOrError(req)),
+  'folder-add': async (req) => addFolder(req, ...projectOrError(req)),
+  'folder-move': async (req) => moveToFolder(req, ...projectOrError(req)),
+  'folder-rename': async (req) => renameFolder(req, ...projectOrError(req)),
+  'folder-remove': async (req) => removeFolder(req, ...projectOrError(req)),
   'quit-for-update': async () => {
     // Sent by the instance whose Update button was clicked (peer-instances.ts).
     // The pid lets it wait for this process to fully exit, not just the pipe.

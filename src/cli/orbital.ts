@@ -46,6 +46,11 @@ Usage:
   orbital server add <url|port>
   orbital server remove <url|port>
   orbital server list
+  orbital folder list [--rail]
+  orbital folder add "<name>" [--in <folder>] [--rail]
+  orbital folder move <repo|folder> (--to <folder> | --top) [--before <repo|folder>] [--rail]
+  orbital folder rename <folder> "<name>" [--rail]
+  orbital folder remove <folder> [--rail]
   orbital help
 
 Options:
@@ -63,6 +68,16 @@ Options:
                the whole project's from the project session.
   --worktree   on \`tab new\`: open the tab in that worktree (name, branch or id) instead.
   --prompt     on \`tab new agent\`: start the agent with this prompt (first launch only).
+  --rail       on \`folder\` commands: work with the rail's own folders, the ones that
+               hold projects, instead of the folders among this project's repos. The
+               rows \`folder move\` takes are then projects.
+
+Folders:
+  \`orbital folder\` arranges the cockpit's left rail and nothing else: no repo moves
+  on disk and no project changes. A project's repos can be filed in folders under
+  its header, folders nest, and a folder is named by its name, by its path of names
+  (\`Games/Engines\`) when the name alone is ambiguous, or by its id. \`folder remove\`
+  deletes only the folder: what was in it stays, where the folder was.
 
 Examples:
   orbital status needs-attention
@@ -87,6 +102,12 @@ Examples:
   orbital task archive 12
   orbital server add 5173
   orbital server remove 5173
+  orbital folder list
+  orbital folder add "Games"
+  orbital folder add "Engines" --in Games
+  orbital folder move volterra --to Games/Engines
+  orbital folder move Engines --top --before api
+  orbital folder remove Games
 `
 
 /** Print usage to a stream and exit with the given code. */
@@ -117,7 +138,7 @@ interface ParsedArgs {
  * Flags that never take a value, so the token after one stays a positional:
  * `task add --no-repo "Title"` must not read "Title" as the flag's value.
  */
-const BOOLEAN_FLAGS = new Set(['all', 'archived', 'no-repo', 'all-repos'])
+const BOOLEAN_FLAGS = new Set(['all', 'archived', 'no-repo', 'all-repos', 'rail', 'top'])
 
 /**
  * Split tokens into positionals and `--flag value` / `--flag=value` pairs.
@@ -349,6 +370,48 @@ function buildRequest(argv: string[]): ControlRequest {
       return usageError()
     }
 
+    case 'folder': {
+      const sub = rest[0]
+      const { positionals, flags } = parseArgs(rest.slice(1))
+      // `--rail` picks the rail's own folders over this project's; `--repo`
+      // picks the project of another repo.
+      const args: Record<string, unknown> = withRepo('rail' in flags ? { rail: true } : {}, flags)
+      /** A flag that names a row: present means a value is required. */
+      const named = (name: string): string | undefined => {
+        if (!(name in flags)) return undefined
+        if (!flags[name]) usageError()
+        return flags[name]
+      }
+      if (sub === 'list') return request('folder-list', args)
+      if (sub === 'add') {
+        if (!positionals[0]) usageError()
+        const parent = named('in')
+        return request('folder-add', { ...args, name: positionals[0], ...(parent ? { in: parent } : {}) })
+      }
+      if (sub === 'move') {
+        if (!positionals[0]) usageError()
+        const to = named('to')
+        const before = named('before')
+        if ('top' in flags === (to !== undefined)) fail('say where it goes: --to <folder>, or --top')
+        return request('folder-move', {
+          ...args,
+          row: positionals[0],
+          ...(to ? { to } : { top: true }),
+          ...(before ? { before } : {})
+        })
+      }
+      if (sub === 'rename') {
+        if (!positionals[0] || !positionals[1]) usageError()
+        return request('folder-rename', { ...args, folder: positionals[0], name: positionals[1] })
+      }
+      // `delete` is accepted for `remove`: either way only the folder goes.
+      if (sub === 'remove' || sub === 'delete') {
+        if (!positionals[0]) usageError()
+        return request('folder-remove', { ...args, folder: positionals[0] })
+      }
+      return usageError()
+    }
+
     case 'help':
     case '--help':
     case '-h':
@@ -416,10 +479,13 @@ function printProject(data: unknown): void {
     process.stdout.write('No repos in this project yet.\n')
     return
   }
+  // A FOLDER column only when the cockpit's rail files some of them in folders.
+  const filed = repos.some((r) => typeof r.folder === 'string' && r.folder)
   printTable(
     [
       { key: 'current', head: '' },
       { key: 'name', head: 'NAME' },
+      ...(filed ? [{ key: 'folder', head: 'FOLDER' }] : []),
       { key: 'branch', head: 'BRANCH' },
       { key: 'state', head: 'STATE' },
       { key: 'worktrees', head: 'WORKTREES' },
@@ -430,6 +496,7 @@ function printProject(data: unknown): void {
       // Marks the calling terminal's own repo.
       current: r.current ? '*' : '',
       name: `${String(r.name ?? '')}${r.home ? ' (home)' : ''}`,
+      folder: typeof r.folder === 'string' ? r.folder : '',
       branch: r.branch == null ? '?' : String(r.branch),
       state: r.dirty == null ? '?' : r.dirty ? 'dirty' : 'clean',
       worktrees: String(Array.isArray(r.worktrees) ? r.worktrees.length : 0),
@@ -551,6 +618,34 @@ function formatWhen(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? new Date(value).toLocaleString() : '(unknown)'
 }
 
+/**
+ * `orbital folder list`: the rail's arrangement as an indented tree, a folder
+ * as `Name/` with its rows under it.
+ */
+function printFolders(data: unknown): void {
+  const o = (data ?? {}) as Record<string, unknown>
+  const items = Array.isArray(o.items) ? (o.items as Record<string, unknown>[]) : []
+  const rail = o.scope === 'rail'
+  process.stdout.write(rail ? 'The rail: folders of projects\n' : `Project ${String(o.project ?? '')}: folders among its repos\n`)
+  const hasFolder = (rows: Record<string, unknown>[]): boolean => rows.some((r) => r.kind === 'folder')
+  if (!hasFolder(items)) {
+    process.stdout.write(`No folders yet. (\`orbital folder add "<name>"${rail ? ' --rail' : ''}\`)\n`)
+  }
+  const print = (rows: Record<string, unknown>[], depth: number): void => {
+    for (const row of rows) {
+      const pad = '  '.repeat(depth + 1)
+      if (row.kind !== 'folder') {
+        process.stdout.write(`${pad}${String(row.name ?? '')}\n`)
+        continue
+      }
+      const inside = Array.isArray(row.items) ? (row.items as Record<string, unknown>[]) : []
+      process.stdout.write(`${pad}${String(row.name ?? '')}/${inside.length === 0 ? '  (empty)' : ''}\n`)
+      print(inside, depth + 1)
+    }
+  }
+  print(items, 0)
+}
+
 function printServers(data: unknown): void {
   const list = Array.isArray(data) ? data : []
   if (list.length === 0) {
@@ -611,9 +706,28 @@ function confirmation(req: ControlRequest, data: unknown): string {
       const n = Array.isArray(d.servers) ? d.servers.length : 0
       return `dev server removed: ${String(d.url ?? '')} (${n} live)`
     }
+    case 'folder-add':
+      return `folder added${folderScope(d)}: ${String(d.path ?? d.name ?? '')}`
+    case 'folder-move': {
+      const what = d.kind === 'folder' ? 'folder' : String(d.kind ?? 'row')
+      const dest = d.folder ? `into ${String(d.folder)}` : `to the top${folderScope(d)}`
+      return `${what} ${String(d.name ?? '')} moved ${dest}`
+    }
+    case 'folder-rename':
+      return `folder renamed: ${String(d.was ?? '')} → ${String(d.name ?? '')}`
+    case 'folder-remove': {
+      const n = typeof d.released === 'number' ? d.released : 0
+      const kept = n === 0 ? 'it was empty' : `the ${n} row${n === 1 ? '' : 's'} in it stay${n === 1 ? 's' : ''} where it was`
+      return `folder removed: ${String(d.name ?? '')} (${kept}; nothing on disk changed)`
+    }
     default:
       return typeof data === 'string' ? data : 'ok'
   }
+}
+
+/** ` in the rail` / ` in project <name>`: which list a folder command worked on. */
+function folderScope(d: Record<string, unknown>): string {
+  return d.scope === 'rail' ? ' in the rail' : d.project ? ` in project ${String(d.project)}` : ''
 }
 
 /* --------------------------------------------------------------- transport - */
@@ -734,6 +848,8 @@ function handleResponse(req: ControlRequest, lineText: string): void {
     printTaskDetail(res.data)
   } else if (req.cmd === 'server-list') {
     printServers(res.data)
+  } else if (req.cmd === 'folder-list') {
+    printFolders(res.data)
   } else {
     process.stdout.write(confirmation(req, res.data) + '\n')
   }

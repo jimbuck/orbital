@@ -258,6 +258,58 @@ to `http://localhost:3000`; `remove` matches by exact URL or by port.
 Registered servers appear in the title-bar pill and the add-tab menu. See
 [Dev servers](/orbital/guides/dev-servers/).
 
+## Folders
+
+```sh
+orbital folder list [--rail]
+orbital folder add "<name>" [--in <folder>] [--rail]
+orbital folder move <repo|folder> (--to <folder> | --top) [--before <repo|folder>] [--rail]
+orbital folder rename <folder> "<name>" [--rail]
+orbital folder remove <folder> [--rail]
+```
+
+Reads and arranges the folders of the left rail. Folders are for looking at:
+no repo moves on disk and no project changes, so these commands are safe to run
+against a project you are in the middle of working on.
+
+Without `--rail` the commands work on the calling terminal's project: the
+folders among its repos, drawn under the project's header. With `--rail` they
+work on the rail's own folders, the ones that hold whole projects, and the rows
+`folder move` takes are projects. A project of one repo has no list of repos to
+arrange, so there `--rail` is the only form.
+
+```
+> orbital folder list
+Project hq: folders among its repos
+  orbital
+  Games/
+    Engines/
+      ion
+      volterra
+    turbokeep
+  Sites/
+    jimbuck.io
+  flywheel
+```
+
+- **`list`** prints the arrangement as a tree, in the order the rail draws it.
+  The home repo is the project's header, so it is not a row here. With `--json`
+  each folder carries its `id`, its `path` and its `items`.
+- **`add`** makes a folder, last in the project's list, or last inside
+  `--in <folder>`.
+- **`move`** files a repo or a folder in `--to <folder>`, or takes it out to the
+  top of the list with `--top`. It goes last unless `--before <row>` names the
+  row to put it ahead of. A folder never goes inside itself.
+- **`rename`** and **`remove`** take the folder. Removing deletes only the
+  folder: what was in it stays, where the folder was.
+
+A folder is named by its name, by its path of names (`Games/Engines`) when the
+name alone is ambiguous, or by its id. A repo is named as everywhere else, by
+name or id.
+
+`orbital project` adds a `FOLDER` column once any of the project's repos is
+filed in one, and each repo's `folder` is in its `--json` output.
+
 ## Environment
 
 Orbital injects these into every worktree terminal:

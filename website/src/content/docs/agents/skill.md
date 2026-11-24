@@ -10,7 +10,7 @@ Claude profile (**Settings ▸ Agents**, on the profile's card). It lands at
 
 The frontmatter pre-approves the read-only and status-reporting commands, so an
 agent can say what it's doing without a permission prompt. Creating worktrees
-or tabs and deleting tasks still ask.
+or tabs, deleting tasks and rearranging the rail's folders still ask.
 
 If you'd rather not let Orbital write into your profile, you can copy this into
 a skill or a `CLAUDE.md` yourself.
@@ -20,7 +20,7 @@ a skill or a `CLAUDE.md` yourself.
 ````md
 ---
 name: orbital
-description: Report status, file and progress tasks, list sibling worktrees and the project's repos, open tabs and agents, and register dev servers in the Orbital cockpit via the `orbital` CLI. Use when working inside an Orbital worktree terminal (ORBITAL_WORKTREE_ID is set) and you need to tell the human something, capture follow-up work, spin up a worktree, or hand work to another repo in the project.
+description: Report status, file and progress tasks, list sibling worktrees and the project's repos, open tabs and agents, read and arrange the rail's folders, and register dev servers in the Orbital cockpit via the `orbital` CLI. Use when working inside an Orbital worktree terminal (ORBITAL_WORKTREE_ID is set) and you need to tell the human something, capture follow-up work, spin up a worktree, or hand work to another repo in the project.
 allowed-tools:
   - Bash(orbital status *)
   - Bash(orbital whoami *)
@@ -33,6 +33,7 @@ allowed-tools:
   - Bash(orbital task update *)
   - Bash(orbital task done *)
   - Bash(orbital server *)
+  - Bash(orbital folder list *)
   - Bash(orbital help *)
 metadata:
   managed-by: orbital
@@ -178,6 +179,29 @@ change, one agent per worktree, a prompt that says what done looks like. The
 root folder session has no repo of its own, so worktree commands there need
 `--repo`; tasks filed there go under no repo unless you pass one. In a member
 repo, stay in that repo unless the task needs more.
+
+## Folders in the rail
+
+The cockpit's left rail can file a project's repos in folders, and nest them.
+Folders are for the human's eye only: nothing moves on disk, and no repo or
+project changes. Read them to learn how the human groups the repos, and
+rearrange them only when asked to.
+
+```sh
+orbital folder list                              # this project's folders and repos, as a tree
+orbital folder add "Games"                       # a new folder among this project's repos
+orbital folder add "Engines" --in Games          # nested in another
+orbital folder move volterra --to Games/Engines  # file a repo (or a folder) in one
+orbital folder move volterra --top               # back out to the top of the project's list
+orbital folder move Engines --top --before api   # a place in a list: just before that row
+orbital folder rename Games "Game dev"
+orbital folder remove Games                      # only the folder goes; what was in it stays
+```
+
+A folder is named by its name, by its path (`Games/Engines`) when two share a
+name, or by its id. `orbital project` adds a FOLDER column once any repo is
+filed in one. `--rail` works with the rail's own folders instead, the ones that
+hold whole projects; the rows `folder move` takes are then projects.
 
 ## Tabs and dev servers
 
