@@ -8,8 +8,10 @@ import type { Tab } from '@shared/types'
  * terminal" without threading ids through the mock. Hoisted alongside the
  * vi.mock factory below, which runs before this module body.
  */
-const { terminals, FakeTerminal, webLinks, FakeWebLinksAddon } = vi.hoisted(() => {
+const { terminals, FakeTerminal, webLinks, FakeWebLinksAddon, calls } = vi.hoisted(() => {
   const built: FakeTerminal[] = []
+  /** Resizes, writes and fits across every fake, in the order they happened. */
+  const calls: string[] = []
   /** The link-click handler each TerminalTab installed, in mount order. */
   const links: FakeWebLinksAddon[] = []
   class FakeWebLinksAddon {
@@ -26,7 +28,16 @@ const { terminals, FakeTerminal, webLinks, FakeWebLinksAddon } = vi.hoisted(() =
     focus = vi.fn()
     open = vi.fn()
     loadAddon = vi.fn()
-    write = vi.fn()
+    /** Like xterm, a write's callback runs once that write has been parsed. */
+    write = vi.fn((data: string, done?: () => void) => {
+      if (data) calls.push(`write ${data}`)
+      done?.()
+    })
+    resize = vi.fn((cols: number, rows: number) => {
+      this.cols = cols
+      this.rows = rows
+      calls.push(`resize ${cols}x${rows}`)
+    })
     paste = vi.fn()
     selectAll = vi.fn()
     clearSelection = vi.fn(() => {
@@ -57,13 +68,15 @@ const { terminals, FakeTerminal, webLinks, FakeWebLinksAddon } = vi.hoisted(() =
       built.push(this)
     }
   }
-  return { terminals: built, FakeTerminal, webLinks: links, FakeWebLinksAddon }
+  return { terminals: built, FakeTerminal, webLinks: links, FakeWebLinksAddon, calls }
 })
 
 vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }))
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
-    fit = (): void => {}
+    fit = (): void => {
+      calls.push('fit')
+    }
   }
 }))
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: FakeWebLinksAddon }))
@@ -122,6 +135,7 @@ function press(
 
 beforeEach(() => {
   terminals.length = 0
+  calls.length = 0
   writeClipboard.mockClear()
   // mockReset (not mockClear) so a test's mockReturnValue does not leak into the
   // next one — vi.fn(impl) restores that impl on reset.
@@ -145,7 +159,7 @@ beforeEach(() => {
   vi.stubGlobal('orbital', {
     onTerminalData: () => () => {},
     onTerminalExit: () => () => {},
-    terminalBuffer: () => Promise.resolve({ data: '', seq: 0 }),
+    terminalBuffer: () => Promise.resolve({ data: '', seq: 0, cols: 0, rows: 0 }),
     terminalInput: () => {},
     terminalResize: () => {},
     openExternal,
@@ -159,6 +173,70 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+})
+
+describe('TerminalTab restoring a terminal on mount', () => {
+  const terminalResize = vi.fn()
+  /** The live-output listener TerminalTab subscribed, to push chunks at. */
+  let pushData: (evt: { tabId: string; data: string; seq: number }) => void
+  let settle: (buffer: { data: string; seq: number; cols: number; rows: number }) => void
+
+  beforeEach(() => {
+    terminalResize.mockClear()
+    // jsdom lays nothing out; give the pane a size so a fit is not skipped as hidden.
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+    Object.assign(window.orbital, {
+      terminalResize,
+      onTerminalData: (cb: typeof pushData) => {
+        pushData = cb
+        return () => {}
+      },
+      terminalBuffer: () => new Promise((resolve) => (settle = resolve))
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** Let the animation frame TerminalTab asked for on mount run. */
+  const frame = (): Promise<void> =>
+    act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    })
+
+  it('sizes the terminal to the snapshot, writes it, and only then fits to the pane', async () => {
+    const term = mountTerminal()
+    await frame()
+    // A fit before the state is in would resize the terminal under the write.
+    expect(calls).toEqual([])
+    expect(terminalResize).not.toHaveBeenCalled()
+
+    await act(async () => settle({ data: 'SCREEN', seq: 10, cols: 132, rows: 43 }))
+    expect(calls).toEqual(['resize 132x43', 'write SCREEN', 'fit'])
+    expect(terminalResize).toHaveBeenCalledWith('T1', term.cols, term.rows)
+  })
+
+  it('writes only the live output that came after the snapshot was taken', async () => {
+    mountTerminal()
+    pushData({ tabId: 'T1', data: 'old', seq: 8 })
+    pushData({ tabId: 'T1', data: 'new', seq: 14 })
+    await act(async () => settle({ data: 'SCREEN', seq: 10, cols: 132, rows: 43 }))
+    expect(calls).toEqual(['resize 132x43', 'write SCREEN', 'write new', 'fit'])
+
+    pushData({ tabId: 'T1', data: 'later', seq: 19 })
+    expect(calls.at(-1)).toBe('write later')
+  })
+
+  it('leaves the size alone when there is no screen to restore, and reports the fitted size', async () => {
+    const term = mountTerminal()
+    await act(async () => settle({ data: '', seq: 0, cols: 0, rows: 0 }))
+    expect(term.resize).not.toHaveBeenCalled()
+    expect(calls).toEqual(['fit'])
+    // A tab whose PTY is not spawned yet is waiting on exactly this report.
+    expect(terminalResize).toHaveBeenCalledWith('T1', 80, 24)
+  })
 })
 
 describe('TerminalTab auto-focus', () => {

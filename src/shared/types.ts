@@ -1042,11 +1042,19 @@ export interface TerminalDataEvent {
   seq: number
 }
 
-/** Scrollback snapshot plus the sequence cut-point it represents (PRD §5 replay). */
+/**
+ * A terminal's state for a tab that is (re)mounting, plus the sequence
+ * cut-point it represents (PRD §5 replay). `data` is not the raw output: it is
+ * the screen, scrollback, cursor and modes written out so that a fresh xterm
+ * of the same size, given it, ends up where the terminal is now.
+ */
 export interface TerminalBuffer {
   data: string
   /** Cumulative bytes the snapshot covers; live chunks with seq <= this are dupes. */
   seq: number
+  /** The size `data` was drawn at, to write it back at. 0 when there is no screen (a notice, an unknown tab). */
+  cols: number
+  rows: number
 }
 
 export interface TerminalExitEvent {

@@ -2,16 +2,22 @@
  * Orbital — terminal (PTY) manager.
  *
  * Owns the lifecycle of every interactive terminal, one node-pty process per
- * tabId. Each terminal keeps a bounded scrollback ring buffer so a renderer tab
- * can replay its history when it remounts. Emits 'data' and 'exit' events that
- * the IPC layer fans out to the renderer (TerminalDataEvent / TerminalExitEvent).
+ * tabId. Each terminal keeps a headless mirror of its screen so a renderer tab
+ * can be handed the terminal's current state when it remounts. Emits 'data' and
+ * 'exit' events that the IPC layer fans out to the renderer (TerminalDataEvent /
+ * TerminalExitEvent).
  */
 import * as pty from 'node-pty'
 import { EventEmitter } from 'node:events'
+import { Terminal as HeadlessTerminal } from '@xterm/headless'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import type { TerminalBuffer } from '@shared/types'
 
-/** Maximum scrollback retained per terminal, in characters. Oldest is trimmed. */
-const MAX_BUFFER = 200_000
+/**
+ * Lines of history the mirror keeps above the screen. The same as the view's
+ * own scrollback (xterm's default), so a remount gives back what was there.
+ */
+const SCROLLBACK_LINES = 1000
 
 /**
  * How long output is coalesced before one 'data' event per tab goes out.
@@ -41,18 +47,60 @@ export interface SpawnOptions {
   rows?: number
 }
 
-/** Internal per-tab record: the live PTY (null for a static notice) plus its scrollback. */
+/**
+ * A headless terminal fed the same output as the view. A remounting tab is
+ * given this terminal's STATE (screen, scrollback, cursor, modes) rather than
+ * a replay of the raw output that produced it.
+ *
+ * A raw log has to be capped, and a capped log cannot be replayed: ConPTY, and
+ * any program that redraws only what changed, positions its writes on a screen
+ * it assumes is already there. Cut the head off the log and everything drawn
+ * before the cut and not touched since (an agent CLI's input box and status
+ * line, while only its spinner ticks) is absent from the replay. Replaying
+ * also re-ran every side effect in the log, an OSC 52 clipboard write or a
+ * device query among them.
+ */
+interface Mirror {
+  screen: HeadlessTerminal
+  serializer: SerializeAddon
+  /**
+   * Whether the program hid the cursor (DECTCEM). The serializer leaves this
+   * out, and a TUI that draws its own caret would otherwise come back with the
+   * terminal's blinking over it.
+   */
+  cursorHidden: boolean
+  /** Snapshots waiting on output still being parsed; settled empty on dispose. */
+  waiters: Set<() => void>
+}
+
+function createMirror(cols: number, rows: number): Mirror {
+  const screen = new HeadlessTerminal({ cols, rows, scrollback: SCROLLBACK_LINES, allowProposedApi: true })
+  const serializer = new SerializeAddon()
+  screen.loadAddon(serializer)
+  const mirror: Mirror = { screen, serializer, cursorHidden: false, waiters: new Set() }
+  const track =
+    (hidden: boolean) =>
+    (params: (number | number[])[]): boolean => {
+      if (params.includes(25)) mirror.cursorHidden = hidden
+      return false // observe only: the terminal still handles the sequence
+    }
+  screen.parser.registerCsiHandler({ prefix: '?', final: 'l' }, track(true))
+  screen.parser.registerCsiHandler({ prefix: '?', final: 'h' }, track(false))
+  return mirror
+}
+
+function disposeMirror(mirror: Mirror): void {
+  for (const settle of [...mirror.waiters]) settle()
+  mirror.screen.dispose()
+}
+
+/** Internal per-tab record: the live PTY and its mirror, or a static notice. */
 interface TerminalEntry {
   proc: pty.IPty | null
-  /**
-   * Scrollback as the chunks that arrived, oldest first, kept to about
-   * MAX_BUFFER characters by dropping whole leading chunks. A single string
-   * would cost a fresh MAX_BUFFER-sized copy on every read once full.
-   */
-  chunks: string[]
-  /** Characters currently held in `chunks`. */
-  bufLen: number
-  /** Cumulative bytes ever emitted (monotonic; survives ring trimming). */
+  /** Null for a static notice, which has no screen to keep: `notice` is all of it. */
+  mirror: Mirror | null
+  notice: string
+  /** Cumulative characters ever emitted (monotonic). */
   total: number
   /** Last size pushed to the PTY, so an unchanged report is not a ConPTY resize. */
   cols: number
@@ -147,10 +195,11 @@ export class TerminalManager extends EventEmitter {
       useConpty: true
     })
 
+    const mirror = createMirror(opts.cols || 80, opts.rows || 24)
     const entry: TerminalEntry = {
       proc,
-      chunks: [],
-      bufLen: 0,
+      mirror,
+      notice: '',
       total: 0,
       cols: opts.cols || 80,
       rows: opts.rows || 24
@@ -160,15 +209,12 @@ export class TerminalManager extends EventEmitter {
     proc.onData((data) => {
       // Ignore trailing output from a PTY that has already been replaced.
       if (this.terminals.get(opts.tabId) !== entry) return
-      entry.chunks.push(data)
-      entry.bufLen += data.length
       entry.total += data.length
-      // Trim by whole chunks, and only once comfortably over, so trimming is
-      // amortised rather than a shift per read.
-      if (entry.bufLen > MAX_BUFFER * 2) {
-        while (entry.chunks.length > 1 && entry.bufLen - entry.chunks[0].length >= MAX_BUFFER) {
-          entry.bufLen -= entry.chunks.shift()!.length
-        }
+      try {
+        mirror.screen.write(data)
+      } catch {
+        // xterm refuses writes once tens of megabytes sit unparsed. The view
+        // still gets the output; only a later remount would be missing it.
       }
       this.queue(opts.tabId, data, entry.total)
     })
@@ -178,6 +224,7 @@ export class TerminalManager extends EventEmitter {
       // was replaced (kill+respawn under the same id) must not clobber its successor.
       if (this.terminals.get(opts.tabId) !== entry) return
       this.terminals.delete(opts.tabId)
+      disposeMirror(mirror)
       this.emit('exit', { tabId: opts.tabId, exitCode })
     })
   }
@@ -193,8 +240,8 @@ export class TerminalManager extends EventEmitter {
     if (this.terminals.has(tabId)) this.kill(tabId)
     const entry: TerminalEntry = {
       proc: null,
-      chunks: [message],
-      bufLen: message.length,
+      mirror: null,
+      notice: message,
       total: message.length,
       cols: 0,
       rows: 0
@@ -242,6 +289,7 @@ export class TerminalManager extends EventEmitter {
       entry.cols = cols
       entry.rows = rows
       entry.proc.resize(cols, rows)
+      entry.mirror?.screen.resize(cols, rows)
       return
     }
     // No live PTY yet: this is the first size for a deferred spawn (spawn it now),
@@ -256,20 +304,39 @@ export class TerminalManager extends EventEmitter {
   }
 
   /**
-   * Current scrollback + sequence cut-point for replay; empty if unknown.
+   * The terminal's current state as a string a fresh xterm can be written to
+   * reproduce it, with the size it was drawn at and the sequence cut-point it
+   * covers; empty if unknown.
    *
    * Pending batches are flushed FIRST. A batch's seq is that of its last chunk,
    * and the renderer replays a queued batch only when its seq lies past the
    * snapshot's — so a batch must never straddle the cut-point, which it would
    * if a chunk arrived between this snapshot and the timer. The flush goes out
    * ahead of the reply on the same ordered channel.
+   *
+   * The mirror parses its input a slice at a time, so the snapshot is taken
+   * from a marker written behind everything received so far: xterm runs the
+   * marker's callback after that output and before any that arrives later,
+   * which is exactly the state `seq` names.
    */
-  buffer(tabId: string): TerminalBuffer {
+  buffer(tabId: string): Promise<TerminalBuffer> {
     this.flush()
     const entry = this.terminals.get(tabId)
-    if (!entry) return { data: '', seq: 0 }
-    const data = entry.chunks.join('')
-    return { data: data.length > MAX_BUFFER ? data.slice(data.length - MAX_BUFFER) : data, seq: entry.total }
+    if (!entry) return Promise.resolve({ data: '', seq: 0, cols: 0, rows: 0 })
+    const { mirror } = entry
+    const seq = entry.total
+    if (!mirror) return Promise.resolve({ data: entry.notice, seq, cols: 0, rows: 0 })
+    return new Promise((resolve) => {
+      // Killed before the marker was reached: nothing is left to show.
+      const abandoned = (): void => resolve({ data: '', seq, cols: 0, rows: 0 })
+      mirror.waiters.add(abandoned)
+      mirror.screen.write('', () => {
+        if (!mirror.waiters.delete(abandoned)) return
+        const { cols, rows } = mirror.screen
+        const data = mirror.serializer.serialize() + (mirror.cursorHidden ? '\x1b[?25l' : '')
+        resolve({ data, seq, cols, rows })
+      })
+    })
   }
 
   /** Kill and drop the terminal for `tabId`, including any pending deferred spawn. */
@@ -282,6 +349,7 @@ export class TerminalManager extends EventEmitter {
     const entry = this.terminals.get(tabId)
     if (!entry) return
     this.terminals.delete(tabId)
+    if (entry.mirror) disposeMirror(entry.mirror)
     entry.proc?.kill()
   }
 

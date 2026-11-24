@@ -116,10 +116,14 @@ Backpressure rule, applied everywhere bulk data moves: pause the source
 unbundled Vite page, not `echo`.
 
 Reconnect: the client retries the control stream with backoff. Terminal
-streams re-attach by sending the last sequence number seen. The host's existing
-scrollback buffer in `src/main/services/terminals.ts` (200,000 characters with
-a sequence cut-point, built for renderer remounts) replays only what was
-missed. Nothing new is stored. PTYs live in the host process regardless of
+streams re-attach the way a remounting tab does. The host keeps a headless
+mirror of each terminal in `src/main/services/terminals.ts`, and a snapshot of
+it (screen, scrollback, cursor and modes, with the size it was drawn at and a
+sequence cut-point) is written into a fresh terminal on the client, which then
+takes live output past the cut-point. It is the terminal's state and not a log
+of its output, so there is no "only what was missed" to send: a raw log has to
+be capped, and a capped one cannot be replayed into a correct screen.
+Nothing new is stored. PTYs live in the host process regardless of
 whether anyone is attached, which is the whole reason persistence is gone.
 
 Multiple clients on one terminal are mirrored. Same PTY, both see output, both

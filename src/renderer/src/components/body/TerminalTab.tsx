@@ -3,7 +3,7 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
-import type { Tab } from '@shared/types'
+import type { Tab, TerminalBuffer } from '@shared/types'
 import { useTheme } from '@renderer/lib/theme'
 import { themeTokens, type ThemeSpec } from '@shared/themes'
 import { rgba } from '@shared/color'
@@ -176,11 +176,19 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
 
     term.open(container)
 
-    // Replay safely without duplication: queue live chunks (each tagged with a
-    // cumulative seq) while we fetch the scrollback snapshot, write the snapshot,
-    // then flush ONLY queued chunks past the snapshot's seq cut-point, then go live.
+    // Restore safely without duplication: queue live chunks (each tagged with a
+    // cumulative seq) while we fetch the terminal's state from main, write it,
+    // then flush ONLY queued chunks past its seq cut-point, then go live.
+    //
+    // The state is a picture of a screen of a particular size, so it is written
+    // into a terminal of that size, and fitting to the pane waits until it is
+    // in (`restored`). Fitting first would be harmless only while the pane is
+    // still the size the PTY last heard about; after a window resize made in
+    // another Worktree it is not, and rows drawn for one width would land in
+    // another.
     const queue: { data: string; seq: number }[] = []
     let live = false
+    let restored = false
     const unsubscribe = onTerminalData(tab.id, (evt) => {
       if (live) term.write(evt.data)
       else queue.push({ data: evt.data, seq: evt.seq })
@@ -189,21 +197,28 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       term.write(`\r\n\x1b[2m[process exited${evt.exitCode ? ` with code ${evt.exitCode}` : ''}]\x1b[0m\r\n`)
     })
 
-    const goLive = (buffer: { data: string; seq: number }): void => {
+    const goLive = (buffer: TerminalBuffer): void => {
       if (disposed) return
+      if (buffer.cols > 0 && buffer.rows > 0) term.resize(buffer.cols, buffer.rows)
       if (buffer.data) term.write(buffer.data)
       for (const chunk of queue) {
         if (chunk.seq > buffer.seq) term.write(chunk.data)
       }
       queue.length = 0
       live = true
+      // xterm parses writes asynchronously and applies a resize at once, so
+      // the fit has to wait behind everything just written.
+      term.write('', () => {
+        restored = true
+        fitAndReport()
+      })
     }
     window.orbital
       .terminalBuffer(tab.id)
       .then(goLive)
       // No snapshot (main mid-teardown, say): go live with what was queued
       // rather than queueing every later chunk forever and showing none.
-      .catch(() => goLive({ data: '', seq: -1 }))
+      .catch(() => goLive({ data: '', seq: -1, cols: 0, rows: 0 }))
 
     // Copy the current selection to the system clipboard, then clear it, so a
     // following Ctrl+C is an interrupt again rather than a second identical copy
@@ -337,7 +352,7 @@ export default function TerminalTab({ tab, active }: { tab: Tab; active: boolean
       window.orbital.terminalResize(tab.id, term.cols, term.rows)
     }
     const fitAndReport = (): void => {
-      if (disposed) return
+      if (disposed || !restored) return
       // Skip while hidden (display:none) — clientWidth/Height collapse to 0.
       if (container.clientWidth === 0 || container.clientHeight === 0) return
       try {
