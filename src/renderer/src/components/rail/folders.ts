@@ -406,8 +406,12 @@ export type OverZone = 'top' | 'middle' | 'bottom' | 'body'
 export interface RailOver {
   /** A member repo row (never a flat row). Halves measured on its header. */
   repo: { id: string; lowerHalf: boolean } | null
-  /** The project block under the pointer: a flat row or a group. `lowerHalf` is true for 'body'. */
-  project: { id: string; lowerHalf: boolean; zone: OverZone } | null
+  /**
+   * The project block under the pointer: a flat row or a group. `lowerHalf` is
+   * true for 'body'. `aboveRows` says a 'body' pointer is over what a group
+   * draws between its header and its rows: the home repo's worktrees.
+   */
+  project: { id: string; lowerHalf: boolean; zone: OverZone; aboveRows?: boolean } | null
   /** The innermost folder under the pointer. */
   folder: { id: string; zone: OverZone } | null
 }
@@ -520,6 +524,11 @@ function overFolder(
  * A folder being dragged. It stays among its own kind: a folder of projects
  * moves through the rail's lists, a folder of repos through its own
  * project's, and neither goes inside itself.
+ *
+ * Over no row at all (the blank space under the rail's last row is the big
+ * one) it goes to the end of its own top list, whichever kind it is: that is
+ * where a row is dragged to be sent to the bottom, and for a folder of repos
+ * the bottom is the end of its project.
  */
 function folderTarget(ix: RailIndex, dragId: string, over: RailOver): DropTarget | null {
   const me = ix.folders.get(dragId)
@@ -547,6 +556,7 @@ function folderTarget(ix: RailIndex, dragId: string, over: RailOver): DropTarget
   }
 
   // Among one project's repos.
+  const top = inProject(me.projectId)
   if (over.repo) {
     const repo = ix.repos.get(over.repo.id)
     if (!repo || repo.projectId !== me.projectId) return null
@@ -556,10 +566,17 @@ function folderTarget(ix: RailIndex, dragId: string, over: RailOver): DropTarget
     if (overEntry.projectId !== me.projectId || overEntry.row.id === dragId) return null
     return outside(overFolder(ix, stays, over.folder.zone, overEntry))
   }
+  if (!over.project && !over.folder) return atEnd(ix, stays, top)
   if (over.project?.id !== me.projectId) return null
-  // Its project's header sends it to the end of the project's own list.
-  const top = inProject(me.projectId)
-  if (over.project.zone === 'top' || (over.project.zone === 'body' && stays.list === top)) return null
+  if (over.project.zone === 'top') return null
+  if (over.project.zone === 'body') {
+    // Inside its project but on none of its rows. Above the rows (the home
+    // repo's worktrees sit there) is the start of the list. Among them it is
+    // a gap between two rows, where a folder already in this list stays.
+    if (over.project.aboveRows) return slot(stays, top, 0)
+    if (stays.list === top) return null
+  }
+  // Its project's header, or a gap from inside one of its folders: the end of the project's own list.
   return atEnd(ix, stays, top)
 }
 
@@ -624,8 +641,10 @@ function repoTarget(ix: RailIndex, dragId: string, over: RailOver): DropTarget |
       // Dragged up out of its own project, it lands just above it.
       if (zone === 'top') return beside(null, target.place, false)
       // The header sends it to the end of the project's own list (out of any
-      // folder); between the rows of that list it stays where it is.
+      // folder); between the rows of that list it stays where it is, and
+      // above them (over the home repo's worktrees) it goes first.
       const top = inProject(source.id)
+      if (zone === 'body' && over.project.aboveRows) return slot(member.place, top, 0)
       if (zone === 'body' && member.place.list === top) return null
       return atEnd(ix, member.place, top)
     }

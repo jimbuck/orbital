@@ -767,4 +767,31 @@ describe("folders among a project's repos", () => {
     expect(bridge.placeProject).not.toHaveBeenCalled()
     expect(bridge.addRepoToProject).not.toHaveBeenCalled()
   })
+
+  it("sends a folder of repos to the end of its project from the blank space under the rail's rows", () => {
+    renderRail(filed)
+    const blank = groupBlock('acme').closest('.overflow-y-auto')!
+    fireEvent.dragStart(folderHeader('f-old'), { dataTransfer: dataTransfer() })
+    fireEvent.dragOver(blank, { dataTransfer: dataTransfer() })
+    // The marker is where it will land: after acme's last row, not at the end of the rail.
+    expect(marker(groupBlock('acme'))).toBeTruthy()
+    fireEvent.drop(blank, { dataTransfer: dataTransfer() })
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('f-old', null, null)
+
+    // Apps is acme's last row already, so the same drop moves nothing.
+    bridge.placeRailFolder.mockClear()
+    fireEvent.dragStart(folderHeader('f-apps'), { dataTransfer: dataTransfer() })
+    fireEvent.drop(blank, { dataTransfer: dataTransfer() })
+    expect(bridge.placeRailFolder).not.toHaveBeenCalled()
+  })
+
+  it("puts a folder first from over the home repo's worktrees, above the project's rows", () => {
+    renderRail(filed)
+    const adr = screen.getByText('adr')
+    expect(adr.closest('[data-project-rows]')).toBeNull()
+    fireEvent.dragStart(folderHeader('f-apps'), { dataTransfer: dataTransfer() })
+    // jsdom's boxes are 0×0 at the origin, so above the rows is a pointer above 0.
+    dropAt(adr, TOP)
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('f-apps', null, 'api')
+  })
 })

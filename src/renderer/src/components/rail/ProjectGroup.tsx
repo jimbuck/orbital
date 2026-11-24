@@ -275,7 +275,8 @@ export default function ProjectGroup({
       )}
 
       {open && (items.length > 0 || !home) && (
-        <div role="group" aria-label={`Repos in ${project.name}`} className={CHILD_LIST}>
+        // The data attribute is how the Rail tells a drag over these rows from one over the worktrees above them.
+        <div data-project-rows role="group" aria-label={`Repos in ${project.name}`} className={CHILD_LIST}>
           {items.map((item, i) => (
             <div key={item.id}>
               {repoSlot === i && <SlotMarker />}

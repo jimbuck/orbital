@@ -227,7 +227,7 @@ describe('rail folders — actions', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'New folder' }))
     })
-    // No spot: a folder of projects at the top of the rail.
+    // No spot: a folder of projects, last in the rail.
     expect(bridge.createRailFolder).toHaveBeenCalledWith('New Folder', undefined)
 
     const field = screen.getByLabelText('Folder name')

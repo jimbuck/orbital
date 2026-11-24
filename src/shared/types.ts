@@ -435,13 +435,13 @@ export interface RailItem {
 }
 
 /**
- * Where a new rail folder goes. Without one it is a folder of projects at the
- * top of the rail.
+ * Where a new rail folder goes. Without one it is a folder of projects, last
+ * in the rail.
  *
  * - `holding`: it takes that row's place and holds it. A project makes a
  *   folder of projects; a repo makes a folder among its project's repos.
- * - `parentId`: first inside that folder, as a folder of the same kind.
- * - `projectId`: first among that project's repos.
+ * - `parentId`: last inside that folder, as a folder of the same kind.
+ * - `projectId`: last among that project's repos.
  */
 export type RailFolderSpot = { holding: RailItem } | { parentId: string } | { projectId: string }
 

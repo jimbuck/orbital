@@ -849,10 +849,48 @@ describe("folders among a project's repos", () => {
     expect(dropTargetFor(fdrag('games'), filed, onProject('duo', 'middle'))).toBeNull()
     expect(dropTargetFor(fdrag('games'), filed, onMember('d1', 'duo', false))).toBeNull()
     expect(dropTargetFor(fdrag('games'), filed, onProject('a', 'top'))).toBeNull()
-    expect(dropTargetFor(fdrag('games'), filed, nothing)).toBeNull()
+    expect(dropTargetFor(fdrag('games'), filed, onFolder('games'))).toBeNull()
     // Above its own project's header, and between rows of the list it is in: nothing.
     expect(dropTargetFor(fdrag('games'), filed, onProject('hq', 'top'))).toBeNull()
     expect(dropTargetFor(fdrag('games'), filed, onProject('hq', 'body'))).toBeNull()
+  })
+
+  it("sends a folder of repos to the end of its project from the blank space under the rail's rows", () => {
+    // Over no row at all there is nowhere else for it to go: it never leaves its project.
+    expect(dropTargetFor(fdrag('games'), filed, nothing)).toEqual(repoSlot('hq', 4))
+    expect(dropTargetFor(fdrag('engines'), filed, nothing)).toEqual(repoSlot('hq', 4))
+    expect(dropAction(fdrag('games'), filed, repoSlot('hq', 4))).toEqual({
+      op: 'placeRailFolder',
+      folderId: 'games',
+      parentId: null,
+      beforeId: null
+    })
+    // Already last, it stays.
+    const last = railRows(
+      [project('hq', ['home', 'api'], 'home')],
+      [repo('home', 'hq'), repo('api', 'hq')],
+      [repoFolder('sites', 'hq')],
+      [p('hq')],
+      {},
+      { hq: [r('home'), r('api'), f('sites')] }
+    )
+    expect(dropTargetFor(fdrag('sites'), last, nothing)).toBeNull()
+  })
+
+  it("puts a row first from over the home repo's worktrees, which sit above the project's rows", () => {
+    const overWorktrees: RailOver = {
+      repo: null,
+      folder: null,
+      project: { id: 'hq', zone: 'body', lowerHalf: true, aboveRows: true }
+    }
+    expect(dropTargetFor(fdrag('sites'), filed, overWorktrees)).toEqual(repoSlot('hq', 0))
+    expect(dropTargetFor(fdrag('engines'), filed, overWorktrees)).toEqual(repoSlot('hq', 0))
+    expect(dropTargetFor(rdrag('web'), filed, overWorktrees)).toEqual(repoSlot('hq', 0))
+    expect(dropTargetFor(rdrag('volt'), filed, overWorktrees)).toEqual(repoSlot('hq', 0))
+    // The row that is first already stays, and a repo from outside still just joins.
+    expect(dropTargetFor(rdrag('api'), filed, overWorktrees)).toBeNull()
+    expect(dropTargetFor(rdrag('d1'), filed, overWorktrees)).toEqual(join('hq'))
+    expect(dropTargetFor(fdrag('games'), filed, { ...overWorktrees, project: { ...overWorktrees.project!, id: 'duo' } })).toBeNull()
   })
 
   it("treats a project's folders as part of the project when a project or a folder of projects is dragged", () => {

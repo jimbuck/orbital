@@ -163,9 +163,6 @@ export function addFolder(req: ControlRequest, project?: Project, noProject?: st
     name,
     parent ? { parentId: parent.id } : scope.project ? { projectId: scope.project.id } : undefined
   )
-  // The cockpit puts a new folder first, where a person is sure to see it. A
-  // script making several wants them in the order it made them: last.
-  tables.railFolders.placeFolder(created.id, parent?.id ?? null, null)
   arranged(scope)
   const parentPath = parent ? scope.paths.get(parent.id) : undefined
   return {

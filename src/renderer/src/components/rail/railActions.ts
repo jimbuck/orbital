@@ -21,8 +21,10 @@ export function currentRailRows(): RailRow[] {
 }
 
 /**
- * Make a folder at `spot` (see RailFolderSpot; none = the top of the rail) and
+ * Make a folder at `spot` (see RailFolderSpot; none = last in the rail) and
  * open it straight into its name, so it is never left called "New Folder".
+ * The name field takes focus as it appears, which also scrolls a folder made
+ * below the fold into view.
  */
 export function newRailFolder(spot?: RailFolderSpot): void {
   fireAndForget(

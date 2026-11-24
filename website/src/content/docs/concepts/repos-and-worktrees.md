@@ -86,8 +86,11 @@ or its settings.
 Either kind nests: right-click a folder and choose **New Folder Inside**, or
 drag one folder onto another. Drag a row onto a folder's header to file it
 there, or between two rows to place it; dropping on a folder (or a project's
-header) the row is already in sends it to the end of that list. Deleting a
-folder leaves everything that was in it where the folder was.
+header) the row is already in sends it to the end of that list. A new folder
+starts last in its list. To send a folder to the bottom, drop it in the blank
+space under the rail's rows: a folder of repos goes to the end of its project,
+since it never leaves it. Deleting a folder leaves everything that was in it
+where the folder was.
 
 Right-click a folder and choose **Add Repo…** to add a repo straight into it,
 from any of the dialog's sources. In a folder of repos it joins that project;

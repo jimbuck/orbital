@@ -53,6 +53,8 @@ function railOverAt(e: DragEvent): RailOver {
   const projectEl = target.closest<HTMLElement>('[data-project-id]')
   const projectHeader = projectEl?.firstElementChild
   const zone = zoneOn(projectHeader)
+  // A group's rows start below whatever it draws under its header.
+  const rowsTop = projectEl?.querySelector(':scope > [data-project-rows]')?.getBoundingClientRect().top
   // Folders nest, and a folder's own header is the first one inside it.
   const folderEl = target.closest<HTMLElement>('[data-folder-id]')
   const folderHeader = folderEl?.querySelector('[data-folder-header]')
@@ -63,7 +65,8 @@ function railOverAt(e: DragEvent): RailOver {
       ? {
           id: projectEl.dataset.projectId ?? '',
           lowerHalf: zone === 'body' || below(projectHeader),
-          zone
+          zone,
+          aboveRows: zone === 'body' && rowsTop !== undefined && y < rowsTop
         }
       : null,
     folder: folderEl ? { id: folderEl.dataset.folderId ?? '', zone: zoneOn(folderHeader) } : null

@@ -861,17 +861,19 @@ export const railFolders = {
   /**
    * A new, expanded folder.
    *
-   * - No `spot`: a folder of projects at the top of the rail, where a folder
-   *   nobody has placed yet is sure to be seen.
+   * It goes last in its list, the way a new project or repo does, so nothing
+   * already arranged moves to make room for it:
+   *
+   * - No `spot`: a folder of projects, last in the rail.
    * - `holding` a row: it takes that row's place, in whatever list the row is
    *   in, and holds it. A project gives a folder of projects, a repo a folder
    *   among its project's repos.
-   * - `parentId`: first inside that folder (which is opened), as a folder of
+   * - `parentId`: last inside that folder (which is opened), as a folder of
    *   the same kind.
-   * - `projectId`: first among that project's repos.
+   * - `projectId`: last among that project's repos.
    *
-   * A spot that names nothing in this workspace gives a folder at the top of
-   * the rail.
+   * A spot that names nothing in this workspace gives a folder of projects,
+   * last in the rail.
    */
   create(name: string, spot?: RailFolderSpot): RailFolder {
     const fid = id()
@@ -902,10 +904,10 @@ export const railFolders = {
         at.list.splice(at.index, 1, entry)
         filed.push(holding)
       } else if (parent) {
-        scope.inside.get(parent.id)?.unshift(entry)
+        scope.inside.get(parent.id)?.push(entry)
         getDb().prepare('UPDATE rail_folders SET collapsed = 0 WHERE id = ?').run(parent.id)
       } else {
-        scope.top.unshift(entry)
+        scope.top.push(entry)
       }
       writeScope(scope)
     })
