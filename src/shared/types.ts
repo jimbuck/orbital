@@ -394,30 +394,56 @@ export interface Project {
 }
 
 /**
- * A folder in the rail: a named, collapsible group of projects.
+ * A folder in the rail: a named, collapsible group of rows.
  *
- * It arranges the Repos panel and does nothing else. A project's repos, root,
- * worktree locations, agent defaults and settings are the same in a folder as
- * out of one, which is why membership lives here and not as a field on
- * {@link Project}; folders are also left out of the workspace export.
+ * A folder lives in one of two places. With `projectId` null it is a folder of
+ * projects, somewhere in the rail's own list. With `projectId` set it is a
+ * folder of that project's repos, drawn under the project's header. Either
+ * kind nests: a folder holds folders of its own kind beside its rows.
+ *
+ * It arranges the Projects panel and does nothing else. A project's repos,
+ * root, worktree locations, agent defaults and settings are the same in a
+ * folder as out of one, which is why membership lives here and not as a field
+ * on {@link Project} or {@link Repo}; folders are also left out of the
+ * workspace export.
  */
 export interface RailFolder {
   id: string
   name: string
-  /** Whether its projects are hidden. Persisted, so the rail comes back as it was left. */
+  /** Whether its rows are hidden. Persisted, so the rail comes back as it was left. */
   collapsed: boolean
-  /** The projects filed here, in the order the rail lists them. A project is in at most one folder. */
-  projectIds: string[]
+  /** The project whose repos it arranges, or null for a folder of projects. */
+  projectId: string | null
+  /** The folder it sits in, or null at the top of its list (the rail's, or its project's). */
+  parentId: string | null
+  /**
+   * What is filed here, in the order the rail lists it: folders of the same
+   * kind, and projects (`projectId` null) or the project's repos. A row is in
+   * at most one folder.
+   */
+  items: RailItem[]
 }
 
 /**
- * One row at the rail's top level: a folder, or a project that is in no folder.
- * The two share one order, so a folder can sit anywhere among the loose projects.
+ * One row of a list the rail orders by hand: a folder, a project (in the
+ * rail's own lists) or a repo (in a project's). Folders share the order with
+ * the rows beside them, so one can sit anywhere among them.
  */
 export interface RailItem {
-  kind: 'folder' | 'project'
+  kind: 'folder' | 'project' | 'repo'
   id: string
 }
+
+/**
+ * Where a new rail folder goes. Without one it is a folder of projects at the
+ * top of the rail.
+ *
+ * - `holding`: it takes that row's place and holds it. A project makes a
+ *   folder of projects; a repo makes a folder among its project's repos.
+ * - `parentId`: first inside that folder, as a folder of the same kind.
+ * - `projectId`: first among that project's repos.
+ */
+export type RailFolderSpot = { holding: RailItem } | { parentId: string } | { projectId: string }
 
 /**
  * Default env-sync globs (a global setting shared by every repo): env
@@ -663,10 +689,17 @@ export interface AppState {
   repos: Repo[]
   /** Every project in the workspace; each repo's `projectId` names one of these. */
   projects: Project[]
-  /** The rail's folders, each with the projects filed in it. */
+  /** Every rail folder, of projects and of a project's repos alike, each with what is filed in it. */
   railFolders: RailFolder[]
-  /** The rail's top level, in order: every folder and every project that is in none. */
+  /** The rail's top level, in order: every folder of projects and every project that is in none. */
   railItems: RailItem[]
+  /**
+   * For each project that has folders among its repos: the top of that list,
+   * in order (its folders, and its repos that are in none). The home repo is
+   * listed like any other, though the rail draws it as the project's header.
+   * A project with no folders is not listed: its repos read as `repoIds` has them.
+   */
+  railProjectItems: Record<string, RailItem[]>
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings
@@ -1109,6 +1142,12 @@ export type ControlCommand =
   | 'server-add'
   | 'server-remove'
   | 'server-list'
+  /** `orbital folder ...`: the rail's folders, read and arranged from a terminal. */
+  | 'folder-list'
+  | 'folder-add'
+  | 'folder-move'
+  | 'folder-rename'
+  | 'folder-remove'
   | 'hook'
   /** App-to-app, not a CLI verb: another instance is installing an update. */
   | 'quit-for-update'

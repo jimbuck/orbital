@@ -26,8 +26,8 @@ export function register(): void {
   const h = handle
 
   // ---- projects ----
-  h(IPC.addRepoToProject, (_e, projectId, repoId, beforeRepoId) => {
-    tables.projects.addRepo(projectId, repoId, beforeRepoId ?? null)
+  h(IPC.addRepoToProject, (_e, projectId, repoId, beforeId, folderId) => {
+    tables.projects.addRepo(projectId, repoId, beforeId ?? null, folderId ?? null)
     settled()
   })
 
@@ -101,8 +101,8 @@ export function register(): void {
   })
 
   // ---- rail folders (the rail's arrangement; see tables.railFolders) ----
-  h(IPC.createRailFolder, (_e, name, projectId) => {
-    const folder = tables.railFolders.create(String(name ?? '').trim() || 'New Folder', projectId || undefined)
+  h(IPC.createRailFolder, (_e, name, spot) => {
+    const folder = tables.railFolders.create(String(name ?? '').trim() || 'New Folder', spot ?? undefined)
     broadcast()
     return folder
   })
@@ -114,9 +114,12 @@ export function register(): void {
     broadcast()
   })
 
+  // A folder of a project's repos took part in that project's repo order,
+  // which the managed repo list follows, so removing or moving one settles
+  // like any other change to the order.
   h(IPC.removeRailFolder, (_e, folderId) => {
     tables.railFolders.remove(folderId)
-    broadcast()
+    settled()
   })
 
   h(IPC.setRailFolderCollapsed, (_e, folderId, collapsed) => {
@@ -129,8 +132,8 @@ export function register(): void {
     broadcast()
   })
 
-  h(IPC.placeRailFolder, (_e, folderId, beforeId) => {
-    tables.railFolders.placeFolder(folderId, beforeId ?? null)
-    broadcast()
+  h(IPC.placeRailFolder, (_e, folderId, parentId, beforeId) => {
+    tables.railFolders.placeFolder(folderId, parentId ?? null, beforeId ?? null)
+    settled()
   })
 }

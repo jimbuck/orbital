@@ -4,11 +4,19 @@ import {
   beforeIdAt,
   dropAction,
   dropTargetFor,
+  folderOf,
+  foldersIn,
+  placeOf,
   projectRollup,
+  projectRowById,
+  projectRowOfRepo,
+  projectRows,
   railRows,
   repoPathLabel,
   sameDropTarget,
   type DropTarget,
+  type MemberRow,
+  type OverZone,
   type ProjectRow,
   type RailDrag,
   type RailOver,
@@ -35,14 +43,38 @@ const project = (id: string, repoIds: string[], homeRepoId: string | null = null
   repoIds,
   createdAt: 0
 })
-const folder = (id: string, projectIds: string[] = [], collapsed = false): RailFolder => ({
+const p = (id: string): RailItem => ({ kind: 'project', id })
+const f = (id: string): RailItem => ({ kind: 'folder', id })
+const r = (id: string): RailItem => ({ kind: 'repo', id })
+/** A folder of projects. A bare string among its rows is a project id. */
+const folder = (
+  id: string,
+  rows: Array<string | RailItem> = [],
+  collapsed = false,
+  parentId: string | null = null
+): RailFolder => ({
   id,
   name: id,
   collapsed,
-  projectIds
+  projectId: null,
+  parentId,
+  items: rows.map((row) => (typeof row === 'string' ? p(row) : row))
 })
-const p = (id: string): RailItem => ({ kind: 'project', id })
-const f = (id: string): RailItem => ({ kind: 'folder', id })
+/** A folder among `projectId`'s repos. A bare string among its rows is a repo id. */
+const repoFolder = (
+  id: string,
+  projectId: string,
+  rows: Array<string | RailItem> = [],
+  collapsed = false,
+  parentId: string | null = null
+): RailFolder => ({
+  id,
+  name: id,
+  collapsed,
+  projectId,
+  parentId,
+  items: rows.map((row) => (typeof row === 'string' ? r(row) : row))
+})
 
 /** Project `id` holding one repo `r-<id>`: a flat row. */
 const flatProject = (id: string): { project: Project; repos: Repo[] } => ({
@@ -50,13 +82,17 @@ const flatProject = (id: string): { project: Project; repos: Repo[] } => ({
   repos: [repo(`r-${id}`, id)]
 })
 
-/** Rows by id: a folder as `id[...]`, a group as `id{home|members}`. */
-const view = (rows: RailRow[]): string[] =>
-  rows.map((r) => {
-    const one = (x: ProjectRow): string =>
-      x.kind === 'flat' ? x.id : `${x.id}{${x.home?.id ?? ''}|${x.members.map((m) => m.id).join(' ')}}`
-    return r.kind === 'folder' ? `${r.id}[${r.projects.map(one).join(' ')}]` : one(r)
-  })
+/** Rows by id: a folder as `id[its rows]`, a group as `id{home|its rows}`, nested as they nest. */
+const view = (rows: RailRow[]): string[] => {
+  const member = (m: MemberRow): string => (m.kind === 'folder' ? `${m.id}[${m.items.map(member).join(' ')}]` : m.id)
+  const one = (x: RailRow): string =>
+    x.kind === 'folder'
+      ? `${x.id}[${x.items.map(one).join(' ')}]`
+      : x.kind === 'flat'
+        ? x.id
+        : `${x.id}{${x.home?.id ?? ''}|${x.items.map(member).join(' ')}}`
+  return rows.map(one)
+}
 
 /* ---- railRows ------------------------------------------------------------- */
 
@@ -126,7 +162,7 @@ describe('railRows', () => {
     const rows = railRows([fx.project, g], [...fx.repos, ...gRepos], [work], [], {})
     const [fRow, aRow] = rows
     expect(fRow.kind === 'folder' && fRow.folder).toBe(work)
-    const inner = fRow.kind === 'folder' ? fRow.projects[0] : null
+    const inner = fRow.kind === 'folder' ? fRow.items[0] : null
     expect(inner?.kind === 'group' && inner.project).toBe(g)
     expect(inner?.kind === 'group' && inner.members[1]).toBe(gRepos[1])
     expect(aRow.kind === 'flat' && aRow.repo).toBe(fx.repos[0])
@@ -255,20 +291,21 @@ const overProject = (
   id: string,
   lowerHalf = false,
   inFolder?: string,
-  zone: 'top' | 'middle' | 'bottom' | 'body' = lowerHalf ? 'bottom' : 'top'
+  zone: OverZone = lowerHalf ? 'bottom' : 'top'
 ): RailOver => ({
   repo: null,
   project: { id, lowerHalf, zone },
   // Over a filed project the pointer is below its folder's header.
-  folder: inFolder ? { id: inFolder, lowerHalf: true, edge: null } : null
+  folder: inFolder ? { id: inFolder, zone: 'body' } : null
 })
-const overFolder = (id: string, edge: 'top' | 'bottom' | null = null, lowerHalf = edge === 'bottom'): RailOver => ({
+const overFolder = (id: string, zone: OverZone = 'middle'): RailOver => ({
   repo: null,
   project: null,
-  folder: { id, lowerHalf, edge }
+  folder: { id, zone }
 })
 const top = (index: number): DropTarget => ({ kind: 'slot', folderId: null, index })
 const inside = (folderId: string, index: number): DropTarget => ({ kind: 'slot', folderId, index })
+const into = (folderId: string): DropTarget => ({ kind: 'into', folderId })
 
 describe('dropTargetFor: dragging a project', () => {
   const drag = (id: string): RailDrag => ({ kind: 'project', id })
@@ -294,10 +331,11 @@ describe('dropTargetFor: dragging a project', () => {
     expect(dropTargetFor(drag('e'), rows, overProject('b', true, 'work'))).toEqual(inside('work', 1))
   })
 
-  it('goes into a folder from its header, after the projects already there', () => {
-    expect(dropTargetFor(drag('a'), rows, overFolder('work'))).toEqual({ kind: 'into', folderId: 'work' })
-    expect(dropTargetFor(drag('a'), rows, overFolder('shut'))).toEqual({ kind: 'into', folderId: 'shut' })
-    expect(dropTargetFor(drag('b'), rows, overFolder('empty'))).toEqual({ kind: 'into', folderId: 'empty' })
+  it('goes into a folder from its header or the gaps between its rows, after the projects already there', () => {
+    expect(dropTargetFor(drag('a'), rows, overFolder('work'))).toEqual(into('work'))
+    expect(dropTargetFor(drag('a'), rows, overFolder('work', 'body'))).toEqual(into('work'))
+    expect(dropTargetFor(drag('a'), rows, overFolder('shut'))).toEqual(into('shut'))
+    expect(dropTargetFor(drag('b'), rows, overFolder('empty'))).toEqual(into('empty'))
   })
 
   it('slips in above a folder from the top edge of its header', () => {
@@ -308,7 +346,15 @@ describe('dropTargetFor: dragging a project', () => {
   it('slips in below a folder from its bottom edge, unless the folder is showing projects there', () => {
     expect(dropTargetFor(drag('a'), rows, overFolder('shut', 'bottom'))).toEqual(top(4))
     expect(dropTargetFor(drag('a'), rows, overFolder('empty', 'bottom'))).toEqual(top(5))
-    expect(dropTargetFor(drag('a'), rows, overFolder('work', 'bottom'))).toEqual({ kind: 'into', folderId: 'work' })
+    expect(dropTargetFor(drag('a'), rows, overFolder('work', 'bottom'))).toEqual(into('work'))
+  })
+
+  it("goes to the end of its own folder from that folder's header, and stays put between its rows", () => {
+    expect(dropTargetFor(drag('b'), rows, overFolder('work'))).toEqual(inside('work', 2))
+    expect(dropTargetFor(drag('b'), rows, overFolder('work', 'bottom'))).toEqual(inside('work', 2))
+    expect(dropTargetFor(drag('b'), rows, overFolder('work', 'body'))).toBeNull()
+    // Already last there: nothing to do.
+    expect(dropTargetFor(drag('c'), rows, overFolder('work'))).toBeNull()
   })
 
   it('goes last when dropped below every row', () => {
@@ -324,7 +370,6 @@ describe('dropTargetFor: dragging a project', () => {
     expect(dropTargetFor(drag('c'), rows, overProject('c', true, 'work'))).toBeNull()
     expect(dropTargetFor(drag('c'), rows, overProject('b', true, 'work'))).toBeNull()
     expect(dropTargetFor(drag('b'), rows, overProject('c', false, 'work'))).toBeNull()
-    expect(dropTargetFor(drag('b'), rows, overFolder('work'))).toBeNull()
     expect(dropTargetFor(drag('e'), rows, overFolder('shut'))).toBeNull()
   })
 
@@ -340,7 +385,7 @@ describe('dropTargetFor: dragging a project', () => {
   })
 })
 
-describe('dropTargetFor: dragging a folder', () => {
+describe('dropTargetFor: dragging a folder of projects', () => {
   const drag = (id: string): RailDrag => ({ kind: 'folder', id })
 
   it('goes above or below a loose project', () => {
@@ -348,18 +393,27 @@ describe('dropTargetFor: dragging a folder', () => {
     expect(dropTargetFor(drag('work'), rows, overProject('d', true))).toEqual(top(3))
   })
 
-  it('goes above or below another folder, never into it', () => {
-    expect(dropTargetFor(drag('empty'), rows, overFolder('work', null, false))).toEqual(top(1))
-    expect(dropTargetFor(drag('empty'), rows, overFolder('work', null, true))).toEqual(top(2))
-    expect(dropTargetFor(drag('empty'), rows, overProject('c', false, 'work'))).toEqual(top(2))
+  it("goes above or below another folder from the edges of that folder's header", () => {
+    expect(dropTargetFor(drag('empty'), rows, overFolder('work', 'top'))).toEqual(top(1))
+    expect(dropTargetFor(drag('work'), rows, overFolder('shut', 'bottom'))).toEqual(top(4))
+  })
+
+  it('goes into another folder from its header, and beside a project filed in one', () => {
+    expect(dropTargetFor(drag('empty'), rows, overFolder('work'))).toEqual(into('work'))
+    expect(dropTargetFor(drag('empty'), rows, overFolder('shut'))).toEqual(into('shut'))
+    // An open folder's rows are just below its header, so its bottom edge is "into" as well.
+    expect(dropTargetFor(drag('empty'), rows, overFolder('work', 'bottom'))).toEqual(into('work'))
+    expect(dropTargetFor(drag('empty'), rows, overProject('c', false, 'work'))).toEqual(inside('work', 1))
+    expect(dropTargetFor(drag('shut'), rows, overProject('c', true, 'work'))).toEqual(inside('work', 2))
   })
 
   it('goes last when dropped below every row', () => {
     expect(dropTargetFor(drag('work'), rows, nothing)).toEqual(top(5))
   })
 
-  it('offers nothing for the slots that leave it where it is', () => {
-    expect(dropTargetFor(drag('work'), rows, overFolder('work', null, true))).toBeNull()
+  it('never goes inside itself, and offers nothing for the slots that leave it where it is', () => {
+    expect(dropTargetFor(drag('work'), rows, overFolder('work'))).toBeNull()
+    expect(dropTargetFor(drag('work'), rows, overFolder('work', 'body'))).toBeNull()
     expect(dropTargetFor(drag('work'), rows, overProject('b', false, 'work'))).toBeNull()
     expect(dropTargetFor(drag('work'), rows, overProject('a', true))).toBeNull()
     expect(dropTargetFor(drag('work'), rows, overProject('d'))).toBeNull()
@@ -368,6 +422,117 @@ describe('dropTargetFor: dragging a folder', () => {
 
   it('ignores a folder this rail does not have', () => {
     expect(dropTargetFor(drag('elsewhere'), rows, overProject('a'))).toBeNull()
+    expect(dropTargetFor(drag('work'), rows, overFolder('elsewhere'))).toBeNull()
+  })
+})
+
+/*
+ * Folders in folders:
+ *
+ *   0  a
+ *   1  outer [
+ *        0  b
+ *        1  inner [ c ]
+ *        2  deep  [ leaf [ d ] ]
+ *      ]
+ *   2  e
+ */
+const nested = (() => {
+  const fx = ['a', 'b', 'c', 'd', 'e'].map(flatProject)
+  return railRows(
+    fx.map((x) => x.project),
+    fx.flatMap((x) => x.repos),
+    [
+      folder('outer', ['b', f('inner'), f('deep')]),
+      folder('inner', ['c'], false, 'outer'),
+      folder('deep', [f('leaf')], false, 'outer'),
+      folder('leaf', ['d'], false, 'deep')
+    ],
+    [p('a'), f('outer'), p('e')],
+    {}
+  )
+})()
+
+describe('folders in folders', () => {
+  const fdrag = (id: string): RailDrag => ({ kind: 'folder', id })
+  const pdrag = (id: string): RailDrag => ({ kind: 'project', id })
+
+  it('lists a folder inside the folder that files it, and not again at the top', () => {
+    expect(view(nested)).toEqual(['a', 'outer[b inner[c] deep[leaf[d]]]', 'e'])
+    expect(projectRows(nested).map((row) => row.id)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(folderOf(nested, 'c')).toBe('inner')
+    expect(folderOf(nested, 'a')).toBeNull()
+    expect(foldersIn(nested, null).map((x) => [x.folder.id, x.depth])).toEqual([
+      ['outer', 0],
+      ['inner', 1],
+      ['deep', 1],
+      ['leaf', 2]
+    ])
+    expect(placeOf(nested, 'folder', 'leaf')).toEqual({ folderId: 'deep', ids: ['leaf'], index: 0 })
+    expect(placeOf(nested, 'project', 'b')).toEqual({ folderId: 'outer', ids: ['b', 'inner', 'deep'], index: 0 })
+  })
+
+  it('lists a folder once even when the folders name each other in a loop', () => {
+    const fx = flatProject('a')
+    const looped = railRows(
+      [fx.project],
+      fx.repos,
+      [folder('one', [f('two')], false, 'two'), folder('two', [f('one'), 'a'], false, 'one')],
+      [],
+      {}
+    )
+    expect(view(looped)).toEqual(['one[two[a]]'])
+  })
+
+  it('places a project among the rows of a nested folder, folders counting as rows', () => {
+    // Over c, which is in inner, which is in outer: the innermost folder is what the pointer reports.
+    expect(dropTargetFor(pdrag('a'), nested, overProject('c', false, 'inner'))).toEqual(inside('inner', 0))
+    expect(dropTargetFor(pdrag('a'), nested, overFolder('inner', 'top'))).toEqual(inside('outer', 1))
+    expect(dropTargetFor(pdrag('a'), nested, overFolder('inner'))).toEqual(into('inner'))
+    expect(dropTargetFor(pdrag('e'), nested, overFolder('leaf'))).toEqual(into('leaf'))
+    expect(beforeIdAt(nested, inside('outer', 1))).toBe('inner')
+    expect(dropAction(pdrag('a'), nested, inside('outer', 1))).toEqual({
+      op: 'placeProject',
+      projectId: 'a',
+      folderId: 'outer',
+      beforeId: 'inner'
+    })
+  })
+
+  it("gets a project below an open folder that is last in its list by dropping on the list's own header", () => {
+    // deep is open and last in outer, so there is no row of outer below it to drop beside.
+    expect(dropTargetFor(pdrag('b'), nested, overFolder('outer'))).toEqual(inside('outer', 3))
+    expect(dropAction(pdrag('b'), nested, inside('outer', 3))).toMatchObject({ folderId: 'outer', beforeId: null })
+  })
+
+  it('moves a folder into, out of and between folders', () => {
+    expect(dropTargetFor(fdrag('inner'), nested, overFolder('deep'))).toEqual(into('deep'))
+    expect(dropTargetFor(fdrag('inner'), nested, overProject('a'))).toEqual(top(0))
+    expect(dropTargetFor(fdrag('leaf'), nested, overProject('b', false, 'outer'))).toEqual(inside('outer', 0))
+    expect(dropTargetFor(fdrag('leaf'), nested, nothing)).toEqual(top(3))
+
+    expect(dropAction(fdrag('inner'), nested, into('deep'))).toEqual({
+      op: 'placeRailFolder',
+      folderId: 'inner',
+      parentId: 'deep',
+      beforeId: null
+    })
+    expect(dropAction(fdrag('leaf'), nested, inside('outer', 0))).toEqual({
+      op: 'placeRailFolder',
+      folderId: 'leaf',
+      parentId: 'outer',
+      beforeId: 'b'
+    })
+  })
+
+  it('never puts a folder inside itself, at any depth', () => {
+    expect(dropTargetFor(fdrag('outer'), nested, overFolder('inner'))).toBeNull()
+    expect(dropTargetFor(fdrag('outer'), nested, overProject('c', false, 'inner'))).toBeNull()
+    expect(dropTargetFor(fdrag('deep'), nested, overFolder('leaf'))).toBeNull()
+    expect(dropTargetFor(fdrag('deep'), nested, overProject('d', true, 'leaf'))).toBeNull()
+    // And the action refuses it even if asked.
+    expect(dropAction(fdrag('outer'), nested, into('leaf'))).toBeNull()
+    expect(dropAction(fdrag('outer'), nested, inside('inner', 0))).toBeNull()
   })
 })
 
@@ -423,21 +588,20 @@ const grouped = (() => {
 })()
 
 const rdrag = (id: string): RailDrag => ({ kind: 'repo', id })
-type Zone = 'top' | 'middle' | 'bottom' | 'body'
-const onProject = (id: string, zone: Zone, inFolder?: string): RailOver => ({
+const onProject = (id: string, zone: OverZone, inFolder?: string): RailOver => ({
   repo: null,
   project: { id, zone, lowerHalf: zone === 'bottom' || zone === 'body' },
-  folder: inFolder ? { id: inFolder, lowerHalf: true, edge: null } : null
+  folder: inFolder ? { id: inFolder, zone: 'body' } : null
 })
 const onMember = (repoId: string, projectId: string, lowerHalf: boolean, inFolder?: string): RailOver => ({
   repo: { id: repoId, lowerHalf },
   project: { id: projectId, zone: 'body', lowerHalf: true },
-  folder: inFolder ? { id: inFolder, lowerHalf: true, edge: null } : null
+  folder: inFolder ? { id: inFolder, zone: 'body' } : null
 })
-const onFolder = (id: string, edge: 'top' | 'bottom' | null = null): RailOver => ({
+const onFolder = (id: string, zone: OverZone = 'middle'): RailOver => ({
   repo: null,
   project: null,
-  folder: { id, lowerHalf: edge === 'bottom', edge }
+  folder: { id, zone }
 })
 const join = (projectId: string): DropTarget => ({ kind: 'join', projectId })
 const repoSlot = (projectId: string, index: number): DropTarget => ({ kind: 'repoSlot', projectId, index })
@@ -463,17 +627,22 @@ describe('dropTargetFor: dragging a repo (spec §2.3, rows 1–10)', () => {
   })
 
   it('3: a flat row over its own project is nothing, whatever the zone', () => {
-    for (const zone of ['top', 'middle', 'bottom', 'body'] as Zone[]) {
+    for (const zone of ['top', 'middle', 'bottom', 'body'] as OverZone[]) {
       expect(dropTargetFor(rdrag('r-a'), grouped, onProject('a', zone))).toBeNull()
     }
   })
 
-  it("4: a member over its own project's header top detaches it to just above; elsewhere nothing", () => {
+  it("4: a member over its own project's header top detaches it to just above", () => {
     expect(dropTargetFor(rdrag('g2'), grouped, onProject('g', 'top'))).toEqual(top(1))
     expect(dropTargetFor(rdrag('h1'), grouped, onProject('h', 'top', 'team'))).toEqual(inside('team', 0))
-    for (const zone of ['middle', 'bottom', 'body'] as Zone[]) {
-      expect(dropTargetFor(rdrag('g2'), grouped, onProject('g', zone))).toBeNull()
-    }
+  })
+
+  it("4: the rest of its own header sends it to the end of the project's list; between its rows it stays", () => {
+    expect(dropTargetFor(rdrag('g2'), grouped, onProject('g', 'middle'))).toEqual(repoSlot('g', 3))
+    expect(dropTargetFor(rdrag('g2'), grouped, onProject('g', 'bottom'))).toEqual(repoSlot('g', 3))
+    expect(dropTargetFor(rdrag('g2'), grouped, onProject('g', 'body'))).toBeNull()
+    // Already last: nothing.
+    expect(dropTargetFor(rdrag('g3'), grouped, onProject('g', 'middle'))).toBeNull()
   })
 
   it('5: over the top of another project goes before it', () => {
@@ -511,11 +680,11 @@ describe('dropTargetFor: dragging a repo (spec §2.3, rows 1–10)', () => {
   })
 
   it("9: over a folder header follows the folder rule; a member may always go into its project's folder", () => {
-    expect(dropTargetFor(rdrag('r-a'), grouped, onFolder('team'))).toEqual({ kind: 'into', folderId: 'team' })
+    expect(dropTargetFor(rdrag('r-a'), grouped, onFolder('team'))).toEqual(into('team'))
     expect(dropTargetFor(rdrag('r-z'), grouped, onFolder('team', 'top'))).toEqual(top(2))
-    // Already in it, flat: nothing. A member of a filed group: detach into the same folder.
+    // Already last in it, flat: nothing. A member of a filed group: detach into the same folder.
     expect(dropTargetFor(rdrag('r-t'), grouped, onFolder('team'))).toBeNull()
-    expect(dropTargetFor(rdrag('h1'), grouped, onFolder('team'))).toEqual({ kind: 'into', folderId: 'team' })
+    expect(dropTargetFor(rdrag('h1'), grouped, onFolder('team'))).toEqual(into('team'))
   })
 
   it('10: over empty rail goes last', () => {
@@ -527,6 +696,213 @@ describe('dropTargetFor: dragging a repo (spec §2.3, rows 1–10)', () => {
 
   it('refuses a repo the rail does not draw, and the home (which is a header, not a row)', () => {
     expect(dropTargetFor(rdrag('nope'), grouped, onProject('g', 'middle'))).toBeNull()
+    expect(dropTargetFor(rdrag('h0'), grouped, onProject('g', 'middle'))).toBeNull()
+  })
+})
+
+/*
+ * Folders among a project's repos:
+ *
+ *   0  a                       flat (r-a)
+ *   1  hq {home|               group with a home
+ *        0  api
+ *        1  games [            a folder of hq's repos
+ *             0  ion
+ *             1  engines [ volt ]
+ *             2  keep
+ *           ]
+ *        2  sites [ ]          empty
+ *        3  web
+ *      }
+ *   2  duo {| d1 d2}           group, no home, two repos
+ */
+const filed = (() => {
+  const projects = [
+    project('a', ['r-a']),
+    project('hq', ['home', 'api', 'ion', 'volt', 'keep', 'web'], 'home'),
+    project('duo', ['d1', 'd2'])
+  ]
+  const repos = [
+    repo('r-a', 'a'),
+    ...['home', 'api', 'ion', 'volt', 'keep', 'web'].map((id) => repo(id, 'hq')),
+    repo('d1', 'duo'),
+    repo('d2', 'duo')
+  ]
+  const folders = [
+    repoFolder('games', 'hq', ['ion', f('engines'), 'keep']),
+    repoFolder('engines', 'hq', ['volt'], false, 'games'),
+    repoFolder('sites', 'hq')
+  ]
+  return railRows(projects, repos, folders, [p('a'), p('hq'), p('duo')], {}, {
+    // The home is listed like any repo, though it is drawn as the header.
+    hq: [r('home'), r('api'), f('games'), f('sites'), r('web')]
+  })
+})()
+
+/** Over a row inside one of hq's folders: the folder is the innermost block, inside hq's body. */
+const inHq = (over: Partial<RailOver>): RailOver => ({
+  repo: null,
+  folder: null,
+  ...over,
+  project: { id: 'hq', zone: 'body', lowerHalf: true }
+})
+
+describe("folders among a project's repos", () => {
+  const fdrag = (id: string): RailDrag => ({ kind: 'folder', id })
+
+  it("draws the project's folders under its header, the home never among them", () => {
+    expect(view(filed)).toEqual(['a', 'hq{home|api games[ion engines[volt] keep] sites[] web}', 'duo{|d1 d2}'])
+    const hq = projectRowById(filed, 'hq') as Extract<ProjectRow, { kind: 'group' }>
+    // The flat order reads top to bottom through the folders.
+    expect(hq.members.map((m) => m.id)).toEqual(['api', 'ion', 'volt', 'keep', 'web'])
+    expect(foldersIn(filed, 'hq').map((x) => [x.folder.id, x.depth])).toEqual([
+      ['games', 0],
+      ['engines', 1],
+      ['sites', 0]
+    ])
+    expect(foldersIn(filed, null)).toEqual([])
+    expect(placeOf(filed, 'repo', 'volt')).toEqual({ folderId: 'engines', ids: ['volt'], index: 0 })
+    expect(placeOf(filed, 'repo', 'api')).toEqual({ folderId: null, ids: ['api', 'games', 'sites', 'web'], index: 0 })
+    // A project's folders are its own: they are no row of the rail's lists.
+    expect(folderOf(filed, 'hq')).toBeNull()
+    expect(projectRowOfRepo(filed, 'volt')?.id).toBe('hq')
+  })
+
+  it("falls back to the project's repo order, folders first, for whatever its list leaves out", () => {
+    const projects = [project('hq', ['home', 'api', 'ion', 'web'], 'home')]
+    const repos = ['home', 'api', 'ion', 'web'].map((id) => repo(id, 'hq'))
+    const folders = [repoFolder('games', 'hq', ['ion', 'gone', r('home')]), folder('rail', ['hq'])]
+    // No list sent for hq at all, a repo id that names nothing, and the home filed in a folder.
+    expect(view(railRows(projects, repos, folders, [], {}))).toEqual(['rail[hq{home|games[ion] api web}]'])
+    // A folder of another project is not drawn in this one.
+    const stray = [repoFolder('theirs', 'other', ['api'])]
+    expect(view(railRows(projects, repos, stray, [], {}, { hq: [f('theirs'), r('web')] }))).toEqual([
+      'hq{home|web api ion}'
+    ])
+  })
+
+  it('a flat project draws as its repo, folders or not', () => {
+    const fx = flatProject('a')
+    expect(view(railRows([fx.project], fx.repos, [repoFolder('x', 'a', ['r-a'])], [], {}))).toEqual(['a'])
+  })
+
+  it('places a repo beside a member wherever that member is filed', () => {
+    const overIon = inHq({ repo: { id: 'ion', lowerHalf: false }, folder: { id: 'games', zone: 'body' } })
+    expect(dropTargetFor(rdrag('api'), filed, overIon)).toEqual(inside('games', 0))
+    expect(dropTargetFor(rdrag('r-a'), filed, overIon)).toEqual(inside('games', 0))
+    const underVolt = inHq({ repo: { id: 'volt', lowerHalf: true }, folder: { id: 'engines', zone: 'body' } })
+    expect(dropTargetFor(rdrag('web'), filed, underVolt)).toEqual(inside('engines', 1))
+    // At the top of the project's list a folder is a row like any other.
+    const underApi = inHq({ repo: { id: 'api', lowerHalf: true } })
+    expect(dropTargetFor(rdrag('keep'), filed, underApi)).toEqual(repoSlot('hq', 1))
+    expect(beforeIdAt(filed, repoSlot('hq', 1))).toBe('games')
+    // The two slots around itself still change nothing.
+    const underIon = inHq({ repo: { id: 'ion', lowerHalf: true }, folder: { id: 'games', zone: 'body' } })
+    expect(dropTargetFor(rdrag('ion'), filed, underIon)).toBeNull()
+  })
+
+  it("files a repo in one of the project's folders from the folder's header", () => {
+    expect(dropTargetFor(rdrag('api'), filed, inHq({ folder: { id: 'sites', zone: 'middle' } }))).toEqual(into('sites'))
+    expect(dropTargetFor(rdrag('api'), filed, inHq({ folder: { id: 'engines', zone: 'middle' } }))).toEqual(
+      into('engines')
+    )
+    // From another project, or a plain repo row, that is joining the project too.
+    expect(dropTargetFor(rdrag('d1'), filed, inHq({ folder: { id: 'games', zone: 'middle' } }))).toEqual(into('games'))
+    expect(dropTargetFor(rdrag('r-a'), filed, inHq({ folder: { id: 'sites', zone: 'body' } }))).toEqual(into('sites'))
+    // The edges of the header slip it in beside the folder instead.
+    expect(dropTargetFor(rdrag('web'), filed, inHq({ folder: { id: 'games', zone: 'top' } }))).toEqual(repoSlot('hq', 1))
+    expect(dropTargetFor(rdrag('api'), filed, inHq({ folder: { id: 'sites', zone: 'bottom' } }))).toEqual(
+      repoSlot('hq', 3)
+    )
+    expect(dropTargetFor(rdrag('web'), filed, inHq({ folder: { id: 'engines', zone: 'top' } }))).toEqual(
+      inside('games', 1)
+    )
+  })
+
+  it("takes a repo out of a folder: to the end of the project from its header, or of the folder from the folder's", () => {
+    expect(dropTargetFor(rdrag('ion'), filed, onProject('hq', 'middle'))).toEqual(repoSlot('hq', 4))
+    expect(dropTargetFor(rdrag('volt'), filed, onProject('hq', 'body'))).toEqual(repoSlot('hq', 4))
+    expect(dropTargetFor(rdrag('ion'), filed, inHq({ folder: { id: 'games', zone: 'middle' } }))).toEqual(
+      inside('games', 3)
+    )
+    // Between the rows of the list it is already in, it stays.
+    expect(dropTargetFor(rdrag('ion'), filed, inHq({ folder: { id: 'games', zone: 'body' } }))).toBeNull()
+    expect(dropTargetFor(rdrag('api'), filed, onProject('hq', 'body'))).toBeNull()
+    // Dragged above its project's header it still detaches, from however deep.
+    expect(dropTargetFor(rdrag('volt'), filed, onProject('hq', 'top'))).toEqual(top(1))
+  })
+
+  it("moves a folder of repos within its project's lists, and nowhere else", () => {
+    const overApi = inHq({ repo: { id: 'api', lowerHalf: false } })
+    expect(dropTargetFor(fdrag('sites'), filed, overApi)).toEqual(repoSlot('hq', 0))
+    expect(dropTargetFor(fdrag('sites'), filed, inHq({ folder: { id: 'games', zone: 'middle' } }))).toEqual(
+      into('games')
+    )
+    expect(dropTargetFor(fdrag('engines'), filed, onProject('hq', 'middle'))).toEqual(repoSlot('hq', 4))
+    expect(dropTargetFor(fdrag('engines'), filed, inHq({ folder: { id: 'sites', zone: 'middle' } }))).toEqual(
+      into('sites')
+    )
+    // Not into itself, not out of its project, not into the rail's lists.
+    expect(dropTargetFor(fdrag('games'), filed, inHq({ folder: { id: 'engines', zone: 'middle' } }))).toBeNull()
+    const overVolt = inHq({ repo: { id: 'volt', lowerHalf: false }, folder: { id: 'engines', zone: 'body' } })
+    expect(dropTargetFor(fdrag('games'), filed, overVolt)).toBeNull()
+    expect(dropTargetFor(fdrag('games'), filed, onProject('duo', 'middle'))).toBeNull()
+    expect(dropTargetFor(fdrag('games'), filed, onMember('d1', 'duo', false))).toBeNull()
+    expect(dropTargetFor(fdrag('games'), filed, onProject('a', 'top'))).toBeNull()
+    expect(dropTargetFor(fdrag('games'), filed, nothing)).toBeNull()
+    // Above its own project's header, and between rows of the list it is in: nothing.
+    expect(dropTargetFor(fdrag('games'), filed, onProject('hq', 'top'))).toBeNull()
+    expect(dropTargetFor(fdrag('games'), filed, onProject('hq', 'body'))).toBeNull()
+  })
+
+  it("treats a project's folders as part of the project when a project or a folder of projects is dragged", () => {
+    const overGames = inHq({ folder: { id: 'games', zone: 'middle' } })
+    expect(dropTargetFor({ kind: 'project', id: 'duo' }, filed, overGames)).toBeNull()
+    expect(dropTargetFor({ kind: 'project', id: 'a' }, filed, overGames)).toEqual(top(2))
+  })
+
+  it('turns those drops into moves inside the project', () => {
+    expect(dropAction(rdrag('api'), filed, into('sites'))).toEqual({
+      op: 'addRepoToProject',
+      projectId: 'hq',
+      repoId: 'api',
+      folderId: 'sites',
+      beforeId: null,
+      forms: false,
+      dissolves: null
+    })
+    expect(dropAction(rdrag('web'), filed, inside('games', 1))).toEqual({
+      op: 'addRepoToProject',
+      projectId: 'hq',
+      repoId: 'web',
+      folderId: 'games',
+      beforeId: 'engines',
+      forms: false,
+      dissolves: null
+    })
+    // Joining from a two-repo group with no home dissolves that group.
+    expect(dropAction(rdrag('d1'), filed, into('games'))).toMatchObject({
+      op: 'addRepoToProject',
+      projectId: 'hq',
+      folderId: 'games',
+      dissolves: 'duo'
+    })
+    expect(dropAction(fdrag('sites'), filed, repoSlot('hq', 0))).toEqual({
+      op: 'placeRailFolder',
+      folderId: 'sites',
+      parentId: null,
+      beforeId: 'api'
+    })
+    expect(dropAction(fdrag('engines'), filed, into('sites'))).toEqual({
+      op: 'placeRailFolder',
+      folderId: 'engines',
+      parentId: 'sites',
+      beforeId: null
+    })
+    // Never across kinds: a project into a folder of repos, or a folder of repos into the rail or another project.
+    expect(dropAction({ kind: 'project', id: 'a' }, filed, into('games'))).toBeNull()
+    expect(dropAction(fdrag('games'), filed, top(0))).toBeNull()
+    expect(dropAction(fdrag('games'), filed, repoSlot('duo', 0))).toBeNull()
   })
 })
 
@@ -540,7 +916,7 @@ describe('beforeIdAt', () => {
   })
 
   it('puts a project dropped into a folder, or a repo joining a project, at the end', () => {
-    expect(beforeIdAt(rows, { kind: 'into', folderId: 'work' })).toBeNull()
+    expect(beforeIdAt(rows, into('work'))).toBeNull()
     expect(beforeIdAt(grouped, join('g'))).toBeNull()
   })
 
@@ -557,12 +933,12 @@ describe('sameDropTarget', () => {
     expect(sameDropTarget(null, null)).toBe(true)
     expect(sameDropTarget(top(1), top(1))).toBe(true)
     expect(sameDropTarget(inside('a', 1), inside('a', 1))).toBe(true)
-    expect(sameDropTarget({ kind: 'into', folderId: 'a' }, { kind: 'into', folderId: 'a' })).toBe(true)
-    expect(sameDropTarget({ kind: 'into', folderId: 'a' }, { kind: 'into', folderId: 'b' })).toBe(false)
+    expect(sameDropTarget(into('a'), into('a'))).toBe(true)
+    expect(sameDropTarget(into('a'), into('b'))).toBe(false)
     expect(sameDropTarget(top(1), top(2))).toBe(false)
     expect(sameDropTarget(top(1), inside('a', 1))).toBe(false)
     expect(sameDropTarget(inside('a', 1), inside('b', 1))).toBe(false)
-    expect(sameDropTarget({ kind: 'into', folderId: 'a' }, inside('a', 0))).toBe(false)
+    expect(sameDropTarget(into('a'), inside('a', 0))).toBe(false)
     expect(sameDropTarget(top(0), null)).toBe(false)
   })
 
@@ -579,18 +955,27 @@ describe('sameDropTarget', () => {
 /* ---- dropAction (spec §2.4) ----------------------------------------------- */
 
 describe('dropAction', () => {
-  it('moves a folder along the top level, and nothing else', () => {
+  it('moves a folder to a slot or into another folder, and never into itself', () => {
     expect(dropAction({ kind: 'folder', id: 'team' }, grouped, top(0))).toEqual({
       op: 'placeRailFolder',
       folderId: 'team',
+      parentId: null,
       beforeId: 'a'
     })
-    expect(dropAction({ kind: 'folder', id: 'team' }, grouped, { kind: 'into', folderId: 'team' })).toBeNull()
+    expect(dropAction({ kind: 'folder', id: 'empty' }, rows, into('work'))).toEqual({
+      op: 'placeRailFolder',
+      folderId: 'empty',
+      parentId: 'work',
+      beforeId: null
+    })
+    expect(dropAction({ kind: 'folder', id: 'team' }, grouped, into('team'))).toBeNull()
+    expect(dropAction({ kind: 'folder', id: 'team' }, grouped, join('g'))).toBeNull()
+    expect(dropAction({ kind: 'folder', id: 'team' }, grouped, repoSlot('g', 0))).toBeNull()
   })
 
   it('places a project into a folder or a slot, and never joins it to another', () => {
     const drag: RailDrag = { kind: 'project', id: 'g' }
-    expect(dropAction(drag, grouped, { kind: 'into', folderId: 'team' })).toEqual({
+    expect(dropAction(drag, grouped, into('team'))).toEqual({
       op: 'placeProject',
       projectId: 'g',
       folderId: 'team',
@@ -613,7 +998,7 @@ describe('dropAction', () => {
       folderId: null,
       beforeId: 'duo'
     })
-    expect(dropAction(rdrag('r-a'), grouped, { kind: 'into', folderId: 'team' })).toEqual({
+    expect(dropAction(rdrag('r-a'), grouped, into('team'))).toEqual({
       op: 'placeProject',
       projectId: 'a',
       folderId: 'team',
@@ -629,7 +1014,7 @@ describe('dropAction', () => {
       beforeId: 'a',
       dissolves: null
     })
-    expect(dropAction(rdrag('d1'), grouped, { kind: 'into', folderId: 'team' })).toEqual({
+    expect(dropAction(rdrag('d1'), grouped, into('team'))).toEqual({
       op: 'detachRepo',
       repoId: 'd1',
       folderId: 'team',
@@ -645,7 +1030,8 @@ describe('dropAction', () => {
       op: 'addRepoToProject',
       projectId: 'g',
       repoId: 'r-a',
-      beforeRepoId: null,
+      folderId: null,
+      beforeId: null,
       forms: false,
       dissolves: null
     })
@@ -653,7 +1039,8 @@ describe('dropAction', () => {
       op: 'addRepoToProject',
       projectId: 'z',
       repoId: 'r-a',
-      beforeRepoId: null,
+      folderId: null,
+      beforeId: null,
       forms: true,
       dissolves: null
     })
@@ -665,7 +1052,8 @@ describe('dropAction', () => {
       op: 'addRepoToProject',
       projectId: 'g',
       repoId: 'r-a',
-      beforeRepoId: 'g2',
+      folderId: null,
+      beforeId: 'g2',
       forms: false,
       dissolves: null
     })
@@ -673,15 +1061,17 @@ describe('dropAction', () => {
       op: 'addRepoToProject',
       projectId: 'duo',
       repoId: 'd2',
-      beforeRepoId: 'd1',
+      folderId: null,
+      beforeId: 'd1',
       forms: false,
       dissolves: null
     })
-    expect(dropAction(rdrag('d1'), grouped, repoSlot('g', 3))).toMatchObject({ beforeRepoId: null, dissolves: 'duo' })
+    expect(dropAction(rdrag('d1'), grouped, repoSlot('g', 3))).toMatchObject({ beforeId: null, dissolves: 'duo' })
   })
 
-  it('refuses a repo the rail does not draw', () => {
+  it('refuses a repo the rail does not draw, and a folder it does not have', () => {
     expect(dropAction(rdrag('nope'), grouped, top(0))).toBeNull()
     expect(dropAction(rdrag('r-a'), grouped, join('nowhere'))).toBeNull()
+    expect(dropAction(rdrag('r-a'), grouped, into('nowhere'))).toBeNull()
   })
 })

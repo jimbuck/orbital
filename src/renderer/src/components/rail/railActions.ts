@@ -1,7 +1,7 @@
-import { isPtyTabType, type Worktree } from '@shared/types'
+import { isPtyTabType, type RailFolderSpot, type Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
-import type { RailAction } from './folders'
+import { railRows, type RailAction, type RailRow } from './folders'
 
 /**
  * Carrying out what a drop or a rail menu decided: the one main call it comes
@@ -9,6 +9,28 @@ import type { RailAction } from './folders'
  * region says afterwards. Drag and menu share all three, so the two routes to
  * the same change cannot drift apart.
  */
+
+/**
+ * The rail's rows as the store has them now, for a menu that has to work out
+ * where a row sits. (The Rail keeps its own, memoized; this is the same thing
+ * read once.)
+ */
+export function currentRailRows(): RailRow[] {
+  const s = useStore.getState()
+  return railRows(s.projects, s.repos, s.railFolders, s.railItems, s.expanded, s.railProjectItems)
+}
+
+/**
+ * Make a folder at `spot` (see RailFolderSpot; none = the top of the rail) and
+ * open it straight into its name, so it is never left called "New Folder".
+ */
+export function newRailFolder(spot?: RailFolderSpot): void {
+  fireAndForget(
+    window.orbital.createRailFolder('New Folder', spot).then((folder) => {
+      useStore.getState().setRenamingFolder(folder.id)
+    })
+  )
+}
 
 /** Open terminal and agent tabs in a worktree: what closes with it. */
 export function ptyCount(worktree: Worktree | null | undefined): number {
@@ -92,7 +114,7 @@ export function runRailAction(action: RailAction): void {
   }
   switch (action.op) {
     case 'placeRailFolder':
-      fireAndForget(window.orbital.placeRailFolder(action.folderId, action.beforeId))
+      fireAndForget(window.orbital.placeRailFolder(action.folderId, action.parentId, action.beforeId))
       return
     case 'placeProject':
       fireAndForget(window.orbital.placeProject(action.projectId, action.folderId, action.beforeId))
@@ -102,7 +124,7 @@ export function runRailAction(action: RailAction): void {
       return
     case 'addRepoToProject':
       fireAndForget(
-        window.orbital.addRepoToProject(action.projectId, action.repoId, action.beforeRepoId).then(() => {
+        window.orbital.addRepoToProject(action.projectId, action.repoId, action.beforeId, action.folderId).then(() => {
           if (action.forms) {
             setExpanded(action.projectId, true)
             setRenamingProject(action.projectId)

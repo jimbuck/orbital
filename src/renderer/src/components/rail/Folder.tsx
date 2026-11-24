@@ -1,69 +1,86 @@
-import { useState, type JSX, type KeyboardEvent } from 'react'
-import { Folder as FolderClosed, FolderOpen, Pencil, Trash2 } from 'lucide-react'
+import { useMemo, useState, type JSX, type KeyboardEvent } from 'react'
+import { Folder as FolderClosed, FolderOpen, FolderPlus, Pencil, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { aggregateStatus, type RailFolder } from '@shared/types'
+import { aggregateStatus, type Project } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { worktreeStatusLabel } from '@renderer/lib/status'
 import { fireAndForget } from '@renderer/lib/bridge'
-import { GroupChevron, NeedsYouPill } from './Repo'
+import Repo, { GroupChevron, NeedsYouPill } from './Repo'
 import ProjectItem from './ProjectItem'
 import RenameField from './RenameField'
 import { SlotMarker } from './SlotMarker'
+import { CHILD_LIST } from './treeLines'
 import { ContextMenu, MenuConfirm, MenuItem, clampMenuPos, type MenuPos } from './menu'
-import { beginRailDrag, type DropTarget, type ProjectRow } from './folders'
-import { repoCount } from './railActions'
+import { beginRailDrag, leafRows, type DropTarget, type FolderRow, type ProjectRow, type RepoRow } from './folders'
+import { newRailFolder, repoCount } from './railActions'
 
 export { SlotMarker }
 
 /**
- * A folder in the rail: a named, collapsible group of projects.
+ * A folder in the rail: a named, collapsible group of rows.
  *
- * It is an arrangement of the panel and nothing else. The projects inside are
- * the same rows the loose list renders, and nothing about them (paths,
+ * There are two kinds, drawn the same way. A folder of projects sits in the
+ * rail's own list and holds projects; a folder of repos sits under a
+ * project's header (`project` is that project) and holds its member repos.
+ * Either holds more folders of its own kind.
+ *
+ * It is an arrangement of the panel and nothing else. The rows inside are the
+ * same rows the list outside renders, and nothing about them (paths,
  * worktrees, agent, settings) depends on which folder they sit in.
  *
  * The whole header toggles the folder, since there is nothing to select here
  * the way a repo header selects its root Worktree. Collapsed, the chevron
  * and the count badge stand in for the rows that are hidden, in the same status
  * vocabulary a repo's chevron uses for its hidden Worktrees. Right-click
- * renames or deletes it; deleting only ungroups. The header drags to move the
- * folder along the rail. The Rail owns every drop: it passes `dropInto` while
- * a dragged project would be filed here, `dropSlot` while one would be
- * inserted at a place among the projects already inside, and `dropTarget` for
- * the projects inside to find their own part of.
+ * renames it, makes a folder inside it, or deletes it; deleting only ungroups.
+ * The header drags to move the folder. The Rail owns every drop: `dropTarget`
+ * is its current one, which this folder reads its own part of (a row would be
+ * filed here, or inserted at a place among the rows already inside) and hands
+ * on to the rows inside.
  */
 export default function Folder({
-  folder,
-  projects,
-  dropInto,
-  dropSlot,
-  dropTarget = null,
-  renaming,
-  onRenaming
+  row,
+  project,
+  dropTarget = null
 }: {
-  folder: RailFolder
-  projects: ProjectRow[]
-  /** A dragged project would land in this folder if dropped now. */
-  dropInto: boolean
-  /** The index among `projects` a dragged one would be inserted before (its length = last), or null. */
-  dropSlot: number | null
-  /** The Rail's current drop target, for the projects inside. */
+  row: FolderRow<ProjectRow> | FolderRow<RepoRow>
+  /** The project whose repos this folder arranges; absent for a folder of projects. */
+  project?: Project
+  /** The Rail's current drop target. */
   dropTarget?: DropTarget | null
-  /** Controlled by the Rail, so a folder it has just created can open straight into its name. */
-  renaming: boolean
-  onRenaming: (renaming: boolean) => void
 }): JSX.Element {
+  const { folder } = row
+  // What the folder holds at any depth: project ids for a folder of projects,
+  // repo ids for a folder of repos.
+  const held = useMemo(() => {
+    const leaves = leafRows<ProjectRow | RepoRow>(row.items)
+    const repoTotal = leaves.reduce(
+      (n, leaf) => n + (leaf.kind === 'group' ? leaf.members.length + (leaf.home ? 1 : 0) : 1),
+      0
+    )
+    return { ids: new Set(leaves.map((leaf) => leaf.id)), repoTotal }
+  }, [row])
   // Every Worktree under the folder, project sessions and repo roots
   // included: collapsed, none of their own dots are on screen, so this is the
   // only place they report.
   const statuses = useStore(
-    useShallow((s) => s.worktrees.filter((w) => folder.projectIds.includes(w.projectId)).map((w) => w.status))
+    useShallow((s) =>
+      s.worktrees
+        .filter((w) => (project ? !!w.repoId && held.ids.has(w.repoId) : held.ids.has(w.projectId)))
+        .map((w) => w.status)
+    )
   )
-  const repoTotal = useStore((s) => s.repos.filter((r) => folder.projectIds.includes(r.projectId)).length)
-  const holdsActive = useStore((s) => !!s.activeProjectId && folder.projectIds.includes(s.activeProjectId))
+  const holdsActive = useStore((s) => {
+    const active = project ? s.activeRepoId : s.activeProjectId
+    return !!active && held.ids.has(active)
+  })
+  const renaming = useStore((s) => s.renamingFolderId === folder.id)
+  const setRenamingFolder = useStore((s) => s.setRenamingFolder)
   const expanded = !folder.collapsed
   const status = aggregateStatus(statuses)
   const needsAttention = statuses.filter((s) => s === 'needs_attention').length
+  const dropInto = dropTarget?.kind === 'into' && dropTarget.folderId === folder.id
+  const dropSlot = dropTarget?.kind === 'slot' && dropTarget.folderId === folder.id ? dropTarget.index : null
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -76,7 +93,7 @@ export default function Folder({
     e.preventDefault()
     e.stopPropagation()
     setConfirming(false)
-    setMenu(clampMenuPos(e, 210, 120))
+    setMenu(clampMenuPos(e, 210, 150))
   }
 
   const setCollapsed = (collapsed: boolean): void => {
@@ -85,7 +102,7 @@ export default function Folder({
   const toggle = (): void => setCollapsed(expanded)
   const commitRename = (draft: string): void => {
     const name = draft.trim()
-    onRenaming(false)
+    setRenamingFolder(null)
     if (name && name !== folder.name) fireAndForget(window.orbital.renameRailFolder(folder.id, name))
   }
   const remove = (): void => {
@@ -105,8 +122,8 @@ export default function Folder({
   }
 
   const Icon = expanded ? FolderOpen : FolderClosed
-  const count = repoCount(repoTotal)
-  const holds = projects.length > 0 || repoTotal > 0
+  const count = repoCount(held.repoTotal)
+  const holds = row.items.length > 0
 
   return (
     // The data attribute is how the Rail tells which folder a drag is over. The
@@ -144,7 +161,7 @@ export default function Folder({
                 label="Folder name"
                 className="text-[12px] font-semibold"
                 onCommit={commitRename}
-                onCancel={() => onRenaming(false)}
+                onCancel={() => setRenamingFolder(null)}
               />
             ) : (
               <div
@@ -162,26 +179,32 @@ export default function Folder({
           {!renaming && !expanded && needsAttention > 0 && <NeedsYouPill count={needsAttention} />}
           {!renaming && (
             <span title={count} className="flex-none font-mono text-[10px] text-faint">
-              {repoTotal}
+              {held.repoTotal}
             </span>
           )}
         </div>
 
         {expanded && (
-          <div className="ml-[15px] border-l border-line-2 pl-[5px] pt-[2px]">
-            {projects.length > 0 ? (
+          <div className={CHILD_LIST}>
+            {holds ? (
               <>
-                {projects.map((row, i) => (
-                  <div key={row.id}>
+                {row.items.map((item, i) => (
+                  <div key={item.id}>
                     {dropSlot === i && <SlotMarker />}
-                    <ProjectItem row={row} dropTarget={dropTarget} />
+                    {item.kind === 'folder' ? (
+                      <Folder row={item} project={project} dropTarget={dropTarget} />
+                    ) : item.kind === 'repo' ? (
+                      <Repo repo={item.repo} project={project} variant="member" />
+                    ) : (
+                      <ProjectItem row={item} dropTarget={dropTarget} />
+                    )}
                   </div>
                 ))}
-                {dropSlot === projects.length && <SlotMarker />}
+                {dropSlot === row.items.length && <SlotMarker />}
               </>
             ) : (
               <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">
-                Empty. Drag a repo or project here.
+                {project ? 'Empty. Drag a repo here.' : 'Empty. Drag a repo or project here.'}
               </div>
             )}
           </div>
@@ -196,7 +219,16 @@ export default function Folder({
                 icon={<Pencil size={13} strokeWidth={1.5} />}
                 label="Rename"
                 onClick={() => {
-                  onRenaming(true)
+                  setRenamingFolder(folder.id)
+                  closeMenu()
+                }}
+              />
+              <MenuItem
+                icon={<FolderPlus size={13} strokeWidth={1.5} />}
+                label="New Folder Inside"
+                onClick={() => {
+                  // Main opens this folder, so the new one is on screen to be named.
+                  newRailFolder({ parentId: folder.id })
                   closeMenu()
                 }}
               />
@@ -212,7 +244,7 @@ export default function Folder({
           ) : (
             <MenuConfirm
               message={`Delete the folder "${folder.name}"?`}
-              hint="Everything in it stays in Orbital, at the top level. Nothing on disk changes."
+              hint="Everything in it stays in Orbital, where the folder was. Nothing on disk changes."
               confirmLabel="Delete Folder"
               danger={false}
               onConfirm={remove}

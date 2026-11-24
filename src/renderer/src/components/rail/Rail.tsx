@@ -2,7 +2,6 @@ import { useMemo, useState, type DragEvent, type JSX } from 'react'
 import { FolderPlus, Plus } from 'lucide-react'
 import { useStore } from '@renderer/store'
 import { usePanelWidth } from '@renderer/lib/usePanelWidth'
-import { fireAndForget } from '@renderer/lib/bridge'
 import PanelResizeHandle from '../PanelResizeHandle'
 import { CollapsedPane, PaneCollapseTab } from '../PaneCollapse'
 import Folder from './Folder'
@@ -18,22 +17,23 @@ import {
   railRows,
   sameDropTarget,
   type DropTarget,
+  type OverZone,
   type RailAction,
   type RailOver
 } from './folders'
-import { dissolveConfirm, runRailAction, type DissolveConfirm } from './railActions'
+import { dissolveConfirm, newRailFolder, runRailAction, type DissolveConfirm } from './railActions'
 
 const HEADER_BUTTON =
   'flex size-6 flex-none items-center justify-center rounded-[7px] border border-line-2 text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-accent/60'
 
 /**
- * What the pointer of a drag is over: the member repo, the project and the
- * folder it is inside of, each with where on its header row the pointer sits.
- * The header (the first row of the block) is what is measured, not the whole
- * block, so an open project's rows and an open folder's projects all count as
- * "below". A project's header is split in three (top quarter, middle half,
- * bottom quarter), since its middle is where a dragged repo joins it; below
- * the header is its body.
+ * What the pointer of a drag is over: the innermost member repo, project and
+ * folder around it, each with where on its header row the pointer sits. The
+ * header (the first row of the block) is what is measured, not the whole
+ * block, so an open project's rows and an open folder's rows all count as
+ * its body. A header is split in three (top quarter, middle half, bottom
+ * quarter): the edges are where a row is slipped in beside the block, the
+ * middle is where it goes into it.
  */
 function railOverAt(e: DragEvent): RailOver {
   const target = e.target as HTMLElement
@@ -42,26 +42,20 @@ function railOverAt(e: DragEvent): RailOver {
     const box = header?.getBoundingClientRect()
     return !!box && y > box.top + box.height / 2
   }
+  const zoneOn = (header: Element | null | undefined): OverZone => {
+    if (!header?.contains(target)) return 'body'
+    const box = header.getBoundingClientRect()
+    const band = box.height / 4
+    return y < box.top + band ? 'top' : y > box.bottom - band ? 'bottom' : 'middle'
+  }
 
   const repoEl = target.closest<HTMLElement>('[data-repo-id]')
   const projectEl = target.closest<HTMLElement>('[data-project-id]')
   const projectHeader = projectEl?.firstElementChild
-  let zone: 'top' | 'middle' | 'bottom' | 'body' = 'body'
-  if (projectHeader?.contains(target)) {
-    const box = projectHeader.getBoundingClientRect()
-    const band = box.height / 4
-    zone = y < box.top + band ? 'top' : y > box.bottom - band ? 'bottom' : 'middle'
-  }
-
+  const zone = zoneOn(projectHeader)
+  // Folders nest, and a folder's own header is the first one inside it.
   const folderEl = target.closest<HTMLElement>('[data-folder-id]')
   const folderHeader = folderEl?.querySelector('[data-folder-header]')
-  const box = folderHeader?.getBoundingClientRect()
-  let edge: 'top' | 'bottom' | null = null
-  if (box) {
-    const band = box.height / 4
-    if (y < box.top + band) edge = 'top'
-    else if (y > box.bottom - band && y <= box.bottom) edge = 'bottom'
-  }
 
   return {
     repo: repoEl ? { id: repoEl.dataset.repoId ?? '', lowerHalf: below(repoEl.firstElementChild) } : null,
@@ -72,7 +66,7 @@ function railOverAt(e: DragEvent): RailOver {
           zone
         }
       : null,
-    folder: folderEl ? { id: folderEl.dataset.folderId ?? '', lowerHalf: below(folderHeader), edge } : null
+    folder: folderEl ? { id: folderEl.dataset.folderId ?? '', zone: zoneOn(folderHeader) } : null
   }
 }
 
@@ -83,10 +77,11 @@ function railOverAt(e: DragEvent): RailOver {
  * What the rail arranges is projects: a one-repo project with no home is drawn
  * as its repo's row, anything else as a group (see ProjectGroup). Dragging a
  * repo onto another project's row adds it there, and dragging it out of a
- * group gives it a project of its own. Projects can be filed in folders, and
- * the rail's order is the user's: a folder sits anywhere among the loose
- * projects, and projects are ordered by hand both at the top level and inside
- * a folder. The rail is also the one drop zone for its own drags. What a drop
+ * group gives it a project of its own. Projects can be filed in folders, a
+ * group's repos in folders of its own, and folders in folders. The rail's
+ * order is the user's: a folder sits anywhere among the rows beside it, and
+ * every list is ordered by hand. The rail is also the one drop zone for its
+ * own drags. What a drop
  * would do is decided by `dropTargetFor` and `dropAction`; this component turns
  * the pointer into their inputs and paints the answer.
  */
@@ -95,6 +90,7 @@ export default function Rail(): JSX.Element {
   const projects = useStore((s) => s.projects)
   const folders = useStore((s) => s.railFolders)
   const rail = useStore((s) => s.railItems)
+  const projectItems = useStore((s) => s.railProjectItems)
   const expanded = useStore((s) => s.expanded)
   const railMessage = useStore((s) => s.railMessage)
   const openModal = useStore((s) => s.openModal)
@@ -106,13 +102,10 @@ export default function Rail(): JSX.Element {
     handleEdge: 'right'
   })
   const rows = useMemo(
-    () => railRows(projects, repos, folders, rail, expanded),
-    [projects, repos, folders, rail, expanded]
+    () => railRows(projects, repos, folders, rail, expanded, projectItems),
+    [projects, repos, folders, rail, expanded, projectItems]
   )
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
-  // The folder whose name is being edited. Held here, not in the folder, so
-  // that one created from the header button opens straight into its name.
-  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
   // A drop waiting on its confirm: it would close a folder session that has
   // terminals open. Asked at the drop point, like a menu.
   const [pendingDrop, setPendingDrop] = useState<{
@@ -122,10 +115,6 @@ export default function Rail(): JSX.Element {
   } | null>(null)
 
   if (collapsed) return <CollapsedPane edge="right" label="projects panel" onExpand={toggleCollapsed} />
-
-  const newFolder = (): void => {
-    fireAndForget(window.orbital.createRailFolder('New Folder').then((folder) => setRenamingFolderId(folder.id)))
-  }
 
   const targetAt = (e: DragEvent): DropTarget | null => {
     const drag = currentRailDrag()
@@ -170,10 +159,8 @@ export default function Rail(): JSX.Element {
     runRailAction(action)
   }
 
-  // The top-level slot a drop would open, and the slot inside one folder.
+  // The top-level slot a drop would open. A folder or a group finds its own in `dropTarget`.
   const topSlot = dropTarget?.kind === 'slot' && dropTarget.folderId === null ? dropTarget.index : -1
-  const slotIn = (folderId: string): number | null =>
-    dropTarget?.kind === 'slot' && dropTarget.folderId === folderId ? dropTarget.index : null
 
   return (
     <aside style={{ width }} className="relative flex flex-none flex-col border-r border-line bg-rail">
@@ -189,7 +176,7 @@ export default function Rail(): JSX.Element {
             type="button"
             aria-label="New folder"
             title="New folder"
-            onClick={newFolder}
+            onClick={() => newRailFolder()}
             className={HEADER_BUTTON}
           >
             <FolderPlus size={14} strokeWidth={1.5} />
@@ -219,15 +206,7 @@ export default function Rail(): JSX.Element {
           <div key={row.id}>
             {topSlot === i && <SlotMarker />}
             {row.kind === 'folder' ? (
-              <Folder
-                folder={row.folder}
-                projects={row.projects}
-                dropInto={dropTarget?.kind === 'into' && dropTarget.folderId === row.id}
-                dropSlot={slotIn(row.id)}
-                dropTarget={dropTarget}
-                renaming={renamingFolderId === row.id}
-                onRenaming={(renaming) => setRenamingFolderId(renaming ? row.id : null)}
-              />
+              <Folder row={row} dropTarget={dropTarget} />
             ) : (
               <ProjectItem row={row} dropTarget={dropTarget} />
             )}

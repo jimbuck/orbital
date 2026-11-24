@@ -36,6 +36,30 @@ as that login. Orbital acts as the chosen account for that dialog only, by
 handing `gh` the account's token for each call, so it never runs
 `gh auth switch` and your terminals keep whichever account they had.
 
+## Folders
+
+The rail can be arranged into folders, and they are for the eye only: a folder
+changes nothing about a repo or a project, where it is on disk, its worktrees
+or its settings.
+
+- **Folders of projects** sit in the rail's own list. Make one with the
+  folder button at the top of the rail, or from a row's **Move to Folder**.
+- **Folders of repos** sit under a project's header and hold that project's
+  repos, which is how a home repo with many repos under it stays readable.
+  Right-click the project and choose **New Folder**, or use **Move to Folder**
+  on one of its repos.
+
+Either kind nests: right-click a folder and choose **New Folder Inside**, or
+drag one folder onto another. Drag a row onto a folder's header to file it
+there, or between two rows to place it; dropping on a folder (or a project's
+header) the row is already in sends it to the end of that list. Deleting a
+folder leaves everything that was in it where the folder was.
+
+Under a project with a home repo, the home repo's own worktrees are listed
+first, under **Worktrees**, each marked with a branch. The project's repos
+follow under **Repos**. Agents can read and rearrange the same folders with
+[`orbital folder`](/orbital/reference/cli/#folders).
+
 ## Worktrees
 
 A **worktree** is a working surface bound to one working directory:

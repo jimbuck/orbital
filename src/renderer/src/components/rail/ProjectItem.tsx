@@ -15,8 +15,7 @@ export default function ProjectItem({
   row: ProjectRow
   dropTarget: DropTarget | null
 }): JSX.Element {
+  if (row.kind === 'group') return <ProjectGroup row={row} dropTarget={dropTarget} />
   const joinTarget = dropTarget?.kind === 'join' && dropTarget.projectId === row.id
-  if (row.kind === 'flat') return <Repo variant="flat" repo={row.repo} project={row.project} joinTarget={joinTarget} />
-  const repoSlot = dropTarget?.kind === 'repoSlot' && dropTarget.projectId === row.id ? dropTarget.index : null
-  return <ProjectGroup row={row} joinTarget={joinTarget} repoSlot={repoSlot} />
+  return <Repo variant="flat" repo={row.repo} project={row.project} joinTarget={joinTarget} />
 }

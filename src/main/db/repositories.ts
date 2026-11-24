@@ -4,6 +4,7 @@ import {
   type Repo,
   type Project,
   type RailFolder,
+  type RailFolderSpot,
   type RailItem,
   type Worktree,
   type Pane,
@@ -340,7 +341,9 @@ function memberIds(pid: string): string[] {
 /**
  * Record `repoIds` as the project's repos, in that order (moving any that were
  * elsewhere). A repo that moves takes the tasks filed under it along; its
- * old project keeps its untagged ones.
+ * old project keeps its untagged ones. Called only through {@link writeScope},
+ * which is what keeps this order and the rail's arrangement of the project the
+ * same thing.
  */
 function writeMembers(pid: string, repoIds: string[]): void {
   const set = getDb().prepare('UPDATE repos SET project_id = ?, project_position = ? WHERE id = ?')
@@ -372,11 +375,16 @@ function mapProject(r: ProjectRow, repoIds: string[]): Project {
   }
 }
 
-/** Take a project's name and root from its one repo (the DEMOTE rule). */
+/**
+ * Take a project's name and root from its one repo (the DEMOTE rule). A plain
+ * repo row has no list of repos to arrange, so the folders that arranged it
+ * go too.
+ */
 function demote(pid: string, rid: string): void {
   const repo = repoRow(rid)
   if (!repo) return
   getDb().prepare('UPDATE projects SET name = ?, root_path = ? WHERE id = ?').run(repo.name, repo.repo_path, pid)
+  getDb().prepare('DELETE FROM rail_folders WHERE project_id = ?').run(pid)
 }
 
 /**
@@ -457,7 +465,11 @@ export const projects = {
       const moving = (input.repoIds ?? [])
         .map((rid) => repoRow(rid))
         .filter((r): r is RepoRow => !!r && r.workspace_id === workspaceId)
-      writeMembers(pid, moving.map((r) => r.id))
+      writeScope({
+        projectId: pid,
+        top: moving.map((r): RailItem => ({ kind: 'repo', id: r.id })),
+        inside: new Map()
+      })
       for (const r of moving) {
         if (!r.project_id) continue
         dropHome(r.project_id, r.id)
@@ -504,22 +516,28 @@ export const projects = {
     getDb().prepare('DELETE FROM projects WHERE id = ?').run(pid)
   },
   /**
-   * Move a repo into `pid`, just before `beforeRepoId` among its repos (last
-   * when null or not there). The same project reorders. From another project,
-   * the repo stops being that project's home if it was, the project it left
-   * is deleted or demoted, and `pid` is promoted if it was flat (see the
-   * rules above). Repos and projects from different workspaces never mix.
+   * Move a repo into `pid`: into its folder `folderId` (null = the top of the
+   * project's repos), just before the row `beforeId` of that list (a repo or
+   * a folder; last when null or not there). The same project rearranges. From
+   * another project, the repo stops being that project's home if it was, the
+   * project it left is deleted or demoted, and `pid` is promoted if it was
+   * flat (see the rules above). Repos and projects from different workspaces
+   * never mix, and a folder that is not one of `pid`'s own makes the call do
+   * nothing.
    */
-  addRepo(pid: string, rid: string, beforeRepoId: string | null): void {
-    if (beforeRepoId === rid) return
+  addRepo(pid: string, rid: string, beforeId: string | null, folderId: string | null = null): void {
+    if (beforeId === rid) return
     writeTx(() => {
       const repo = repoRow(rid)
       const target = projectRow(pid)
       if (!repo || !target || repo.workspace_id !== target.workspace_id) return
       const before = memberIds(pid)
-      const list = before.filter((x) => x !== rid)
-      insertBefore(list, rid, (x) => x === beforeRepoId)
-      writeMembers(pid, list)
+      const scope = scopeOf(readRailLayout(target.workspace_id), pid)
+      const list = listIn(scope, folderId)
+      if (!list) return
+      take(scope, rid)
+      insertBefore(list, { kind: 'repo', id: rid }, (item) => item.id === beforeId)
+      writeScope(scope)
       const source = repo.project_id
       if (source === pid) return
       if (source) {
@@ -546,7 +564,7 @@ export const projects = {
         pid = source.id
       } else {
         pid = insertProject(repo.workspace_id, repo.name, repo.repo_path)
-        writeMembers(pid, [rid])
+        writeScope({ projectId: pid, top: [{ kind: 'repo', id: rid }], inside: new Map() })
         if (source) {
           dropHome(source.id, rid)
           settleAfterLeave(source.id, pid)
@@ -566,7 +584,7 @@ export const projects = {
       if (!projectRow(pid)) return
       const members = memberIds(pid)
       getDb().prepare('UPDATE projects SET home_repo_id = NULL WHERE id = ?').run(pid)
-      const folderId = readRailLayout().folders.find((f) => f.projectIds.includes(pid))?.id ?? null
+      const folderId = readRailLayout().folders.find((f) => f.items.some((item) => item.id === pid))?.id ?? null
       for (const rid of members.slice(0, -1)) projects.detachRepo(rid, folderId, pid)
       if (members.length === 1) demote(pid, members[0])
     })
@@ -574,34 +592,58 @@ export const projects = {
 }
 
 /* ============================================================================
- * Rail folders and the rail's order (scoped to the active workspace)
+ * Rail folders and the rail's arrangement (scoped to the active workspace)
  *
- * Nothing here writes to `projects` or `repos`. A folder is a row of its own,
- * and where a project sits (which folder, how far down) is a row in
- * `rail_positions`, so filing, reordering and unfiling a project leave the
- * project exactly as it was.
+ * The rail orders its rows by hand, in lists. There are two kinds of list:
  *
- * The top level is one order shared by folders (`rail_folders.position`)
- * and loose projects (their `rail_positions.position`). Every write
- * renumbers the whole list it touched, so the two never collide. A project
- * that has never been arranged has no row and is listed last, oldest first.
+ *  - the rail's own: the top level and every folder of projects. Their rows
+ *    are projects and folders of projects.
+ *  - a project's: the top of its repos and every folder among them. Their
+ *    rows are that project's repos and its folders.
+ *
+ * A folder belongs to one kind for good (`rail_folders.project_id`: NULL, or
+ * the project) and nests only in folders of the same kind and project.
+ *
+ * Where a row sits is a row of its own: a folder's is its `parent_id` and
+ * `position`, a project's is in `rail_positions`, a repo's in
+ * `rail_repo_positions`. So filing, reordering and unfiling leave projects
+ * and repos as they were, with one exception that predates folders: a
+ * project's repos have a flat hand order (`repos.project_position`, which is
+ * `Project.repoIds`), and it is kept equal to the arrangement read top to
+ * bottom. Without folders that is the arrangement.
+ *
+ * Every write renumbers the whole of the lists it touched, so rows of
+ * different kinds sharing a list never collide. A row that has never been
+ * arranged has no position and is listed last in its top-level list, oldest
+ * first.
  * ========================================================================== */
 
 interface RailLayout {
-  /** Folders in top-level order, each with its projects in order. */
+  /** Every folder of the workspace, of either kind, with what is filed in it. */
   folders: RailFolder[]
-  /** The top level: folders and loose projects, interleaved. */
+  /** The rail's top level: folders of projects and loose projects, interleaved. */
   rail: RailItem[]
+  /** Each project's top-level list: its folders and its repos in none (the home repo included). */
+  members: Map<string, RailItem[]>
 }
 
-function readRailLayout(): RailLayout {
+function readRailLayout(workspaceId = requireWorkspaceId()): RailLayout {
   const db = getDb()
-  const workspaceId = requireWorkspaceId()
   const folderRows = db
-    .prepare('SELECT * FROM rail_folders WHERE workspace_id = ? ORDER BY position, created_at, id')
-    .all(workspaceId) as Array<{ id: string; name: string; collapsed: number; position: number }>
-  // Arranged projects first, by position; the rest (no row) after, oldest
-  // first, with rowid settling a tie the way insertion order would.
+    .prepare(
+      `SELECT id, name, collapsed, position, parent_id, project_id FROM rail_folders
+       WHERE workspace_id = ? ORDER BY position, created_at, id`
+    )
+    .all(workspaceId) as Array<{
+    id: string
+    name: string
+    collapsed: number
+    position: number
+    parent_id: string | null
+    project_id: string | null
+  }>
+  // Arranged rows first, by position; the rest (no row) after, oldest first,
+  // with rowid settling a tie the way insertion order would.
   const projectRows = db
     .prepare(
       `SELECT p.id, s.folder_id, s.position FROM projects p
@@ -609,53 +651,176 @@ function readRailLayout(): RailLayout {
        WHERE p.workspace_id = ? ORDER BY s.position IS NULL, s.position, p.created_at, p.rowid`
     )
     .all(workspaceId) as Array<{ id: string; folder_id: string | null; position: number | null }>
+  const repoRows = db
+    .prepare(
+      `SELECT r.id, r.project_id, s.folder_id, s.position FROM repos r
+       LEFT JOIN rail_repo_positions s ON s.repo_id = r.id
+       WHERE r.workspace_id = ? AND r.project_id IS NOT NULL
+       ORDER BY s.position IS NULL, s.position, r.project_position IS NULL, r.project_position, r.added_at, r.rowid`
+    )
+    .all(workspaceId) as Array<{ id: string; project_id: string; folder_id: string | null; position: number | null }>
 
-  const members = new Map<string, string[]>(folderRows.map((f) => [f.id, []]))
-  const top: Array<{ item: RailItem; position: number }> = folderRows.map((f) => ({
-    item: { kind: 'folder', id: f.id },
-    position: f.position
-  }))
-  for (const p of projectRows) {
-    const filed = p.folder_id === null ? undefined : members.get(p.folder_id)
-    if (filed) filed.push(p.id)
-    else top.push({ item: { kind: 'project', id: p.id }, position: p.position ?? Number.POSITIVE_INFINITY })
+  // Lists by key: a folder's id, or the top of a scope.
+  const RAIL_TOP = ''
+  const topOf = (projectId: string | null): string => (projectId === null ? RAIL_TOP : `project:${projectId}`)
+  const folderById = new Map(folderRows.map((f) => [f.id, f]))
+  const unplaced = Number.POSITIVE_INFINITY
+  const lists = new Map<string, Array<{ item: RailItem; position: number }>>()
+  const add = (key: string, item: RailItem, position: number): void => {
+    const list = lists.get(key)
+    if (list) list.push({ item, position })
+    else lists.set(key, [{ item, position }])
   }
-  // A stable sort: where positions tie, folders (pushed first) stay ahead of
-  // projects and each kind keeps the order it was read in.
-  top.sort((a, b) => (a.position === b.position ? 0 : a.position < b.position ? -1 : 1))
+  // A row filed in a folder that is not one of its own kind (which no write
+  // here produces) reads as never arranged, at the top of its own lists.
+  for (const f of folderRows) {
+    const parent = f.parent_id === null ? undefined : folderById.get(f.parent_id)
+    const nested = !!parent && parent.project_id === f.project_id
+    add(nested ? parent.id : topOf(f.project_id), { kind: 'folder', id: f.id }, f.position)
+  }
+  for (const p of projectRows) {
+    const folder = p.folder_id === null ? undefined : folderById.get(p.folder_id)
+    const stray = p.folder_id !== null && folder?.project_id !== null
+    const key = folder && !stray ? folder.id : RAIL_TOP
+    add(key, { kind: 'project', id: p.id }, stray ? unplaced : (p.position ?? unplaced))
+  }
+  for (const r of repoRows) {
+    const folder = r.folder_id === null ? undefined : folderById.get(r.folder_id)
+    const stray = r.folder_id !== null && folder?.project_id !== r.project_id
+    const key = folder && !stray ? folder.id : topOf(r.project_id)
+    add(key, { kind: 'repo', id: r.id }, stray ? unplaced : (r.position ?? unplaced))
+  }
+  // A stable sort: where positions tie, folders (added first) stay ahead of
+  // the other rows and each kind keeps the order it was read in.
+  for (const list of lists.values()) {
+    list.sort((a, b) => (a.position === b.position ? 0 : a.position < b.position ? -1 : 1))
+  }
+
+  // Walk down from each top, so that every folder is listed exactly once
+  // whatever the rows say: a folder whose parents loop back on themselves is
+  // reachable from no top, and is put at the top of its own scope instead.
+  const items = new Map<string, RailItem[]>()
+  const parentOf = new Map<string, string | null>()
+  const settle = (key: string, folderId: string | null): RailItem[] => {
+    const out: RailItem[] = []
+    for (const { item } of lists.get(key) ?? []) {
+      if (item.kind === 'folder') {
+        if (parentOf.has(item.id)) continue
+        parentOf.set(item.id, folderId)
+      }
+      out.push(item)
+    }
+    items.set(key, out)
+    for (const item of out) if (item.kind === 'folder') settle(item.id, item.id)
+    return out
+  }
+  const rail = settle(RAIL_TOP, null)
+  const members = new Map<string, RailItem[]>(projectRows.map((p) => [p.id, settle(topOf(p.id), null)]))
+  for (const f of folderRows) {
+    if (parentOf.has(f.id)) continue
+    parentOf.set(f.id, null)
+    const top = f.project_id === null ? rail : members.get(f.project_id)
+    top?.push({ kind: 'folder', id: f.id })
+    settle(f.id, f.id)
+  }
 
   return {
     folders: folderRows.map((f) => ({
       id: f.id,
       name: f.name,
       collapsed: f.collapsed === 1,
-      projectIds: members.get(f.id) ?? []
+      projectId: f.project_id,
+      parentId: parentOf.get(f.id) ?? null,
+      items: items.get(f.id) ?? []
     })),
-    rail: top.map((t) => t.item)
+    rail,
+    members
   }
 }
 
-function setRailPosition(pid: string, folderId: string | null, position: number): void {
-  getDb()
-    .prepare(
-      `INSERT INTO rail_positions (project_id, folder_id, position) VALUES (?, ?, ?)
-       ON CONFLICT(project_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
-    )
-    .run(pid, folderId, position)
+/**
+ * One scope's arrangement, copied out to be edited and written back: the
+ * rail's own lists (`projectId` null) or one project's.
+ */
+interface RailScope {
+  projectId: string | null
+  top: RailItem[]
+  /** Every folder of the scope, by id. */
+  inside: Map<string, RailItem[]>
 }
 
-/** Record `rail` as the top-level order. A project in it is, by that, in no folder. */
-function writeRail(rail: RailItem[]): void {
-  const setFolder = getDb().prepare('UPDATE rail_folders SET position = ? WHERE id = ?')
-  rail.forEach((item, i) => {
-    if (item.kind === 'folder') setFolder.run(i, item.id)
-    else setRailPosition(item.id, null, i)
-  })
+function scopeOf(layout: RailLayout, projectId: string | null): RailScope {
+  return {
+    projectId,
+    top: [...(projectId === null ? layout.rail : (layout.members.get(projectId) ?? []))],
+    inside: new Map(layout.folders.filter((f) => f.projectId === projectId).map((f) => [f.id, [...f.items]]))
+  }
 }
 
-/** Record `projectIds` as the folder's projects, in that order. */
-function writeFolderProjects(fid: string, projectIds: string[]): void {
-  projectIds.forEach((pid, i) => setRailPosition(pid, fid, i))
+/** A list of the scope: a folder's, or its top for null. Undefined for a folder the scope does not have. */
+function listIn(scope: RailScope, folderId: string | null): RailItem[] | undefined {
+  return folderId === null ? scope.top : scope.inside.get(folderId)
+}
+
+/** Where a row sits in the scope, if it is in it. */
+function locate(scope: RailScope, rowId: string): { list: RailItem[]; index: number } | undefined {
+  for (const list of [scope.top, ...scope.inside.values()]) {
+    const index = list.findIndex((item) => item.id === rowId)
+    if (index !== -1) return { list, index }
+  }
+  return undefined
+}
+
+/** Take a row out of whichever list of the scope holds it. */
+function take(scope: RailScope, rowId: string): void {
+  const at = locate(scope, rowId)
+  if (at) at.list.splice(at.index, 1)
+}
+
+/** Whether folder `fid` is `ancestorId` or somewhere inside it. */
+function isWithin(scope: RailScope, ancestorId: string, fid: string): boolean {
+  if (ancestorId === fid) return true
+  return (scope.inside.get(ancestorId) ?? []).some((item) => item.kind === 'folder' && isWithin(scope, item.id, fid))
+}
+
+/** The scope's repos, read top to bottom through its folders. */
+function reposInOrder(scope: RailScope): string[] {
+  const out: string[] = []
+  const walk = (list: RailItem[]): void => {
+    for (const item of list) {
+      if (item.kind === 'repo') out.push(item.id)
+      else if (item.kind === 'folder') walk(scope.inside.get(item.id) ?? [])
+    }
+  }
+  walk(scope.top)
+  return out
+}
+
+/**
+ * Record a scope as edited: every row's list and place in it. For a project's
+ * scope that also makes each repo in it a member of the project, in the order
+ * the arrangement reads top to bottom (see {@link writeMembers}).
+ */
+function writeScope(scope: RailScope): void {
+  const db = getDb()
+  const setFolder = db.prepare('UPDATE rail_folders SET parent_id = ?, position = ? WHERE id = ?')
+  const setProject = db.prepare(
+    `INSERT INTO rail_positions (project_id, folder_id, position) VALUES (?, ?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
+  )
+  const setRepo = db.prepare(
+    `INSERT INTO rail_repo_positions (repo_id, folder_id, position) VALUES (?, ?, ?)
+     ON CONFLICT(repo_id) DO UPDATE SET folder_id = excluded.folder_id, position = excluded.position`
+  )
+  const write = (folderId: string | null, list: RailItem[]): void =>
+    list.forEach((item, i) => {
+      if (item.kind === 'folder') setFolder.run(folderId, i, item.id)
+      else if (item.kind === 'project') setProject.run(item.id, folderId, i)
+      else setRepo.run(item.id, folderId, i)
+    })
+  write(null, scope.top)
+  for (const [fid, list] of scope.inside) write(fid, list)
+  if (scope.projectId !== null) writeMembers(scope.projectId, reposInOrder(scope))
 }
 
 /** Insert `item` just before the entry `isBefore` matches, or last when none does. */
@@ -664,45 +829,85 @@ function insertBefore<T>(list: T[], item: T, isBefore: (entry: T) => boolean): v
   list.splice(at === -1 ? list.length : at, 0, item)
 }
 
+/** The part of a layout the renderer is sent per project: only the projects with folders have one. */
+function projectItemsOf(layout: RailLayout): Record<string, RailItem[]> {
+  const out: Record<string, RailItem[]> = {}
+  for (const folder of layout.folders) {
+    if (folder.projectId === null || out[folder.projectId]) continue
+    out[folder.projectId] = layout.members.get(folder.projectId) ?? []
+  }
+  return out
+}
+
 export const railFolders = {
-  /** The active workspace's folders, each with its projects in rail order. */
+  /** The active workspace's folders, of projects and of a project's repos alike, each with its rows in order. */
   list(): RailFolder[] {
     return readRailLayout().folders
   },
-  /** The rail's top level in order: folders and the projects in none of them. */
+  /** The rail's top level in order: folders of projects and the projects in none of them. */
   rail(): RailItem[] {
     return readRailLayout().rail
+  },
+  /**
+   * The top of each project's own list, for the projects that have folders
+   * among their repos (the rest have nothing to say beyond `repoIds`).
+   */
+  projectItems(): Record<string, RailItem[]> {
+    return projectItemsOf(readRailLayout())
   },
   get(fid: string): RailFolder | undefined {
     return railFolders.list().find((f) => f.id === fid)
   },
   /**
-   * A new, expanded folder. Given a project it is made to hold, it takes that
-   * project's place in the rail (or sits just below the folder the project
-   * was in); otherwise it goes at the top, where a folder nobody has placed
-   * yet is sure to be seen.
+   * A new, expanded folder.
+   *
+   * - No `spot`: a folder of projects at the top of the rail, where a folder
+   *   nobody has placed yet is sure to be seen.
+   * - `holding` a row: it takes that row's place, in whatever list the row is
+   *   in, and holds it. A project gives a folder of projects, a repo a folder
+   *   among its project's repos.
+   * - `parentId`: first inside that folder (which is opened), as a folder of
+   *   the same kind.
+   * - `projectId`: first among that project's repos.
+   *
+   * A spot that names nothing in this workspace gives a folder at the top of
+   * the rail.
    */
-  create(name: string, forProjectId?: string): RailFolder {
+  create(name: string, spot?: RailFolderSpot): RailFolder {
     const fid = id()
     writeTx(() => {
-      const { folders, rail } = readRailLayout()
-      getDb()
-        .prepare('INSERT INTO rail_folders (id, workspace_id, name, position, created_at) VALUES (?, ?, ?, 0, ?)')
-        .run(fid, requireWorkspaceId(), name, now())
-      const entry: RailItem = { kind: 'folder', id: fid }
-      const loose = rail.findIndex((item) => item.kind === 'project' && item.id === forProjectId)
-      const holder = folders.find((f) => forProjectId !== undefined && f.projectIds.includes(forProjectId))
-      if (loose !== -1) {
-        rail.splice(loose, 1, entry)
-      } else if (holder) {
-        rail.splice(rail.findIndex((item) => item.kind === 'folder' && item.id === holder.id) + 1, 0, entry)
-      } else {
-        rail.unshift(entry)
+      const layout = readRailLayout()
+      const parent = spot && 'parentId' in spot ? layout.folders.find((f) => f.id === spot.parentId) : undefined
+      let holding = spot && 'holding' in spot && spot.holding.kind !== 'folder' ? spot.holding : null
+      let projectId: string | null = null
+      if (parent) projectId = parent.projectId
+      else if (spot && 'projectId' in spot && layout.members.has(spot.projectId)) projectId = spot.projectId
+      else if (holding?.kind === 'repo') {
+        const owner = repoRow(holding.id)?.project_id
+        if (owner && layout.members.has(owner)) projectId = owner
+        else holding = null
       }
-      // Members before the top level, so the project is filed by the time
-      // writeRail (which no longer lists it) runs.
-      if (forProjectId !== undefined && (loose !== -1 || holder)) writeFolderProjects(fid, [forProjectId])
-      writeRail(rail)
+      const scope = scopeOf(layout, projectId)
+      getDb()
+        .prepare(
+          `INSERT INTO rail_folders (id, workspace_id, name, position, created_at, project_id)
+           VALUES (?, ?, ?, 0, ?, ?)`
+        )
+        .run(fid, requireWorkspaceId(), name, now(), projectId)
+      const entry: RailItem = { kind: 'folder', id: fid }
+      const filed: RailItem[] = []
+      scope.inside.set(fid, filed)
+      const at = holding ? locate(scope, holding.id) : undefined
+      if (holding && at) {
+        at.list.splice(at.index, 1, entry)
+        filed.push(holding)
+      } else if (parent) {
+        scope.inside.get(parent.id)?.unshift(entry)
+        getDb().prepare('UPDATE rail_folders SET collapsed = 0 WHERE id = ?').run(parent.id)
+      } else {
+        scope.top.unshift(entry)
+      }
+      writeScope(scope)
     })
     return railFolders.get(fid)!
   },
@@ -710,19 +915,23 @@ export const railFolders = {
     getDb().prepare('UPDATE rail_folders SET name = ? WHERE id = ?').run(name, fid)
   },
   /**
-   * Delete a folder. Its projects are not deleted: they take the folder's
-   * place at the top level, in the order they had inside it.
+   * Delete a folder. Nothing in it is deleted: its rows, folders included,
+   * take its place in the list it was in, in the order they had inside it.
    */
   remove(fid: string): void {
     writeTx(() => {
-      const { folders, rail } = readRailLayout()
-      const folder = folders.find((f) => f.id === fid)
+      const layout = readRailLayout()
+      const folder = layout.folders.find((f) => f.id === fid)
       if (!folder) return
-      const at = rail.findIndex((item) => item.kind === 'folder' && item.id === fid)
-      rail.splice(at, 1, ...folder.projectIds.map((pid): RailItem => ({ kind: 'project', id: pid })))
-      // Before the delete: the rows now say "top level", so the cascade from
-      // the folder finds none of them.
-      writeRail(rail)
+      const scope = scopeOf(layout, folder.projectId)
+      const rows = scope.inside.get(fid) ?? []
+      scope.inside.delete(fid)
+      const at = locate(scope, fid)
+      if (at) at.list.splice(at.index, 1, ...rows)
+      else scope.top.push(...rows)
+      // Before the delete: the rows now say where they went, so the cascade
+      // from the folder finds none of them.
+      writeScope(scope)
       getDb().prepare('DELETE FROM rail_folders WHERE id = ?').run(fid)
     })
   },
@@ -730,45 +939,44 @@ export const railFolders = {
     getDb().prepare('UPDATE rail_folders SET collapsed = ? WHERE id = ?').run(collapsed ? 1 : 0, fid)
   },
   /**
-   * Put a project in `folderId` (null = the top level), just before
-   * `beforeId` or last when that is null or names nothing there. `beforeId`
-   * is a project in that folder or, at the top level, a folder or a loose
-   * project.
+   * Put a project in the folder of projects `folderId` (null = the rail's top
+   * level), just before `beforeId` or last when that is null or names nothing
+   * there. `beforeId` is a row of that list: a project or a folder.
    *
-   * A project or folder that is gone, or belongs to another workspace, is not
-   * in this workspace's layout, so the call does nothing.
+   * A project or folder that is gone, belongs to another workspace, or (the
+   * folder) arranges a project's repos is not in this workspace's rail, so
+   * the call does nothing.
    */
   placeProject(pid: string, folderId: string | null, beforeId: string | null): void {
     if (beforeId === pid) return
     writeTx(() => {
-      const { folders, rail } = readRailLayout()
-      const known =
-        rail.some((item) => item.kind === 'project' && item.id === pid) ||
-        folders.some((f) => f.projectIds.includes(pid))
-      if (!known) return
-      const top = rail.filter((item) => !(item.kind === 'project' && item.id === pid))
-      if (folderId === null) {
-        insertBefore(top, { kind: 'project', id: pid }, (item) => item.id === beforeId)
-      } else {
-        const folder = folders.find((f) => f.id === folderId)
-        if (!folder) return
-        const filed = folder.projectIds.filter((x) => x !== pid)
-        insertBefore(filed, pid, (x) => x === beforeId)
-        writeFolderProjects(folderId, filed)
-      }
-      writeRail(top)
+      const scope = scopeOf(readRailLayout(), null)
+      const list = listIn(scope, folderId)
+      if (!list || !locate(scope, pid)) return
+      take(scope, pid)
+      insertBefore(list, { kind: 'project', id: pid }, (item) => item.id === beforeId)
+      writeScope(scope)
     })
   },
-  /** Put a folder just before the top-level row `beforeId` (a folder or a loose project), or last when null or unknown. */
-  placeFolder(fid: string, beforeId: string | null): void {
+  /**
+   * Put a folder in `parentId`, a folder of its own kind (null = the top of
+   * its list: the rail's for a folder of projects, its project's for a folder
+   * of repos), just before the row `beforeId` there or last when that is null
+   * or names nothing there. A folder never goes inside itself, into a folder
+   * of the other kind, or into another project's.
+   */
+  placeFolder(fid: string, parentId: string | null, beforeId: string | null): void {
     if (beforeId === fid) return
     writeTx(() => {
-      const { rail } = readRailLayout()
-      const entry = rail.find((item) => item.kind === 'folder' && item.id === fid)
-      if (!entry) return
-      const top = rail.filter((item) => item !== entry)
-      insertBefore(top, entry, (item) => item.id === beforeId)
-      writeRail(top)
+      const layout = readRailLayout()
+      const folder = layout.folders.find((f) => f.id === fid)
+      if (!folder) return
+      const scope = scopeOf(layout, folder.projectId)
+      const list = listIn(scope, parentId)
+      if (!list || (parentId !== null && isWithin(scope, fid, parentId))) return
+      take(scope, fid)
+      insertBefore(list, { kind: 'folder', id: fid }, (item) => item.id === beforeId)
+      writeScope(scope)
     })
   }
 }
@@ -1273,6 +1481,7 @@ export function getAppState(): Omit<AppState, 'devServers' | 'settings' | 'works
     projects: projects.list(),
     railFolders: rail.folders,
     railItems: rail.rail,
+    railProjectItems: projectItemsOf(rail),
     worktrees: worktrees.list(),
     tasks: tasks.list()
   }

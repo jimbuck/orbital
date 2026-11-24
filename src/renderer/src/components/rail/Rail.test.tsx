@@ -50,11 +50,19 @@ const worktree = (repoId: string, status: Worktree['status'] = 'idle'): Worktree
   panes: []
 })
 
-const folder = (id: string, projectIds: string[], collapsed = false): RailFolder => ({
+/** A folder of projects. A bare string among its rows is a project id. */
+const folder = (
+  id: string,
+  rows: Array<string | RailItem>,
+  collapsed = false,
+  parentId: string | null = null
+): RailFolder => ({
   id,
   name: id,
   collapsed,
-  projectIds
+  projectId: null,
+  parentId,
+  items: rows.map((row) => (typeof row === 'string' ? { kind: 'project', id: row } : row))
 })
 
 /**
@@ -67,6 +75,8 @@ function renderRail(folders: RailFolder[], worktrees: Worktree[] = [], rail: Rai
     projects: [project('alpha'), project('beta'), project('gamma')],
     railFolders: folders,
     railItems: rail,
+    railProjectItems: {},
+    renamingFolderId: null,
     worktrees,
     tasks: [],
     activeRepoId: 'alpha',
@@ -172,6 +182,37 @@ describe('rail folders — layout', () => {
     renderRail([folder('empty', [])])
     expect(within(folderBox('empty')).getByText(/Drag a repo or project here/)).toBeTruthy()
   })
+
+  it('draws a folder inside the folder that holds it, and counts everything under each', () => {
+    renderRail(
+      [
+        folder('work', ['alpha', { kind: 'folder', id: 'clients' }]),
+        folder('clients', ['beta', { kind: 'folder', id: 'old' }], false, 'work'),
+        folder('old', [], false, 'clients')
+      ],
+      [worktree('beta', 'needs_attention')]
+    )
+
+    expect(folderBox('clients').parentElement?.closest('[data-folder-id]')).toBe(folderBox('work'))
+    expect(folderBox('old').parentElement?.closest('[data-folder-id]')).toBe(folderBox('clients'))
+    expect(names()).toEqual(['alpha', 'beta', 'gamma'])
+    // work holds alpha and, through clients, beta; gamma is loose.
+    expect(within(header('work')).getByTitle('2 repos')).toBeTruthy()
+    expect(within(header('clients')).getByTitle('1 repo')).toBeTruthy()
+    expect(within(header('old')).getByTitle('0 repos')).toBeTruthy()
+    // What a folder two levels up is hiding still reaches its chevron.
+    expect(within(header('work')).getByTitle('Worktrees needs you')).toBeTruthy()
+  })
+
+  it('hides a nested folder with the one it is in', () => {
+    renderRail([
+      folder('work', [{ kind: 'folder', id: 'clients' }], true),
+      folder('clients', ['beta'], false, 'work')
+    ])
+    expect(document.querySelector('[data-folder-id="clients"]')).toBeNull()
+    expect(screen.queryByText('beta')).toBeNull()
+    expect(within(header('work')).getByTitle('1 repo')).toBeTruthy()
+  })
 })
 
 describe('rail folders — actions', () => {
@@ -186,7 +227,8 @@ describe('rail folders — actions', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'New folder' }))
     })
-    expect(bridge.createRailFolder).toHaveBeenCalledWith('New Folder')
+    // No spot: a folder of projects at the top of the rail.
+    expect(bridge.createRailFolder).toHaveBeenCalledWith('New Folder', undefined)
 
     const field = screen.getByLabelText('Folder name')
     fireEvent.change(field, { target: { value: '  Client work ' } })
@@ -212,7 +254,7 @@ describe('rail folders — actions', () => {
     fireEvent.click(screen.getByText('Delete Folder'))
 
     expect(bridge.removeRailFolder).not.toHaveBeenCalled()
-    expect(screen.getByText(/Everything in it stays in Orbital, at the top level/)).toBeTruthy()
+    expect(screen.getByText(/Everything in it stays in Orbital, where the folder was/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Delete Folder' }))
     expect(bridge.removeRailFolder).toHaveBeenCalledWith('work')
   })
@@ -222,6 +264,32 @@ describe('rail folders — actions', () => {
     fireEvent.contextMenu(header('work'))
     fireEvent.click(screen.getByText('Delete Folder'))
     expect(bridge.removeRailFolder).toHaveBeenCalledWith('work')
+  })
+
+  it('makes a folder inside another from its menu, and opens the new one into its name', async () => {
+    renderRail([folder('work', [{ kind: 'folder', id: 'f-new' }]), folder('f-new', [], false, 'work')])
+    fireEvent.contextMenu(header('work'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('New Folder Inside'))
+    })
+    expect(bridge.createRailFolder).toHaveBeenCalledWith('New Folder', { parentId: 'work' })
+    expect(within(folderBox('f-new')).getByLabelText('Folder name')).toBeTruthy()
+  })
+
+  it('files a repo in a nested folder, and reorders past a folder that is a row of the list', () => {
+    renderRail([
+      folder('work', ['alpha', { kind: 'folder', id: 'clients' }]),
+      folder('clients', ['beta'], false, 'work')
+    ])
+
+    fireEvent.dragStart(repoRow('gamma'), { dataTransfer: dataTransfer() })
+    fireEvent.drop(header('clients'), { dataTransfer: dataTransfer() })
+    expect(bridge.placeProject).toHaveBeenLastCalledWith('gamma', 'clients', null)
+
+    // Above the nested folder is a place in the folder that holds it.
+    fireEvent.dragStart(repoRow('gamma'), { dataTransfer: dataTransfer() })
+    dropAt(header('clients'), TOP_EDGE)
+    expect(bridge.placeProject).toHaveBeenLastCalledWith('gamma', 'work', 'clients')
   })
 })
 
@@ -360,32 +428,53 @@ describe('rail folders — dragging a folder', () => {
     expect(marker()).toBeTruthy()
     fireEvent.drop(repoRow('beta'), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', 'beta')
+    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', null, 'beta')
     expect(bridge.placeProject).not.toHaveBeenCalled()
   })
 
-  it('goes before another folder from the upper half of its header, and after it from the lower', () => {
+  it("goes before another folder from the top edge of its header, and after it from the bottom edge", () => {
     renderRail([folder('work', []), folder('play', [])])
 
     fireEvent.dragStart(header('play'), { dataTransfer: dataTransfer() })
-    fireEvent.drop(header('work'), { dataTransfer: dataTransfer() })
-    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('play', 'work')
+    dropAt(header('work'), TOP_EDGE)
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('play', null, 'work')
 
     fireEvent.dragStart(header('work'), { dataTransfer: dataTransfer() })
     dropAt(header('play'), LOWER)
     // After play is before whatever follows play.
-    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('work', 'alpha')
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('work', null, 'alpha')
   })
 
-  it('never lands inside another folder: over its repos it goes after that folder', () => {
+  it('goes into another folder from the middle of its header, which lights up for it', () => {
+    renderRail([folder('work', []), folder('play', [])])
+
+    fireEvent.dragStart(header('work'), { dataTransfer: dataTransfer() })
+    fireEvent.dragOver(header('play'), { dataTransfer: dataTransfer() })
+    expect(folderBox('play').firstElementChild?.className).toContain('ring-accent/50')
+    fireEvent.drop(header('play'), { dataTransfer: dataTransfer() })
+
+    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', 'play', null)
+  })
+
+  it('lands beside a repo that is inside another folder, in that folder', () => {
     renderRail([folder('work', []), folder('play', ['beta'])])
 
     fireEvent.dragStart(header('work'), { dataTransfer: dataTransfer() })
     // Over a repo in play, which sits below play's header.
     dropAt(repoRow('beta'), LOWER)
 
-    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', 'alpha')
+    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', 'play', null)
     expect(bridge.placeProject).not.toHaveBeenCalled()
+  })
+
+  it('is never dropped into itself', () => {
+    renderRail([folder('work', [{ kind: 'folder', id: 'inner' }]), folder('inner', ['beta'], false, 'work')])
+
+    fireEvent.dragStart(header('work'), { dataTransfer: dataTransfer() })
+    fireEvent.drop(header('inner'), { dataTransfer: dataTransfer() })
+    dropAt(repoRow('beta'), LOWER)
+
+    expect(bridge.placeRailFolder).not.toHaveBeenCalled()
   })
 
   it('goes last when dropped below every row', () => {
@@ -394,7 +483,7 @@ describe('rail folders — dragging a folder', () => {
     fireEvent.dragStart(header('work'), { dataTransfer: dataTransfer() })
     fireEvent.drop(emptyRail(), { dataTransfer: dataTransfer() })
 
-    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', null)
+    expect(bridge.placeRailFolder).toHaveBeenCalledWith('work', null, null)
   })
 })
 
@@ -427,7 +516,7 @@ describe('dragging a repo onto another: starting a project', () => {
       fireEvent.drop(repoRow('gamma'), { dataTransfer: dataTransfer() })
     })
 
-    expect(bridge.addRepoToProject).toHaveBeenCalledWith('gamma', 'alpha', null)
+    expect(bridge.addRepoToProject).toHaveBeenCalledWith('gamma', 'alpha', null, null)
     expect(bridge.placeProject).not.toHaveBeenCalled()
     expect(useStore.getState().renamingProjectId).toBe('gamma')
     expect(useStore.getState().expanded.gamma).toBe(true)

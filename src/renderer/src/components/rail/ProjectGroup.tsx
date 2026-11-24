@@ -5,6 +5,7 @@ import {
   FileText,
   FolderInput,
   FolderOpen,
+  FolderPlus,
   FolderRoot,
   House,
   Layers,
@@ -21,13 +22,14 @@ import { StatusDot, worktreeStatusLabel } from '@renderer/lib/status'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { fileManagerName } from '@renderer/lib/platform'
 import Repo, { GroupChevron, NeedsYouPill } from './Repo'
-import WorktreeRow from './WorktreeRow'
+import Folder from './Folder'
+import { BranchStub, CHILD_LIST, DOT_CELL, WorktreeBranches } from './treeLines'
 import RenameField from './RenameField'
 import { SlotMarker } from './SlotMarker'
 import { ContextMenu, MenuConfirm, MenuItem, clampMenuPos, type MenuPos } from './menu'
 import { FolderStep, MENU_TITLE, NewFolderStep } from './menuSteps'
-import { beginRailDrag, projectRollup, type ProjectRow } from './folders'
-import { makeHome, openTerminals, ptyCount, repoCount } from './railActions'
+import { beginRailDrag, projectRollup, type DropTarget, type ProjectRow } from './folders'
+import { makeHome, newRailFolder, openTerminals, ptyCount, repoCount } from './railActions'
 
 type GroupRow = Extract<ProjectRow, { kind: 'group' }>
 
@@ -42,27 +44,34 @@ const HOVER_BUTTON =
  *
  * The session is the home repo's root worktree when there is a home, else the
  * project's folder session (a terminal-and-agent session in the root folder,
- * with no git). Under the header come the home's linked worktrees, then the
- * member repos in the project's order; the home is never listed again, since
- * its row is this header.
+ * with no git). Two different things hang under the header, and the lines
+ * beside them (see treeLines) are what tells one from the other:
+ *
+ * - The home repo's linked worktrees. They belong to the header's repo, so
+ *   they branch out of its status dot, each joined to it by a curve.
+ * - The project's repos, in the project's order, loose or in the project's
+ *   own folders. They are only indented, behind a rule under the chevron that
+ *   folds the project. The home is never listed here, since its row is this
+ *   header.
  *
  * Collapsed, the chevron and the needs-you pill stand in for every hidden
  * worktree (the session's own status stays on its dot, never rolled up). The
- * header drags to move the whole project; the Rail owns the drop, and passes
- * `joinTarget` while a dragged repo would join this project and `repoSlot`
- * while it would be inserted among the members.
+ * header drags to move the whole project; the Rail owns the drop, and its
+ * `dropTarget` says when a dragged repo would join this project or be
+ * inserted at a place in its list.
  */
 export default function ProjectGroup({
   row,
-  joinTarget,
-  repoSlot
+  dropTarget
 }: {
   row: GroupRow
-  joinTarget: boolean
-  /** The member index a dragged repo would be inserted before (members.length = last), or null. */
-  repoSlot: number | null
+  /** The Rail's current drop target. */
+  dropTarget: DropTarget | null
 }): JSX.Element {
-  const { project, home, members, open } = row
+  const { project, home, members, items, open } = row
+  const joinTarget = dropTarget?.kind === 'join' && dropTarget.projectId === project.id
+  // The index in `items` a dragged row would be inserted before (its length = last), or null.
+  const repoSlot = dropTarget?.kind === 'repoSlot' && dropTarget.projectId === project.id ? dropTarget.index : null
   const worktrees = useStore(useShallow((s) => s.worktrees.filter((w) => w.projectId === project.id)))
   const rollup = useMemo(() => projectRollup(project, worktrees), [project, worktrees])
   const { session, homeLinked } = rollup
@@ -79,7 +88,7 @@ export default function ProjectGroup({
   const [step, setStep] = useState<MenuStep>('items')
 
   const repoTotal = members.length + (home ? 1 : 0)
-  const hasChildren = members.length > 0 || homeLinked.length > 0
+  const hasChildren = items.length > 0 || homeLinked.length > 0
   const sessionActive = !!session && activeWorktreeId === session.id
   const homeLinkedActive = homeLinked.some((w) => w.id === activeWorktreeId)
   const sessionStatus = session?.status ?? 'idle'
@@ -180,11 +189,9 @@ export default function ProjectGroup({
           <span className="w-[14px] flex-none" />
         )}
 
-        <span
-          title={worktreeStatusLabel(sessionStatus)}
-          className="flex w-[11px] flex-none items-center justify-center"
-        >
+        <span title={worktreeStatusLabel(sessionStatus)} className={DOT_CELL}>
           <StatusDot status={sessionStatus} />
+          {open && homeLinked.length > 0 && <BranchStub />}
         </span>
 
         <div className="min-w-0 flex-1">
@@ -263,24 +270,24 @@ export default function ProjectGroup({
         )}
       </div>
 
-      {open && (hasChildren || !home) && (
-        <div className="ml-[15px] border-l border-line-2 pl-[5px] pt-[2px]">
-          {homeLinked.length > 0 && (
-            // 22px = chevron 14 + gap 8, so these dots line up with the members' dots below.
-            <div className="mb-[4px] flex flex-col gap-[2px] pl-[22px]">
-              {homeLinked.map((w) => (
-                <WorktreeRow key={w.id} worktree={w} />
-              ))}
-            </div>
-          )}
-          {members.map((repo, i) => (
-            <div key={repo.id}>
+      {open && homeLinked.length > 0 && (
+        <WorktreeBranches worktrees={homeLinked} label={`Worktrees of ${home?.name ?? project.name}`} />
+      )}
+
+      {open && (items.length > 0 || !home) && (
+        <div role="group" aria-label={`Repos in ${project.name}`} className={CHILD_LIST}>
+          {items.map((item, i) => (
+            <div key={item.id}>
               {repoSlot === i && <SlotMarker />}
-              <Repo repo={repo} project={project} variant="member" />
+              {item.kind === 'folder' ? (
+                <Folder row={item} project={project} dropTarget={dropTarget} />
+              ) : (
+                <Repo repo={item.repo} project={project} variant="member" />
+              )}
             </div>
           ))}
-          {members.length > 0 && repoSlot === members.length && <SlotMarker />}
-          {members.length === 0 && !home && (
+          {items.length > 0 && repoSlot === items.length && <SlotMarker />}
+          {items.length === 0 && !home && (
             <>
               <div className="px-[9px] pt-[5px] text-[11px] text-faint">No repos yet. Drag one here.</div>
               <button
@@ -313,6 +320,17 @@ export default function ProjectGroup({
                 label="Add Repo…"
                 onClick={() => {
                   addRepo()
+                  closeMenu()
+                }}
+              />
+              <MenuItem
+                icon={<FolderPlus size={13} strokeWidth={1.5} />}
+                label="New Folder"
+                hint="for its repos"
+                onClick={() => {
+                  // Open, so the new folder is on screen to be named.
+                  setExpanded(project.id, true)
+                  newRailFolder({ projectId: project.id })
                   closeMenu()
                 }}
               />
@@ -476,13 +494,15 @@ export default function ProjectGroup({
           {step === 'move' && (
             <FolderStep
               name={project.name}
-              projectId={project.id}
+              item={{ kind: 'project', id: project.id }}
               onNewFolder={() => setStep('newFolder')}
               onDone={closeMenu}
             />
           )}
 
-          {step === 'newFolder' && <NewFolderStep name={project.name} projectId={project.id} onDone={closeMenu} />}
+          {step === 'newFolder' && (
+            <NewFolderStep name={project.name} item={{ kind: 'project', id: project.id }} onDone={closeMenu} />
+          )}
 
           {step === 'confirmUngroup' && (
             <MenuConfirm

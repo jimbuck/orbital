@@ -104,8 +104,18 @@ describe('applyState structural sharing', () => {
           createdAt: 0
         }
       ],
-      railFolders: [{ id: 'f1', name: 'Work', collapsed: false, projectIds: ['pr1'] }],
+      railFolders: [
+        {
+          id: 'f1',
+          name: 'Work',
+          collapsed: false,
+          projectId: null,
+          parentId: null,
+          items: [{ kind: 'project', id: 'pr1' }]
+        }
+      ],
       railItems: [{ kind: 'folder', id: 'f1' }],
+      railProjectItems: {},
       worktrees: [worktree('w1', ['a']), worktree('w2', ['c'])],
       tasks: [],
       settings: structuredClone(settings),
@@ -124,6 +134,7 @@ describe('applyState structural sharing', () => {
     expect(after.projects).toBe(before.projects)
     expect(after.railFolders).toBe(before.railFolders)
     expect(after.railItems).toBe(before.railItems)
+    expect(after.railProjectItems).toBe(before.railProjectItems)
     expect(after.worktrees).toBe(before.worktrees)
     expect(after.tasks).toBe(before.tasks)
     expect(after.settings).toBe(before.settings)
@@ -163,8 +174,22 @@ describe('selecting a repo hidden in a collapsed rail folder', () => {
         { id: 'p2', name: 'Q', repoPath: '/q', projectId: 'pr2' } as AppState['repos'][number]
       ],
       railFolders: [
-        { id: 'f-shut', name: 'Shut', collapsed: true, projectIds: ['pr1'] },
-        { id: 'f-open', name: 'Open', collapsed: false, projectIds: ['pr2'] }
+        {
+          id: 'f-shut',
+          name: 'Shut',
+          collapsed: true,
+          projectId: null,
+          parentId: null,
+          items: [{ kind: 'project', id: 'pr1' }]
+        },
+        {
+          id: 'f-open',
+          name: 'Open',
+          collapsed: false,
+          projectId: null,
+          parentId: null,
+          items: [{ kind: 'project', id: 'pr2' }]
+        }
       ]
     })
   })
@@ -188,6 +213,38 @@ describe('selecting a repo hidden in a collapsed rail folder', () => {
     expect(setRailFolderCollapsed).not.toHaveBeenCalled()
   })
 
+  it('opens every folder between the row and the top: the nested ones, and the ones among its project\'s repos', () => {
+    const folder = (
+      id: string,
+      collapsed: boolean,
+      parentId: string | null,
+      projectId: string | null,
+      items: AppState['railItems']
+    ): AppState['railFolders'][number] => ({ id, name: id, collapsed, projectId, parentId, items })
+    useStore.setState({
+      railFolders: [
+        // pr1 is in `inner`, which is in `outer`; `between` is open already.
+        folder('outer', true, null, null, [{ kind: 'folder', id: 'between' }]),
+        folder('between', false, 'outer', null, [{ kind: 'folder', id: 'inner' }]),
+        folder('inner', true, 'between', null, [{ kind: 'project', id: 'pr1' }]),
+        // p1 is in `apps`, one of pr1's own folders, itself in `all`.
+        folder('all', true, null, 'pr1', [{ kind: 'folder', id: 'apps' }]),
+        folder('apps', true, 'all', 'pr1', [{ kind: 'repo', id: 'p1' }]),
+        folder('elsewhere', true, null, null, [{ kind: 'project', id: 'pr2' }])
+      ]
+    })
+    useStore.getState().setActiveRepo('p1')
+    expect(setRailFolderCollapsed.mock.calls.map((c) => c[0]).sort()).toEqual(['all', 'apps', 'inner', 'outer'])
+
+    // Selecting the project itself opens what hides its header, not its repos' folders.
+    setRailFolderCollapsed.mockClear()
+    useStore.setState({
+      projects: [{ id: 'pr1', name: 'P', homeRepoId: null, repoIds: ['p1'] } as AppState['projects'][number]]
+    })
+    useStore.getState().setActiveProject('pr1')
+    expect(setRailFolderCollapsed.mock.calls.map((c) => c[0]).sort()).toEqual(['inner', 'outer'])
+  })
+
   it('never reopens a folder on a state push: one the user collapsed stays collapsed', () => {
     const state = useStore.getState()
     state.applyState({
@@ -195,6 +252,7 @@ describe('selecting a repo hidden in a collapsed rail folder', () => {
       projects: [],
       railFolders: state.railFolders,
       railItems: state.railItems,
+      railProjectItems: {},
       worktrees: [worktree('w1', ['a'])],
       tasks: [],
       settings: {} as Settings,

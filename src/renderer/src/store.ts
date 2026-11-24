@@ -47,6 +47,12 @@ interface UIState {
    */
   renamingProjectId: string | null
   /**
+   * The rail folder whose name is being edited. In the store for the same
+   * reason: a folder made from a button or a menu, wherever in the rail it
+   * lands, opens straight into its name.
+   */
+  renamingFolderId: string | null
+  /**
    * The rail's latest announcement for screen readers (its polite live
    * region): what a drop or a menu action just did to the grouping.
    */
@@ -121,10 +127,12 @@ interface Data {
   repos: Repo[]
   /** Every project; the rail arranges these (see Project). */
   projects: Project[]
-  /** The rail's folders, in rail order (see RailFolder). */
+  /** Every rail folder: of projects, and of a project's repos (see RailFolder). */
   railFolders: RailFolder[]
   /** The rail's top level in order: folders and the projects in none of them. */
   railItems: RailItem[]
+  /** The top of a project's own list, for each project with folders among its repos. */
+  railProjectItems: Record<string, RailItem[]>
   worktrees: Worktree[]
   tasks: Task[]
   settings: Settings | null
@@ -148,6 +156,7 @@ interface Actions {
   /** Set a rail row open or closed. */
   setExpanded: (id: string, open: boolean) => void
   setRenamingProject: (id: string | null) => void
+  setRenamingFolder: (id: string | null) => void
   announceRail: (message: string) => void
   openModal: (type: ModalType, data?: unknown) => void
   closeModal: () => void
@@ -219,7 +228,9 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
 }
 
 /**
- * Open the rail folder hiding `projectId`, if one is.
+ * Open the rail folders hiding a row: every collapsed folder between the
+ * project and the top of the rail and, given `repoId`, every collapsed one
+ * between that repo and its project's header.
  *
  * A session can be selected from places that are not its rail row (the
  * command palette, the needs-attention banner), and a selection the rail
@@ -228,9 +239,30 @@ export function shareById<T extends { id: string }>(prev: T[], next: T[]): T[] {
  * collapsed through every state push, including the one at boot. (The project
  * and repo rows are opened by the select actions themselves, in `expanded`.)
  */
-function revealProject(folders: RailFolder[], projectId: string | null | undefined): void {
-  const hiding = folders.find((f) => f.collapsed && !!projectId && f.projectIds.includes(projectId))
-  if (hiding) fireAndForget(window.orbital.setRailFolderCollapsed(hiding.id, false))
+function revealInRail(folders: RailFolder[], projectId: string | null | undefined, repoId?: string | null): void {
+  const byId = new Map(folders.map((f) => [f.id, f]))
+  const opened = new Set<string>()
+  const openAround = (rowId: string | null | undefined): void => {
+    if (!rowId) return
+    let folder = folders.find((f) => f.items.some((item) => item.id === rowId))
+    // `opened` also stops a walk up parents that loop, which main never writes.
+    while (folder && !opened.has(folder.id)) {
+      opened.add(folder.id)
+      if (folder.collapsed) fireAndForget(window.orbital.setRailFolderCollapsed(folder.id, false))
+      folder = folder.parentId ? byId.get(folder.parentId) : undefined
+    }
+  }
+  openAround(projectId)
+  openAround(repoId)
+}
+
+/**
+ * The repo whose row has to be on show for a session in `repoId` to be: the
+ * repo itself, unless it is its project's home, which is the project's header
+ * and so in none of the project's folders as far as the rail draws it.
+ */
+function rowRepo(projects: Project[], projectId: string | null, repoId: string | null): string | null {
+  return repoId && projects.find((p) => p.id === projectId)?.homeRepoId === repoId ? null : repoId
 }
 
 /** Whether a project group's children are showing: open unless closed by hand. */
@@ -258,6 +290,7 @@ export const useStore = create<Store>((set, get) => ({
   projects: [],
   railFolders: [],
   railItems: [],
+  railProjectItems: {},
   worktrees: [],
   tasks: [],
   settings: null,
@@ -272,6 +305,7 @@ export const useStore = create<Store>((set, get) => ({
   activeWorktreeId: null,
   expanded: {},
   renamingProjectId: null,
+  renamingFolderId: null,
   railMessage: '',
   modal: null,
   modalData: null,
@@ -334,6 +368,7 @@ export const useStore = create<Store>((set, get) => ({
       projects: shareById(prev.projects, s.projects),
       railFolders: shareById(prev.railFolders, s.railFolders),
       railItems: share(prev.railItems, s.railItems),
+      railProjectItems: share(prev.railProjectItems, s.railProjectItems ?? {}),
       worktrees: shareById(prev.worktrees, s.worktrees),
       tasks: shareById(prev.tasks, s.tasks),
       settings: share(prev.settings, s.settings),
@@ -350,7 +385,7 @@ export const useStore = create<Store>((set, get) => ({
 
   setActiveRepo(id) {
     const projectId = get().repos.find((r) => r.id === id)?.projectId ?? null
-    revealProject(get().railFolders, projectId)
+    revealInRail(get().railFolders, projectId, rowRepo(get().projects, projectId, id))
     const activeWorktreeId = repoSession(get().worktrees, id)?.id ?? null
     set((s) => ({
       activeRepoId: id,
@@ -365,7 +400,7 @@ export const useStore = create<Store>((set, get) => ({
     const s = get()
     const project = s.projects.find((p) => p.id === id)
     if (!project) return
-    revealProject(s.railFolders, id)
+    revealInRail(s.railFolders, id)
     const session = projectSession(s.projects, s.worktrees, id)
     set((st) => ({
       activeProjectId: id,
@@ -381,7 +416,11 @@ export const useStore = create<Store>((set, get) => ({
       set({ activeWorktreeId: id })
       return
     }
-    revealProject(get().railFolders, worktree.projectId)
+    revealInRail(
+      get().railFolders,
+      worktree.projectId,
+      rowRepo(get().projects, worktree.projectId, worktree.repoId)
+    )
     const { projectId, repoId } = worktree
     set((s) => ({
       activeWorktreeId: id,
@@ -406,6 +445,10 @@ export const useStore = create<Store>((set, get) => ({
 
   setRenamingProject(id) {
     set({ renamingProjectId: id })
+  },
+
+  setRenamingFolder(id) {
+    set({ renamingFolderId: id })
   },
 
   announceRail(message) {

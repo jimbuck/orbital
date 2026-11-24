@@ -1,10 +1,19 @@
 import type { JSX } from 'react'
 import { Folder, FolderGit2, FolderMinus, FolderPlus, Layers } from 'lucide-react'
-import type { Project, Repo } from '@shared/types'
+import type { Project, RailItem, Repo } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { fireAndForget } from '@renderer/lib/bridge'
 import { MenuItem, MenuPrompt } from './menu'
-import { dissolvesOnLeave, projectRowById, projectRows, railRows, type RailAction } from './folders'
+import {
+  dissolvesOnLeave,
+  foldersIn,
+  placeOf,
+  projectRowById,
+  projectRows,
+  railRows,
+  type RailAction,
+  type RailRow
+} from './folders'
 
 /**
  * Menu steps the rail's row menus share. Each swaps in place of the items
@@ -15,51 +24,76 @@ export const MENU_TITLE = 'truncate px-2 py-1.5 text-[11.5px] font-semibold text
 const MENU_CAPTION = 'px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-[0.9px] text-faint'
 const PICK_LIST = 'max-h-[260px] overflow-y-auto'
 
+/** The rail's rows as the store has them, for a menu step to read places from. */
+function useRailRows(): RailRow[] {
+  const projects = useStore((s) => s.projects)
+  const repos = useStore((s) => s.repos)
+  const folders = useStore((s) => s.railFolders)
+  const rail = useStore((s) => s.railItems)
+  const projectItems = useStore((s) => s.railProjectItems)
+  return railRows(projects, repos, folders, rail, {}, projectItems)
+}
+
 /**
- * "Move to Folder": file a project in a folder (last in it), start a new
- * folder for it, or take it out to the top level just below its folder.
- * Rail arrangement only; the project is untouched.
+ * "Move to Folder": file a row in a folder (last in it), start a new folder
+ * for it, or take it out of its folder to just below it. The row is a project
+ * (a group's header or a flat row), filed among the rail's folders, or a
+ * member repo, filed among its project's own folders. Rail arrangement only;
+ * the project and the repo are untouched.
  */
 export function FolderStep({
   name,
-  projectId,
+  item,
   onNewFolder,
   onDone
 }: {
-  /** What the title calls the row: the repo's name on a flat row, the project's on a header. */
+  /** What the title calls the row: the repo's name on a repo row, the project's on a header. */
   name: string
-  projectId: string
+  /** The row being filed: a project, or one of a group's repos. */
+  item: RailItem
   onNewFolder: () => void
   onDone: () => void
 }): JSX.Element {
-  const folders = useStore((s) => s.railFolders)
-  const folderId = folders.find((f) => f.projectIds.includes(projectId))?.id ?? null
+  const rows = useRailRows()
+  // A member repo is filed among its own project's folders, and stays in that project.
+  const ownerId = useStore((s) => (item.kind === 'repo' ? s.repos.find((r) => r.id === item.id)?.projectId : undefined))
+  const folders = foldersIn(rows, item.kind === 'repo' ? (ownerId ?? '') : null)
+  const kind = item.kind === 'repo' ? 'repo' : 'project'
+  const folderId = placeOf(rows, kind, item.id)?.folderId ?? null
 
-  const moveTo = (target: string): void => {
-    fireAndForget(window.orbital.placeProject(projectId, target, null))
+  /** Put the row in `target` (null = the top of its list), before `beforeId` or last. */
+  const place = (target: string | null, beforeId: string | null): void => {
+    if (item.kind === 'repo') {
+      if (ownerId) fireAndForget(window.orbital.addRepoToProject(ownerId, item.id, beforeId, target))
+    } else {
+      fireAndForget(window.orbital.placeProject(item.id, target, beforeId))
+    }
     onDone()
   }
-  // Out of its folder, it lands at the top level just below that folder, which
-  // is the nearest place to where it was.
+  // Out of its folder, it lands just below that folder, in the list the
+  // folder is in, which is the nearest place to where it was.
   const removeFromFolder = (): void => {
-    const rail = useStore.getState().railItems
-    const at = rail.findIndex((item) => item.kind === 'folder' && item.id === folderId)
-    fireAndForget(window.orbital.placeProject(projectId, null, at === -1 ? null : (rail[at + 1]?.id ?? null)))
-    onDone()
+    const holder = folderId === null ? null : placeOf(rows, 'folder', folderId)
+    place(holder?.folderId ?? null, holder ? (holder.ids[holder.index + 1] ?? null) : null)
   }
 
   return (
     <>
       <div className={MENU_TITLE}>Move {name} to</div>
       <div className={PICK_LIST}>
-        {folders.map((folder) => (
+        {folders.map(({ folder, depth }) => (
           <MenuItem
             key={folder.id}
-            icon={<Folder size={13} strokeWidth={1.5} />}
+            // Indented by how deep the folder is nested, as the rail draws it.
+            icon={
+              <span className="inline-flex" style={{ paddingLeft: depth * 10 }}>
+                <Folder size={13} strokeWidth={1.5} />
+              </span>
+            }
             label={folder.name}
             hint={folder.id === folderId ? 'current' : undefined}
             disabled={folder.id === folderId}
-            onClick={() => moveTo(folder.id)}
+            onClick={() => place(folder.id, null)}
           />
         ))}
       </div>
@@ -76,14 +110,15 @@ export function FolderStep({
   )
 }
 
-/** The name prompt "New Folder…" leads to: a folder made to hold `projectId`, where it was. */
+/** The name prompt "New Folder…" leads to: a folder made to hold `item`, where it was. */
 export function NewFolderStep({
   name,
-  projectId,
+  item,
   onDone
 }: {
   name: string
-  projectId: string
+  /** The project or member repo the folder is made for. */
+  item: RailItem
   onDone: () => void
 }): JSX.Element {
   return (
@@ -92,7 +127,7 @@ export function NewFolderStep({
       placeholder="Folder name"
       confirmLabel="Create"
       onSubmit={(folderName) => {
-        fireAndForget(window.orbital.createRailFolder(folderName, projectId))
+        fireAndForget(window.orbital.createRailFolder(folderName, { holding: item }))
         onDone()
       }}
       onCancel={onDone}
@@ -116,18 +151,14 @@ export function ProjectStep({
   project: Project
   onPick: (action: RailAction) => void
 }): JSX.Element {
-  const projects = useStore((s) => s.projects)
-  const repos = useStore((s) => s.repos)
-  const folders = useStore((s) => s.railFolders)
-  const rail = useStore((s) => s.railItems)
-  const rows = railRows(projects, repos, folders, rail, {})
+  const rows = useRailRows()
   const all = projectRows(rows)
   const groups = all.filter((p) => p.kind === 'group')
   const flats = all.filter((p) => p.kind === 'flat' && p.id !== project.id)
   const dissolves = dissolvesOnLeave(projectRowById(rows, project.id))
 
   const join = (projectId: string, forms: boolean): void =>
-    onPick({ op: 'addRepoToProject', projectId, repoId: repo.id, beforeRepoId: null, forms, dissolves })
+    onPick({ op: 'addRepoToProject', projectId, repoId: repo.id, folderId: null, beforeId: null, forms, dissolves })
 
   return (
     <>

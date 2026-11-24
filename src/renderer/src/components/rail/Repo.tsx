@@ -17,19 +17,12 @@ import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Project, type Repo as RepoModel, type TerminalStatus } from '@shared/types'
 import { useStore } from '@renderer/store'
 import { StatusDot, worktreeStatusLabel, worktreeStatusTextClass } from '@renderer/lib/status'
-import WorktreeRow from './WorktreeRow'
+import { BranchStub, DOT_CELL, WorktreeBranches } from './treeLines'
 import { ContextMenu, MenuItem, MenuConfirm, clampMenuPos, type MenuPos } from './menu'
-import {
-  beginRailDrag,
-  dissolvesOnLeave,
-  folderOf,
-  projectRowById,
-  railRows,
-  repoPathLabel,
-  type RailAction
-} from './folders'
+import { beginRailDrag, dissolvesOnLeave, placeOf, projectRowById, repoPathLabel, type RailAction } from './folders'
 import { FolderStep, NewFolderStep, ProjectStep } from './menuSteps'
 import {
+  currentRailRows,
   dissolveConfirm,
   folderSessionOf,
   makeHome,
@@ -43,8 +36,9 @@ import { fileManagerName } from '@renderer/lib/platform'
 
 /**
  * What the context menu is showing: its items, or one of the steps that swap in
- * place of them (see ./menu). `move` is the folder picker and `newFolder` the
- * name prompt it leads to; `project` is the Move to Project picker; `confirm`
+ * place of them (see ./menu). `move` is the folder picker (the rail's folders
+ * for a flat row, its project's own for a member) and `newFolder` the name
+ * prompt it leads to; `project` is the Move to Project picker; `confirm`
  * holds a move that would close a folder session with terminals open.
  */
 type MenuStep =
@@ -188,18 +182,13 @@ export default function Repo({
   // Out of its project, it lands as its own row just below the project.
   const removeFromProject = (): void => {
     if (!project) return
-    const s = useStore.getState()
-    const rows = railRows(s.projects, s.repos, s.railFolders, s.railItems, {})
-    const folderId = folderOf(rows, project.id)
-    const list = folderId
-      ? (rows.find((r) => r.kind === 'folder' && r.id === folderId) as { projects: { id: string }[] }).projects
-      : rows
-    const after = list[list.findIndex((r) => r.id === project.id) + 1]?.id ?? null
+    const rows = currentRailRows()
+    const at = placeOf(rows, 'project', project.id)
     pick({
       op: 'detachRepo',
       repoId: repo.id,
-      folderId,
-      beforeId: after,
+      folderId: at?.folderId ?? null,
+      beforeId: at?.ids[at.index + 1] ?? null,
       dissolves: dissolvesOnLeave(projectRowById(rows, project.id))
     })
   }
@@ -252,6 +241,9 @@ export default function Repo({
 
   const pathLabel = member && project ? repoPathLabel(repo.repoPath, project.rootPath) : repo.repoPath
   const projectName = project?.name ?? ''
+  // What "Move to Folder" files: a flat row is its project, among the rail's
+  // folders; a member is the repo, among its project's own.
+  const filed = member ? ({ kind: 'repo', id: repo.id } as const) : ({ kind: 'project', id: repo.projectId } as const)
 
   return (
     // The data attribute is how the Rail tells what a drag is over: a flat
@@ -299,8 +291,9 @@ export default function Repo({
           <span className="w-[14px] flex-none" />
         )}
 
-        <span title={worktreeStatusLabel(rootStatus)} className="flex w-[11px] flex-none items-center justify-center">
+        <span title={worktreeStatusLabel(rootStatus)} className={DOT_CELL}>
           <StatusDot status={rootStatus} />
+          {expanded && linked.length > 0 && <BranchStub />}
         </span>
 
         <div className="min-w-0 flex-1">
@@ -350,10 +343,7 @@ export default function Repo({
       </div>
 
       {expanded && linked.length > 0 && (
-        <div className="ml-3 mb-[6px] mt-[3px] flex flex-col gap-[2px] border-l border-line-2 pl-3">
-          {linked.map((worktree) => (
-            <WorktreeRow key={worktree.id} worktree={worktree} />
-          ))}
+        <WorktreeBranches worktrees={linked} label={`Worktrees of ${repo.name}`}>
           <button
             type="button"
             onClick={() => openModal('newWorktree', { repo })}
@@ -362,7 +352,7 @@ export default function Repo({
             <Plus size={13} strokeWidth={1.5} className="flex-none" />
             <span>New Worktree</span>
           </button>
-        </div>
+        </WorktreeBranches>
       )}
 
       {menu && (
@@ -370,14 +360,11 @@ export default function Repo({
           {step.kind === 'items' && (
             <>
               <MenuItem icon={<Pencil size={13} strokeWidth={1.5} />} label="Rename" onClick={startRename} />
-              {/* Folders hold projects: a member is filed with its project, from the header. */}
-              {!member && (
-                <MenuItem
-                  icon={<FolderInput size={13} strokeWidth={1.5} />}
-                  label="Move to Folder"
-                  onClick={() => setStep({ kind: 'move' })}
-                />
-              )}
+              <MenuItem
+                icon={<FolderInput size={13} strokeWidth={1.5} />}
+                label="Move to Folder"
+                onClick={() => setStep({ kind: 'move' })}
+              />
               {!member && project && (
                 <>
                   <MenuItem
@@ -476,15 +463,13 @@ export default function Repo({
           {step.kind === 'move' && (
             <FolderStep
               name={repo.name}
-              projectId={repo.projectId}
+              item={filed}
               onNewFolder={() => setStep({ kind: 'newFolder' })}
               onDone={closeMenu}
             />
           )}
 
-          {step.kind === 'newFolder' && (
-            <NewFolderStep name={repo.name} projectId={repo.projectId} onDone={closeMenu} />
-          )}
+          {step.kind === 'newFolder' && <NewFolderStep name={repo.name} item={filed} onDone={closeMenu} />}
 
           {step.kind === 'project' && project && <ProjectStep repo={repo} project={project} onPick={pick} />}
 

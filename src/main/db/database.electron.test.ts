@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
-import { DEFAULT_ENV_SYNC_PATTERNS, type Project, type Repo } from '@shared/types'
+import { DEFAULT_ENV_SYNC_PATTERNS, type Project, type RailItem, type Repo } from '@shared/types'
 import { closeDb, getDb, initDb, writeTx } from './database'
 import * as tables from './repositories'
 import { exportWorkspaceToFile, importWorkspaceFromFile } from '../services/workspaces'
@@ -89,6 +89,7 @@ const ALL_TABLES = [
   'projects',
   'rail_folders',
   'rail_positions',
+  'rail_repo_positions',
   'repos',
   'settings',
   'tabs',
@@ -258,15 +259,28 @@ function writePreProjectsDb(v145: boolean): void {
   d.close()
 }
 
-/** The rail as drawn, by project name: a loose project is its name, a folder `Name[its projects]`. */
-function railByName(): string[] {
+/** A list of rail rows by name: a project or a repo is its name, a folder `Name[its rows]`, nested as it nests. */
+function rowsByName(items: RailItem[]): string[] {
   const state = tables.getAppState()
-  const name = (pid: string): string => state.projects.find((p) => p.id === pid)?.name ?? '?'
-  return state.railItems.map((item) => {
-    if (item.kind === 'project') return name(item.id)
+  const one = (item: RailItem): string => {
+    if (item.kind === 'project') return state.projects.find((p) => p.id === item.id)?.name ?? '?'
+    if (item.kind === 'repo') return state.repos.find((r) => r.id === item.id)?.name ?? '?'
     const folder = state.railFolders.find((f) => f.id === item.id)!
-    return `${folder.name}[${folder.projectIds.map(name).join(' ')}]`
-  })
+    return `${folder.name}[${folder.items.map(one).join(' ')}]`
+  }
+  return items.map(one)
+}
+
+/** The rail as drawn, through getAppState, so this is what the renderer is sent. */
+function railByName(): string[] {
+  return rowsByName(tables.getAppState().railItems)
+}
+
+/** A project's own list as the rail arranges it: its repos (the home too) and its folders. */
+function membersByName(pid: string): string[] {
+  const state = tables.getAppState()
+  // A project with no folders is not sent a list: its repos read as repoIds has them.
+  return rowsByName(state.railProjectItems[pid] ?? state.projects.find((p) => p.id === pid)!.repoIds.map((id) => ({ kind: 'repo', id })))
 }
 
 const columns = (table: string): string[] =>
@@ -632,10 +646,17 @@ describe('repositories', () => {
       const stateBefore = tables.projects.get(p)
       const listBefore = tables.repos.list()
       const folder = tables.railFolders.create('Work')
-      expect(folder).toEqual({ id: folder.id, name: 'Work', collapsed: false, projectIds: [] })
+      expect(folder).toEqual({
+        id: folder.id,
+        name: 'Work',
+        collapsed: false,
+        projectId: null,
+        parentId: null,
+        items: []
+      })
 
       tables.railFolders.placeProject(p, folder.id, null)
-      expect(tables.railFolders.get(folder.id)!.projectIds).toEqual([p])
+      expect(tables.railFolders.get(folder.id)!.items).toEqual([{ kind: 'project', id: p }])
       // Same rows, byte for byte, and the same entities over the bridge: where
       // the project sits is recorded beside it, never on it.
       expect([projectRow(p), repoRow(repoId)]).toEqual(before)
@@ -643,6 +664,8 @@ describe('repositories', () => {
       expect(tables.repos.list()).toEqual(listBefore)
       expect(tables.getAppState().railFolders).toEqual(tables.railFolders.list())
       expect(tables.getAppState().railItems).toEqual(tables.railFolders.rail())
+      // No project has folders among its repos, so none is sent a list of its own.
+      expect(tables.getAppState().railProjectItems).toEqual({})
     })
 
     it('lists projects nobody has arranged oldest first, with a new folder above them', () => {
@@ -675,11 +698,11 @@ describe('repositories', () => {
       expect(rail()).toEqual(['Work[]', 'p', 'a', 'b'])
 
       // A folder between two projects, then last, then back before a project.
-      tables.railFolders.placeFolder(work, b)
+      tables.railFolders.placeFolder(work, null, b)
       expect(rail()).toEqual(['p', 'a', 'Work[]', 'b'])
-      tables.railFolders.placeFolder(work, null)
+      tables.railFolders.placeFolder(work, null, null)
       expect(rail()).toEqual(['p', 'a', 'b', 'Work[]'])
-      tables.railFolders.placeFolder(work, a)
+      tables.railFolders.placeFolder(work, null, a)
       expect(rail()).toEqual(['p', 'Work[]', 'a', 'b'])
 
       // A project before a folder, before another project, and last.
@@ -691,15 +714,15 @@ describe('repositories', () => {
       expect(rail()).toEqual(['p', 'b', 'Work[]', 'a'])
 
       // Before itself changes nothing; before something that is not there goes last.
-      tables.railFolders.placeFolder(work, work)
+      tables.railFolders.placeFolder(work, null, work)
       tables.railFolders.placeProject(b, null, b)
       expect(rail()).toEqual(['p', 'b', 'Work[]', 'a'])
-      tables.railFolders.placeFolder(work, 'missing')
+      tables.railFolders.placeFolder(work, null, 'missing')
       expect(rail()).toEqual(['p', 'b', 'a', 'Work[]'])
 
       // A second folder is its own row in the same order.
       const play = tables.railFolders.create('Play').id
-      tables.railFolders.placeFolder(play, work)
+      tables.railFolders.placeFolder(play, null, work)
       expect(rail()).toEqual(['p', 'b', 'a', 'Play[]', 'Work[]'])
       // A project added once the rail is arranged still lands at the end.
       add('z')
@@ -736,11 +759,77 @@ describe('repositories', () => {
     it('puts a folder made for a project where that project was', () => {
       const a = add('a')
       add('b')
-      tables.railFolders.create('Work', a)
+      tables.railFolders.create('Work', { holding: { kind: 'project', id: a } })
       expect(rail()).toEqual(['p', 'Work[a]', 'b'])
-      // Made for a project that is already filed, it sits just below that folder.
-      tables.railFolders.create('Other', a)
-      expect(rail()).toEqual(['p', 'Work[]', 'Other[a]', 'b'])
+      // Made for a project that is already filed, it takes the project's place inside that folder.
+      tables.railFolders.create('Other', { holding: { kind: 'project', id: a } })
+      expect(rail()).toEqual(['p', 'Work[Other[a]]', 'b'])
+      // A spot that names nothing is a plain new folder, at the top.
+      tables.railFolders.create('Lost', { holding: { kind: 'project', id: 'gone' } })
+      tables.railFolders.create('Nowhere', { parentId: 'gone' })
+      expect(rail()).toEqual(['Nowhere[]', 'Lost[]', 'p', 'Work[Other[a]]', 'b'])
+    })
+
+    it('nests folders: one inside another, moved in and out, and never inside itself', () => {
+      const a = add('a')
+      const b = add('b')
+      const work = tables.railFolders.create('Work').id
+      const client = tables.railFolders.create('Client', { parentId: work })
+      expect(client).toMatchObject({ projectId: null, parentId: work, items: [] })
+      expect(rail()).toEqual(['Work[Client[]]', 'p', 'a', 'b'])
+
+      // A project goes into a nested folder like any other, and before a row of it.
+      tables.railFolders.placeProject(a, client.id, null)
+      tables.railFolders.placeProject(b, client.id, a)
+      tables.railFolders.placeProject(p, work, client.id)
+      expect(rail()).toEqual(['Work[p Client[b a]]'])
+
+      // A new folder goes first in its parent, and opens a parent that was shut.
+      tables.railFolders.setCollapsed(work, true)
+      const later = tables.railFolders.create('Later', { parentId: work }).id
+      expect(tables.railFolders.get(work)!.collapsed).toBe(false)
+      expect(rail()).toEqual(['Work[Later[] p Client[b a]]'])
+
+      // Folders move between lists: into another, out to the top, and to a place among the rows there.
+      tables.railFolders.placeFolder(later, client.id, a)
+      expect(rail()).toEqual(['Work[p Client[b Later[] a]]'])
+      expect(tables.railFolders.get(later)!.parentId).toBe(client.id)
+      tables.railFolders.placeFolder(client.id, null, work)
+      expect(rail()).toEqual(['Client[b Later[] a]', 'Work[p]'])
+
+      // Never inside itself, at any depth; a parent that is not there changes nothing.
+      tables.railFolders.placeFolder(client.id, client.id, null)
+      tables.railFolders.placeFolder(client.id, later, null)
+      tables.railFolders.placeFolder(client.id, 'missing', null)
+      expect(rail()).toEqual(['Client[b Later[] a]', 'Work[p]'])
+
+      // Deleting a folder leaves everything in it, folders included, where it was.
+      tables.railFolders.placeFolder(client.id, work, null)
+      expect(rail()).toEqual(['Work[p Client[b Later[] a]]'])
+      tables.railFolders.remove(client.id)
+      expect(rail()).toEqual(['Work[p b Later[] a]'])
+      expect(tables.railFolders.get(later)!.parentId).toBe(work)
+
+      closeDb()
+      initDb(dir)
+      expect(rail()).toEqual(['Work[p b Later[] a]'])
+    })
+
+    it('survives folders whose parents loop: each is still listed once', () => {
+      const one = tables.railFolders.create('One').id
+      const two = tables.railFolders.create('Two', { parentId: one }).id
+      tables.railFolders.placeProject(p, two, null)
+      // No write here makes this; it is what a damaged file could hold.
+      getDb().prepare('UPDATE rail_folders SET parent_id = ? WHERE id = ?').run(two, one)
+      // Which of the two ends up outermost is not promised; that the read
+      // ends, and lists each folder and the project once, is.
+      const drawn = rail().join(' ')
+      expect(['One[Two[p]]', 'Two[One[] p]']).toContain(drawn)
+      expect(tables.railFolders.list().filter((f) => f.parentId === null)).toHaveLength(1)
+      // And the next writes put the rows right.
+      tables.railFolders.placeFolder(one, null, null)
+      tables.railFolders.placeFolder(two, null, one)
+      expect(rail()).toEqual(['Two[p]', 'One[]'])
     })
 
     it('deleting a folder only ungroups: its projects take its place, and nothing else goes', () => {
@@ -750,7 +839,7 @@ describe('repositories', () => {
       const folder = tables.railFolders.create('Work')
       tables.railFolders.placeProject(b, folder.id, null)
       tables.railFolders.placeProject(p, folder.id, null)
-      tables.railFolders.placeFolder(folder.id, null)
+      tables.railFolders.placeFolder(folder.id, null, null)
       tables.railFolders.placeProject(a, null, null)
       expect(rail()).toEqual(['Work[b p]', 'a'])
       const rowsBefore = [p, a, b].map(projectRow)
@@ -769,7 +858,7 @@ describe('repositories', () => {
       tables.railFolders.placeProject(p, folder.id, null)
       tables.repos.remove(repoId)
       expect(tables.projects.get(p)).toBeUndefined()
-      expect(tables.railFolders.list()).toEqual([{ ...folder, projectIds: [] }])
+      expect(tables.railFolders.list()).toEqual([{ ...folder, items: [] }])
       expect(getDb().prepare('SELECT COUNT(*) AS n FROM rail_positions').get()).toEqual({ n: 0 })
     })
 
@@ -781,11 +870,21 @@ describe('repositories', () => {
       tables.railFolders.setCollapsed(folder.id, true)
       tables.railFolders.placeProject(b, folder.id, null)
       tables.railFolders.placeProject(a, folder.id, b)
-      tables.railFolders.placeFolder(folder.id, null)
+      tables.railFolders.placeFolder(folder.id, null, null)
       closeDb()
       initDb(dir)
       expect(tables.railFolders.list()).toEqual([
-        { id: folder.id, name: 'Clients', collapsed: true, projectIds: [a, b] }
+        {
+          id: folder.id,
+          name: 'Clients',
+          collapsed: true,
+          projectId: null,
+          parentId: null,
+          items: [
+            { kind: 'project', id: a },
+            { kind: 'project', id: b }
+          ]
+        }
       ])
       expect(rail()).toEqual(['p', 'Clients[a b]'])
     })
@@ -807,7 +906,7 @@ describe('repositories', () => {
       tables.setActiveWorkspaceId(other.id)
       expect(rail()).toEqual(['x'])
       // Nor can that workspace move this one's folder.
-      tables.railFolders.placeFolder(here.id, foreign)
+      tables.railFolders.placeFolder(here.id, null, foreign)
       tables.setActiveWorkspaceId(home)
       expect(rail()).toEqual(['Here[p]'])
 
@@ -988,6 +1087,132 @@ describe('repositories', () => {
         n: 0
       })
       expect(railByName()).toEqual(['p'])
+    })
+
+    describe('folders among a project\'s repos', () => {
+      /** A group "src" of a (the home), b, c and d, in that order. */
+      const group = (): { pid: string; a: Repo; b: Repo; c: Repo; d: Repo } => {
+        const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((name) => add(name))
+        for (const r of [b, c, d]) tables.projects.addRepo(a.projectId, r.id, null)
+        tables.projects.setHome(a.projectId, a.id)
+        return { pid: a.projectId, a, b, c, d }
+      }
+      const names = (pid: string): string[] =>
+        project(pid).repoIds.map((rid) => tables.repos.get(rid)!.name)
+
+      it('files repos in a folder of the project, and keeps the flat order reading top to bottom', () => {
+        const { pid, a, b, c, d } = group()
+        const before = [b, c, d].map((r) => ({ ...tables.repos.get(r.id)! }))
+        const apps = tables.railFolders.create('Apps', { projectId: pid })
+        expect(apps).toMatchObject({ projectId: pid, parentId: null, items: [] })
+        // It is one of the project's rows, not one of the rail's.
+        expect(railByName()).toEqual(['p', 'src'])
+        expect(membersByName(pid)).toEqual(['Apps[]', 'a', 'b', 'c', 'd'])
+
+        tables.projects.addRepo(pid, d.id, null, apps.id)
+        tables.projects.addRepo(pid, b.id, d.id, apps.id)
+        expect(membersByName(pid)).toEqual(['Apps[b d]', 'a', 'c'])
+        // The one flat order follows the arrangement; nothing else about a repo moved.
+        expect(names(pid)).toEqual(['b', 'd', 'a', 'c'])
+        expect([b, c, d].map((r) => tables.repos.get(r.id))).toEqual(before)
+        expect(project(pid)).toMatchObject({ name: 'src', rootPath: 'C:/src', homeRepoId: a.id })
+
+        // Back out to a place among the rows at the top, a folder being one of them.
+        tables.projects.addRepo(pid, d.id, apps.id)
+        expect(membersByName(pid)).toEqual(['d', 'Apps[b]', 'a', 'c'])
+        tables.projects.addRepo(pid, b.id, null)
+        expect(membersByName(pid)).toEqual(['d', 'Apps[]', 'a', 'c', 'b'])
+        expect(names(pid)).toEqual(['d', 'a', 'c', 'b'])
+      })
+
+      it('makes a folder for a repo where the repo was, and nests and moves folders within the project', () => {
+        const { pid, b, c, d } = group()
+        const apps = tables.railFolders.create('Apps', { holding: { kind: 'repo', id: c.id } })
+        expect(apps.projectId).toBe(pid)
+        expect(membersByName(pid)).toEqual(['a', 'b', 'Apps[c]', 'd'])
+
+        const web = tables.railFolders.create('Web', { parentId: apps.id })
+        expect(web).toMatchObject({ projectId: pid, parentId: apps.id })
+        tables.projects.addRepo(pid, d.id, null, web.id)
+        expect(membersByName(pid)).toEqual(['a', 'b', 'Apps[Web[d] c]'])
+        expect(names(pid)).toEqual(['a', 'b', 'd', 'c'])
+
+        tables.railFolders.placeFolder(web.id, null, b.id)
+        expect(membersByName(pid)).toEqual(['a', 'Web[d]', 'b', 'Apps[c]'])
+        expect(names(pid)).toEqual(['a', 'd', 'b', 'c'])
+        tables.railFolders.placeFolder(apps.id, web.id, null)
+        expect(membersByName(pid)).toEqual(['a', 'Web[d Apps[c]]', 'b'])
+
+        // Deleting one leaves its rows where it was.
+        tables.railFolders.remove(web.id)
+        expect(membersByName(pid)).toEqual(['a', 'd', 'Apps[c]', 'b'])
+        expect(names(pid)).toEqual(['a', 'd', 'c', 'b'])
+
+        closeDb()
+        initDb(dir)
+        expect(membersByName(pid)).toEqual(['a', 'd', 'Apps[c]', 'b'])
+      })
+
+      it('keeps the two kinds of folder, and each project\'s folders, apart', () => {
+        const { pid, b } = group()
+        const other = add('x', 'C:/other/x')
+        const y = add('y', 'C:/other/y')
+        tables.projects.addRepo(other.projectId, y.id, null)
+        const apps = tables.railFolders.create('Apps', { projectId: pid })
+        const theirs = tables.railFolders.create('Theirs', { projectId: other.projectId })
+        const work = tables.railFolders.create('Work')
+
+        // A project is not filed in a folder of repos, nor a repo in a folder of projects or of another project.
+        tables.railFolders.placeProject(other.projectId, apps.id, null)
+        tables.projects.addRepo(pid, b.id, null, work.id)
+        tables.projects.addRepo(pid, b.id, null, theirs.id)
+        // Nor does a folder cross over.
+        tables.railFolders.placeFolder(apps.id, work.id, null)
+        tables.railFolders.placeFolder(apps.id, theirs.id, null)
+        tables.railFolders.placeFolder(work.id, apps.id, null)
+        expect(railByName()).toEqual(['Work[]', 'p', 'src', 'other'])
+        expect(membersByName(pid)).toEqual(['Apps[]', 'a', 'b', 'c', 'd'])
+        expect(membersByName(other.projectId)).toEqual(['Theirs[]', 'x', 'y'])
+      })
+
+      it('moves a repo into another project\'s folder, and settles the project it left', () => {
+        const { pid, b } = group()
+        const x = add('x', 'C:/other/x')
+        const y = add('y', 'C:/other/y')
+        tables.projects.addRepo(x.projectId, y.id, null)
+        const kept = tables.railFolders.create('Kept', { projectId: x.projectId })
+        tables.projects.addRepo(x.projectId, y.id, null, kept.id)
+        const apps = tables.railFolders.create('Apps', { projectId: pid })
+
+        tables.projects.addRepo(pid, y.id, null, apps.id)
+        expect(tables.repos.get(y.id)!.projectId).toBe(pid)
+        expect(membersByName(pid)).toEqual(['Apps[y]', 'a', 'b', 'c', 'd'])
+        // The project y left is a plain repo row again, and a plain row has no folders.
+        expect(project(x.projectId)).toMatchObject({ name: 'x', repoIds: [x.id] })
+        expect(tables.railFolders.get(kept.id)).toBeUndefined()
+
+        // Taken out of its project altogether, the repo forgets the folder it was in.
+        tables.projects.addRepo(pid, b.id, null, apps.id)
+        tables.projects.detachRepo(b.id, null, null)
+        expect(membersByName(pid)).toEqual(['Apps[y]', 'a', 'c', 'd'])
+        expect(getDb().prepare('SELECT folder_id FROM rail_repo_positions WHERE repo_id = ?').get(b.id)).toEqual({
+          folder_id: null
+        })
+      })
+
+      it('lists a repo added later after the arranged ones, and goes with its project', () => {
+        const { pid } = group()
+        const apps = tables.railFolders.create('Apps', { projectId: pid })
+        tables.railFolders.placeFolder(apps.id, null, null)
+        const late = tables.repos.create({ name: 'late', repoPath: 'C:/src/late', projectId: pid })
+        expect(membersByName(pid)).toEqual(['a', 'b', 'c', 'd', 'Apps[]', 'late'])
+        expect(names(pid)).toEqual(['a', 'b', 'c', 'd', 'late'])
+
+        tables.projects.addRepo(pid, late.id, null, apps.id)
+        tables.projects.remove(pid)
+        expect(tables.railFolders.list()).toEqual([])
+        expect(getDb().prepare('SELECT COUNT(*) AS n FROM rail_repo_positions').get()).toEqual({ n: 0 })
+      })
     })
 
     it('never mixes workspaces', () => {

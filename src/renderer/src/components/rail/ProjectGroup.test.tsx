@@ -91,6 +91,7 @@ function renderRail(
     worktrees?: Worktree[]
     folders?: RailFolder[]
     rail?: RailItem[]
+    projectItems?: Record<string, RailItem[]>
     expanded?: Record<string, boolean>
     active?: string | null
     projects?: Project[]
@@ -113,6 +114,8 @@ function renderRail(
     projects: opts.projects ?? projects,
     railFolders: opts.folders ?? [],
     railItems: opts.rail ?? [],
+    railProjectItems: opts.projectItems ?? {},
+    renamingFolderId: null,
     worktrees,
     tasks: [],
     activeRepoId: active?.repoId ?? null,
@@ -303,6 +306,7 @@ describe('project header menu', () => {
     expect(items()).toEqual([
       'Rename',
       'Add Repo…',
+      'New Folderfor its repos',
       'New Worktree',
       'Home Repohome',
       'Change Root Folder…',
@@ -422,11 +426,12 @@ describe('project header menu', () => {
 })
 
 describe('member and flat repo menus', () => {
-  it('gives a member the project items and no Move to Folder', () => {
+  it("gives a member the project items, and Move to Folder among its project's folders", () => {
     renderRail()
     fireEvent.contextMenu(memberRow('api'))
     expect(items()).toEqual([
       'Rename',
+      'Move to Folder',
       'New Worktree',
       'Make Home Repo',
       'Move to Project',
@@ -470,7 +475,7 @@ describe('member and flat repo menus', () => {
     expect(within(screen.getByRole('menu')).getByText('Acme').closest('button')?.disabled).toBe(true)
     expect(screen.getByText('New project with')).toBeTruthy()
     fireEvent.click(within(screen.getByRole('menu')).getByText('Platform'))
-    expect(bridge.addRepoToProject).toHaveBeenCalledWith('platform', 'api', null)
+    expect(bridge.addRepoToProject).toHaveBeenCalledWith('platform', 'api', null, null)
 
     fireEvent.contextMenu(flatRow('orbital'))
     fireEvent.click(screen.getByText('Move to Project'))
@@ -479,7 +484,7 @@ describe('member and flat repo menus', () => {
     await act(async () => {
       fireEvent.click(within(screen.getByRole('menu')).getByText('docs'))
     })
-    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('docs', 'orbital', null)
+    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('docs', 'orbital', null, null)
     expect(useStore.getState().renamingProjectId).toBe('docs')
   })
 
@@ -516,7 +521,7 @@ describe('dragging repos in and out of projects', () => {
     fireEvent.dragOver(groupHeader('platform'), { dataTransfer: dataTransfer() })
     expect(groupBlock('platform').className).toContain('ring-accent/50')
     fireEvent.drop(groupHeader('platform'), { dataTransfer: dataTransfer() })
-    expect(bridge.addRepoToProject).toHaveBeenCalledWith('platform', 'orbital', null)
+    expect(bridge.addRepoToProject).toHaveBeenCalledWith('platform', 'orbital', null, null)
   })
 
   it('shows a slot among the members and inserts there', () => {
@@ -525,14 +530,14 @@ describe('dragging repos in and out of projects', () => {
     fireEvent.dragOver(memberRow('web'), { dataTransfer: dataTransfer() })
     expect(marker(groupBlock('acme'))).toBeTruthy()
     fireEvent.drop(memberRow('web'), { dataTransfer: dataTransfer() })
-    expect(bridge.addRepoToProject).toHaveBeenCalledWith('acme', 'orbital', 'web')
+    expect(bridge.addRepoToProject).toHaveBeenCalledWith('acme', 'orbital', 'web', null)
   })
 
   it('reorders a member inside its project', () => {
     renderRail()
     fireEvent.dragStart(memberRow('web'), { dataTransfer: dataTransfer() })
     fireEvent.drop(memberRow('api'), { dataTransfer: dataTransfer() })
-    expect(bridge.addRepoToProject).toHaveBeenCalledWith('acme', 'web', 'api')
+    expect(bridge.addRepoToProject).toHaveBeenCalledWith('acme', 'web', 'api', null)
     expect(document.querySelector('[aria-live="polite"]')).toBeTruthy()
   })
 
@@ -564,7 +569,7 @@ describe('dragging repos in and out of projects', () => {
     fireEvent.dragStart(memberRow('billing'), { dataTransfer: dataTransfer() })
     fireEvent.drop(flatRow('orbital'), { dataTransfer: dataTransfer() })
     fireEvent.click(screen.getByRole('button', { name: 'Take Out' }))
-    expect(bridge.addRepoToProject).toHaveBeenCalledWith('orbital', 'billing', null)
+    expect(bridge.addRepoToProject).toHaveBeenCalledWith('orbital', 'billing', null, null)
   })
 
   it('moves a whole project by its header, and never merges it into another', () => {
@@ -572,6 +577,167 @@ describe('dragging repos in and out of projects', () => {
     fireEvent.dragStart(groupHeader('platform'), { dataTransfer: dataTransfer() })
     fireEvent.drop(groupHeader('acme'), { dataTransfer: dataTransfer() })
     expect(bridge.placeProject).toHaveBeenCalledWith('platform', null, 'acme')
+    expect(bridge.addRepoToProject).not.toHaveBeenCalled()
+  })
+})
+
+describe("folders among a project's repos", () => {
+  /*
+   * acme   home 'home' (worktree adr)
+   *   api
+   *   Apps [ web, Old [ ] ]
+   */
+  const apps: RailFolder = {
+    id: 'f-apps',
+    name: 'Apps',
+    collapsed: false,
+    projectId: 'acme',
+    parentId: null,
+    items: [
+      { kind: 'repo', id: 'web' },
+      { kind: 'folder', id: 'f-old' }
+    ]
+  }
+  const old: RailFolder = { id: 'f-old', name: 'Old', collapsed: false, projectId: 'acme', parentId: 'f-apps', items: [] }
+  /** A folder of projects, which has nothing to do with acme's repos. */
+  const work: RailFolder = { id: 'f-work', name: 'Work', collapsed: false, projectId: null, parentId: null, items: [] }
+  const filed = {
+    folders: [apps, old, work],
+    // The home is listed like any repo; the rail draws it as the header.
+    projectItems: {
+      acme: [
+        { kind: 'repo', id: 'home' },
+        { kind: 'repo', id: 'api' },
+        { kind: 'folder', id: 'f-apps' }
+      ] as RailItem[]
+    }
+  }
+  const folderBox = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-folder-id="${id}"]`)!
+  const folderHeader = (id: string): HTMLElement => folderBox(id).querySelector<HTMLElement>('[data-folder-header]')!
+
+  it('draws them under the project header, nested, each with the repos filed in it', () => {
+    renderRail(filed)
+    expect(folderBox('f-apps').closest('[data-project-id]')).toBe(groupBlock('acme'))
+    expect(folderBox('f-old').parentElement?.closest('[data-folder-id]')).toBe(folderBox('f-apps'))
+    expect(memberRow('web').closest('[data-folder-id]')).toBe(folderBox('f-apps'))
+    expect(memberRow('api').closest('[data-folder-id]')).toBeNull()
+    expect(within(folderHeader('f-apps')).getByTitle('1 repo')).toBeTruthy()
+    expect(within(folderBox('f-old')).getByText('Empty. Drag a repo here.')).toBeTruthy()
+    // Filing changes nothing about the project: it still has its three repos, and the home is still the header.
+    expect(within(groupHeader('acme')).getByTitle('3 repos')).toBeTruthy()
+    expect(document.querySelector('[data-repo-id="home"]')).toBeNull()
+  })
+
+  it('reports what a collapsed folder of repos hides, by repo', () => {
+    renderRail({
+      ...filed,
+      folders: [{ ...apps, collapsed: true }, old, work],
+      worktrees: [
+        wt('acme-root', 'acme', 'home', 'root'),
+        wt('api-root', 'acme', 'api', 'root', 'needs_attention'),
+        wt('web-root', 'acme', 'web', 'root', 'needs_attention')
+      ]
+    })
+    expect(document.querySelector('[data-repo-id="web"]')).toBeNull()
+    // web is in the folder; api needs you too, but it is not this folder's news.
+    expect(within(folderHeader('f-apps')).getByLabelText('1 worktree needs you')).toBeTruthy()
+    expect(within(folderHeader('f-apps')).getByTitle('Worktrees needs you')).toBeTruthy()
+  })
+
+  it("keeps the home repo's worktrees and the project's repos in separate lists, told apart by their lines", () => {
+    renderRail(filed)
+    const acme = groupBlock('acme')
+    const worktrees = within(acme).getByRole('group', { name: 'Worktrees of home' })
+    const repos = within(acme).getByRole('group', { name: 'Repos in Acme' })
+    expect(within(worktrees).getByText('adr')).toBeTruthy()
+    // No repo of the project is in the worktree list, and no worktree among the repos.
+    expect(worktrees.querySelector('[data-repo-id]')).toBeNull()
+    expect(repos.contains(memberRow('api'))).toBe(true)
+    expect(repos.contains(worktrees)).toBe(false)
+    // The lines do the telling, so neither list is captioned.
+    expect(within(acme).queryByText('Worktrees')).toBeNull()
+    expect(within(acme).queryByText('Repos')).toBeNull()
+    // Each worktree is joined to the header's dot: a stub in the header, a trunk and a curve beside the row.
+    expect(groupHeader('acme').querySelectorAll('[aria-hidden].bg-line-strong')).toHaveLength(1)
+    expect(worktrees.querySelectorAll('span[aria-hidden].border-line-strong')).toHaveLength(2)
+    // Collapsed, there is no branch for the stub to start.
+    act(() => useStore.getState().setExpanded('acme', false))
+    expect(groupHeader('acme').querySelector('[aria-hidden].bg-line-strong')).toBeNull()
+  })
+
+  it('makes a folder for the project from its header menu, and opens it into its name', async () => {
+    bridge.createRailFolder.mockResolvedValue(old)
+    renderRail({ ...filed, expanded: { acme: false } })
+    fireEvent.contextMenu(groupHeader('acme'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('New Folder'))
+    })
+    expect(bridge.createRailFolder).toHaveBeenCalledWith('New Folder', { projectId: 'acme' })
+    // The project is opened so the folder is on screen, in rename.
+    expect(useStore.getState().expanded.acme).toBe(true)
+    expect(within(folderBox('f-old')).getByLabelText('Folder name')).toBeTruthy()
+  })
+
+  it("files a member through Move to Folder, among its own project's folders only", () => {
+    renderRail(filed)
+    fireEvent.contextMenu(memberRow('api'))
+    fireEvent.click(screen.getByText('Move to Folder'))
+    // Work holds projects, so it is not offered to a repo of acme.
+    expect(items()).toEqual(['Apps', 'Old', 'New Folder…'])
+    fireEvent.click(within(screen.getByRole('menu')).getByText('Old'))
+    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('acme', 'api', null, 'f-old')
+
+    fireEvent.contextMenu(memberRow('web'))
+    fireEvent.click(screen.getByText('Move to Folder'))
+    expect(items()).toEqual(['Appscurrent', 'Old', 'New Folder…', 'Remove from Folder'])
+    fireEvent.click(screen.getByText('Remove from Folder'))
+    // Out of Apps to the top of acme's list, just below Apps (which is last there).
+    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('acme', 'web', null, null)
+
+    fireEvent.contextMenu(memberRow('api'))
+    fireEvent.click(screen.getByText('Move to Folder'))
+    fireEvent.click(screen.getByText('New Folder…'))
+    fireEvent.change(screen.getByPlaceholderText('Folder name'), { target: { value: 'Services' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(bridge.createRailFolder).toHaveBeenCalledWith('Services', { holding: { kind: 'repo', id: 'api' } })
+    expect(bridge.placeProject).not.toHaveBeenCalled()
+  })
+
+  it('files a dragged repo in a folder, lighting the folder up, or at a place among its rows', () => {
+    renderRail(filed)
+    fireEvent.dragStart(memberRow('api'), { dataTransfer: dataTransfer() })
+    fireEvent.dragOver(folderHeader('f-apps'), { dataTransfer: dataTransfer() })
+    expect(folderBox('f-apps').firstElementChild?.className).toContain('ring-accent/50')
+    // Into a folder is not joining the project, so the project itself is not ringed.
+    expect(groupBlock('acme').className).not.toContain('ring-accent/50')
+    fireEvent.drop(folderHeader('f-apps'), { dataTransfer: dataTransfer() })
+    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('acme', 'api', null, 'f-apps')
+
+    // A repo from outside the project, dropped beside a filed repo: it joins the project there.
+    fireEvent.dragStart(flatRow('orbital'), { dataTransfer: dataTransfer() })
+    fireEvent.dragOver(memberRow('web'), { dataTransfer: dataTransfer() })
+    expect(marker(folderBox('f-apps'))).toBeTruthy()
+    fireEvent.drop(memberRow('web'), { dataTransfer: dataTransfer() })
+    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('acme', 'orbital', 'web', 'f-apps')
+  })
+
+  it("moves a folder of repos within its project, and nowhere else", () => {
+    renderRail(filed)
+    fireEvent.dragStart(folderHeader('f-old'), { dataTransfer: dataTransfer() })
+    fireEvent.drop(memberRow('api'), { dataTransfer: dataTransfer() })
+    // Out of Apps to the top of acme's list, before api.
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('f-old', null, 'api')
+
+    bridge.placeRailFolder.mockClear()
+    for (const target of [groupHeader('platform'), memberRow('gateway'), flatRow('orbital'), folderHeader('f-work')]) {
+      fireEvent.dragStart(folderHeader('f-apps'), { dataTransfer: dataTransfer() })
+      fireEvent.drop(target, { dataTransfer: dataTransfer() })
+    }
+    // Nor into itself.
+    fireEvent.dragStart(folderHeader('f-apps'), { dataTransfer: dataTransfer() })
+    fireEvent.drop(folderHeader('f-old'), { dataTransfer: dataTransfer() })
+    expect(bridge.placeRailFolder).not.toHaveBeenCalled()
+    expect(bridge.placeProject).not.toHaveBeenCalled()
     expect(bridge.addRepoToProject).not.toHaveBeenCalled()
   })
 })

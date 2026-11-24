@@ -138,27 +138,50 @@ function migrate(d: Database.Database): void {
 
     -- Rail folders: how the rail is arranged, and nothing more. Kept in tables
     -- of their own so filing a project never touches its row.
+    --
+    -- A folder is one of two kinds. project_id NULL: a folder of projects, in
+    -- the rail's own lists. project_id set: a folder of that project's repos,
+    -- under its header. parent_id nests one in another of its kind (NULL = the
+    -- top of its list), and position orders it among everything in the list it
+    -- is in: the folders and the projects or repos beside it. The two columns
+    -- come last because databases from before them get them by ALTER TABLE
+    -- (see below), and both shapes must end up alike.
     CREATE TABLE IF NOT EXISTS rail_folders (
       id           TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       name         TEXT NOT NULL,
       position     INTEGER NOT NULL,
       collapsed    INTEGER NOT NULL DEFAULT 0,
-      created_at   INTEGER NOT NULL
+      created_at   INTEGER NOT NULL,
+      parent_id    TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
+      project_id   TEXT REFERENCES projects(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_rail_folders_workspace ON rail_folders(workspace_id);
 
-    -- Where a project sits in the rail: in which folder (NULL = the top level,
-    -- where it shares rail_folders.position's order with the folders) and how
-    -- far down. project_id is the key, so a project is in one place. A project
-    -- with no row has never been arranged and is listed last. (Before projects
-    -- existed this was keyed by repo_id; groupReposIntoProjects rebuilds it.)
+    -- Where a project sits in the rail: in which folder (NULL = the top level)
+    -- and how far down the list it shares with the folders there. project_id
+    -- is the key, so a project is in one place. A project with no row has
+    -- never been arranged and is listed last. (Before projects existed this
+    -- was keyed by repo_id; groupReposIntoProjects rebuilds it.)
     CREATE TABLE IF NOT EXISTS rail_positions (
       project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
       folder_id  TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
       position   INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_rail_positions_folder ON rail_positions(folder_id);
+
+    -- The same for a repo among its project's repos: in which of the
+    -- project's folders (NULL = the top of the project's list) and how far
+    -- down. A repo with no row has never been arranged and is listed last, at
+    -- the top of the list. repos.project_position stays the one flat order of
+    -- a project's repos; it is rewritten to follow this arrangement, top to
+    -- bottom, whenever the arrangement changes.
+    CREATE TABLE IF NOT EXISTS rail_repo_positions (
+      repo_id   TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
+      folder_id TEXT REFERENCES rail_folders(id) ON DELETE CASCADE,
+      position  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rail_repo_positions_folder ON rail_repo_positions(folder_id);
 
     -- A worktree is a repo's checkout (repo_id set) or, kind 'folder', a
     -- project's root-folder session (project_id set, repo_id NULL). See
@@ -239,6 +262,11 @@ function migrate(d: Database.Database): void {
   addColumnIfMissing(d, 'tasks', 'archived_at', 'INTEGER')
   // Off by default: a project's `.code-workspace` file is opt-in.
   addColumnIfMissing(d, 'projects', 'code_workspace', 'INTEGER NOT NULL DEFAULT 0')
+  // Folders nest, and a project's repos have folders of their own. Every
+  // folder from before that is a top-level folder of projects, which is what
+  // NULL in both columns means.
+  addColumnIfMissing(d, 'rail_folders', 'parent_id', 'TEXT REFERENCES rail_folders(id) ON DELETE CASCADE')
+  addColumnIfMissing(d, 'rail_folders', 'project_id', 'TEXT REFERENCES projects(id) ON DELETE CASCADE')
   backfillTaskSeqs(d)
   unlinkTasksFromMissingWorktrees(d)
   d.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_seq ON tasks(seq)')

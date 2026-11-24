@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import type { Repo as RepoModel, RailFolder, RailItem, Worktree } from '@shared/types'
+import type { Project, Repo as RepoModel, RailFolder, RailItem, Worktree } from '@shared/types'
 import { useStore } from '@renderer/store'
 
 import Repo from './Repo'
@@ -27,6 +27,18 @@ const repo: RepoModel = {
   defaultAgentId: 'claude',
   addedAt: 0,
   projectId: 'pr1'
+}
+
+/** The repo's own project: one repo and no home, so the rail draws it as this row. */
+const ownProject: Project = {
+  id: repo.projectId,
+  name: repo.name,
+  rootPath: repo.repoPath,
+  homeRepoId: null,
+  managedBlock: true,
+  codeWorkspace: false,
+  repoIds: [repo.id],
+  createdAt: 0
 }
 
 const rootWorktree: Worktree = {
@@ -61,12 +73,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** Render the header with `worktrees` (and rail `folders`) seeded, then right-click it open. */
-function openMenu(worktrees: Worktree[], folders: RailFolder[] = [], rail: RailItem[] = []): void {
+/**
+ * Render the header with `worktrees` (and rail `folders`) seeded, then
+ * right-click it open. `projects` is empty unless a test is about where the
+ * repo's project sits in the rail.
+ */
+function openMenu(
+  worktrees: Worktree[],
+  folders: RailFolder[] = [],
+  rail: RailItem[] = [],
+  projects: Project[] = []
+): void {
   useStore.setState({
     repos: [repo],
+    projects,
     railFolders: folders,
     railItems: rail,
+    railProjectItems: {},
     worktrees,
     tasks: [],
     activeRepoId: repo.id,
@@ -158,11 +181,19 @@ describe('repo context menu', () => {
 
 describe('repo context menu — Move to Folder', () => {
   // Folders hold projects: the repo is filed through its project.
-  const work: RailFolder = { id: 'f-work', name: 'Work', collapsed: false, projectIds: [] }
-  const play: RailFolder = { id: 'f-play', name: 'Play', collapsed: false, projectIds: [repo.projectId] }
+  const folder = (id: string, name: string, items: RailItem[] = [], parentId: string | null = null): RailFolder => ({
+    id,
+    name,
+    collapsed: false,
+    projectId: null,
+    parentId,
+    items
+  })
+  const work = folder('f-work', 'Work')
+  const play = folder('f-play', 'Play', [{ kind: 'project', id: repo.projectId }])
 
   it('lists the folders in place of the menu and files the repo project in the one picked', () => {
-    openMenu([], [work, play])
+    openMenu([], [work, play], [], [ownProject])
     fireEvent.click(screen.getByText('Move to Folder'))
 
     expect(items()).toEqual(['Work', 'Playcurrent', 'New Folder…', 'Remove from Folder'])
@@ -176,10 +207,15 @@ describe('repo context menu — Move to Folder', () => {
   })
 
   it('takes the repo out of its folder, to the top level just below it', () => {
-    openMenu([], [work, play], [
-      { kind: 'folder', id: play.id },
-      { kind: 'folder', id: work.id }
-    ])
+    openMenu(
+      [],
+      [work, play],
+      [
+        { kind: 'folder', id: play.id },
+        { kind: 'folder', id: work.id }
+      ],
+      [ownProject]
+    )
     fireEvent.click(screen.getByText('Move to Folder'))
     fireEvent.click(screen.getByText('Remove from Folder'))
     // Below Play is before Work, the row that follows it.
@@ -187,10 +223,15 @@ describe('repo context menu — Move to Folder', () => {
   })
 
   it('takes the repo out to the end when its folder is the last row', () => {
-    openMenu([], [work, play], [
-      { kind: 'folder', id: work.id },
-      { kind: 'folder', id: play.id }
-    ])
+    openMenu(
+      [],
+      [work, play],
+      [
+        { kind: 'folder', id: work.id },
+        { kind: 'folder', id: play.id }
+      ],
+      [ownProject]
+    )
     fireEvent.click(screen.getByText('Move to Folder'))
     fireEvent.click(screen.getByText('Remove from Folder'))
     expect(bridge.placeProject).toHaveBeenCalledWith(repo.projectId, null, null)
@@ -204,8 +245,35 @@ describe('repo context menu — Move to Folder', () => {
     fireEvent.click(screen.getByText('New Folder…'))
     fireEvent.change(screen.getByPlaceholderText('Folder name'), { target: { value: 'Clients' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
-    expect(bridge.createRailFolder).toHaveBeenCalledWith('Clients', repo.projectId)
+    // A plain repo row is filed as its project, among the rail's folders.
+    expect(bridge.createRailFolder).toHaveBeenCalledWith('Clients', {
+      holding: { kind: 'project', id: repo.projectId }
+    })
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('lists nested folders in the order the rail draws them, and takes the repo out to the folder above', () => {
+    const outer = folder('f-outer', 'Outer', [
+      { kind: 'folder', id: 'f-inner' },
+      { kind: 'project', id: 'other' }
+    ])
+    const inner = folder('f-inner', 'Inner', [{ kind: 'project', id: repo.projectId }], outer.id)
+    // Sent in an order that is not the rail's, as main may.
+    openMenu(
+      [],
+      [inner, work, outer],
+      [
+        { kind: 'folder', id: outer.id },
+        { kind: 'folder', id: work.id }
+      ],
+      [ownProject, { ...ownProject, id: 'other', name: 'other', repoIds: [] }]
+    )
+    fireEvent.click(screen.getByText('Move to Folder'))
+    expect(items()).toEqual(['Outer', 'Innercurrent', 'Work', 'New Folder…', 'Remove from Folder'])
+
+    fireEvent.click(screen.getByText('Remove from Folder'))
+    // Out of Inner it lands in Outer, just below Inner: before the row that follows it there.
+    expect(bridge.placeProject).toHaveBeenCalledWith(repo.projectId, outer.id, 'other')
   })
 })
 
