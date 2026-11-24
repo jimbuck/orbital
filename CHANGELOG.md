@@ -2,6 +2,14 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.47.0](https://github.com/jimbuck/orbital/compare/v1.46.0...v1.47.0) (2026-11-24)
+
+
+### Features
+
+* **cli:** orbital folder commands for arranging the rail ([e0a57d6](https://github.com/jimbuck/orbital/commit/e0a57d6df283663e0fb48868977fb4ee1d8088e4))
+* **rail:** folders inside projects, nested at every level ([629bbc9](https://github.com/jimbuck/orbital/commit/629bbc9c1cdb42047a4a1aedfbfe544acfa23bdc))
+
 # [1.46.0](https://github.com/jimbuck/orbital/compare/v1.45.0...v1.46.0) (2026-11-23)
 
 
