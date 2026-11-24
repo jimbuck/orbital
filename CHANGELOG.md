@@ -2,6 +2,18 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.49.0](https://github.com/jimbuck/orbital/compare/v1.48.0...v1.49.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* **rail:** let a project's folder drop below the list, and put new folders last ([c10605f](https://github.com/jimbuck/orbital/commit/c10605fd80e289320f17a83a984531badf4c39e7))
+
+
+### Features
+
+* **rail:** more in a folder's menu: gather rows, move it, open or close it all ([fe77e5b](https://github.com/jimbuck/orbital/commit/fe77e5b613f6ced09b81e2373f10d33bf4768aa1))
+
 # [1.48.0](https://github.com/jimbuck/orbital/compare/v1.47.0...v1.48.0) (2026-11-24)
 
 
