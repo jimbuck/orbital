@@ -2,6 +2,22 @@
 
 All notable changes to Orbital. Generated automatically from Conventional Commits — do not edit by hand.
 
+# [1.48.0](https://github.com/jimbuck/orbital/compare/v1.47.0...v1.48.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* **menu:** keep Escape in a context menu from closing the modal under it ([2b1e698](https://github.com/jimbuck/orbital/commit/2b1e6984c7a2b2f3fdba1e4f0d5f208cb8861281))
+* **terminal:** restore a terminal's screen on remount instead of replaying a capped log ([44f7658](https://github.com/jimbuck/orbital/commit/44f7658d7fa12ee9ada5117c15e847a03f092eee))
+
+
+### Features
+
+* **panels:** a grip on the border to collapse and resize the side panels ([1a44120](https://github.com/jimbuck/orbital/commit/1a4412065100f7a8e7da4191c7f283fcb3e71d42))
+* **repos:** add repos from a folder's menu, and clone from Azure DevOps ([792772f](https://github.com/jimbuck/orbital/commit/792772faeefb125dfcfca2e01d11e2e200c5af0b))
+* **tasks:** a reworked task board with a project picker and menus throughout ([3e64169](https://github.com/jimbuck/orbital/commit/3e64169719374e85e559af0ba07b0f66ce2a5047))
+* **worktrees:** a branch prefix setting for new worktrees ([1cc60ae](https://github.com/jimbuck/orbital/commit/1cc60ae3cc213d91969ffa66212b817398021a03))
+
 # [1.47.0](https://github.com/jimbuck/orbital/compare/v1.46.0...v1.47.0) (2026-11-24)
 
 
