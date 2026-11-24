@@ -3,6 +3,7 @@ import { IPC } from '@shared/contract'
 import { runtime, tables } from '../runtime'
 import { git } from '../services/git'
 import { github } from '../services/github'
+import { azureDevops } from '../services/azure-devops'
 import { addRepo, removeRepo } from '../worktree-lifecycle'
 import { scheduleProjectPointers } from '../services/project-pointers'
 import { handle, broadcast } from './handle'
@@ -11,7 +12,7 @@ import { handle, broadcast } from './handle'
 export function register(): void {
   const h = handle
   // ---- repos ----
-  h(IPC.addRepo, async (_e, projectId) => {
+  h(IPC.addRepo, async (_e, projectId, folderId) => {
     const win = runtime.window ?? undefined
     const result = win
       ? await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Open a git repository' })
@@ -26,7 +27,7 @@ export function register(): void {
       })
       return null
     }
-    return addRepo(dir, projectId || undefined)
+    return addRepo(dir, projectId || undefined, folderId || undefined)
   })
 
   h(IPC.pickDirectory, async (_e, title) => {
@@ -47,14 +48,26 @@ export function register(): void {
 
   // Clone into <parentDir>/<repo>, then register it exactly as addRepo does
   // for a folder picked by hand.
-  h(IPC.githubCloneRepo, async (_e, nameWithOwner, parentDir, account, projectId) => {
+  h(IPC.githubCloneRepo, async (_e, nameWithOwner, parentDir, account, projectId, folderId) => {
     const repoName = String(nameWithOwner).split('/').pop() ?? ''
     const dest = github.resolveCloneTarget(String(parentDir), repoName)
     await github.cloneRepo(String(nameWithOwner), dest, account)
     if (!(await git.isRepo(dest))) {
       throw new Error(`Cloned ${nameWithOwner}, but ${dest} is not a git repository.`)
     }
-    return addRepo(dest, projectId || undefined)
+    return addRepo(dest, projectId || undefined, folderId || undefined)
+  })
+
+  // ---- azure devops (a pasted link, and git) ----
+  h(IPC.azureCloneRepo, async (_e, link, parentDir, projectId, folderId) => {
+    // Read here again: the clone runs on what main makes of the link.
+    const ref = azureDevops.readLink(String(link))
+    const dest = github.resolveCloneTarget(String(parentDir), ref.dirName)
+    await azureDevops.cloneRepo(ref, dest)
+    if (!(await git.isRepo(dest))) {
+      throw new Error(`Cloned ${ref.repository}, but ${dest} is not a git repository.`)
+    }
+    return addRepo(dest, projectId || undefined, folderId || undefined)
   })
 
   h(IPC.removeRepo, (_e, repoId) => removeRepo(repoId))

@@ -462,4 +462,49 @@ describe("a project's folder session", () => {
     // Still a no-home group of two: it keeps its session.
     expect(folderOf(project.id)).toBeDefined()
   })
+
+  /** A second git repository beside the fixture's. */
+  const another = (name: string): string => {
+    const path = join(dir, name)
+    mkdirSync(path)
+    gitIn(path, 'init', '-q', '-b', 'main')
+    return path
+  }
+
+  it('files a repo added to a folder of repos in that folder, in the folder’s project', async () => {
+    const project = tables.projects.create({ name: 'Fresh', rootPath: dir })
+    const apps = tables.railFolders.create('Apps', { projectId: project.id })
+    // The folder says which project: nothing else has to, and nothing else can disagree.
+    const added = await addRepo(another('other'), undefined, apps.id)
+    expect(added.projectId).toBe(project.id)
+    expect(tables.railFolders.get(apps.id)?.items).toEqual([{ kind: 'repo', id: added.id }])
+
+    // One already in the project is filed without leaving it; one from elsewhere moves in.
+    const loose = await addRepo(another('loose'), project.id)
+    expect(tables.railFolders.get(apps.id)?.items).toHaveLength(1)
+    await addRepo(join(dir, 'loose'), project.id, apps.id)
+    const moved = await addRepo(repoPath, 'not-a-project', apps.id)
+    expect(moved.projectId).toBe(project.id)
+    expect(tables.railFolders.get(apps.id)?.items.map((i) => i.id)).toEqual([added.id, loose.id, repo.id])
+  })
+
+  it('files a repo added to a folder of projects there as a row of its own', async () => {
+    const clients = tables.railFolders.create('Clients')
+    const added = await addRepo(another('other'), undefined, clients.id)
+    // Its own project, a plain repo row, and that row is what the folder holds.
+    expect(tables.projects.get(added.projectId)).toMatchObject({ homeRepoId: null, repoIds: [added.id] })
+    expect(tables.railFolders.get(clients.id)?.items).toEqual([{ kind: 'project', id: added.projectId }])
+
+    // A repo that is already one of a group's stays in its group: the folder holds rows, and it is not one.
+    group()
+    const before = tables.repos.get(repo.id)?.projectId
+    await addRepo(repoPath, undefined, clients.id)
+    expect(tables.repos.get(repo.id)?.projectId).toBe(before)
+    expect(tables.railFolders.get(clients.id)?.items).toEqual([{ kind: 'project', id: added.projectId }])
+  })
+
+  it('still adds the repo when the folder it was meant for is gone', async () => {
+    const added = await addRepo(another('other'), undefined, 'no-such-folder')
+    expect(tables.repos.get(added.id)).toBeDefined()
+  })
 })

@@ -143,15 +143,33 @@ export async function removeWorktree(worktreeId: string, opts: RemoveWorktreeOpt
  * Add a git repository as a Repo: its root Worktree, its watchers, and any
  * worktrees the repo already has (they show up immediately). Adding a path
  * that is already a Repo returns that Repo.
+ *
+ * `projectId` puts it in that project. `folderId` files it in a rail folder,
+ * and the kind of folder says what that means: a folder of a project's repos
+ * puts it in that project (whatever `projectId` says) and in the folder; a
+ * folder of projects takes the repo as a row of its own. A folder that is gone
+ * is ignored, so the repo is still added.
  */
-export async function addRepo(repoPath: string, projectId?: string): Promise<Repo> {
-  await registerRepo(repoPath, projectId)
+export async function addRepo(repoPath: string, projectId?: string, folderId?: string): Promise<Repo> {
+  const folder = folderId ? tables.railFolders.get(folderId) : undefined
+  const into = folder ? (folder.projectId ?? undefined) : projectId
+  await registerRepo(repoPath, into)
   let repo = tables.repos.getByPath(repoPath)
   if (!repo) throw new Error(`repo at ${repoPath} was not registered`)
-  // Already added, but asked for in another project: move it there.
-  if (projectId && repo.projectId !== projectId) {
-    tables.projects.addRepo(projectId, repo.id, null)
-    repo = tables.repos.get(repo.id) ?? repo
+  if (into) {
+    // Already added, but asked for in another project: move it there. Into a
+    // folder, also when it is in the project already: that files it.
+    if (repo.projectId !== into || folder) {
+      tables.projects.addRepo(into, repo.id, null, folder?.id ?? null)
+      repo = tables.repos.get(repo.id) ?? repo
+    }
+  } else if (folder) {
+    // A folder of projects holds rows, and a repo is a row only while it is a
+    // project of its own. One that was already added inside a group stays put.
+    const project = tables.projects.get(repo.projectId)
+    if (project && project.homeRepoId === null && project.repoIds.length === 1) {
+      tables.railFolders.placeProject(project.id, folder.id, null)
+    }
   }
   await reconcileRepoWorktrees(repo.id)
   settleProjectSessions()

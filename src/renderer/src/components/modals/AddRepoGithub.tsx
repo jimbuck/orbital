@@ -30,7 +30,7 @@ import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './Modal
 import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
 import { Select } from './Select'
 
-/** Panel width shared by all three Add Repo modes so switching does not resize the dialog. */
+/** Panel width shared by every Add Repo mode so switching does not resize the dialog. */
 export const ADD_REPO_WIDTH = 560
 
 /* ============================================================================
@@ -115,6 +115,11 @@ const VISIBILITY_LABEL: Record<GithubVisibility, string> = {
  */
 let rememberedParentDir = ''
 
+/** A clone into `dir` worked: the next one defaults there. */
+export function rememberParentDir(dir: string): void {
+  rememberedParentDir = dir
+}
+
 function parentOf(path: string): string {
   return path.replace(/[\\/]+$/, '').replace(/[\\/][^\\/]+$/, '')
 }
@@ -127,10 +132,17 @@ export function joinPath(parent: string, name: string): string {
   return `${p}${sep}${name}`
 }
 
-function useDefaultParentDir(projectId?: string): string {
+export function useDefaultParentDir(projectId?: string): string {
   const firstRepo = useStore((s) => s.repos[0]?.repoPath)
   // Cloning into a project lands in its root folder, beside its other repos.
-  const projectRoot = useStore((s) => (projectId ? s.projects.find((p) => p.id === projectId)?.rootPath : undefined))
+  // A plain repo row is a project rooted at the repo itself, so beside it is
+  // one folder up: inside it would be a clone in another repo's working tree.
+  const projectRoot = useStore((s) => {
+    const project = projectId ? s.projects.find((p) => p.id === projectId) : undefined
+    if (!project) return undefined
+    const flat = project.homeRepoId === null && project.repoIds.length === 1
+    return flat ? parentOf(project.rootPath) : project.rootPath
+  })
   return projectRoot || rememberedParentDir || (firstRepo ? parentOf(firstRepo) : '')
 }
 
@@ -221,7 +233,7 @@ function AccountPicker({ state, id, disabled }: { state: GithubState; id: string
 }
 
 /** A local parent-folder field with a native Browse button and the resulting clone path. */
-function ParentDirField({
+export function ParentDirField({
   id,
   value,
   onChange,
@@ -312,7 +324,7 @@ function Checkbox({
   )
 }
 
-function ErrorText({ error }: { error: string | null }): React.JSX.Element | null {
+export function ErrorText({ error }: { error: string | null }): React.JSX.Element | null {
   if (!error) return null
   return (
     <div role="alert" className="allow-select mt-3 break-words text-[11.5px] leading-snug text-red-2">
@@ -328,12 +340,21 @@ function VisibilityIcon({ visibility }: { visibility: GithubVisibility }): React
   return <Lock size={12} strokeWidth={1.5} className={cls} />
 }
 
-interface FormProps {
-  github: GithubState
+/** What every source of a repo is told by the dialog around it. */
+export interface SourceProps {
   modeSwitch: ReactNode
+  /** Close without adding anything. */
   onDone: () => void
-  /** Clone into this project: its root folder is the default destination, and the repo joins it. */
+  /** A repo was added: close, and show where it went. */
+  onAdded: () => void
+  /** Add into this project: its root folder is the default destination, and the repo joins it. */
   projectId?: string
+  /** File the repo in this rail folder (see `addRepo` in the window contract). */
+  folderId?: string
+}
+
+interface FormProps extends SourceProps {
+  github: GithubState
 }
 
 /* ============================================================================
@@ -345,7 +366,14 @@ type RepoLoad =
   | { status: 'ready'; repos: GithubRepoSummary[] }
   | { status: 'error'; error: string }
 
-export function CloneFromGithub({ github, modeSwitch, onDone, projectId }: FormProps): React.JSX.Element {
+export function CloneFromGithub({
+  github,
+  modeSwitch,
+  onDone,
+  onAdded,
+  projectId,
+  folderId
+}: FormProps): React.JSX.Element {
   const ctx = github.load.status === 'ready' ? github.load.ctx : null
   const account = ctx?.account
   const acting = account ? accountKey(account) : ''
@@ -407,9 +435,9 @@ export function CloneFromGithub({ github, modeSwitch, onDone, projectId }: FormP
     setBusy(true)
     setError(null)
     try {
-      await window.orbital.githubCloneRepo(selected, parentDir.trim(), account ?? undefined, projectId)
+      await window.orbital.githubCloneRepo(selected, parentDir.trim(), account ?? undefined, projectId, folderId)
       rememberedParentDir = parentDir.trim()
-      onDone()
+      onAdded()
     } catch (e) {
       setError(cleanIpcError(e) || 'Could not clone the repository.')
       setBusy(false)
@@ -618,7 +646,14 @@ type NameCheck =
 
 const NAME_CHECK_DEBOUNCE_MS = 450
 
-export function CreateOnGithub({ github, modeSwitch, onDone, projectId }: FormProps): React.JSX.Element {
+export function CreateOnGithub({
+  github,
+  modeSwitch,
+  onDone,
+  onAdded,
+  projectId,
+  folderId
+}: FormProps): React.JSX.Element {
   const ctx = github.load.status === 'ready' ? github.load.ctx : null
   const account = ctx?.account
   const acting = account ? accountKey(account) : ''
@@ -723,9 +758,15 @@ export function CreateOnGithub({ github, modeSwitch, onDone, projectId }: FormPr
         setCreated(repo)
       }
       setPhase('cloning')
-      await window.orbital.githubCloneRepo(repo.nameWithOwner, parentDir.trim(), account ?? undefined, projectId)
+      await window.orbital.githubCloneRepo(
+        repo.nameWithOwner,
+        parentDir.trim(),
+        account ?? undefined,
+        projectId,
+        folderId
+      )
       rememberedParentDir = parentDir.trim()
-      onDone()
+      onAdded()
     } catch (e) {
       const msg = cleanIpcError(e) || 'Something went wrong.'
       setError(repo ? `The repository was created at ${repo.url}, but cloning it failed: ${msg}` : msg)

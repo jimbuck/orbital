@@ -13,7 +13,7 @@ belong to a [workspace](/orbital/concepts/workspaces/).
 
 ![The Add Repo dialog](../../../assets/screenshots/14-add-project.png)
 
-The **Add repo** dialog has three sources:
+The **Add repo** dialog has four sources:
 
 - **Local folder** — pick a folder that is already a git repository.
 - **Clone from GitHub** — pick one of your repositories (or type `owner/repo`)
@@ -23,6 +23,16 @@ The **Add repo** dialog has three sources:
   a name with a live availability check, visibility, description, and under
   *More options* a README, `.gitignore` template, license, template repository,
   homepage, issues/wiki toggles and an org team.
+- **Azure DevOps** — paste a repository's link and clone it. See
+  [Cloning from Azure DevOps](#cloning-from-azure-devops).
+
+The dialog adds the repo wherever it was opened from. From the **+** button or
+the File menu that is the top of the rail. Right-click a project (its header
+is its home repo, when it has one) and choose **Add Repo…** to add one under
+it, or right-click a [folder](#folders) to add one straight into that folder.
+On a plain repo row, **Add Repo…** starts a project with the two of them. A
+line at the top of the dialog says where the repo is going, and a clone
+defaults to the project's root folder.
 
 The GitHub sources use the [GitHub CLI](https://cli.github.com) (`gh`), so it
 needs to be installed and signed in with `gh auth login`. Cloning goes through
@@ -35,6 +45,30 @@ active account, and choosing another one reloads the owners and repositories
 as that login. Orbital acts as the chosen account for that dialog only, by
 handing `gh` the account's token for each call, so it never runs
 `gh auth switch` and your terminals keep whichever account they had.
+
+### Cloning from Azure DevOps
+
+Paste the repository's link into **Repository link**. If you copied it just
+before opening the dialog, it is already there. Orbital reads it back as its
+organization, project and repository before anything is cloned, and takes any
+of these:
+
+- the HTTPS link from the repository's **Clone** button,
+  `https://org@dev.azure.com/org/project/_git/repo`
+- the SSH link from the same button, `git@ssh.dev.azure.com:v3/org/project/repo`
+- the address bar of any page of the repository (a file, a pull request, a
+  commit)
+- older `org.visualstudio.com` links, and Azure DevOps Server links
+
+There is nothing to install or sign in to beyond git. The clone is a plain
+`git clone` with the credentials git already has: Git Credential Manager,
+which ships with Git for Windows and opens its own sign-in window the first
+time, or your SSH key for an SSH link. If you can clone the repository in a
+terminal, you can clone it here. The Azure CLI is not used.
+
+A token written into a link (`https://user:token@…`) is left out of the clone,
+since git would save it in the repository's config in plain text. Git asks for
+it instead and keeps it with your other credentials.
 
 ## Folders
 
@@ -55,10 +89,14 @@ there, or between two rows to place it; dropping on a folder (or a project's
 header) the row is already in sends it to the end of that list. Deleting a
 folder leaves everything that was in it where the folder was.
 
-Under a project with a home repo, the home repo's own worktrees are listed
-first, under **Worktrees**, each marked with a branch. The project's repos
-follow under **Repos**. Agents can read and rearrange the same folders with
-[`orbital folder`](/orbital/reference/cli/#folders).
+Right-click a folder and choose **Add Repo…** to add a repo straight into it,
+from any of the dialog's sources. In a folder of repos it joins that project;
+in a folder of projects it is a row of its own.
+
+Under a project with a home repo, the home repo's own worktrees come first,
+each joined to the header's status dot by a branch line. The project's repos
+follow, indented behind a rule. Agents can read and rearrange the same folders
+with [`orbital folder`](/orbital/reference/cli/#folders).
 
 ## Worktrees
 

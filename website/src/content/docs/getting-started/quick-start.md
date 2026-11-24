@@ -9,7 +9,8 @@ This walkthrough uses **nebula-shop**, an example storefront repo.
 
 Click the **+** at the top of the left rail (or **File ▸ Add Repo…**) and
 pick your repo's folder. With the GitHub CLI signed in, you can also clone one
-of your GitHub repositories or create a new one from the same dialog. The repo
+of your GitHub repositories or create a new one from the same dialog, and an
+Azure DevOps repository clones from its pasted link. The repo
 appears in the rail with a **root worktree** (`main`) bound to your normal
 checkout.
 

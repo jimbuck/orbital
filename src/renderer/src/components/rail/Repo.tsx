@@ -8,6 +8,7 @@ import {
   House,
   Layers,
   ListMinus,
+  ListPlus,
   Pencil,
   Plus,
   Terminal,
@@ -165,7 +166,7 @@ export default function Repo({
     e.preventDefault()
     e.stopPropagation()
     setStep({ kind: 'items' })
-    setMenu(clampMenuPos(e, 210, 300))
+    setMenu(clampMenuPos(e, 210, 330))
   }
 
   /** Run a move, confirming first when it would close a folder session that has terminals open. */
@@ -367,6 +368,16 @@ export default function Repo({
               />
               {!member && project && (
                 <>
+                  <MenuItem
+                    icon={<ListPlus size={13} strokeWidth={1.5} />}
+                    label="Add Repo…"
+                    hint="starts a project"
+                    onClick={() => {
+                      // A second repo beside this one makes the row a project, as dropping one on it does.
+                      openModal('addRepo', { projectId: project.id })
+                      closeMenu()
+                    }}
+                  />
                   <MenuItem
                     icon={<Layers size={13} strokeWidth={1.5} />}
                     label="Move to Project"

@@ -501,6 +501,7 @@ describe('member and flat repo menus', () => {
     expect(items()).toEqual([
       'Rename',
       'Move to Folder',
+      'Add Repo…starts a project',
       'Move to Project',
       'Make Home Repo',
       'New Worktree',
@@ -511,6 +512,15 @@ describe('member and flat repo menus', () => {
     ])
     fireEvent.click(screen.getByText('Make Home Repo'))
     expect(bridge.setProjectHome).toHaveBeenCalledWith('orbital', 'orbital')
+  })
+
+  it('opens Add Repo for a flat row as its project, which the new repo turns into a group', () => {
+    renderRail()
+    fireEvent.contextMenu(flatRow('orbital'))
+    fireEvent.click(screen.getByText('Add Repo…'))
+    expect(useStore.getState().modal).toBe('addRepo')
+    expect(useStore.getState().modalData).toEqual({ projectId: 'orbital' })
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 })
 
@@ -622,10 +632,27 @@ describe("folders among a project's repos", () => {
     expect(memberRow('web').closest('[data-folder-id]')).toBe(folderBox('f-apps'))
     expect(memberRow('api').closest('[data-folder-id]')).toBeNull()
     expect(within(folderHeader('f-apps')).getByTitle('1 repo')).toBeTruthy()
-    expect(within(folderBox('f-old')).getByText('Empty. Drag a repo here.')).toBeTruthy()
+    expect(within(folderBox('f-old')).getByText('Empty. Drag a repo here, or right-click to add one.')).toBeTruthy()
     // Filing changes nothing about the project: it still has its three repos, and the home is still the header.
     expect(within(groupHeader('acme')).getByTitle('3 repos')).toBeTruthy()
     expect(document.querySelector('[data-repo-id="home"]')).toBeNull()
+  })
+
+  it('opens Add Repo from a folder of repos, for that folder in that project', () => {
+    renderRail(filed)
+    fireEvent.contextMenu(folderHeader('f-apps'))
+    expect(items()).toEqual(['Rename', 'Add Repo…', 'New Folder Inside', 'Delete Folder'])
+    fireEvent.click(screen.getByText('Add Repo…'))
+    expect(useStore.getState().modal).toBe('addRepo')
+    expect(useStore.getState().modalData).toEqual({ projectId: 'acme', folderId: 'f-apps' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('opens Add Repo from a folder of projects with no project, so the repo is a row of its own in it', () => {
+    renderRail({ ...filed, rail: [{ kind: 'folder', id: 'f-work' }] })
+    fireEvent.contextMenu(folderHeader('f-work'))
+    fireEvent.click(screen.getByText('Add Repo…'))
+    expect(useStore.getState().modalData).toEqual({ projectId: undefined, folderId: 'f-work' })
   })
 
   it('reports what a collapsed folder of repos hides, by repo', () => {

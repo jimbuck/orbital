@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import type { Repo } from '@shared/types'
+import type { Project, RailFolder, Repo } from '@shared/types'
 import type { GithubAccountRef, GithubContext, GithubCreateRepoOptions, GithubRepoSummary } from '@shared/github'
 import { useStore } from '@renderer/store'
 
-import AddRepo from './AddRepo'
+import AddRepo, { type AddRepoTarget } from './AddRepo'
 import { joinPath, timeAgo } from './AddRepoGithub'
 
 /**
- * The Add Repo dialog has three sources behind one radio group. These tests
- * pin the wiring for each: the local picker still does what it did, and the
- * two GitHub forms load the gh context once, gate their primary action on the
- * right things, and hand the bridge exactly the request the form describes.
+ * The Add Repo dialog has four sources behind one radio group. These tests
+ * pin the wiring for each: the local picker still does what it did, the two
+ * GitHub forms load the gh context once, gate their primary action on the
+ * right things, and hand the bridge exactly the request the form describes,
+ * and the Azure DevOps form reads a pasted link back before cloning it. Opened
+ * from a project or a rail folder, every source adds the repo there.
  */
 
 const repo: Repo = {
@@ -79,10 +81,17 @@ const githubCreateRepo = vi.fn(async (opts: GithubCreateRepoOptions) => ({
   url: `https://github.com/${opts.owner}/${opts.name}`
 }))
 const githubCloneRepo = vi.fn(async (_nameWithOwner: string, _parentDir: string): Promise<Repo> => repo)
+const azureCloneRepo = vi.fn(async (_link: string, _parentDir: string, ..._where: unknown[]): Promise<Repo> => repo)
+const readClipboard = vi.fn((): string => '')
+const setRailFolderCollapsed = vi.fn(async (_folderId: string, _collapsed: boolean): Promise<void> => undefined)
 
 function seed(repos: Repo[] = [repo]): void {
   useStore.setState({
     repos,
+    projects: [],
+    railFolders: [],
+    expanded: {},
+    renamingProjectId: null,
     worktrees: [],
     tasks: [],
     activeRepoId: repos[0]?.id ?? null,
@@ -121,8 +130,14 @@ beforeEach(() => {
     url: `https://github.com/${opts.owner}/${opts.name}`
   }))
   githubCloneRepo.mockReset().mockImplementation(async () => repo)
+  azureCloneRepo.mockReset().mockImplementation(async () => repo)
+  readClipboard.mockReset().mockImplementation(() => '')
+  setRailFolderCollapsed.mockReset().mockImplementation(async () => undefined)
   vi.stubGlobal('orbital', {
     addRepo,
+    azureCloneRepo,
+    readClipboard,
+    setRailFolderCollapsed,
     pickDirectory,
     githubContext,
     githubListRepos,
@@ -261,7 +276,7 @@ describe('AddRepo — new GitHub repo', () => {
       template: undefined,
       team: undefined
     })
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/demo', 'D:\\Code', personal, undefined))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/demo', 'D:\\Code', personal, undefined, undefined))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -345,7 +360,7 @@ describe('AddRepo — clone from GitHub', () => {
     expect(screen.getByText(`${parent}\\orbital`)).toBeTruthy()
     fireEvent.click(clone)
 
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', parent, personal, undefined))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', parent, personal, undefined, undefined))
     await waitFor(() => expect(useStore.getState().modal).toBeNull())
   })
 
@@ -356,7 +371,7 @@ describe('AddRepo — clone from GitHub', () => {
     fireEvent.click(within(list).getByRole('option', { name: /cli\/cli/ }))
     const parent = (screen.getByLabelText(/Local folder/) as HTMLInputElement).value
     fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('cli/cli', parent, personal, undefined))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('cli/cli', parent, personal, undefined, undefined))
   })
 
   it('surfaces a clone failure and stays open', async () => {
@@ -407,7 +422,7 @@ describe('AddRepo — GitHub account picker', () => {
 
     await waitFor(() => expect(githubCreateRepo).toHaveBeenCalledTimes(1))
     expect(githubCreateRepo.mock.calls[0][0]).toMatchObject({ account: work, owner: 'jimbuckrda', name: 'demo' })
-    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuckrda/demo', expect.any(String), work, undefined))
+    await waitFor(() => expect(githubCloneRepo).toHaveBeenCalledWith('jimbuckrda/demo', expect.any(String), work, undefined, undefined))
   })
 
   it('keeps the account across the two GitHub modes and re-lists repositories as it', async () => {
@@ -421,6 +436,229 @@ describe('AddRepo — GitHub account picker', () => {
     expect((screen.getByLabelText(/GitHub account/) as HTMLSelectElement).value).toBe('github.com/jimbuckrda')
     // One load per account, not one per mode.
     expect(githubContext).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('AddRepo — Azure DevOps', () => {
+  const link = 'https://contoso@dev.azure.com/contoso/Website/_git/api'
+
+  async function openAzure(): Promise<void> {
+    seed()
+    render(<AddRepo />)
+    fireEvent.click(sourceRadio('Azure DevOps'))
+  }
+  const cloneButton = (): HTMLElement => screen.getByRole('button', { name: 'Clone repository' })
+  const linkField = (): HTMLInputElement => screen.getByLabelText(/Repository link/) as HTMLInputElement
+  /** The folder the form defaults to: beside an existing repo, or wherever the last clone went. */
+  const parentDir = (): string => (screen.getByLabelText(/Local folder/) as HTMLInputElement).value
+
+  it('needs nothing from gh, and waits for a link', async () => {
+    await openAzure()
+    expect(githubContext).not.toHaveBeenCalled()
+    expect(linkField().value).toBe('')
+    expect(cloneButton().hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText(/choose Clone and copy the HTTPS or SSH link/)).toBeTruthy()
+  })
+
+  it('reads a pasted link back as its parts and clones it beside the other repos', async () => {
+    await openAzure()
+    fireEvent.change(linkField(), { target: { value: `${link}?path=/src&version=GBmain` } })
+
+    const parts = screen.getAllByRole('definition').map((d) => d.textContent)
+    expect(parts).toEqual(['contoso', 'Website', 'api'])
+    // Where it lands: the default folder, in a folder named for the repository.
+    const parent = parentDir()
+    expect(parent).not.toBe('')
+    expect(screen.getByText(joinPath(parent, 'api'))).toBeTruthy()
+
+    fireEvent.click(cloneButton())
+    // The page address was cut back to the repository itself.
+    await waitFor(() => expect(azureCloneRepo).toHaveBeenCalledWith(link, parent, undefined, undefined))
+    await waitFor(() => expect(useStore.getState().modal).toBeNull())
+  })
+
+  it('takes the SSH address too, and says which way it clones', async () => {
+    await openAzure()
+    fireEvent.change(linkField(), { target: { value: 'git@ssh.dev.azure.com:v3/contoso/Website/api' } })
+    expect(screen.getByText(/Cloned over SSH/)).toBeTruthy()
+    fireEvent.keyDown(linkField(), { key: 'Enter' })
+    await waitFor(() =>
+      expect(azureCloneRepo).toHaveBeenCalledWith(
+        'git@ssh.dev.azure.com:v3/contoso/Website/api',
+        expect.any(String),
+        undefined,
+        undefined
+      )
+    )
+  })
+
+  it('says so when what was typed is not a repository link, and does not clone', async () => {
+    await openAzure()
+    fireEvent.change(linkField(), { target: { value: 'https://github.com/contoso/api' } })
+    expect(screen.getByText(/That is not an Azure DevOps repository link/)).toBeTruthy()
+    expect(linkField().getAttribute('aria-invalid')).toBe('true')
+    expect(cloneButton().hasAttribute('disabled')).toBe(true)
+    fireEvent.keyDown(linkField(), { key: 'Enter' })
+    expect(azureCloneRepo).not.toHaveBeenCalled()
+  })
+
+  it('starts with the link on the clipboard when there is one, and says where it came from', async () => {
+    readClipboard.mockReturnValue(`  ${link}  `)
+    await openAzure()
+    expect(linkField().value).toBe(link)
+    expect(screen.getByText(/Filled in from your clipboard/)).toBeTruthy()
+    expect(cloneButton().hasAttribute('disabled')).toBe(false)
+  })
+
+  it('leaves the field empty when the clipboard holds something else', async () => {
+    readClipboard.mockReturnValue('npm run build')
+    await openAzure()
+    expect(linkField().value).toBe('')
+  })
+
+  it('pastes on request, whatever is there, so a bad paste can be seen and fixed', async () => {
+    await openAzure()
+    readClipboard.mockReturnValue('https://dev.azure.com/contoso/Website')
+    fireEvent.click(screen.getByRole('button', { name: 'Paste' }))
+    expect(linkField().value).toBe('https://dev.azure.com/contoso/Website')
+    expect(screen.getByText(/That is not an Azure DevOps repository link/)).toBeTruthy()
+  })
+
+  it('clones without a token that was written into the link, and explains', async () => {
+    await openAzure()
+    fireEvent.change(linkField(), { target: { value: 'https://build:s3cret@dev.azure.com/contoso/Website/_git/api' } })
+    expect(screen.getByText(/The token in this link is left out/)).toBeTruthy()
+    fireEvent.click(cloneButton())
+    await waitFor(() => expect(azureCloneRepo).toHaveBeenCalledTimes(1))
+    expect(azureCloneRepo.mock.calls[0][0]).toBe('https://build@dev.azure.com/contoso/Website/_git/api')
+  })
+
+  it('shows why a clone failed and stays open to try again', async () => {
+    azureCloneRepo.mockImplementationOnce(async () => {
+      throw new Error(
+        "Error invoking remote method 'orbital:azureCloneRepo': Error: Git could not sign in to dev.azure.com. Run `git clone` once in a terminal."
+      )
+    })
+    await openAzure()
+    fireEvent.change(linkField(), { target: { value: link } })
+    fireEvent.click(cloneButton())
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('Git could not sign in to dev.azure.com. Run `git clone` once in a terminal.')
+    expect(useStore.getState().modal).toBe('addRepo')
+    expect(cloneButton().hasAttribute('disabled')).toBe(false)
+  })
+})
+
+describe('AddRepo — opened from a project or a folder', () => {
+  const project = (id: string, name: string, repoIds: string[], homeRepoId: string | null = null): Project => ({
+    id,
+    name,
+    rootPath: `D:\\Work\\${id}`,
+    homeRepoId,
+    managedBlock: true,
+    codeWorkspace: false,
+    repoIds,
+    createdAt: 0
+  })
+  const acme = project('acme', 'Acme', ['home', 'api'], 'home')
+  const apps: RailFolder = { id: 'f-apps', name: 'Apps', collapsed: true, projectId: 'acme', parentId: null, items: [] }
+  const mobile: RailFolder = { id: 'f-mobile', name: 'Mobile', collapsed: false, projectId: 'acme', parentId: 'f-apps', items: [] }
+  const clients: RailFolder = { id: 'f-clients', name: 'Clients', collapsed: false, projectId: null, parentId: null, items: [] }
+
+  function openFrom(target: AddRepoTarget, projects: Project[] = [acme]): void {
+    seed()
+    useStore.setState({
+      projects,
+      railFolders: [apps, mobile, clients],
+      modalStack: [{ type: 'addRepo', data: target }],
+      modalData: target
+    } as unknown as Parameters<typeof useStore.setState>[0])
+    render(<AddRepo />)
+  }
+
+  it('adds a local repo to the folder it was opened from, in that folder\u2019s project', async () => {
+    openFrom({ projectId: 'acme', folderId: 'f-mobile' })
+    expect(screen.getByText('Acme').parentElement?.textContent).toBe('Adding to Acme › Apps › Mobile')
+
+    fireEvent.click(screen.getByRole('button', { name: /Choose folder/ }))
+    await waitFor(() => expect(addRepo).toHaveBeenCalledWith('acme', 'f-mobile'))
+    await waitFor(() => expect(useStore.getState().modal).toBeNull())
+    // What it was added to is opened, so the new row is on screen: the one
+    // folder around it that was shut, and the project.
+    expect(setRailFolderCollapsed.mock.calls).toEqual([['f-apps', false]])
+    expect(useStore.getState().expanded.acme).toBe(true)
+  })
+
+  it('goes by the folder for the project, since a folder of repos belongs to one', async () => {
+    // The folder alone is enough, and it wins over a project that disagrees.
+    openFrom({ projectId: 'elsewhere', folderId: 'f-apps' })
+    expect(screen.getByText('Acme').parentElement?.textContent).toBe('Adding to Acme › Apps')
+    fireEvent.click(screen.getByRole('button', { name: /Choose folder/ }))
+    await waitFor(() => expect(addRepo).toHaveBeenCalledWith('acme', 'f-apps'))
+  })
+
+  it('adds to a folder of projects as a row of its own, with no project', async () => {
+    openFrom({ folderId: 'f-clients' })
+    expect(screen.getByText('Clients').parentElement?.textContent).toBe('Adding to the folder Clients')
+    fireEvent.click(screen.getByRole('button', { name: /Choose folder/ }))
+    await waitFor(() => expect(addRepo).toHaveBeenCalledWith(undefined, 'f-clients'))
+  })
+
+  it('carries the folder through a GitHub clone, into the project\u2019s root folder', async () => {
+    openFrom({ projectId: 'acme', folderId: 'f-apps' })
+    fireEvent.click(sourceRadio('Clone from GitHub'))
+    fireEvent.click(await screen.findByRole('option', { name: /orbital/ }))
+    expect((screen.getByLabelText(/Local folder/) as HTMLInputElement).value).toBe('D:\\Work\\acme')
+    fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
+    await waitFor(() =>
+      expect(githubCloneRepo).toHaveBeenCalledWith('jimbuck/orbital', 'D:\\Work\\acme', personal, 'acme', 'f-apps')
+    )
+  })
+
+  it('carries the folder through an Azure DevOps clone', async () => {
+    openFrom({ folderId: 'f-clients' })
+    fireEvent.click(sourceRadio('Azure DevOps'))
+    fireEvent.change(screen.getByLabelText(/Repository link/), {
+      target: { value: 'https://dev.azure.com/contoso/Website/_git/api' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
+    await waitFor(() =>
+      expect(azureCloneRepo).toHaveBeenCalledWith(
+        'https://dev.azure.com/contoso/Website/_git/api',
+        expect.any(String),
+        undefined,
+        'f-clients'
+      )
+    )
+  })
+
+  it('says a second repo starts a project, clones beside the first, and opens the new project into its name', async () => {
+    const flat: Project = { ...project('solo', 'orbital', ['p1']), rootPath: 'C:\\Projects\\orbital' }
+    openFrom({ projectId: 'solo' }, [flat])
+    expect(screen.getByText('orbital').parentElement?.textContent).toBe('Starts a project with orbital')
+    // Not "in orbital": that is the repo it will sit beside.
+    expect(screen.getByText('Open a local git repo in Orbital')).toBeTruthy()
+
+    fireEvent.click(sourceRadio('Azure DevOps'))
+    // Beside the repo, never inside its working tree.
+    expect((screen.getByLabelText(/Local folder/) as HTMLInputElement).value).toBe('C:\\Projects')
+    fireEvent.change(screen.getByLabelText(/Repository link/), {
+      target: { value: 'https://dev.azure.com/contoso/Website/_git/api' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Clone repository' }))
+    await waitFor(() => expect(useStore.getState().modal).toBeNull())
+    expect(azureCloneRepo.mock.calls[0].slice(2)).toEqual(['solo', undefined])
+    expect(useStore.getState().renamingProjectId).toBe('solo')
+  })
+
+  it('names the project in the local picker, and leaves a real project alone once the repo is in', async () => {
+    openFrom({ projectId: 'acme' })
+    expect(screen.getByText('Open a local git repo in Acme')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Choose folder/ }))
+    await waitFor(() => expect(addRepo).toHaveBeenCalledWith('acme', undefined))
+    await waitFor(() => expect(useStore.getState().modal).toBeNull())
+    expect(useStore.getState().renamingProjectId).toBeNull()
+    expect(setRailFolderCollapsed).not.toHaveBeenCalled()
   })
 })
 

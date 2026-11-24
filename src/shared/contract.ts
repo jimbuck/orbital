@@ -128,7 +128,13 @@ export const contract = {
    * project (moving there if it was already added elsewhere); otherwise it
    * gets a project of its own.
    */
-  addRepo: invoke<(projectId?: string) => Promise<Repo | null>>(),
+  /**
+   * Pick a local git repository and add it. With `projectId` it joins that
+   * project. With `folderId`, a rail folder, it is filed there: a folder of a
+   * project's repos puts it in that project, a folder of projects takes it as
+   * a row of its own. Resolves null when the picker is cancelled.
+   */
+  addRepo: invoke<(projectId?: string, folderId?: string) => Promise<Repo | null>>(),
   removeRepo: invoke<(repoId: string) => Promise<void>>(),
   renameRepo: invoke<(repoId: string, name: string) => Promise<void>>(),
   /** Native folder picker; `null` when cancelled. */
@@ -216,11 +222,25 @@ export const contract = {
   githubCreateRepo: invoke<(opts: GithubCreateRepoOptions) => Promise<GithubCreatedRepo>>(),
   /**
    * Clone `owner/repo` into `<parentDir>/<repo>` as `account` and register it
-   * as a repo, like `addRepo` does for a folder picked by hand.
+   * as a repo, like `addRepo` does for a folder picked by hand (`projectId`
+   * and `folderId` as there).
    */
   githubCloneRepo: invoke<
-    (nameWithOwner: string, parentDir: string, account?: GithubAccountRef, projectId?: string) => Promise<Repo>
+    (
+      nameWithOwner: string,
+      parentDir: string,
+      account?: GithubAccountRef,
+      projectId?: string,
+      folderId?: string
+    ) => Promise<Repo>
   >(),
+  /**
+   * Clone the Azure DevOps repository a pasted link points at (see
+   * shared/azure-devops.ts for the links it reads) into a folder inside
+   * `parentDir`, with git and the credentials git already has, and register it
+   * like `addRepo` does (`projectId` and `folderId` as there).
+   */
+  azureCloneRepo: invoke<(link: string, parentDir: string, projectId?: string, folderId?: string) => Promise<Repo>>(),
 
   // worktrees / panes / tabs
   createWorktree: invoke<(repoId: string, opts: CreateWorktreeOptions) => Promise<Worktree>>(),

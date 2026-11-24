@@ -1210,6 +1210,20 @@ async function writeFile(repoPath: string, relPath: string, content: string): Pr
 }
 
 /* ----------------------------------------------------------------------------
+ * Cloning
+ * -------------------------------------------------------------------------- */
+
+/**
+ * `git clone url dest`, run from `cwd` (the folder `dest` goes in). The user
+ * asked for it, so git's own credential helper may put up its sign-in window;
+ * only the terminal prompt nobody could answer is off. `--` ends the options,
+ * so a url is never read as one.
+ */
+async function clone(cwd: string, url: string, dest: string): Promise<void> {
+  await run(cwd, ['clone', '--', url, dest], { timeoutMs: CHECKOUT_TIMEOUT_MS })
+}
+
+/* ----------------------------------------------------------------------------
  * Worktrees
  * -------------------------------------------------------------------------- */
 
@@ -1514,6 +1528,7 @@ export const git = {
   pull,
   fetch,
   checkout,
+  clone,
   diff,
   log,
   commitDetail,

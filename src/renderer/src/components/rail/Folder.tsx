@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX, type KeyboardEvent } from 'react'
-import { Folder as FolderClosed, FolderOpen, FolderPlus, Pencil, Trash2 } from 'lucide-react'
+import { Folder as FolderClosed, FolderOpen, FolderPlus, ListPlus, Pencil, Trash2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Project } from '@shared/types'
 import { useStore } from '@renderer/store'
@@ -32,7 +32,8 @@ export { SlotMarker }
  * the way a repo header selects its root Worktree. Collapsed, the chevron
  * and the count badge stand in for the rows that are hidden, in the same status
  * vocabulary a repo's chevron uses for its hidden Worktrees. Right-click
- * renames it, makes a folder inside it, or deletes it; deleting only ungroups.
+ * renames it, adds a repo to it, makes a folder inside it, or deletes it;
+ * deleting only ungroups.
  * The header drags to move the folder. The Rail owns every drop: `dropTarget`
  * is its current one, which this folder reads its own part of (a row would be
  * filed here, or inserted at a place among the rows already inside) and hands
@@ -76,6 +77,7 @@ export default function Folder({
   })
   const renaming = useStore((s) => s.renamingFolderId === folder.id)
   const setRenamingFolder = useStore((s) => s.setRenamingFolder)
+  const openModal = useStore((s) => s.openModal)
   const expanded = !folder.collapsed
   const status = aggregateStatus(statuses)
   const needsAttention = statuses.filter((s) => s === 'needs_attention').length
@@ -93,7 +95,7 @@ export default function Folder({
     e.preventDefault()
     e.stopPropagation()
     setConfirming(false)
-    setMenu(clampMenuPos(e, 210, 150))
+    setMenu(clampMenuPos(e, 210, 180))
   }
 
   const setCollapsed = (collapsed: boolean): void => {
@@ -204,7 +206,9 @@ export default function Folder({
               </>
             ) : (
               <div className="px-[9px] pb-[7px] pt-[5px] text-[11px] text-faint">
-                {project ? 'Empty. Drag a repo here.' : 'Empty. Drag a repo or project here.'}
+                {project
+                  ? 'Empty. Drag a repo here, or right-click to add one.'
+                  : 'Empty. Drag a repo or project here, or right-click to add a repo.'}
               </div>
             )}
           </div>
@@ -220,6 +224,15 @@ export default function Folder({
                 label="Rename"
                 onClick={() => {
                   setRenamingFolder(folder.id)
+                  closeMenu()
+                }}
+              />
+              <MenuItem
+                icon={<ListPlus size={13} strokeWidth={1.5} />}
+                label="Add Repo…"
+                onClick={() => {
+                  // The same dialog as everywhere else; main files what it adds here.
+                  openModal('addRepo', { projectId: project?.id, folderId: folder.id })
                   closeMenu()
                 }}
               />
