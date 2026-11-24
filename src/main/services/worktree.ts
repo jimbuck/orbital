@@ -7,17 +7,11 @@ import { beginWorktreeCreate, endWorktreeCreate, normPath } from './worktree-sca
 import { worktrees as worktreeRepo } from '../db/repositories'
 import { getSettings } from './settings'
 import type { Repo, Worktree } from '@shared/types'
+import { branchSlug } from '@shared/worktree-branch'
 
-/** Turn a branch/title into a filesystem- and git-safe slug. */
+/** Turn a branch/title into a filesystem- and git-safe slug. Never empty: a name with nothing usable in it is `worktree`. */
 export function slugify(input: string): string {
-  return (
-    input
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9/_-]+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^[-/]+|[-/]+$/g, '') || 'worktree'
-  )
+  return branchSlug(input) || 'worktree'
 }
 
 /**

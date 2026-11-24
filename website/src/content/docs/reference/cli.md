@@ -133,6 +133,10 @@ orbital worktree new [--worktree <branch>] [--existing-branch <branch>] [--base 
 
 Creates a linked worktree. The branch is slugified; an existing branch of that
 name is attached to, otherwise a new one is forked. Env files sync automatically.
+Without `--worktree`, the branch is made from the name behind the workspace's
+[worktree branch prefix](/orbital/reference/settings/#git): `orbital worktree
+new "Checkout flow"` creates `feature/checkout-flow`. A branch given with
+`--worktree` is used as given.
 
 - `--existing-branch` checks out a branch that already exists instead of forking
   a new one. A remote-only pick (`origin/pr-42`) gets a local tracking branch.
@@ -240,8 +244,9 @@ repo's project (see [Repos](#repos)).
 - Statuses: `draft`, `todo`, `in-progress`, `ready-for-review`, `done` (hyphens or
   underscores both accepted).
 - `task start` is the scriptable form of the task board's play button: it creates
-  a worktree named after the task in the task's repo, links the two, and moves
-  the task to *in progress*. A task filed under no repo, in a project with more
+  a worktree named after the task in the task's repo (on a branch made from the
+  title, behind the worktree branch prefix, unless `--worktree` names one),
+  links the two, and moves the task to *in progress*. A task filed under no repo, in a project with more
   than one repo, needs `--repo <name|id>` to say where; starting it files it
   under that repo.
 

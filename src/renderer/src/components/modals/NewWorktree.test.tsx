@@ -37,11 +37,13 @@ const repo: Repo = {
   addedAt: 0
 }
 
-function seed(): void {
+function seed(worktreeBranchPrefix?: string): void {
   useStore.setState({
     repos: [repo],
     worktrees: [],
     tasks: [],
+    // Absent, a setting reads as its default; the prefix's is `feature/`.
+    settings: worktreeBranchPrefix === undefined ? null : { worktreeBranchPrefix },
     activeRepoId: repo.id,
     activeWorktreeId: null,
     modalData: { repo }
@@ -117,8 +119,54 @@ describe('NewWorktree — branch source', () => {
     const opts = createWorktree.mock.calls[0][1]
     // `branch` creates; `existingBranch` checks one out. Sending the wrong one
     // would silently do the opposite of what the user selected.
-    expect(opts.branch).toBe('login-flow')
+    expect(opts.branch).toBe('feature/login-flow')
     expect(opts.existingBranch).toBeUndefined()
+  })
+})
+
+describe('NewWorktree — the branch prefix', () => {
+  const branchField = (): HTMLInputElement => screen.getByLabelText(/Branch name/) as HTMLInputElement
+  const type = (name: string): void => {
+    fireEvent.change(screen.getByLabelText('Worktree name'), { target: { value: name } })
+  }
+
+  it('suggests the name behind the workspace prefix, and says which prefix', async () => {
+    seed('jb-')
+    render(<NewWorktree />)
+    await waitFor(() => expect(listBranches).toHaveBeenCalled())
+    expect(screen.getByText(/generated from the name, prefixed with jb-/)).toBeTruthy()
+    expect(branchField().placeholder).toBe('jb-cli-flags')
+
+    type('Login flow')
+    expect(branchField().value).toBe('jb-login-flow')
+    // No name is no branch: the prefix alone is not one.
+    type('')
+    expect(branchField().value).toBe('')
+  })
+
+  it('does not double a prefix the name was typed with', async () => {
+    await open()
+    type('feature/login')
+    expect(branchField().value).toBe('feature/login')
+  })
+
+  it('suggests the bare slug when the prefix is empty', async () => {
+    seed('')
+    render(<NewWorktree />)
+    await waitFor(() => expect(listBranches).toHaveBeenCalled())
+    expect(screen.queryByText(/prefixed with/)).toBeNull()
+    type('Login flow')
+    expect(branchField().value).toBe('login-flow')
+  })
+
+  it('leaves a branch the user typed alone, prefix or no', async () => {
+    await open()
+    fireEvent.change(branchField(), { target: { value: 'hotfix/crash' } })
+    type('Login flow')
+    expect(branchField().value).toBe('hotfix/crash')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Worktree' }))
+    await waitFor(() => expect(createWorktree).toHaveBeenCalledTimes(1))
+    expect(createWorktree.mock.calls[0][1].branch).toBe('hotfix/crash')
   })
 
   it('sends an EXISTING branch when the other source is selected', async () => {

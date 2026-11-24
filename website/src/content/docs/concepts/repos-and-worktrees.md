@@ -82,7 +82,8 @@ live, by watching each repo's `.git/worktrees` directory.
 **New Worktree** (on the repo row, **File ▸ New Worktree…**, or the ▶ on a
 task) leads with the worktree's name and offers two choices:
 
-- **Create a new branch.** The branch name follows the worktree name until you
+- **Create a new branch.** The branch name follows the worktree name, behind
+  your [worktree branch prefix](/orbital/reference/settings/#git), until you
   edit it, and forks from the base ref you pick.
 - **Open an existing branch.** Local branches are checked out directly; a
   remote-only branch like `origin/pr-42` gets a local tracking branch. Handy for
@@ -90,8 +91,8 @@ task) leads with the worktree's name and offers two choices:
 
 ![The New Worktree dialog](../../../assets/screenshots/02-new-worktree.png)
 
-Branch names are slugified for you ("Login flow" → `login-flow`) and collisions
-get numeric suffixes. If the branch already exists, Orbital attaches to it;
+Branch names are slugified for you and given the prefix ("Login flow" →
+`feature/login-flow`), and collisions get numeric suffixes. If the branch already exists, Orbital attaches to it;
 otherwise it forks a new branch from the base ref you chose (default `HEAD`).
 
 Right-click a worktree for **Rename**, **Sync env files from root**,

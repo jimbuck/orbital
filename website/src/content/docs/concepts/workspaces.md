@@ -19,8 +19,8 @@ behave differently:
 - its repos, and through them their worktrees, tabs and tasks
 - the theme and accent colour, so each window is recognisable at a glance
 - agent profiles (a work Claude and a personal Claude, say), the default shell,
-  alert toggles, env-file patterns, periodic fetch, zoom level and the default
-  open action
+  alert toggles, env-file patterns, periodic fetch, the worktree branch prefix,
+  zoom level and the default open action
 
 Nothing in Settings is machine-wide any more. A workspace that has never set a
 value picks up the one older builds stored globally, so upgrading doesn't

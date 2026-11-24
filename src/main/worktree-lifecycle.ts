@@ -9,13 +9,14 @@ import {
 } from '@shared/types'
 import { runtime, tables } from './runtime'
 import { git } from './services/git'
-import { createLinkedWorktree, removeWorktree as removeCheckout } from './services/worktree'
+import { createLinkedWorktree, removeWorktree as removeCheckout, slugify } from './services/worktree'
 import { planWorktreeSync, pathsBeingCreated, WorktreesWatcher } from './services/worktree-scan'
 import { copyNodeModulesTree, hasIncompleteCopy, syncEnvFiles, targetsNodeModules } from './services/env-sync'
 import { startPtyTab } from './services/agents/launch'
 import { scheduleProjectPointers } from './services/project-pointers'
 import { logger } from './services/logger'
 import { getSettings } from './services/settings'
+import { prefixedBranch } from '@shared/worktree-branch'
 import { killWorktreeTerminals, releaseTabRuntime } from './tabs'
 import { forgetTabs } from './status'
 
@@ -65,7 +66,13 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
   }
 
   const name = input.name?.trim() || task?.title
-  const branch = input.branch?.trim() || name || `worktree-${Date.now()}`
+  // A branch that was asked for by name is used as asked. One nobody named is
+  // made from the Worktree's name, behind the workspace's prefix, so a
+  // Worktree started from the CLI or a task's play button is named like one
+  // made in the form (which shows the same branch before it is created).
+  const branch =
+    input.branch?.trim() ||
+    prefixedBranch(getSettings().worktreeBranchPrefix, slugify(name || `worktree-${Date.now()}`))
   const created = await createLinkedWorktree({
     repo,
     branch,

@@ -12,6 +12,8 @@ import {
   PROJECT_LANE
 } from '@renderer/lib/taskScope'
 import type { Repo, Task, BranchInfo } from '@shared/types'
+import { branchSlug, prefixedBranch } from '@shared/worktree-branch'
+import { useSetting } from '@renderer/lib/settings'
 import { ModalShell, primaryBtn, ghostBtn, inputBase, fieldLabel } from './ModalRoot'
 import { SegmentedControl, type SegmentedOption } from '../SegmentedControl'
 import { Select } from './Select'
@@ -29,16 +31,6 @@ interface NewWorktreeData {
   repo?: Repo
   /** Pre-link this task and seed the branch/name from it (play-button flow). */
   task?: Task
-}
-
-/** Local slug suggestion for the branch field; main re-slugifies on submit. */
-function toBranch(input: string): string {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9/_-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[-/]+|[-/]+$/g, '')
 }
 
 export default function NewWorktree(): React.JSX.Element {
@@ -85,6 +77,11 @@ export default function NewWorktree(): React.JSX.Element {
     }
   }, [allTasks, prefill?.id, repo, project])
   const linkableCount = linkable.tagged.length + linkable.untagged.length
+
+  // The branch suggested for a name: its slug behind the workspace's prefix
+  // (Settings, Git). Main names a Worktree it is given no branch for the same way.
+  const prefix = useSetting('worktreeBranchPrefix')
+  const toBranch = (text: string): string => prefixedBranch(prefix, branchSlug(text))
 
   const [name, setName] = useState(prefill?.title ?? '')
   // "new" forks a fresh branch named after the Worktree; "existing" checks out
@@ -286,7 +283,10 @@ export default function NewWorktree(): React.JSX.Element {
         {mode === 'new' ? (
           <>
             <label className={`${fieldLabel} mt-4 block`} htmlFor="nf-branch">
-              Branch name <span className="font-normal text-faint">· generated from the name</span>
+              Branch name{' '}
+              <span className="font-normal text-faint">
+                · generated from the name{prefix ? `, prefixed with ${prefix}` : ''}
+              </span>
             </label>
             <input
               id="nf-branch"
@@ -296,7 +296,7 @@ export default function NewWorktree(): React.JSX.Element {
                 setBranchTouched(true)
               }}
               onKeyDown={onEnter}
-              placeholder="feat/cli-flags"
+              placeholder={prefix ? `${prefix}cli-flags` : 'feat/cli-flags'}
               aria-invalid={Boolean(error && !branch.trim())}
               className={`mt-1.5 font-mono ${inputBase}`}
             />

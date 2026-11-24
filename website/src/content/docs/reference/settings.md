@@ -66,6 +66,19 @@ sh, fish and pwsh.
 **Periodic fetch** fetches each repo in the background so ahead/behind counts
 stay current. On by default.
 
+**Worktree branch prefix** goes in front of the branch Orbital makes for a new
+worktree. It is `feature/` by default, so a worktree named "Login flow" gets
+the branch `feature/login-flow`. The separator is part of the prefix: `jb-` and
+`users/jim/` work the same way, and without one the prefix runs straight into
+the name. Leave it empty for no prefix. The field shows the branch a worktree
+would get as you type.
+
+The prefix applies wherever Orbital names the branch from the worktree's name:
+the **New Worktree** dialog (where you can still edit the branch), a task's ▶
+button, and `orbital worktree new` or `orbital task start` without
+`--worktree`. A branch you name yourself, and an existing branch you open, are
+used as they are.
+
 ## Agents
 
 A list of **agent profiles**. Each profile shows up in the new-tab menus and

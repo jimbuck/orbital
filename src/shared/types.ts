@@ -652,6 +652,14 @@ export interface Settings {
    * the executable. Empty means VS Code's `code`.
    */
   externalEditor: string
+  /**
+   * What goes in front of the branch name made for a new Worktree: `feature/`
+   * turns "Login flow" into `feature/login-flow`. The separator is part of it
+   * (`jb-` works as well as `team/`), and empty means no prefix. It names the
+   * branch Orbital makes from a Worktree's name; a branch asked for by name,
+   * or an existing one being opened, is used as it is. See shared/worktree-branch.ts.
+   */
+  worktreeBranchPrefix: string
 }
 
 /**

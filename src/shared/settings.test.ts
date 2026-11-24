@@ -15,6 +15,7 @@ describe('the settings schema', () => {
       debugLogging: false,
       defaultOpenAction: 'right',
       accentColor: null,
+      worktreeBranchPrefix: 'feature/',
       envSyncPatterns: DEFAULT_ENV_SYNC_PATTERNS,
       alerts: { indicator: true, sound: true, taskbarBadge: true, taskbarFlash: true }
     })
@@ -78,6 +79,15 @@ describe('resolveSettings', () => {
     const s = resolveSettings({ systemDarkTheme: 'github-light', systemLightTheme: 'github-light' })
     expect(s.systemDarkTheme).toBe('dark')
     expect(s.systemLightTheme).toBe('github-light')
+  })
+
+  it('reads the worktree branch prefix as a branch name can carry it, and an empty one as no prefix', () => {
+    expect(resolveSettings({ worktreeBranchPrefix: 'jb-' }).worktreeBranchPrefix).toBe('jb-')
+    // Hand-edited: held to a branch name's characters rather than trusted.
+    expect(resolveSettings({ worktreeBranchPrefix: ' /My Team// ' }).worktreeBranchPrefix).toBe('my-team/')
+    // Empty is a choice (no prefix), so the default does not show through it.
+    expect(resolveSettings({ worktreeBranchPrefix: '' }).worktreeBranchPrefix).toBe('')
+    expect(resolveSettings({ worktreeBranchPrefix: 7 }).worktreeBranchPrefix).toBe('feature/')
   })
 
   it('converts a legacy enabledAgents list when the row has no agents of its own', () => {

@@ -11,6 +11,7 @@ import type {
 import ThemePicker from '../ThemePicker'
 import { setFontLigatures, useFontLigatures } from '@renderer/lib/theme'
 import { settingOf } from '@renderer/lib/settings'
+import { WORKTREE_BRANCH_PREFIX_MAX, cleanBranchPrefix, prefixedBranch } from '@shared/worktree-branch'
 import { previewAccentColor, setAccentColor, useAccentColor } from '@renderer/lib/accent'
 import { AccentPicker } from '../AccentPicker'
 import {
@@ -452,6 +453,7 @@ export default function Settings(): React.JSX.Element {
   const [patterns, setPatterns] = useState<string[]>(() => settingOf(settings, 'envSyncPatterns'))
   const [defaultShell, setDefaultShell] = useState(() => settingOf(settings, 'defaultShell'))
   const [externalEditor, setExternalEditor] = useState(() => settingOf(settings, 'externalEditor'))
+  const [branchPrefix, setBranchPrefix] = useState(() => settingOf(settings, 'worktreeBranchPrefix'))
   const [alerts, setAlerts] = useState<SettingsModel['alerts']>(() => settingOf(settings, 'alerts'))
   const [periodicFetch, setPeriodicFetch] = useState(() => settingOf(settings, 'periodicFetch'))
   const [defaultOpenAction, setDefaultOpenAction] = useState<OpenAction>(() =>
@@ -595,6 +597,7 @@ export default function Settings(): React.JSX.Element {
         debugLogging,
         defaultOpenAction,
         externalEditor: externalEditor.trim(),
+        worktreeBranchPrefix: cleanBranchPrefix(branchPrefix),
         agents: cleanedAgents
       }
       await window.orbital.setSettings(changedOnly(edited, seededRef.current))
@@ -840,6 +843,40 @@ export default function Settings(): React.JSX.Element {
           checked={periodicFetch}
           onChange={setPeriodicFetch}
         />
+        {/* Shown as it will be saved, on a real name, since whether the prefix
+            ends in a separator is the whole difference between feature/login
+            and featurelogin. */}
+        <div className="flex items-center justify-between gap-4 py-2.5">
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-semibold text-text-2">Worktree branch prefix</div>
+            <div id="branch-prefix-desc" className="mt-px text-[11px] text-dim">
+              {cleanBranchPrefix(branchPrefix) ? (
+                <>
+                  A Worktree named &ldquo;Login flow&rdquo; gets the branch{' '}
+                  <span className="font-mono text-text-3">
+                    {prefixedBranch(cleanBranchPrefix(branchPrefix), 'login-flow')}
+                  </span>
+                </>
+              ) : (
+                <>
+                  No prefix: &ldquo;Login flow&rdquo; gets the branch{' '}
+                  <span className="font-mono text-text-3">login-flow</span>
+                </>
+              )}
+            </div>
+          </div>
+          <input
+            value={branchPrefix}
+            onChange={(e) => setBranchPrefix(e.target.value)}
+            placeholder="none"
+            spellCheck={false}
+            maxLength={WORKTREE_BRANCH_PREFIX_MAX}
+            aria-label="Worktree branch prefix"
+            aria-describedby="branch-prefix-desc"
+            title="Put in front of the branch made for a new Worktree. Include the separator: feature/ or jb-. Empty for none."
+            className="w-[150px] flex-none rounded-btn border border-line-2 bg-bg px-3 py-[7px] font-mono text-[12px] text-text-2 outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-accent/60"
+          />
+        </div>
       </div>
 
       <div className="my-[18px] h-px bg-soft" />

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { Repo, Worktree } from '@shared/types'
 import { closeDb, initDb } from './db/database'
 import * as tables from './db/repositories'
+import { setSettings } from './services/settings'
 
 /**
  * Worktree and Repo lifecycle through its interface, against a real git
@@ -117,9 +118,10 @@ describe('creating a Worktree', () => {
   it('checks out a new branch, records it, copies env files, watches it and tells the window', async () => {
     const w = await createWorktree({ repoId: repo.id, name: 'Login flow' })
 
-    expect(w).toMatchObject({ kind: 'linked', name: 'Login flow', branch: 'login-flow', repoId: repo.id })
+    // Nobody named a branch, so it is the name behind the workspace's prefix (`feature/` until changed).
+    expect(w).toMatchObject({ kind: 'linked', name: 'Login flow', branch: 'feature/login-flow', repoId: repo.id })
     expect(w.panes).toHaveLength(1)
-    expect(gitIn(w.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('login-flow')
+    expect(gitIn(w.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feature/login-flow')
     expect(readFileSync(join(w.path, '.env'), 'utf8')).toBe('SECRET=1\n')
     expect(tables.worktrees.get(w.id)).toBeDefined()
     expect(rt.watch).toHaveBeenCalledWith(w.path)
@@ -132,9 +134,20 @@ describe('creating a Worktree', () => {
     expect(rt.markSettingUp).toHaveBeenCalledWith(w.id)
   })
 
+  it('names the branch behind the prefix the workspace has set, or bare when it has set none', async () => {
+    setSettings({ worktreeBranchPrefix: 'jb-' })
+    expect((await createWorktree({ repoId: repo.id, name: 'Login flow' })).branch).toBe('jb-login-flow')
+    // A name already carrying the prefix is not given it twice.
+    expect((await createWorktree({ repoId: repo.id, name: 'jb-cart' })).branch).toBe('jb-cart')
+
+    setSettings({ worktreeBranchPrefix: '' })
+    expect((await createWorktree({ repoId: repo.id, name: 'Checkout' })).branch).toBe('checkout')
+  })
+
   it('takes an explicit branch over the name, and forks it from the base ref', async () => {
     gitIn(repoPath, 'branch', 'release')
     const w = await createWorktree({ repoId: repo.id, name: 'Hotfix', branch: 'fix/crash', baseRef: 'release' })
+    // Asked for by name: used as asked, with no prefix put on it.
     expect(w.branch).toBe('fix/crash')
     expect(w.name).toBe('Hotfix')
     expect(gitIn(w.path, 'rev-parse', 'HEAD')).toBe(gitIn(repoPath, 'rev-parse', 'release'))
@@ -153,7 +166,7 @@ describe('creating a Worktree', () => {
 
     const w = await createWorktree({ repoId: repo.id, taskId: task.id })
 
-    expect(w).toMatchObject({ name: 'Fix the flaky test', branch: 'fix-the-flaky-test', taskId: task.id })
+    expect(w).toMatchObject({ name: 'Fix the flaky test', branch: 'feature/fix-the-flaky-test', taskId: task.id })
     expect(tables.tasks.get(task.id)).toMatchObject({ worktreeId: w.id, status: 'in_progress' })
   })
 

@@ -7,6 +7,7 @@ import {
   type Settings
 } from './types'
 import { DEFAULT_THEME_ID, isThemeId, normalizeSystemTheme } from './themes'
+import { DEFAULT_WORKTREE_BRANCH_PREFIX, cleanBranchPrefix } from './worktree-branch'
 
 /**
  * The settings schema: for every key of {@link Settings}, what it is before
@@ -127,7 +128,14 @@ export const SETTINGS = {
     default: null,
     parse: (v) => normalizeAccentColor(v) ?? undefined
   }),
-  externalEditor: text('')
+  externalEditor: text(''),
+  // Cleaned on the way out like everything else here: a hand-edited prefix
+  // goes into a branch name, so it is held to what a branch name can carry.
+  // An empty string is a value (no prefix), not a missing one.
+  worktreeBranchPrefix: spec<string>({
+    default: DEFAULT_WORKTREE_BRANCH_PREFIX,
+    parse: (v) => (typeof v === 'string' ? cleanBranchPrefix(v) : undefined)
+  })
   // `any` for the parsed type only: it differs per key (alerts parses to a
   // subset of its toggles), and each entry above states its own.
 } satisfies { [K in keyof Settings]: SettingSpec<Settings[K], any> }

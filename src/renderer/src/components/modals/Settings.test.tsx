@@ -35,6 +35,7 @@ function makeSettings(theme: ThemeMode, pair?: SystemPair): SettingsModel {
     ...pair,
     defaultOpenAction: 'right',
     externalEditor: '',
+    worktreeBranchPrefix: 'feature/',
     accentColor: null
   } as unknown as SettingsModel
 }
@@ -252,6 +253,34 @@ describe('Settings — Save', () => {
     await vi.waitFor(() => expect(setSettings).toHaveBeenCalledTimes(1))
 
     expect(setSettings.mock.calls[0][0]).toEqual({ defaultShell: 'cmd.exe' })
+  })
+
+  it('shows the branch a new Worktree would get, and saves the prefix as a branch can carry it', async () => {
+    seed('dark')
+    render(<Settings />)
+    const field = screen.getByLabelText('Worktree branch prefix') as HTMLInputElement
+    expect(field.value).toBe('feature/')
+    expect(screen.getByText('feature/login-flow')).toBeTruthy()
+
+    // The preview is what makes a missing separator visible before it is saved.
+    fireEvent.change(field, { target: { value: 'JB' } })
+    expect(screen.getByText('jblogin-flow')).toBeTruthy()
+    fireEvent.change(field, { target: { value: ' Team One/ ' } })
+    expect(screen.getByText('team-one/login-flow')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(setSettings).toHaveBeenCalledTimes(1))
+    expect(setSettings.mock.calls[0][0]).toEqual({ worktreeBranchPrefix: 'team-one/' })
+  })
+
+  it('saves an emptied prefix as no prefix', async () => {
+    seed('dark')
+    render(<Settings />)
+    fireEvent.change(screen.getByLabelText('Worktree branch prefix'), { target: { value: '' } })
+    expect(screen.getByText(/No prefix/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await vi.waitFor(() => expect(setSettings).toHaveBeenCalledTimes(1))
+    expect(setSettings.mock.calls[0][0]).toEqual({ worktreeBranchPrefix: '' })
   })
 
   it('writes nothing at all when Save is pressed with no edits', async () => {
