@@ -96,6 +96,16 @@ Right-click a folder and choose **Add Repo…** to add a repo straight into it,
 from any of the dialog's sources. In a folder of repos it joins that project;
 in a folder of projects it is a row of its own.
 
+The rest of a folder's menu arranges what is already in the rail:
+
+- **Move Here…** lists the rows that are not in the folder yet and files each
+  one you click, so several can be gathered without dragging. A folder of
+  repos offers its own project's repos.
+- **Move to Folder**, **Move to Top** and **Move to Bottom** move the folder
+  itself: into another folder of its kind, or to either end of its list.
+- **Expand All** / **Collapse All** opens or closes every folder and project
+  under it, and **Clear Status** clears the status of every worktree under it.
+
 Under a project with a home repo, the home repo's own worktrees come first,
 each joined to the header's status dot by a branch line. The project's repos
 follow, indented behind a rule. Agents can read and rearrange the same folders

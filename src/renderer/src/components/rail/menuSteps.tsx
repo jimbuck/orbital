@@ -6,13 +6,18 @@ import { fireAndForget } from '@renderer/lib/bridge'
 import { MenuItem, MenuPrompt } from './menu'
 import {
   dissolvesOnLeave,
+  folderIsWithin,
   foldersIn,
+  leafRows,
   placeOf,
   projectRowById,
   projectRows,
   railRows,
+  type FolderRow,
+  type ProjectRow,
   type RailAction,
-  type RailRow
+  type RailRow,
+  type RepoRow
 } from './folders'
 
 /**
@@ -25,7 +30,7 @@ const MENU_CAPTION = 'px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase trackin
 const PICK_LIST = 'max-h-[260px] overflow-y-auto'
 
 /** The rail's rows as the store has them, for a menu step to read places from. */
-function useRailRows(): RailRow[] {
+export function useRailRows(): RailRow[] {
   const projects = useStore((s) => s.projects)
   const repos = useStore((s) => s.repos)
   const folders = useStore((s) => s.railFolders)
@@ -37,9 +42,10 @@ function useRailRows(): RailRow[] {
 /**
  * "Move to Folder": file a row in a folder (last in it), start a new folder
  * for it, or take it out of its folder to just below it. The row is a project
- * (a group's header or a flat row), filed among the rail's folders, or a
- * member repo, filed among its project's own folders. Rail arrangement only;
- * the project and the repo are untouched.
+ * (a group's header or a flat row), filed among the rail's folders; a member
+ * repo, filed among its project's own folders; or a folder, filed among the
+ * other folders of its kind (never in itself). Rail arrangement only; the
+ * project and the repo are untouched.
  */
 export function FolderStep({
   name,
@@ -47,24 +53,34 @@ export function FolderStep({
   onNewFolder,
   onDone
 }: {
-  /** What the title calls the row: the repo's name on a repo row, the project's on a header. */
+  /** What the title calls the row: the repo's name on a repo row, the project's on a header, the folder's on a folder. */
   name: string
-  /** The row being filed: a project, or one of a group's repos. */
+  /** The row being filed: a project, one of a group's repos, or a folder. */
   item: RailItem
-  onNewFolder: () => void
+  /** Leads to the name prompt for a folder made to hold the row. Absent for a folder, which has New Folder Inside. */
+  onNewFolder?: () => void
   onDone: () => void
 }): JSX.Element {
   const rows = useRailRows()
-  // A member repo is filed among its own project's folders, and stays in that project.
-  const ownerId = useStore((s) => (item.kind === 'repo' ? s.repos.find((r) => r.id === item.id)?.projectId : undefined))
-  const folders = foldersIn(rows, item.kind === 'repo' ? (ownerId ?? '') : null)
-  const kind = item.kind === 'repo' ? 'repo' : 'project'
-  const folderId = placeOf(rows, kind, item.id)?.folderId ?? null
+  // A member repo is filed among its own project's folders, and stays in that
+  // project; so does one of a project's folders. Null is the rail's own folders.
+  const scope = useStore((s) => {
+    if (item.kind === 'repo') return s.repos.find((r) => r.id === item.id)?.projectId ?? ''
+    if (item.kind === 'folder') return s.railFolders.find((f) => f.id === item.id)?.projectId ?? null
+    return null
+  })
+  const folders = foldersIn(rows, scope).filter(
+    // A folder does not go into itself, or into anything inside it.
+    ({ folder }) => item.kind !== 'folder' || !folderIsWithin(rows, folder.id, item.id)
+  )
+  const folderId = placeOf(rows, item.kind, item.id)?.folderId ?? null
 
   /** Put the row in `target` (null = the top of its list), before `beforeId` or last. */
   const place = (target: string | null, beforeId: string | null): void => {
     if (item.kind === 'repo') {
-      if (ownerId) fireAndForget(window.orbital.addRepoToProject(ownerId, item.id, beforeId, target))
+      if (scope) fireAndForget(window.orbital.addRepoToProject(scope, item.id, beforeId, target))
+    } else if (item.kind === 'folder') {
+      fireAndForget(window.orbital.placeRailFolder(item.id, target, beforeId))
     } else {
       fireAndForget(window.orbital.placeProject(item.id, target, beforeId))
     }
@@ -97,14 +113,93 @@ export function FolderStep({
           />
         ))}
       </div>
-      {folders.length > 0 && <div className="my-1 h-px bg-soft" />}
-      <MenuItem icon={<FolderPlus size={13} strokeWidth={1.5} />} label="New Folder…" onClick={onNewFolder} />
+      {folders.length === 0 && !onNewFolder && folderId === null && (
+        <div className="px-2 py-1.5 text-[11px] text-faint">No other folders yet.</div>
+      )}
+      {folders.length > 0 && (onNewFolder || folderId !== null) && <div className="my-1 h-px bg-soft" />}
+      {onNewFolder && (
+        <MenuItem icon={<FolderPlus size={13} strokeWidth={1.5} />} label="New Folder…" onClick={onNewFolder} />
+      )}
       {folderId !== null && (
         <MenuItem
           icon={<FolderMinus size={13} strokeWidth={1.5} />}
           label="Remove from Folder"
           onClick={removeFromFolder}
         />
+      )}
+    </>
+  )
+}
+
+/**
+ * "Move Here": file rows that are already in the rail in this folder, one
+ * click each. A folder of repos offers its project's other repos, a folder of
+ * projects every project (and plain repo row) that is not already directly in
+ * it. The step stays open, and a row leaves the list as it is filed, so
+ * several can be gathered in one go. Rail arrangement only.
+ */
+export function GatherStep({
+  row,
+  project
+}: {
+  row: FolderRow<ProjectRow> | FolderRow<RepoRow>
+  /** The project whose repos this folder arranges; absent for a folder of projects. */
+  project?: Project
+}): JSX.Element {
+  const rows = useRailRows()
+  const { folder } = row
+  const folderName = (id: string | null): string | undefined =>
+    id === null ? undefined : foldersIn(rows, project?.id ?? null).find((f) => f.folder.id === id)?.folder.name
+
+  // What can be filed here, in rail order, with the folder each is in now.
+  const candidates: Array<{ id: string; label: string; group: boolean; from: string | undefined }> = []
+  if (project) {
+    const owner = projectRowById(rows, project.id)
+    for (const repo of owner?.kind === 'group' ? owner.members : []) {
+      const at = placeOf(rows, 'repo', repo.id)
+      if (at && at.folderId !== folder.id) {
+        candidates.push({ id: repo.id, label: repo.name, group: false, from: folderName(at.folderId) })
+      }
+    }
+  } else {
+    for (const p of projectRows(rows)) {
+      const at = placeOf(rows, 'project', p.id)
+      if (at && at.folderId !== folder.id) {
+        candidates.push({
+          id: p.id,
+          label: p.kind === 'flat' ? p.repo.name : p.project.name,
+          group: p.kind === 'group',
+          from: folderName(at.folderId)
+        })
+      }
+    }
+  }
+
+  const file = (id: string): void => {
+    if (project) fireAndForget(window.orbital.addRepoToProject(project.id, id, null, folder.id))
+    else fireAndForget(window.orbital.placeProject(id, folder.id, null))
+  }
+  const here = leafRows<ProjectRow | RepoRow>(row.items).length
+
+  return (
+    <>
+      <div className={MENU_TITLE}>Move into {folder.name}</div>
+      {candidates.length === 0 ? (
+        <div className="px-2 py-1.5 text-[11px] text-faint">
+          {here > 0 ? 'Everything is in this folder already.' : project ? 'No repos to move yet.' : 'Nothing to move yet.'}
+        </div>
+      ) : (
+        <div className={PICK_LIST}>
+          {candidates.map((c) => (
+            <MenuItem
+              key={c.id}
+              icon={c.group ? <Layers size={13} strokeWidth={1.5} /> : <FolderGit2 size={13} strokeWidth={1.5} />}
+              label={c.label}
+              hint={c.from ? `in ${c.from}` : undefined}
+              onClick={() => file(c.id)}
+            />
+          ))}
+        </div>
       )}
     </>
   )

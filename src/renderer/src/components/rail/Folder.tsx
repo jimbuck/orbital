@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX, type KeyboardEvent } from 'react'
-import { Folder as FolderClosed, FolderOpen, FolderPlus, ListPlus, Pencil, Trash2 } from 'lucide-react'
+import { Folder as FolderClosed, FolderOpen } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { aggregateStatus, type Project } from '@shared/types'
 import { useStore } from '@renderer/store'
@@ -10,9 +10,10 @@ import ProjectItem from './ProjectItem'
 import RenameField from './RenameField'
 import { SlotMarker } from './SlotMarker'
 import { CHILD_LIST } from './treeLines'
-import { ContextMenu, MenuConfirm, MenuItem, clampMenuPos, type MenuPos } from './menu'
+import FolderMenu from './FolderMenu'
+import { clampMenuPos, type MenuPos } from './menu'
 import { beginRailDrag, leafRows, type DropTarget, type FolderRow, type ProjectRow, type RepoRow } from './folders'
-import { newRailFolder, repoCount } from './railActions'
+import { repoCount } from './railActions'
 
 export { SlotMarker }
 
@@ -32,8 +33,8 @@ export { SlotMarker }
  * the way a repo header selects its root Worktree. Collapsed, the chevron
  * and the count badge stand in for the rows that are hidden, in the same status
  * vocabulary a repo's chevron uses for its hidden Worktrees. Right-click
- * renames it, adds a repo to it, makes a folder inside it, or deletes it;
- * deleting only ungroups.
+ * opens its menu (see FolderMenu): naming it, adding to it, moving it, and
+ * deleting it, which only ungroups.
  * The header drags to move the folder. The Rail owns every drop: `dropTarget`
  * is its current one, which this folder reads its own part of (a row would be
  * filed here, or inserted at a place among the rows already inside) and hands
@@ -77,7 +78,6 @@ export default function Folder({
   })
   const renaming = useStore((s) => s.renamingFolderId === folder.id)
   const setRenamingFolder = useStore((s) => s.setRenamingFolder)
-  const openModal = useStore((s) => s.openModal)
   const expanded = !folder.collapsed
   const status = aggregateStatus(statuses)
   const needsAttention = statuses.filter((s) => s === 'needs_attention').length
@@ -85,17 +85,10 @@ export default function Folder({
   const dropSlot = dropTarget?.kind === 'slot' && dropTarget.folderId === folder.id ? dropTarget.index : null
 
   const [menu, setMenu] = useState<MenuPos | null>(null)
-  const [confirming, setConfirming] = useState(false)
-
-  const closeMenu = (): void => {
-    setMenu(null)
-    setConfirming(false)
-  }
   const openMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    setConfirming(false)
-    setMenu(clampMenuPos(e, 210, 180))
+    setMenu(clampMenuPos(e, 210, 320))
   }
 
   const setCollapsed = (collapsed: boolean): void => {
@@ -106,10 +99,6 @@ export default function Folder({
     const name = draft.trim()
     setRenamingFolder(null)
     if (name && name !== folder.name) fireAndForget(window.orbital.renameRailFolder(folder.id, name))
-  }
-  const remove = (): void => {
-    fireAndForget(window.orbital.removeRailFolder(folder.id))
-    closeMenu()
   }
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (renaming || e.target !== e.currentTarget) return
@@ -215,57 +204,7 @@ export default function Folder({
         )}
       </div>
 
-      {menu && (
-        <ContextMenu pos={menu} width={210} onClose={closeMenu}>
-          {!confirming ? (
-            <>
-              <MenuItem
-                icon={<Pencil size={13} strokeWidth={1.5} />}
-                label="Rename"
-                onClick={() => {
-                  setRenamingFolder(folder.id)
-                  closeMenu()
-                }}
-              />
-              <MenuItem
-                icon={<ListPlus size={13} strokeWidth={1.5} />}
-                label="Add Repo…"
-                onClick={() => {
-                  // The same dialog as everywhere else; main files what it adds here.
-                  openModal('addRepo', { projectId: project?.id, folderId: folder.id })
-                  closeMenu()
-                }}
-              />
-              <MenuItem
-                icon={<FolderPlus size={13} strokeWidth={1.5} />}
-                label="New Folder Inside"
-                onClick={() => {
-                  // Main opens this folder, so the new one is on screen to be named.
-                  newRailFolder({ parentId: folder.id })
-                  closeMenu()
-                }}
-              />
-              <div className="my-1 h-px bg-soft" />
-              <MenuItem
-                icon={<Trash2 size={13} strokeWidth={1.5} />}
-                label="Delete Folder"
-                danger
-                // An empty folder holds nothing to lose track of, so it just goes.
-                onClick={() => (holds ? setConfirming(true) : remove())}
-              />
-            </>
-          ) : (
-            <MenuConfirm
-              message={`Delete the folder "${folder.name}"?`}
-              hint="Everything in it stays in Orbital, where the folder was. Nothing on disk changes."
-              confirmLabel="Delete Folder"
-              danger={false}
-              onConfirm={remove}
-              onCancel={closeMenu}
-            />
-          )}
-        </ContextMenu>
-      )}
+      {menu && <FolderMenu row={row} project={project} pos={menu} onClose={() => setMenu(null)} />}
     </div>
   )
 }

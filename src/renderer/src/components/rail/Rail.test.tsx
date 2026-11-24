@@ -121,7 +121,8 @@ beforeEach(() => {
     placeProject: vi.fn(async () => undefined),
     placeRailFolder: vi.fn(async () => undefined),
     addRepoToProject: vi.fn(async () => undefined),
-    detachRepo: vi.fn(async () => null)
+    detachRepo: vi.fn(async () => null),
+    clearWorktreeStatus: vi.fn(async () => undefined)
   }
   vi.stubGlobal('orbital', bridge)
 })
@@ -290,6 +291,122 @@ describe('rail folders — actions', () => {
     fireEvent.dragStart(repoRow('gamma'), { dataTransfer: dataTransfer() })
     dropAt(header('clients'), TOP_EDGE)
     expect(bridge.placeProject).toHaveBeenLastCalledWith('gamma', 'work', 'clients')
+  })
+})
+
+describe('rail folders — the folder menu', () => {
+  const item = (name: RegExp): HTMLElement => screen.getByRole('menuitem', { name })
+  const has = (name: RegExp): boolean => screen.queryByRole('menuitem', { name }) !== null
+  const menuOf = (name: string): void => {
+    fireEvent.contextMenu(header(name))
+  }
+  const p = (id: string): RailItem => ({ kind: 'project', id })
+  const f = (id: string): RailItem => ({ kind: 'folder', id })
+
+  it('leaves out what could do nothing: a lone, empty, idle folder has the plain items only', () => {
+    renderRail([folder('work', [])], [], [f('work'), p('alpha'), p('beta'), p('gamma')])
+    menuOf('work')
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual([
+      'Rename',
+      'Add Repo…',
+      'Move Here…repos, projects',
+      'New Folder Inside',
+      'Move to Folder',
+      'Move to Bottom',
+      'Delete Folder'
+    ])
+  })
+
+  it('files rows that are already in the rail from Move Here, one click each, and stays open', () => {
+    renderRail([folder('work', ['alpha']), folder('play', ['beta'])])
+    menuOf('work')
+    fireEvent.click(item(/Move Here/))
+    expect(screen.getByText('Move into work')).toBeTruthy()
+    // Everything that is not directly in the folder already, with where it is now.
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['betain play', 'gamma'])
+
+    fireEvent.click(item(/^gamma/))
+    expect(bridge.placeProject).toHaveBeenLastCalledWith('gamma', 'work', null)
+    fireEvent.click(item(/^beta/))
+    expect(bridge.placeProject).toHaveBeenLastCalledWith('beta', 'work', null)
+    expect(screen.getByText('Move into work')).toBeTruthy()
+  })
+
+  it('says so when everything is in the folder already', () => {
+    renderRail([folder('work', ['alpha', 'beta', 'gamma'])])
+    menuOf('work')
+    fireEvent.click(item(/Move Here/))
+    expect(screen.getByText('Everything is in this folder already.')).toBeTruthy()
+  })
+
+  it('moves the folder to either end of the list it is in', () => {
+    renderRail([folder('work', [])], [], [p('alpha'), f('work'), p('beta'), p('gamma')])
+    menuOf('work')
+    fireEvent.click(item(/Move to Top/))
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('work', null, 'alpha')
+    menuOf('work')
+    fireEvent.click(item(/Move to Bottom/))
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('work', null, null)
+  })
+
+  it('offers neither end to a folder already there', () => {
+    renderRail([folder('work', [])], [], [p('alpha'), p('beta'), p('gamma'), f('work')])
+    menuOf('work')
+    expect(has(/Move to Top/)).toBe(true)
+    expect(has(/Move to Bottom/)).toBe(false)
+  })
+
+  it('moves the folder into another from Move to Folder, never into itself or a folder inside it', () => {
+    renderRail([folder('work', [f('clients')]), folder('clients', [], false, 'work'), folder('play', [])])
+    menuOf('work')
+    fireEvent.click(item(/Move to Folder/))
+    expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['play'])
+    fireEvent.click(item(/^play/))
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('work', 'play', null)
+  })
+
+  it('takes a nested folder out to just below the folder it was in', () => {
+    renderRail([folder('work', [f('clients')]), folder('clients', [], false, 'work'), folder('play', [])])
+    menuOf('clients')
+    fireEvent.click(item(/Move to Folder/))
+    expect(item(/^work/).textContent).toBe('workcurrent')
+    fireEvent.click(item(/Remove from Folder/))
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('clients', null, 'play')
+  })
+
+  it('opens or closes everything under the folder in one go', () => {
+    renderRail([folder('work', ['alpha', f('clients')]), folder('clients', ['beta'], true, 'work')])
+    menuOf('work')
+    // Something inside is shut, so the offer is to open it all.
+    fireEvent.click(item(/Expand All/))
+    expect(bridge.setRailFolderCollapsed.mock.calls).toEqual([['clients', false]])
+    cleanup()
+
+    bridge.setRailFolderCollapsed.mockClear()
+    renderRail([folder('work', ['alpha', f('clients')]), folder('clients', ['beta'], false, 'work')])
+    menuOf('work')
+    fireEvent.click(item(/Collapse All/))
+    expect(bridge.setRailFolderCollapsed.mock.calls).toEqual([
+      ['work', true],
+      ['clients', true]
+    ])
+  })
+
+  it('clears the status of every worktree under the folder, and only offers to when there is one', () => {
+    renderRail(
+      [folder('work', ['alpha', 'beta'])],
+      [worktree('alpha'), worktree('beta', 'needs_attention'), worktree('gamma', 'needs_attention')]
+    )
+    menuOf('work')
+    fireEvent.click(item(/Clear Status/))
+    // gamma needs you too, but it is not in this folder.
+    expect(bridge.clearWorktreeStatus.mock.calls).toEqual([['w-beta']])
+    cleanup()
+
+    renderRail([folder('work', ['alpha'])], [worktree('alpha'), worktree('gamma', 'needs_attention')])
+    menuOf('work')
+    expect(has(/Clear Status/)).toBe(false)
+    expect(has(/Expand All|Collapse All/)).toBe(false)
   })
 })
 

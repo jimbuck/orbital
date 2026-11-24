@@ -333,6 +333,11 @@ export function foldersIn(rows: RailRow[], projectId: string | null): Array<{ fo
     .map((f) => ({ folder: f.row.folder, depth: f.depth }))
 }
 
+/** Whether folder `folderId` is `ancestorId` itself or somewhere inside it: where `ancestorId` cannot be moved to. */
+export function folderIsWithin(rows: RailRow[], folderId: string, ancestorId: string): boolean {
+  return isUnder(indexOf(rows), folderId, ancestorId)
+}
+
 /* ---- Rollups and labels -------------------------------------------------- */
 
 export interface ProjectRollup {

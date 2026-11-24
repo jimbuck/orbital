@@ -641,7 +641,17 @@ describe("folders among a project's repos", () => {
   it('opens Add Repo from a folder of repos, for that folder in that project', () => {
     renderRail(filed)
     fireEvent.contextMenu(folderHeader('f-apps'))
-    expect(items()).toEqual(['Rename', 'Add Repo…', 'New Folder Inside', 'Delete Folder'])
+    // Apps is the last row of acme's list and holds a folder, so it can go up and close what it holds.
+    expect(items()).toEqual([
+      'Rename',
+      'Add Repo…',
+      'Move Here…repos',
+      'New Folder Inside',
+      'Move to Folder',
+      'Move to Top',
+      'Collapse All',
+      'Delete Folder'
+    ])
     fireEvent.click(screen.getByText('Add Repo…'))
     expect(useStore.getState().modal).toBe('addRepo')
     expect(useStore.getState().modalData).toEqual({ projectId: 'acme', folderId: 'f-apps' })
@@ -653,6 +663,27 @@ describe("folders among a project's repos", () => {
     fireEvent.contextMenu(folderHeader('f-work'))
     fireEvent.click(screen.getByText('Add Repo…'))
     expect(useStore.getState().modalData).toEqual({ projectId: undefined, folderId: 'f-work' })
+  })
+
+  it("gathers the project's other repos into a folder of repos from Move Here, and no one else's", () => {
+    renderRail(filed)
+    fireEvent.contextMenu(folderHeader('f-old'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Move Here/ }))
+    expect(screen.getByText('Move into Old')).toBeTruthy()
+    // acme's members only: not its home, and not platform's gateway or the plain rows.
+    expect(items()).toEqual(['api', 'webin Apps'])
+    fireEvent.click(screen.getByRole('menuitem', { name: /^web/ }))
+    expect(bridge.addRepoToProject).toHaveBeenLastCalledWith('acme', 'web', null, 'f-old')
+  })
+
+  it('moves a folder of repos among its own project folders only, from Move to Folder', () => {
+    renderRail(filed)
+    fireEvent.contextMenu(folderHeader('f-old'))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Move to Folder/ }))
+    // Apps holds it; Work is a folder of projects, which is another kind.
+    expect(items()).toEqual(['Appscurrent', 'Remove from Folder'])
+    fireEvent.click(screen.getByRole('menuitem', { name: /Remove from Folder/ }))
+    expect(bridge.placeRailFolder).toHaveBeenLastCalledWith('f-old', null, null)
   })
 
   it('reports what a collapsed folder of repos hides, by repo', () => {
