@@ -35,7 +35,12 @@ export default function RightPanel(): JSX.Element {
         </div>
       </div>
       <PanelResizeHandle edge="left" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
-      <PaneCollapseTab edge="left" label="git & tasks panel" onCollapse={toggleCollapsed} />
+      <PaneCollapseTab
+        edge="left"
+        label="git & tasks panel"
+        onCollapse={toggleCollapsed}
+        onResizeStart={startResize}
+      />
     </aside>
   )
 }

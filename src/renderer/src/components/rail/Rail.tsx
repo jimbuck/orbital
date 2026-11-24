@@ -238,7 +238,12 @@ export default function Rail(): JSX.Element {
 
       <RailFooter />
       <PanelResizeHandle edge="right" dragging={dragging} onMouseDown={startResize} onDoubleClick={resetWidth} />
-      <PaneCollapseTab edge="right" label="projects panel" onCollapse={toggleCollapsed} />
+      <PaneCollapseTab
+        edge="right"
+        label="projects panel"
+        onCollapse={toggleCollapsed}
+        onResizeStart={startResize}
+      />
     </aside>
   )
 }
